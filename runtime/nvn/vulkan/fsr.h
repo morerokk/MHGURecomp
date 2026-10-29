@@ -16,14 +16,19 @@ typedef struct {
 } FsrDraw;
 
 extern bool g_fsr_on;  // FSR is on and works (set once at start-up: vk_fsr_init)
+// FSR, or SMAA T2x ([Anti-aliasing] AntiAliasing = SMAAT2x, picked live; never with FSR), runs: exec.c tells fsr.c
+// the frame's draws (vk_fsr_draw) and captures them for object motion. T2x uses the same frame structure, camera,
+// jitter and motion vectors as FSR, at the render size and without stand-ins (vk_fsr_map is FSR's only).
+extern bool g_temporal_on;
 
 void vk_fsr_init(void);                    // device.c, once the device exists
-void vk_fsr_draw(const FsrDraw *d);        // exec.c draw(): may run FSR (the start of the HUD) before this draw
+void vk_fsr_draw(const FsrDraw *d);        // exec.c draw(): may run FSR / T2x (the start of the HUD) before this draw
 // exec.c, from the start of the HUD to the frame's present: the game's full-screen image, the window texture it is
 // copied to, and the depth target drawn with them, as stand-ins at the output size (else t itself). depth: t is a
 // depth target of a pass whose colour targets have stand-ins.
 NvnTexture *vk_fsr_map(NvnTexture *t, bool depth);
-NvnTexture *vk_fsr_present(NvnTexture *t);  // device.c backend_present: the texture to show (its stand-in)
+// device.c backend_present, every frame: the texture to show (FSR: its stand-in); also where SMAA T2x starts and stops
+NvnTexture *vk_fsr_present(NvnTexture *t);
 
 // ---- object motion ([Upscaler] ObjectMotion): a scene draw is drawn a second time through a variant of its vertex
 // shader that stores each vertex's clip position (gl_Position) in a buffer, indexed by gl_VertexIndex; the next frame's

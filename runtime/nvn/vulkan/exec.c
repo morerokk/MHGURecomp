@@ -1740,6 +1740,7 @@ typedef struct {
     bool wanted;            // (under ready_lock) a draw needs it: a prewarm build goes on to make its modules
     struct Pipe *prewarm;   // pipelines of earlier runs to build once this is (pipeline cache)
     FsrCapProg *fsrcap;     // FSR object motion: the capture variant of its vertex shader (fsr.c)
+    bool capprog_asked;     // (draw thread) capprog_later tried to make fsrcap
 } Prog;
 static void prewarm_pipelines(Prog *p);
 
@@ -1943,6 +1944,21 @@ static void load_program(void *arg) {
     p->vi->msl = vs;
     p->fi->msl = fs;
     compile_program(p);
+}
+
+// Object motion turned on after p was built (SMAA T2x picked in the menu): its capture variant from the vertex source
+// the program cache keeps (NULL: none; asked once).
+static FsrCapProg *capprog_later(Prog *p) {
+    if (p->capprog_asked || !p->src_saved) return NULL;
+    p->capprog_asked = true;
+    char *vs = malloc(p->vlen + 1);
+    if (!vs) return NULL;
+    pthread_mutex_lock(&progcache_rlock);
+    bool ok = progcache_rf && !fseek(progcache_rf, p->src_off, SEEK_SET) && fread(vs, 1, p->vlen, progcache_rf) == p->vlen;
+    pthread_mutex_unlock(&progcache_rlock);
+    if (ok) vs[p->vlen] = 0, p->fsrcap = vk_fsr_capprog_new(vs);
+    free(vs);
+    return p->fsrcap;
 }
 
 static void progcache_open(void) {
@@ -3210,6 +3226,7 @@ static bool post_aa_target(NvnTexture *src, VkPostAa *t) {
     bool has = st.rt.has_cview[0];
     t->src = vk_view(src, NULL, false, false, TEXTYPE_2D);
     t->dst = vk_view(dt, &st.rt.cview[0], has, true, TEXTYPE_2D);
+    t->dst_image = d->image;
     t->format = has && (st.rt.cview[0].setmask & 4) && vk_format(dt->format) == d->format ? vk_format(st.rt.cview[0].format)
                                                                                          : d->format;
     uint32_t lv = has && (st.rt.cview[0].setmask & 1) ? st.rt.cview[0].base_level : 0;
@@ -3263,6 +3280,7 @@ static bool fxaa_replaced(Prog *pr) {
         return false;
     NvnTexture *src = shader_texture_object(1, &pr->fi->tex[0]);
     if (!src || src == st.rt.color[0]) return false;
+    if (mode == AA_SMAA_T2X && !g_temporal_on) mode = AA_SMAA;  // (until T2x runs, from the next frame on: SMAA 1x)
     if (mode == AA_FXAA || mode == AA_SMAA) {
         VkPostAa t;
         if (!post_aa_target(src, &t) || !(mode == AA_SMAA ? vk_smaa(&t, config_live_smaa_quality()) : fxaa_311(&t)))
@@ -3329,7 +3347,7 @@ static void draw(CmdRec *r, bool indexed) {
     VkPrimitiveTopology topo;
     bool native = topology(mode, &topo);
     if (!native && mode != 6 && mode != 7 && mode != 9) { stat_skipped++; return; }
-    if (g_fsr_on) {  // FSR: the frame's structure; at the start of the HUD FSR runs before this draw (fsr.c)
+    if (g_temporal_on) {  // FSR / SMAA T2x: the frame's structure; at the start of the HUD they run before this draw (fsr.c)
         FsrDraw fd = {.color0 = st.rt.ncolor ? st.rt.color[0] : NULL, .depth = st.rt.depth, .count = (uint32_t)r->x[2],
                       .depth_write = st.ds[0] && st.ds[1], .vubuf = &st.ubuf[0][0].addr, .nvubuf = 18};
         for (int i = 0; i < pr->fi->ntex && fd.ntex < 16; i++) fd.tex[fd.ntex++] = shader_texture_object(1, &pr->fi->tex[i]);
@@ -3630,7 +3648,8 @@ static void draw(CmdRec *r, bool indexed) {
     if (!use_index) vkCmdDraw(cb, count, inst, first, base_inst);
     else vkCmdDrawIndexed(cb, icount, inst, 0, base_vertex, base_inst);
     stat_draws++;
-    if (g_fsr_objvel && pr->fsrcap && (k.depth_write || (k.depth_test && pr->vi->cbuf_dynamic)) && inst == 1 && pass_samples == 1) {
+    if (g_fsr_objvel && g_temporal_on && (pr->fsrcap || capprog_later(pr)) &&
+        (k.depth_write || (k.depth_test && pr->vi->cbuf_dynamic)) && inst == 1 && pass_samples == 1) {
         // FSR object motion: the same draw again through the capture variant of its vertex shader (rasterizer
         // discard), which stores each vertex's clip position for the velocity pass (fsr.c)
         FsrCapture fc = {.color0 = st.rt.ncolor ? st.rt.color[0] : NULL, .depth = st.rt.depth, .vs_code = st.program->stages[0].code_addr,

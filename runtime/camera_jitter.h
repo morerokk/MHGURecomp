@@ -1,4 +1,4 @@
-// The game's main 3D camera, captured for the FSR upscaler, and the sub-pixel jitter FSR needs in it
+// The game's main 3D camera, captured for the FSR upscaler and SMAA T2x, and the sub-pixel jitter they need in it
 // (runtime/hle/camera_jitter.c; used by runtime/nvn/vulkan/fsr.c).
 #pragma once
 #include <stdbool.h>
@@ -15,8 +15,12 @@ typedef struct {
     uint32_t cam;              // the camera object (guest address)
 } CamRecord;
 
-void camjit_init(void);  // hooks (only with [Upscaler] FSR = On)
+void camjit_init(void);  // hooks (the jitter stays off until FSR or SMAA T2x turns it on)
 // Renderer: jitter on or off from the next capture on, the 3D render size and the Halton sequence's length.
 void camjit_set(bool on, uint32_t render_w, uint32_t render_h, uint32_t phases);
+// SMAA T2x's two jitters (a quarter pixel right and down, then left and up, a frame each) in place of the Halton
+// sequence while on; camjit_t2x_phase: which of the two a capture's jitter is (0 or 1).
+void camjit_t2x(bool on);
+int camjit_t2x_phase(const float jitter[2]);
 bool camjit_latest(CamRecord *out);              // the newest capture (false: none yet)
 bool camjit_get(uint64_t seq, CamRecord *out);   // capture seq, while it is in the ring (the last 64)

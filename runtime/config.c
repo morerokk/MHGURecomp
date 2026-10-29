@@ -63,8 +63,9 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "MSAA = Off\n"
     "\n"
-    "; Anti-aliasing of the finished picture, in place of GU's own FXAA (Game): FXAA 3.11 or SMAA, with the settings below\n"
-    "; Off, Game, FXAA, SMAA\n"
+    "; Anti-aliasing of the finished picture, in place of GU's own FXAA (Game): FXAA 3.11 or SMAA, with the settings below.\n"
+    "; SMAAT2x is SMAA with the camera shifted by a quarter pixel every other frame and the last two frames combined\n"
+    "; Off, Game, FXAA, SMAA, SMAAT2x\n"
     "; Default: FXAA\n"
     "AntiAliasing = FXAA\n"
     "\n"
@@ -370,7 +371,7 @@ const ConfigSetting g_settings[] = {
     {"Anti-aliasing", "MSAA", SET_CHOICE, F(msaa), 0, 0, 0, "Off|none|0|1|1x,2x|2,4x|4,8x|8", msaa_values, false, ERR_MISC},
     // (FXAA = Off / Game / On, the key before SMAA, reads as the same setting)
     {"Anti-aliasing", "AntiAliasing|FXAA", SET_CHOICE, F(aa), 0, 0, 0,
-     "Off|false|no|0,Game|original|gu|1,FXAA|on|true|yes|3.11|2,SMAA|3", NULL, false, ERR_MISC},
+     "Off|false|no|0,Game|original|gu|1,FXAA|on|true|yes|3.11|2,SMAA|smaa1x|3,SMAAT2x|t2x|4", NULL, false, ERR_MISC},
     {"Anti-aliasing", "FXAAQuality", SET_INT, F(fxaa_quality), 0, 1, 5, NULL, NULL, true, ERR_MISC},
     {"Anti-aliasing", "FXAASubpix", SET_FLOAT, F(fxaa_subpix), 0, 0.0f, 1.0f, NULL, NULL, true, ERR_MISC},
     {"Anti-aliasing", "FXAAEdgeThreshold", SET_FLOAT, F(fxaa_edge_threshold), 0, 0.03f, 0.5f, NULL, NULL, true, ERR_MISC},
@@ -716,7 +717,7 @@ void config_load(void) {
     if (e && parse_size(e, &w, &h)) g_config.display_mode = DISPLAY_WINDOWED, g_config.width = w, g_config.height = h;
     if (getenv("MHGU_HIDDEN")) g_config.display_mode = DISPLAY_WINDOWED;
     if ((e = getenv("MHGU_MSAA"))) g_config.msaa = atoi(e) >= 8 ? 8 : atoi(e) >= 4 ? 4 : atoi(e) >= 2 ? 2 : 1;
-    if ((e = getenv("MHGU_FXAA"))) g_config.aa = atoi(e) >= AA_SMAA ? AA_SMAA : atoi(e) > 0 ? atoi(e) : AA_OFF;
+    if ((e = getenv("MHGU_FXAA"))) g_config.aa = atoi(e) >= AA_SMAA_T2X ? AA_SMAA_T2X : atoi(e) > 0 ? atoi(e) : AA_OFF;
     if ((e = getenv("MHGU_BACKGROUND_INPUT"))) g_config.background_input = atoi(e) != 0;
     if ((e = getenv("MHGU_PAD_POSITIONAL"))) g_config.face_buttons = atoi(e) ? FACE_POSITION : FACE_LABEL;
     if ((e = getenv("MHGU_LDN_PORT")) && atoi(e) > 0) g_config.ldn_port = atoi(e);
@@ -800,17 +801,17 @@ void config_load(void) {
     config_runtime_init(&g_config);
 
     static const char *const modes[] = {"windowed", "fullscreen", "borderless"};
-    static const char *const aa[] = {"off", "the game's FXAA", "FXAA 3.11", "SMAA"};
+    static const char *const aa[] = {"off", "the game's FXAA", "FXAA 3.11", "SMAA", "SMAA T2x"};
     LOG("[config] %s: %s %dx%d, 3D %dx%d (shape %.3f, FOV x%.2f, HUD %.3f wide), %d fps, vsync %s, MSAA %dx, "
         "anti-aliasing %s, face buttons by %s, controller %s in the background\n", path, modes[g_config.display_mode],
         g_config.width, g_config.height, g_config.render_w, g_config.render_h, g_render_aspect, g_fov_scale,
-        g_ui_anchor_aspect, g_config.fps, g_config.vsync ? "on" : "off", g_config.msaa, aa[g_config.aa & 3],
+        g_ui_anchor_aspect, g_config.fps, g_config.vsync ? "on" : "off", g_config.msaa, aa[g_config.aa <= AA_SMAA_T2X ? g_config.aa : 0],
         g_config.face_buttons == FACE_LABEL ? "label" : "position", g_config.background_input ? "on" : "off");
     if (g_config.aa == AA_FXAA)
         LOG("[config] FXAA 3.11: quality %d, sub-pixel blur %g, edge threshold %g, min %g\n", g_config.fxaa_quality,
             (double)g_config.fxaa_subpix, (double)g_config.fxaa_edge_threshold, (double)g_config.fxaa_edge_threshold_min);
     static const char *const smaa[] = {"low", "medium", "high", "ultra"};
-    if (g_config.aa == AA_SMAA) LOG("[config] SMAA: %s preset\n", smaa[g_config.smaa_quality & 3]);
+    if (g_config.aa >= AA_SMAA) LOG("[config] SMAA: %s preset\n", smaa[g_config.smaa_quality & 3]);
     const HpScale *hp = &g_config.hp;
     LOG("[config] monster HP in Hub quests: x%.2f / %.2f / %.2f / %.2f for 1-4 hunters, %d quest(s) set apart\n",
         hp->scale[0], hp->scale[1], hp->scale[2], hp->scale[3], hp->quests);

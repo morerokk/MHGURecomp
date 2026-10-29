@@ -780,7 +780,7 @@ std::vector<Row> main_rows() {
                 r.back().value = tr("Off (FSR)");
             }
         }
-        add_choice(r, "aa", "Anti-aliasing", c.aa, {tr("Off"), tr("Game"), "FXAA", "SMAA"}, [](int v) { c.aa = v; });
+        add_choice(r, "aa", "Anti-aliasing", c.aa, {tr("Off"), tr("Game"), "FXAA", "SMAA", "SMAA T2x"}, [](int v) { c.aa = v; });
         if (g_config.fsr) {
             r.back().cold = true;
             if (c.fsr) {
@@ -788,7 +788,7 @@ std::vector<Row> main_rows() {
                 r.back().value = tr("Off (FSR)");
             }
         }
-        if (c.aa == AA_SMAA && !c.fsr)
+        if (c.aa >= AA_SMAA && !c.fsr)
             add_choice(r, "smaa", "SMAA quality", c.smaa_quality, {tr("Low"), tr("Medium"), tr("High"), tr("Ultra")},
                        [](int v) { c.smaa_quality = v; });
         number(r, "drawdist", tr("Draw distance"), &c.draw_distance, lo("DrawDistance"), hi("DrawDistance"), .25f,

@@ -1,6 +1,7 @@
-// The main 3D camera for the FSR upscaler (runtime/nvn/vulkan/fsr.c): its matrices, captured per frame for the
-// camera motion vectors, and the sub-pixel jitter (a Halton sequence) put into its projection, which FSR needs to
-// rebuild detail from several frames. Only with [Upscaler] FSR = On (or the test option below).
+// The main 3D camera for the FSR upscaler and SMAA T2x (runtime/nvn/vulkan/fsr.c): its matrices, captured per frame
+// for the camera motion vectors, and the sub-pixel jitter put into its projection, which they need to rebuild detail
+// from several frames (FSR: a Halton sequence; SMAA T2x: its two quarter-pixel positions). The hooks are always in
+// (SMAA T2x can be picked at any time); without jitter they only record the camera.
 //
 // The game's camera (an sCamera / uCamera object: +0x30 far, +0x34 near, +0x38 aspect, +0x3c vertical field of view
 // in degrees, +0x40 eye, +0x50 up, +0x60 target) gets its matrices from two small functions:
@@ -41,7 +42,8 @@ static CamRecord g_ring[RING];
 static uint64_t g_seq;
 static struct { uint32_t cam; float m[16]; } g_views[8];  // last view per camera
 static int g_nviews;
-static bool g_on;                   // jitter (renderer: FSR active on scene frames)
+static bool g_on;                   // jitter (renderer: FSR or SMAA T2x active on scene frames)
+static bool g_t2x;                  // SMAA T2x's two jitters instead of the Halton sequence
 static uint32_t g_rw = 1920, g_rh = 1080, g_phases = 8;
 static bool g_test;                 // MHGU_JITTER_TEST
 static float g_test_xy[2];
@@ -88,6 +90,8 @@ static void projection(Cpu *c) {
     float jx = 0, jy = 0;
     if (g_test) {
         jx = g_test_xy[0], jy = g_test_xy[1];
+    } else if (g_on && g_t2x) {  // SMAA T2x: (0.25, -0.25), (-0.25, 0.25) with y up, as SMAA.hlsl lists them
+        jx = jy = g_present_count & 1 ? -0.25f : 0.25f;
     } else if (g_on) {  // AMD's sequence: Halton(2, 3) - 0.5, phases = 8 (output / render)^2, one phase per frame
         uint32_t i = (uint32_t)(g_present_count % g_phases);
         jx = halton(i + 1, 2) - 0.5f;
@@ -126,6 +130,14 @@ void camjit_set(bool on, uint32_t render_w, uint32_t render_h, uint32_t phases) 
     pthread_mutex_unlock(&g_lock);
 }
 
+void camjit_t2x(bool on) {
+    pthread_mutex_lock(&g_lock);
+    g_t2x = on;
+    pthread_mutex_unlock(&g_lock);
+}
+
+int camjit_t2x_phase(const float jitter[2]) { return jitter[0] < 0.0f; }
+
 bool camjit_latest(CamRecord *out) {
     pthread_mutex_lock(&g_lock);
     bool ok = g_seq != 0;
@@ -146,10 +158,9 @@ void camjit_init(void) {
     const char *e = getenv("MHGU_JITTER_TEST");
     g_test = e && sscanf(e, "%f,%f", &g_test_xy[0], &g_test_xy[1]) == 2;
     g_log = getenv("MHGU_JITTER_LOG") != NULL;
-    if (!g_config.fsr && !g_test) return;
     g_rw = g_render_size[0], g_rh = g_render_size[1];
     fnhook_set(FN_LOOKAT, hle_register("camjit:lookat", lookat));
     fnhook_set(FN_PROJECTION, hle_register("camjit:projection", projection));
     if (g_test) LOG("[camjit] test: the 3D picture shifted by (%g, %g) render pixels (x right, y down)\n", g_test_xy[0], g_test_xy[1]);
-    else LOG("[camjit] main camera hooked (main+0x1C33C view, main+0x1C358 projection): jitter while FSR runs\n");
+    else LOG("[camjit] main camera hooked (main+0x1C33C view, main+0x1C358 projection): jitter while FSR or SMAA T2x runs\n");
 }

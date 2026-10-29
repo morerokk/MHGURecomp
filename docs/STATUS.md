@@ -102,6 +102,18 @@ Fixed on the way (2026-10-20):
   the blend into the game's target) with SMAAQuality Low / Medium / High / Ultra (live, like AntiAliasing; the
   settings menu shows it while SMAA is picked). Checked hidden at 1920x1080 in town (MHGU_QUICKHUNT=town, shots):
   against Off, the edges of a barrel's lid are smoothed and its texture is unchanged (2 % of the crop's pixels).
+  SMAAT2x is SMAA T2x, live like the rest (no restart): while it is picked (and FSR is off), fsr.c runs its frame
+  structure, camera jitter and motion vectors at the render size without stand-ins (g_temporal_on; vk_fsr_present
+  starts / stops it, t2x_init makes the images the first time), the camera jitters by (0.25, 0.25) / (-0.25, -0.25)
+  render pixels on alternate frames (camjit_t2x; the hooks are now always in, jitter off unless FSR or T2x runs), and
+  at the start of the HUD smaa.c's vk_smaa_t2x runs SMAA with that frame's subsample indices into one of two history
+  images (SMAA_REPROJECTION: velocity length in alpha) and resolves it with the previous one, reprojected along
+  img_mvf, back into H. Frames without a 3D scene or the main camera get SMAA 1x there; the game's FXAA pass is
+  copied (Off). Object motion: programs built before T2x was picked get their capture variant from programs.src the
+  first time they are drawn with it on (exec.c capprog_later). Checked hidden in town: T2x every frame once the scene
+  was up, camera matched every frame, no history resets, about 225 draws captured and paired a frame (0.4 ms CPU);
+  the picture clean, with no ghosting in the shots; FSR (FSR = On) still upscales every frame as before. Not checked:
+  turning it on / off in the menu, its GPU cost, and moving monsters.
 - Frame rate: the settings' FPS or MHGU_FRAMERATE (default 60, 30..240) writes the engine's target fps (float at +0x3c of the object in
   global 0x2326764, the field theboy181's 60fps patch sets) each frame. Above the monitor's refresh rate it needs
   VSync = Off: see "Frame rates above 60". MHGU_VSYNC=0/1 overrides the setting: no vsync / classic vsync.
