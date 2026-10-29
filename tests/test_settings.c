@@ -163,6 +163,7 @@ int main(int argc, char **argv) {
         Config x=config_defaults();
         assert(config_setting("FXAA")==config_setting("AntiAliasing"));
         assert(config_parse(config_setting("AntiAliasing"),"SMAA",&x) && x.aa==AA_SMAA);
+        assert(config_parse(config_setting("AntiAliasing"),"SMAAS2x",&x) && x.aa==AA_SMAA_S2X);
         assert(config_parse(config_setting("AntiAliasing"),"SMAAT2x",&x) && x.aa==AA_SMAA_T2X);
         assert(config_parse(config_setting("AntiAliasing"),"SMAA4x",&x) && x.aa==AA_SMAA_4X);
         assert(config_parse(config_setting("AntiAliasing"),"CMAA2",&x) && x.aa==AA_CMAA2);

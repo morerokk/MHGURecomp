@@ -1,4 +1,4 @@
-// SMAA 1x, T2x and 4x ([Anti-aliasing] AntiAliasing = SMAA / SMAAT2x / SMAA4x). Jorge Jimenez et al.'s SMAA (third_party/smaa,
+// SMAA 1x, S2x, T2x and 4x ([Anti-aliasing] AntiAliasing = SMAA / SMAAS2x / SMAAT2x / SMAA4x). Jorge Jimenez et al.'s SMAA (third_party/smaa,
 // MIT): SMAA.hlsl's GLSL path, compiled with shaderc, and its precomputed area and search textures.
 //  - 1x, in place of the game's FXAA pass (exec.c fxaa_replaced): three passes at the target's size: luma edge
 //    detection of the game's FXAA input (gamma space, as SMAA wants it) into an RG8 image, the blending weights into an

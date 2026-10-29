@@ -326,11 +326,11 @@ static TexBackend *ms_image(TexBackend *b, VkFormat format, VkImageAspectFlags a
 
 // MSAA (exec.c begin_pass): the multisampled image b's 3D scene passes render into. Only ever a render target (and a
 // transfer source for its resolve: exec.c vk_ms_resolve), kept in the attachment layout: on GCN1 a multisampled image
-// that shaders may read loses its compression (the scene passes took several times longer). The exception: SMAA 4x's
-// colour images (2x), which its S2x reads. NULL: not created.
+// that shaders may read loses its compression (the scene passes took several times longer). The exception: SMAA S2x /
+// 4x's colour images (2x), which S2x reads. NULL: not created.
 TexBackend *vk_tex_ms(TexBackend *b, uint32_t samples) {
     bool depth = b->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
-    bool sampled = !depth && samples == 2 && config_live_aa() == AA_SMAA_4X;
+    bool sampled = !depth && samples == 2 && AA_USES_S2X(config_live_aa());
     TexBackend *m = b->ms;
     if (m && m->samples == samples && m->width == b->width && m->height == b->height && m->format == b->format &&
         m->ms_sampled == sampled)

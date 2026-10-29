@@ -784,12 +784,12 @@ std::vector<Row> main_rows() {
                 r.back().value = tr("Off (FSR)");
             }
         }
-        if (c.aa == AA_SMAA_4X && !c.fsr) {  // (SMAA 4x renders with MSAA 2x: config_live_msaa)
+        if (AA_USES_S2X(c.aa) && !c.fsr) {  // (SMAA S2x / 4x render with MSAA 2x: config_live_msaa)
             r.back().enabled = false;
-            r.back().value = "2x (SMAA 4x)";
+            r.back().value = c.aa == AA_SMAA_S2X ? "2x (SMAA S2x)" : "2x (SMAA 4x)";
         }
-        add_choice(r, "aa", "Anti-aliasing", c.aa, {tr("Off"), tr("Game"), "FXAA", "CMAA2", "SMAA", "SMAA T2x", "SMAA 4x"},
-                   [](int v) { c.aa = v; });
+        add_choice(r, "aa", "Anti-aliasing", c.aa,
+                   {tr("Off"), tr("Game"), "FXAA", "CMAA2", "SMAA", "SMAA S2x", "SMAA T2x", "SMAA 4x"}, [](int v) { c.aa = v; });
         if (g_config.fsr) {
             r.back().cold = true;
             if (c.fsr) {

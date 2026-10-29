@@ -1127,7 +1127,7 @@ static VkPipeline resolve_pipeline(VkRenderPass rp, int kind) {  // kind 1 depth
     return p;
 }
 
-// SMAA 4x: the 3D scene's colour target resolved by SMAA S2x (smaa.c) from its 2x samples. false: not this one.
+// SMAA S2x / 4x: the 3D scene's colour target resolved by SMAA S2x (smaa.c) from its 2x samples. false: not this one.
 static bool ms_resolve_s2x(VkCommandBuffer cb, TexBackend *b, TexBackend *m) {
     int phase;
     if (m->samples != 2 || !m->ms_sampled || !vk_s2x_target(b, &phase)) return false;
@@ -3307,6 +3307,7 @@ static bool fxaa_replaced(Prog *pr) {
     NvnTexture *src = shader_texture_object(1, &pr->fi->tex[0]);
     if (!src || src == st.rt.color[0]) return false;
     if (mode >= AA_SMAA_T2X && !g_temporal_on) mode = AA_SMAA;  // (until T2x / 4x runs, from the next frame on: SMAA 1x)
+    if (mode == AA_SMAA_S2X && !vk_s2x_resolved()) mode = AA_SMAA;  // (S2x did not resolve the scene this frame: SMAA 1x)
     if (mode == AA_FXAA || mode == AA_CMAA2 || mode == AA_SMAA) {
         VkPostAa t;
         if (!post_aa_target(src, &t)) return false;
@@ -3378,7 +3379,8 @@ static void draw(CmdRec *r, bool indexed) {
     VkPrimitiveTopology topo;
     bool native = topology(mode, &topo);
     if (!native && mode != 6 && mode != 7 && mode != 9) { stat_skipped++; return; }
-    if (g_temporal_on) {  // FSR / SMAA T2x: the frame's structure; at the start of the HUD they run before this draw (fsr.c)
+    if (g_temporal_on || g_s2x_on) {  // FSR / SMAA T2x: the frame's structure; at the start of the HUD they run before this
+                                      // draw (fsr.c); SMAA S2x: which target is the scene
         FsrDraw fd = {.color0 = st.rt.ncolor ? st.rt.color[0] : NULL, .depth = st.rt.depth, .count = (uint32_t)r->x[2],
                       .depth_write = st.ds[0] && st.ds[1], .vubuf = &st.ubuf[0][0].addr, .nvubuf = 18};
         for (int i = 0; i < pr->fi->ntex && fd.ntex < 16; i++) fd.tex[fd.ntex++] = shader_texture_object(1, &pr->fi->tex[i]);

@@ -143,6 +143,13 @@ Fixed on the way (2026-10-20):
   with object motion every frame; switched live (MHGU_CONTROL "aa <n>", as the menu previews it) T2x -> 4x -> T2x ->
   SMAA -> 4x, MSAA following; standing and sprinting shots clean, the charge blade solid. Not checked: moving
   monsters, and GPUs without the standard 2x sample positions.
+  SMAAS2x is SMAA S2x alone: 4x's S2x resolve without the jitter or T2x (S2x's own subsample indices, 1 1 1 0 and
+  2 2 2 0), MSAA 2x as for 4x ("2x (SMAA S2x)" in the menu). While it is picked (g_s2x_on) exec.c passes the draws to
+  fsr.c only to count the scene's (no capture), and at each present the target most of them went to becomes the
+  next frame's scene; the game's FXAA pass is copied (Off) when S2x resolved the scene that frame, else SMAA 1x runs
+  there (the first frame, a scene not in MSAA 2x yet). Checked hidden in town at 1920x1080 on an RTX 3090, switched
+  live SMAA -> S2x -> 4x -> S2x -> T2x -> S2x -> Off: S2x every frame from the second, 0.36-0.6 ms a frame, the GPU
+  frame 1.3-2 ms; thin ropes against the sky more continuous than with SMAA 1x.
 - Frame rate: the settings' FPS or MHGU_FRAMERATE (default 60, 30..240) writes the engine's target fps (float at +0x3c of the object in
   global 0x2326764, the field theboy181's 60fps patch sets) each frame. Above the monitor's refresh rate it needs
   VSync = Off: see "Frame rates above 60". MHGU_VSYNC=0/1 overrides the setting: no vsync / classic vsync.

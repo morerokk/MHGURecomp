@@ -13,10 +13,11 @@ enum { FACE_POSITION, FACE_LABEL };
 enum { COMBO_LENIENT, COMBO_STRICT };  // [Controls] ComboInputWindow (runtime/hle/combowin.c)
 enum { MENU_CONFIRM_ORIGINAL, MENU_CONFIRM_SOUTH, MENU_CONFIRM_EAST };
 // [Anti-aliasing] AntiAliasing: what draws in place of the game's FXAA pass (nvn/vulkan/exec.c): nothing (its input
-// copied), the pass itself, FXAA 3.11, CMAA2 (nvn/vulkan/cmaa2.c), SMAA 1x (nvn/vulkan/smaa.c); SMAA T2x: nothing
-// there, the jittered camera's frames resolved at the start of the HUD instead (nvn/vulkan/fsr.c); SMAA 4x: as T2x,
-// with the scene in MSAA 2x (whatever MSAA says) resolved by SMAA S2x
-enum { AA_OFF, AA_GAME, AA_FXAA, AA_CMAA2, AA_SMAA, AA_SMAA_T2X, AA_SMAA_4X };
+// copied), the pass itself, FXAA 3.11, CMAA2 (nvn/vulkan/cmaa2.c), SMAA 1x (nvn/vulkan/smaa.c); SMAA S2x: nothing
+// there, the scene in MSAA 2x (whatever MSAA says) resolved by SMAA S2x; SMAA T2x: nothing there, the jittered
+// camera's frames resolved at the start of the HUD instead (nvn/vulkan/fsr.c); SMAA 4x: S2x and T2x together
+enum { AA_OFF, AA_GAME, AA_FXAA, AA_CMAA2, AA_SMAA, AA_SMAA_S2X, AA_SMAA_T2X, AA_SMAA_4X };
+#define AA_USES_S2X(aa) ((aa) == AA_SMAA_S2X || (aa) == AA_SMAA_4X)  // (they render the scene with MSAA 2x)
 enum { SMAA_LOW, SMAA_MEDIUM, SMAA_HIGH, SMAA_ULTRA };      // [Anti-aliasing] SMAAQuality: SMAA's presets
 enum { CMAA2_LOW, CMAA2_MEDIUM, CMAA2_HIGH, CMAA2_ULTRA };  // [Anti-aliasing] CMAA2Quality: CMAA2's presets
 

@@ -33,7 +33,8 @@ class SettingsLocaleTest(unittest.TestCase):
         # INI keys looked up in the settings table (cold("Mode"), lo("FPS")...) are not shown
         source = re.sub(r'\b(?:cold|lo|hi)\(' + LITERAL + r'\)', '', source)
         unchanged = {"English", "Español", "Xbox", "Switch", "PlayStation",
-                     "FSR", "FSR 3.1", "FSR 4", "MSAA", "FXAA", "SMAA", "SMAA T2x", "SMAA 4x", "2x (SMAA 4x)", "CMAA2",
+                     "FSR", "FSR 3.1", "FSR 4", "MSAA", "FXAA", "SMAA", "SMAA S2x", "SMAA T2x", "SMAA 4x",
+                     "2x (SMAA S2x)", "2x (SMAA 4x)", "CMAA2",
                      "Settings##main"}
         visible = {text for text in literals(source) if text and
                    (text[0].isupper() or " " in text) and any(c.isalpha() for c in text)}

@@ -65,9 +65,10 @@ static const char DEFAULT_INI[] =
     "\n"
     "; Anti-aliasing of the finished picture, in place of GU's own FXAA (Game): FXAA 3.11, CMAA2 or SMAA, with the settings\n"
     "; below. CMAA2 is Intel's sharp, light morphological AA\n"
+    "; SMAAS2x is SMAA on top of MSAA 2x, each of its two samples through SMAA (it sets MSAA to 2x)\n"
     "; SMAAT2x is SMAA with the camera shifted by a quarter pixel every other frame and the last two frames combined\n"
-    "; SMAA4x is SMAAT2x on top of MSAA 2x, each of its two samples through SMAA (it sets MSAA to 2x)\n"
-    "; Off, Game, FXAA, CMAA2, SMAA, SMAAT2x, SMAA4x\n"
+    "; SMAA4x is SMAAS2x and SMAAT2x together (it sets MSAA to 2x)\n"
+    "; Off, Game, FXAA, CMAA2, SMAA, SMAAS2x, SMAAT2x, SMAA4x\n"
     "; Default: FXAA\n"
     "AntiAliasing = FXAA\n"
     "\n"
@@ -382,7 +383,8 @@ const ConfigSetting g_settings[] = {
     {"Anti-aliasing", "MSAA", SET_CHOICE, F(msaa), 0, 0, 0, "Off|none|0|1|1x,2x|2,4x|4,8x|8", msaa_values, false, ERR_MISC},
     // (FXAA = Off / Game / On, the key before SMAA, reads as the same setting)
     {"Anti-aliasing", "AntiAliasing|FXAA", SET_CHOICE, F(aa), 0, 0, 0,
-     "Off|false|no|0,Game|original|gu|1,FXAA|on|true|yes|3.11|2,CMAA2|cmaa|3,SMAA|smaa1x|4,SMAAT2x|t2x|5,SMAA4x|4x|6", NULL,
+     "Off|false|no|0,Game|original|gu|1,FXAA|on|true|yes|3.11|2,CMAA2|cmaa|3,SMAA|smaa1x|4,SMAAS2x|s2x|5,SMAAT2x|t2x|6,SMAA4x|4x|7",
+     NULL,
      false, ERR_MISC},
     {"Anti-aliasing", "FXAAQuality", SET_INT, F(fxaa_quality), 0, 1, 5, NULL, NULL, true, ERR_MISC},
     {"Anti-aliasing", "FXAASubpix", SET_FLOAT, F(fxaa_subpix), 0, 0.0f, 1.0f, NULL, NULL, true, ERR_MISC},
@@ -815,7 +817,7 @@ void config_load(void) {
     config_runtime_init(&g_config);
 
     static const char *const modes[] = {"windowed", "fullscreen", "borderless"};
-    static const char *const aa[] = {"off", "the game's FXAA", "FXAA 3.11", "CMAA2", "SMAA", "SMAA T2x", "SMAA 4x"};
+    static const char *const aa[] = {"off", "the game's FXAA", "FXAA 3.11", "CMAA2", "SMAA", "SMAA S2x", "SMAA T2x", "SMAA 4x"};
     LOG("[config] %s: %s %dx%d, 3D %dx%d (shape %.3f, FOV x%.2f, HUD %.3f wide), %d fps, vsync %s, MSAA %dx, "
         "anti-aliasing %s, face buttons by %s, controller %s in the background\n", path, modes[g_config.display_mode],
         g_config.width, g_config.height, g_config.render_w, g_config.render_h, g_render_aspect, g_fov_scale,

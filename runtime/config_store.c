@@ -116,8 +116,8 @@ int config_live_aa(void) { return runtime_fsr ? 0 : SDL_GetAtomicInt(&live_aa); 
 int config_live_smaa_quality(void) { return SDL_GetAtomicInt(&live_smaa); }
 int config_live_cmaa2_quality(void) { return SDL_GetAtomicInt(&live_cmaa2); }
 int config_live_cmaa2_extra_sharpness(void) { return SDL_GetAtomicInt(&live_cmaa2_sharp); }
-int config_live_msaa(void) {  // (SMAA 4x is S2x: MSAA 2x whatever MSAA says)
-    return runtime_fsr ? 1 : SDL_GetAtomicInt(&live_aa) == AA_SMAA_4X ? 2 : SDL_GetAtomicInt(&live_msaa);
+int config_live_msaa(void) {  // (SMAA S2x / 4x: MSAA 2x whatever MSAA says)
+    return runtime_fsr ? 1 : AA_USES_S2X(SDL_GetAtomicInt(&live_aa)) ? 2 : SDL_GetAtomicInt(&live_msaa);
 }
 int config_live_vsync(void) { return SDL_GetAtomicInt(&live_vsync); }
 int config_live_menu_confirm(void) { return SDL_GetAtomicInt(&live_menu_confirm); }

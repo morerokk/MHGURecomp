@@ -143,9 +143,9 @@ without saving puts them back); the settings marked * at the next start. Details
   (1.0 = the game's), `UIAnchor` (Center keeps the HUD in the middle 16:9 on an ultrawide screen, Edges spreads it
   to the sides)
 - `[Anti-aliasing]`: `MSAA` (Off / 2x / 4x / 8x), `AntiAliasing` (Off / Game: GU's own FXAA / FXAA: FXAA 3.11, the
-  default / CMAA2: Intel's CMAA2, sharp and light / SMAA: SMAA 1x / SMAAT2x: SMAA with the camera jittered and the last
-  two frames combined along their motion
-  / SMAA4x: SMAAT2x over MSAA 2x, each sample through SMAA, MSAA set to 2x while it is on; switchable in game like the
+  default / CMAA2: Intel's CMAA2, sharp and light / SMAA: SMAA 1x / SMAAS2x: SMAA over MSAA 2x, each sample through
+  SMAA / SMAAT2x: SMAA with the camera jittered and the last two frames combined along their motion
+  / SMAA4x: SMAAS2x and SMAAT2x together; S2x and 4x set MSAA to 2x while they are on; switchable in game like the
   rest; the older `FXAA` key still reads, On meaning FXAA 3.11), FXAA 3.11's `FXAAQuality` (1-5,
   Unreal's presets 10, 13, 15, 29 and 39; default 5), `FXAASubpix` (sub-pixel blur, 0-1; default 0),
   `FXAAEdgeThreshold` (default 0.063) and `FXAAEdgeThresholdMin` (default 0.0312), SMAA's `SMAAQuality` (Low /

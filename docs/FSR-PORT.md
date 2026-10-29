@@ -320,5 +320,7 @@ SMAA T2x (`[Anti-aliasing] AntiAliasing = SMAAT2x`, docs/STATUS.md) uses that pr
 object motion and finish steps `run_fsr` runs first) and then `run_t2x` instead of an upscaler, in place, without stand-ins. For it the
 main camera's hooks are always in (`camjit_init`; without jitter they only record the camera), and `vk_fsr_present` is called every frame
 (it returns at once while neither FSR nor T2x runs). SMAA 4x (`SMAA4x`) is the same T2x with a smaller jitter, plus `vk_s2x_target`:
-which resolve of a multisampled image is the scene's, for `exec.c` to resolve it by SMAA S2x. Object motion is captured in MSAA passes
+which resolve of a multisampled image is the scene's, for `exec.c` to resolve it by SMAA S2x. SMAA S2x alone (`SMAAS2x`) uses only
+that: `g_s2x_on` has `exec.c` pass the draws to `vk_fsr_draw`, which counts the scene's draws and returns, and `vk_fsr_present` picks
+the scene for the next frame (no jitter, vectors or capture). Object motion is captured in MSAA passes
 too (the capture variant discards rasterization, so its pipeline has no sample count to match).

@@ -230,7 +230,7 @@ static void create_device(void) {
     if (g_vk.stencil_export) counts &= lim->sampledImageStencilSampleCounts;
     g_vk.msaa = 1;
     g_vk.msaa_counts = counts & (VK_SAMPLE_COUNT_2_BIT | VK_SAMPLE_COUNT_4_BIT | VK_SAMPLE_COUNT_8_BIT);
-    uint32_t want = (uint32_t)config_live_msaa();  // (g_config.msaa, or 2x for SMAA 4x)
+    uint32_t want = (uint32_t)config_live_msaa();  // (g_config.msaa, or 2x for SMAA S2x / 4x)
     for (uint32_t s = want; s > 1 && g_vk.msaa == 1; s >>= 1)
         if (g_vk.msaa_counts & s) g_vk.msaa = s;
     if (g_vk.msaa != want) LOG("[vk] MSAA %ux not supported: %ux\n", want, g_vk.msaa);

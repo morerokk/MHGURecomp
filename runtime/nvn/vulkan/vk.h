@@ -121,7 +121,7 @@ typedef struct TexBackend {
     bool ms_valid;          // ms holds this image's contents (its last write was a pass through ms)
     bool ms_dirty;          // ms is newer than this image: resolved when this one is next read (exec.c vk_ms_resolve)
     VkFormat ms_fmt;        // the format ms is rendered as
-    bool ms_sampled;        // (of a multisampled image) shaders may read it too: SMAA 4x's S2x (smaa.c)
+    bool ms_sampled;        // (of a multisampled image) shaders may read it too: SMAA S2x / 4x's S2x (smaa.c)
 } TexBackend;
 
 TexBackend *vk_tex(NvnTexture *t, bool for_render);  // backend image (uploads CPU contents unless for_render)
