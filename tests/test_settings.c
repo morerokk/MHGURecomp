@@ -48,6 +48,15 @@ int main(int argc, char **argv) {
     char error[256];
     assert(config_save(&volume_only,error,sizeof error));
     assert(fabsf(config_live_fov()-1.6f)<0.001f && fabsf(config_live_fps()-144.5f)<0.001f);
+    // Quick apply: unsaved hot values are live; one back at the file's value gets the override again; closing without
+    // saving puts back what was live before.
+    Config preview=c; preview.fps=90; preview.msaa=8; preview.volume=10;
+    config_preview(&preview);
+    assert(config_live_fps()==90 && config_live_msaa()==8 && fabsf(config_audio_gain()-0.1f)<0.001f);
+    preview.fps=volume_only.fps; config_preview(&preview);
+    assert(fabsf(config_live_fps()-144.5f)<0.001f && config_live_msaa()==8);
+    config_preview_end();
+    assert(fabsf(config_live_fps()-144.5f)<0.001f && config_live_msaa()==1 && fabsf(config_audio_gain()-0.35f)<0.001f);
     float camera_before=camera_fovy(0.5f,g_render_aspect);
     c.menu_confirm = MENU_CONFIRM_SOUTH; c.menu_scale = 170; c.fps = 120; c.fov = 1.2f; c.volume = 25; c.confirm_exit = 0; c.language = 1; c.button_icons = 2;
     c.fxaa=0; c.msaa=4; c.vsync=0; c.face_buttons=FACE_LABEL; c.background_input=0; c.mouse_sensitivity=2.5f;

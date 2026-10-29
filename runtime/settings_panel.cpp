@@ -1195,6 +1195,8 @@ void settings_panel_before_frame(bool open) {
 }
 void settings_panel(bool *open) {
     if (!*open) {
+        if (s.editing)
+            config_preview_end();
         s.editing = false;
         is_dirty = false;
         is_confirming = false;
@@ -1406,8 +1408,11 @@ void settings_panel(bool *open) {
         if (cmd == Command::Save && save())
             focus("reset");
     }
-    if (!equal(before, s.draft) && dirty())
-        s.saved_notice = false;
+    if (!equal(before, s.draft)) {  // quick apply: the hot settings show at once; Save keeps them
+        config_preview(&s.draft);
+        if (dirty())
+            s.saved_notice = false;
+    }
     if (ui_action_failed())
         s.error = tr("Restart failed. The game is still running.");
     if (!s.error.empty()) {
@@ -1435,6 +1440,8 @@ void settings_panel(bool *open) {
     ImGui::PopStyleColor(2);
     is_dirty = *open && (dirty() || pending_text());
     is_confirming = *open && confirmation();
-    if (!*open)
+    if (!*open) {
+        config_preview_end();
         s.editing = false;
+    }
 }

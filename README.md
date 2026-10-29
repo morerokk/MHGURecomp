@@ -134,7 +134,8 @@ screenshot, F7 cycles MSAA.
 
 Everything is in `mhgurecomp.ini`; each setting is explained in the file itself. The settings menu changes them in
 the game: **F1**, or **Minus + Plus** on a controller (Back + Start on an Xbox controller). Frame rate, FOV, draw distance,
-anti-aliasing, VSync, controls and volume apply when you save; the settings marked * at the next start. Details:
+anti-aliasing, VSync, controls and volume apply as soon as you change them (Save keeps them; closing the menu
+without saving puts them back); the settings marked * at the next start. Details:
 [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md). In short:
 
 - `[Display]`: `Mode` (Borderless / Fullscreen / Windowed), `Resolution`, `RenderResolution` (the 3D resolution),

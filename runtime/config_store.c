@@ -51,7 +51,39 @@ static void publish_live(const Config *c, bool all) {
         SDL_UnlockSpinlock(&live_ldn_lock);
     }
 }
+// Quick apply (settings_panel.cpp): the menu's unsaved values of the hot settings are live while it is open. A value
+// back at the file's gets what was live before the menu changed anything (an environment override stays one), and
+// config_preview_end puts those back. A save keeps the previewed values: they are the file's from then on.
+static SDL_AtomicInt *const hot[] = {&live_fps, &live_fov, &live_mouse, &live_draw, &live_fxaa, &live_msaa, &live_vsync,
+                                     &live_face, &live_menu_confirm, &live_background, &live_combo, &volume,
+                                     &mute_in_background};
+#define NHOT (sizeof hot / sizeof hot[0])
+static int hot_before[NHOT];
+static bool previewing;
+static int float_bits(float f) { int b; memcpy(&b, &f, sizeof b); return b; }
+static void hot_values(const Config *c, int v[NHOT]) {
+    const int all[NHOT] = {float_bits((float)c->fps), float_bits(c->fov), float_bits(c->mouse_sensitivity),
+                           float_bits(c->draw_distance), c->fxaa, c->msaa, c->vsync, c->face_buttons, c->menu_confirm,
+                           c->background_input, c->combo_window, c->volume, c->mute_in_background};
+    memcpy(v, all, sizeof all);
+}
+void config_preview(const Config *draft) {
+    if (!previewing)
+        for (size_t i = 0; i < NHOT; i++) hot_before[i] = SDL_GetAtomicInt(hot[i]);
+    previewing = true;
+    int now[NHOT], file[NHOT];
+    hot_values(draft, now);
+    hot_values(&saved, file);
+    for (size_t i = 0; i < NHOT; i++) SDL_SetAtomicInt(hot[i], now[i] != file[i] ? now[i] : hot_before[i]);
+}
+void config_preview_end(void) {
+    if (previewing)
+        for (size_t i = 0; i < NHOT; i++) SDL_SetAtomicInt(hot[i], hot_before[i]);
+    previewing = false;
+}
+
 void config_store_loaded(const Config *c) {
+    previewing = false;
     publish_live(c, !have_saved);
     saved = *c; have_saved = true;
     SDL_SetAtomicInt(&language, c->language);

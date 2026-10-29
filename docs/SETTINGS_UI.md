@@ -52,8 +52,11 @@ there are no pending changes. Restart saves settings after explicit confirmation
 No settings operation saves game progress. Reset this section changes only the
 draft and requires a subsequent Save. A write failure preserves draft and file.
 
-Save applies volume, FPS, FOV, FXAA, MSAA, VSync, mouse sensitivity, face mapping,
-background input and confirmation policy without restarting. Render changes
+Volume, FPS, FOV, draw distance, FXAA, MSAA, VSync, mouse sensitivity, face
+mapping, background input, combo window and confirmation policy apply as soon as
+they change in the draft (quick apply: `config_preview`), without Save or a
+restart; Save keeps them, and closing or discarding without saving puts back what
+was live before (an unchanged environment override included). Render changes
 are consumed at render boundaries. Language, symbols and interface scale preview
 immediately and persist on Save. Cold fields carry an asterisk; the saved status
 indicates a pending restart only when cold settings differ from startup values.

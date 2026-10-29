@@ -132,6 +132,10 @@ int config_live_background_input(void);
 int config_live_combo_window(void);
 void config_live_ldn(char *server, size_t server_size, char *key, size_t key_size);  // [Multiplayer] Server, Key
 bool config_restart_required(const Config *draft); // Raw cold fields vs this process's startup INI values.
+// Quick apply: the settings menu's unsaved hot values made live (config_preview), and the live values from before
+// it put back when the menu closes without saving them (config_preview_end; nothing to do after a save).
+void config_preview(const Config *draft);
+void config_preview_end(void);
 float config_audio_gain(void);  // atomic, safe on audio threads; 0 while muted in the background
 void config_window_focus(bool focused);  // the window got / lost the focus (runtime/host_input.c)
 int config_language(void);     // last saved UI language, atomic across host threads
