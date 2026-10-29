@@ -131,13 +131,17 @@ static void inc_release(void *ud, shaderc_include_result *r) { (void)ud; free(r)
 // driver optimises anyway. MHGU_VK_OPT=1 turns it back on (experiments).
 // vk_glsl_to_spirv_ex adds -D macros and #include (inc); salt stands for what the includes contain, as the disk cache key.
 // opt (there only) is 0 for none or 1 for spirv-opt at the size level (which strips the OpNames), whatever MHGU_VK_OPT says.
+// hlsl: the source is HLSL, compiled from that entry point, its registers mapped to bindings (t# and u# from 0 and
+// hlsl_uav_base on).
 static uint32_t *glsl_compile(const char *src, size_t srclen, int stage, const char *name, const char *const *defs, int ndefs,
-                              VkGlslInclude inc, uint64_t salt, int opt, size_t *nwords) {
+                              VkGlslInclude inc, uint64_t salt, int opt, const char *hlsl, int hlsl_uav_base, size_t *nwords) {
     uint64_t h = src_hash(src, srclen, stage);
-    if (ndefs || inc) {  // (plain callers keep their old keys)
+    if (ndefs || inc || hlsl) {  // (plain callers keep their old keys)
         h ^= salt * 0x9E3779B97F4A7C15ull + 1 + (uint64_t)opt;
         for (int i = 0; i < ndefs; i++)
             for (const char *p = defs[i]; ; p++) { h ^= (uint8_t)*p; h *= 0x100000001B3ull; if (!*p) break; }
+        for (const char *p = hlsl; p && *p; p++) { h ^= (uint8_t)*p; h *= 0x100000001B3ull; }
+        if (hlsl) h = (h ^ (uint64_t)hlsl_uav_base ^ 0x484C534Cull) * 0x100000001B3ull;
     }
     static int nocache = -1;
     if (nocache < 0) nocache = getenv("MHGU_VK_NO_SPIRV_CACHE") != NULL;
@@ -156,11 +160,19 @@ static uint32_t *glsl_compile(const char *src, size_t srclen, int stage, const c
         shaderc_compile_options_add_macro_definition(o, defs[i], nl, eq ? eq + 1 : "1", eq ? strlen(eq + 1) : 1);
     }
     if (inc) shaderc_compile_options_set_include_callbacks(o, inc_resolve, inc_release, inc);
-    shaderc_compilation_result_t r = shaderc_compile_into_spv(comp, src, srclen, kind_of(stage), name, "main", o);
+    if (hlsl) {
+        shaderc_compile_options_set_source_language(o, shaderc_source_language_hlsl);
+        shaderc_compile_options_set_hlsl_io_mapping(o, true);
+        shaderc_compile_options_set_binding_base_for_stage(o, kind_of(stage), shaderc_uniform_kind_unordered_access_view,
+                                                           (uint32_t)hlsl_uav_base);
+    }
+    shaderc_compilation_result_t r = shaderc_compile_into_spv(comp, src, srclen, kind_of(stage), name, hlsl ? hlsl : "main", o);
     shaderc_compile_options_release(o);
     if (shaderc_result_get_compilation_status(r) != shaderc_compilation_status_success) {
         static int nlog;
-        if (nlog++ < 20) LOG("[shader] %s: GLSL compile failed:\n%s\n%s\n", name, shaderc_result_get_error_message(r), ndefs ? "" : src);
+        if (nlog++ < 20)
+            LOG("[shader] %s: %s compile failed:\n%s\n%s\n", name, hlsl ? "HLSL" : "GLSL", shaderc_result_get_error_message(r),
+                ndefs || hlsl ? "" : src);
     } else {
         size_t n = shaderc_result_get_length(r);
         out = malloc(n);
@@ -174,17 +186,22 @@ static uint32_t *glsl_compile(const char *src, size_t srclen, int stage, const c
 }
 
 uint32_t *vk_glsl_to_spirv(const char *src, int stage, const char *name, size_t *nwords) {
-    return glsl_compile(src, strlen(src), stage, name, NULL, 0, NULL, 0, 0, nwords);
+    return glsl_compile(src, strlen(src), stage, name, NULL, 0, NULL, 0, 0, NULL, 0, nwords);
 }
 
 uint32_t *vk_glsl_to_spirv_ex(const char *src, size_t srclen, const char *name, const char *const *defs, int ndefs,
                               VkGlslInclude inc, uint64_t salt, int opt, size_t *nwords) {
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
-    uint32_t *r = glsl_compile(src, srclen, STAGE_COMPUTE, name, defs, ndefs, inc, salt, opt, nwords);
+    uint32_t *r = glsl_compile(src, srclen, STAGE_COMPUTE, name, defs, ndefs, inc, salt, opt, NULL, 0, nwords);
     clock_gettime(CLOCK_MONOTONIC, &t1);
     LOG("[shader] %s: %s in %.1f ms\n", name, r ? "ready" : "FAILED", (t1.tv_sec - t0.tv_sec) * 1e3 + (t1.tv_nsec - t0.tv_nsec) * 1e-6);
     return r;
+}
+
+uint32_t *vk_hlsl_to_spirv(const char *src, size_t srclen, const char *entry, const char *name, const char *const *defs,
+                           int ndefs, int uav_base, size_t *nwords) {
+    return glsl_compile(src, srclen, STAGE_COMPUTE, name, defs, ndefs, NULL, 0, 0, entry, uav_base, nwords);
 }
 
 VkShaderModule vk_module(const uint32_t *spv, size_t nwords) {

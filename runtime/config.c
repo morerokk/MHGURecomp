@@ -17,7 +17,7 @@
 #include "config.h"
 #include "rt.h"
 
-#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, AA_FXAA, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", 5, 0.0f, 0.063f, 0.0312f, SMAA_ULTRA
+#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, AA_FXAA, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", 5, 0.0f, 0.063f, 0.0312f, SMAA_ULTRA, CMAA2_HIGH, 0
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
@@ -63,10 +63,11 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "MSAA = Off\n"
     "\n"
-    "; Anti-aliasing of the finished picture, in place of GU's own FXAA (Game): FXAA 3.11 or SMAA, with the settings below.\n"
+    "; Anti-aliasing of the finished picture, in place of GU's own FXAA (Game): FXAA 3.11, CMAA2 or SMAA, with the settings\n"
+    "; below. CMAA2 is Intel's sharp, light morphological AA\n"
     "; SMAAT2x is SMAA with the camera shifted by a quarter pixel every other frame and the last two frames combined\n"
     "; SMAA4x is SMAAT2x on top of MSAA 2x, each of its two samples through SMAA (it sets MSAA to 2x)\n"
-    "; Off, Game, FXAA, SMAA, SMAAT2x, SMAA4x\n"
+    "; Off, Game, FXAA, CMAA2, SMAA, SMAAT2x, SMAA4x\n"
     "; Default: FXAA\n"
     "AntiAliasing = FXAA\n"
     "\n"
@@ -94,6 +95,15 @@ static const char DEFAULT_INI[] =
     "; Low, Medium, High, Ultra\n"
     "; Default: Ultra\n"
     "SMAAQuality = Ultra\n"
+    "\n"
+    "; CMAA2's quality preset: higher smooths fainter edges\n"
+    "; Low, Medium, High, Ultra\n"
+    "; Default: High\n"
+    "CMAA2Quality = High\n"
+    "\n"
+    "; CMAA2 keeps more of text and fine detail, smoothing a little less\n"
+    "; Default: Off\n"
+    "CMAA2ExtraSharpness = Off\n"
     "\n"
     "[Upscaler]\n"
     "; FSR temporal upscaling\n"
@@ -372,13 +382,16 @@ const ConfigSetting g_settings[] = {
     {"Anti-aliasing", "MSAA", SET_CHOICE, F(msaa), 0, 0, 0, "Off|none|0|1|1x,2x|2,4x|4,8x|8", msaa_values, false, ERR_MISC},
     // (FXAA = Off / Game / On, the key before SMAA, reads as the same setting)
     {"Anti-aliasing", "AntiAliasing|FXAA", SET_CHOICE, F(aa), 0, 0, 0,
-     "Off|false|no|0,Game|original|gu|1,FXAA|on|true|yes|3.11|2,SMAA|smaa1x|3,SMAAT2x|t2x|4,SMAA4x|4x|5", NULL, false, ERR_MISC},
+     "Off|false|no|0,Game|original|gu|1,FXAA|on|true|yes|3.11|2,CMAA2|cmaa|3,SMAA|smaa1x|4,SMAAT2x|t2x|5,SMAA4x|4x|6", NULL,
+     false, ERR_MISC},
     {"Anti-aliasing", "FXAAQuality", SET_INT, F(fxaa_quality), 0, 1, 5, NULL, NULL, true, ERR_MISC},
     {"Anti-aliasing", "FXAASubpix", SET_FLOAT, F(fxaa_subpix), 0, 0.0f, 1.0f, NULL, NULL, true, ERR_MISC},
     {"Anti-aliasing", "FXAAEdgeThreshold", SET_FLOAT, F(fxaa_edge_threshold), 0, 0.03f, 0.5f, NULL, NULL, true, ERR_MISC},
     {"Anti-aliasing", "FXAAEdgeThresholdMin", SET_FLOAT, F(fxaa_edge_threshold_min), 0, 0.0f, 0.25f, NULL, NULL, true,
      ERR_MISC},
     {"Anti-aliasing", "SMAAQuality", SET_CHOICE, F(smaa_quality), 0, 0, 0, "Low,Medium,High,Ultra", NULL, false, ERR_MISC},
+    {"Anti-aliasing", "CMAA2Quality", SET_CHOICE, F(cmaa2_quality), 0, 0, 0, "Low,Medium,High,Ultra", NULL, false, ERR_MISC},
+    ON_OFF("Anti-aliasing", "CMAA2ExtraSharpness", cmaa2_extra_sharpness, false),
     ON_OFF("Upscaler", "FSR", fsr, true),
     {"Upscaler", "Upscaler", SET_CHOICE, F(fsr_upscaler), 0, 0, 0, "FSR3|fsr3.1|3,FSR4|4", NULL, true, ERR_FSR},
     {"Upscaler", "FSRQuality", SET_CHOICE, F(fsr_quality), 0, 0, 0,
@@ -802,7 +815,7 @@ void config_load(void) {
     config_runtime_init(&g_config);
 
     static const char *const modes[] = {"windowed", "fullscreen", "borderless"};
-    static const char *const aa[] = {"off", "the game's FXAA", "FXAA 3.11", "SMAA", "SMAA T2x", "SMAA 4x"};
+    static const char *const aa[] = {"off", "the game's FXAA", "FXAA 3.11", "CMAA2", "SMAA", "SMAA T2x", "SMAA 4x"};
     LOG("[config] %s: %s %dx%d, 3D %dx%d (shape %.3f, FOV x%.2f, HUD %.3f wide), %d fps, vsync %s, MSAA %dx, "
         "anti-aliasing %s, face buttons by %s, controller %s in the background\n", path, modes[g_config.display_mode],
         g_config.width, g_config.height, g_config.render_w, g_config.render_h, g_render_aspect, g_fov_scale,
@@ -813,6 +826,8 @@ void config_load(void) {
             (double)g_config.fxaa_subpix, (double)g_config.fxaa_edge_threshold, (double)g_config.fxaa_edge_threshold_min);
     static const char *const smaa[] = {"low", "medium", "high", "ultra"};
     if (g_config.aa >= AA_SMAA) LOG("[config] SMAA: %s preset\n", smaa[g_config.smaa_quality & 3]);
+    if (g_config.aa == AA_CMAA2)
+        LOG("[config] CMAA2: %s preset%s\n", smaa[g_config.cmaa2_quality & 3], g_config.cmaa2_extra_sharpness ? ", extra sharpness" : "");
     const HpScale *hp = &g_config.hp;
     LOG("[config] monster HP in Hub quests: x%.2f / %.2f / %.2f / %.2f for 1-4 hunters, %d quest(s) set apart\n",
         hp->scale[0], hp->scale[1], hp->scale[2], hp->scale[3], hp->quests);

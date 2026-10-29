@@ -151,6 +151,9 @@ $(O)/rt/nvn/vulkan/fsr4.o: RTFLAGS += -DFSR4_DRIVER_PATCH=$(FSR4_DRIVER_PATCH)
 # directory make runs in), and its area / search textures as C arrays; MIT, unchanged from github.com/iryoku/smaa.
 $(O)/rt/nvn/vulkan/smaa.o: third_party/smaa/SMAA.hlsl third_party/smaa/Textures/AreaTex.h third_party/smaa/Textures/SearchTex.h
 $(O)/rt/nvn/vulkan/smaa.o: RTFLAGS += -Ithird_party/smaa/Textures
+# CMAA2 (runtime/nvn/vulkan/cmaa2.c): third_party/cmaa2/CMAA2.hlsl, embedded with .incbin, compiled from the HLSL at run
+# time; Apache-2.0, from github.com/GameTechDev/CMAA2 with two changes for glslang (marked at its top).
+$(O)/rt/nvn/vulkan/cmaa2.o: third_party/cmaa2/CMAA2.hlsl
 # NULL_GPU=1: no renderer (runtime/nvn/backend_null.c: the game runs, nothing is drawn)
 ifeq ($(NULL_GPU),1)
 RTFLAGS  += -DMHGU_NULL_BACKEND

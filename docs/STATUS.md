@@ -102,6 +102,17 @@ Fixed on the way (2026-10-20):
   the blend into the game's target) with SMAAQuality Low / Medium / High / Ultra (live, like AntiAliasing; the
   settings menu shows it while SMAA is picked). Checked hidden at 1920x1080 in town (MHGU_QUICKHUNT=town, shots):
   against Off, the edges of a barrel's lid are smoothed and its texture is unchanged (2 % of the crop's pixels).
+  CMAA2 draws Intel's CMAA2 (cmaa2.c: third_party/cmaa2's CMAA2.hlsl, Apache-2.0, compiled from the HLSL by shaderc,
+  shaders.c vk_hlsl_to_spirv; two one-word changes for glslang, marked at its top): its four compute kernels as
+  Intel's DX12 code runs them (edges, dispatch arguments, shape candidates by indirect dispatch, arguments again, the
+  blends applied by indirect dispatch). It writes only the pixels it changes, through a storage image, so the input
+  is copied into an RGBA8 image of ours (written through an R32_UINT view: its untyped store) and that into the
+  game's target; the game's targets stay non-storage. CMAA2Quality (Low / Medium / High / Ultra: edge thresholds
+  0.15 / 0.10 / 0.07 / 0.05) and CMAA2ExtraSharpness, live; the device turns on shaderImageGatherExtended for it. A
+  target that is not RGBA8 gets FXAA 3.11 instead. Checked hidden in town at 1920x1080 on an RTX 3090 (switched live
+  with MHGU_CONTROL "aa <n>" between Off, FXAA, CMAA2 and SMAA): edges against the sky smoothed like SMAA's, the
+  flag's print as sharp as without AA (FXAA softens it); 0.17-0.18 ms a frame with the two copies (FXAA 3.11
+  0.08-0.10, SMAA 1x from 0.18: gpuprof labels the FXAA slot's work now).
   SMAAT2x is SMAA T2x, live like the rest (no restart): while it is picked (and FSR is off), fsr.c runs its frame
   structure, camera jitter and motion vectors at the render size without stand-ins (g_temporal_on; vk_fsr_present
   starts / stops it, t2x_init makes the images the first time), the camera jitters by (0.25, 0.25) / (-0.25, -0.25)

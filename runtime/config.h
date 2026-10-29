@@ -13,11 +13,12 @@ enum { FACE_POSITION, FACE_LABEL };
 enum { COMBO_LENIENT, COMBO_STRICT };  // [Controls] ComboInputWindow (runtime/hle/combowin.c)
 enum { MENU_CONFIRM_ORIGINAL, MENU_CONFIRM_SOUTH, MENU_CONFIRM_EAST };
 // [Anti-aliasing] AntiAliasing: what draws in place of the game's FXAA pass (nvn/vulkan/exec.c): nothing (its input
-// copied), the pass itself, FXAA 3.11, SMAA 1x (nvn/vulkan/smaa.c); SMAA T2x: nothing there, the jittered camera's
-// frames resolved at the start of the HUD instead (nvn/vulkan/fsr.c); SMAA 4x: as T2x, with the scene in MSAA 2x
-// (whatever MSAA says) resolved by SMAA S2x
-enum { AA_OFF, AA_GAME, AA_FXAA, AA_SMAA, AA_SMAA_T2X, AA_SMAA_4X };
-enum { SMAA_LOW, SMAA_MEDIUM, SMAA_HIGH, SMAA_ULTRA };  // [Anti-aliasing] SMAAQuality: SMAA's presets
+// copied), the pass itself, FXAA 3.11, CMAA2 (nvn/vulkan/cmaa2.c), SMAA 1x (nvn/vulkan/smaa.c); SMAA T2x: nothing
+// there, the jittered camera's frames resolved at the start of the HUD instead (nvn/vulkan/fsr.c); SMAA 4x: as T2x,
+// with the scene in MSAA 2x (whatever MSAA says) resolved by SMAA S2x
+enum { AA_OFF, AA_GAME, AA_FXAA, AA_CMAA2, AA_SMAA, AA_SMAA_T2X, AA_SMAA_4X };
+enum { SMAA_LOW, SMAA_MEDIUM, SMAA_HIGH, SMAA_ULTRA };      // [Anti-aliasing] SMAAQuality: SMAA's presets
+enum { CMAA2_LOW, CMAA2_MEDIUM, CMAA2_HIGH, CMAA2_ULTRA };  // [Anti-aliasing] CMAA2Quality: CMAA2's presets
 
 // [Monster HP]: factors on the HP multiplier of Hub-type quests' large monsters
 #define HP_QUESTS_MAX 256
@@ -75,6 +76,8 @@ typedef struct {
     int fxaa_quality;
     float fxaa_subpix, fxaa_edge_threshold, fxaa_edge_threshold_min;
     int smaa_quality;  // [Anti-aliasing] AntiAliasing = SMAA: SMAA_*
+    // [Anti-aliasing] AntiAliasing = CMAA2: CMAA2_*, and its variant that keeps more of text and fine detail
+    int cmaa2_quality, cmaa2_extra_sharpness;
 } Config;
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
 // Cloud VM; a DuckDNS name, so it can move without a release). "" = no default.
@@ -136,6 +139,8 @@ float config_live_mouse_sensitivity(void);
 float config_live_draw_distance(void);
 int config_live_aa(void);
 int config_live_smaa_quality(void);
+int config_live_cmaa2_quality(void);
+int config_live_cmaa2_extra_sharpness(void);
 int config_live_msaa(void);
 int config_live_vsync(void);
 int config_live_face_buttons(void);

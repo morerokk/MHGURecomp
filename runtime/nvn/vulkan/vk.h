@@ -159,8 +159,10 @@ VkShaderModule vk_builtin_shader(const char *name);  // internal shaders (clear,
 
 // ---- anti-aliasing in place of the game's FXAA pass (exec.c fxaa_replaced): the input that pass samples and the
 // colour target it draws into (format, size w x h), both in GENERAL layout; recorded outside a render pass
-typedef struct { VkImageView src, dst; VkImage dst_image; VkFormat format; uint32_t w, h; } VkPostAa;
+// (src_image, level: the input's image and the level of the target dst views, for copies)
+typedef struct { VkImageView src, dst; VkImage dst_image, src_image; VkFormat format; uint32_t w, h, level; } VkPostAa;
 bool vk_smaa(const VkPostAa *t, int quality);  // SMAA 1x, SMAA_* preset (smaa.c); false: not drawn
+bool vk_cmaa2(const VkPostAa *t, int quality, bool extra_sharp);  // CMAA2, CMAA2_* preset (cmaa2.c); false: not drawn
 // SMAA T2x in place (t->src and t->dst the same image; fsr.c at the start of the HUD): velocity = the motion vectors
 // (previous position - current, in pixels); phase: the frame's jitter (camjit_t2x_phase), -1 for none (then SMAA 1x);
 // reactive (or VK_NULL_HANDLE): where history is dropped (0..1, fsr.c's reactive mask); history false: the last frame

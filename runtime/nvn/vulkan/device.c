@@ -204,6 +204,7 @@ static void create_device(void) {
     b->robustBufferAccess = h->robustBufferAccess;  // guest shaders index cbufs freely: keep OOB reads harmless
     b->shaderClipDistance = h->shaderClipDistance;
     b->multiViewport = h->multiViewport;
+    b->shaderImageGatherExtended = h->shaderImageGatherExtended;  // (CMAA2's kernels: texel fetches with offsets)
     if (g_config.fsr) {  // FSR: its shaders write images declared without a format, and have 16-bit float variants
         b->shaderStorageImageWriteWithoutFormat = g_vk.fsr_storage_wo_format = h->shaderStorageImageWriteWithoutFormat;
         b->shaderStorageImageReadWithoutFormat = h->shaderStorageImageReadWithoutFormat;

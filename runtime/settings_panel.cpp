@@ -205,6 +205,8 @@ bool equal(const Config &a, const Config &b) {
     SAME(msaa);
     SAME(aa);
     SAME(smaa_quality);
+    SAME(cmaa2_quality);
+    SAME(cmaa2_extra_sharpness);
     SAME(face_buttons);
     SAME(ldn_port);
     SAME(sync_small_monsters);
@@ -523,6 +525,8 @@ void reset_section() {
         c.msaa = f.msaa;
         c.aa = f.aa;
         c.smaa_quality = f.smaa_quality;
+        c.cmaa2_quality = f.cmaa2_quality;
+        c.cmaa2_extra_sharpness = f.cmaa2_extra_sharpness;
         c.volume = f.volume;
         c.mute_in_background = f.mute_in_background;
         break;
@@ -784,7 +788,7 @@ std::vector<Row> main_rows() {
             r.back().enabled = false;
             r.back().value = "2x (SMAA 4x)";
         }
-        add_choice(r, "aa", "Anti-aliasing", c.aa, {tr("Off"), tr("Game"), "FXAA", "SMAA", "SMAA T2x", "SMAA 4x"},
+        add_choice(r, "aa", "Anti-aliasing", c.aa, {tr("Off"), tr("Game"), "FXAA", "CMAA2", "SMAA", "SMAA T2x", "SMAA 4x"},
                    [](int v) { c.aa = v; });
         if (g_config.fsr) {
             r.back().cold = true;
@@ -796,6 +800,11 @@ std::vector<Row> main_rows() {
         if (c.aa >= AA_SMAA && !c.fsr)
             add_choice(r, "smaa", "SMAA quality", c.smaa_quality, {tr("Low"), tr("Medium"), tr("High"), tr("Ultra")},
                        [](int v) { c.smaa_quality = v; });
+        if (c.aa == AA_CMAA2 && !c.fsr) {
+            add_choice(r, "cmaa2", "CMAA2 quality", c.cmaa2_quality, {tr("Low"), tr("Medium"), tr("High"), tr("Ultra")},
+                       [](int v) { c.cmaa2_quality = v; });
+            add_bool(r, "cmaa2sharp", "Extra sharpness", &c.cmaa2_extra_sharpness, false);
+        }
         number(r, "drawdist", tr("Draw distance"), &c.draw_distance, lo("DrawDistance"), hi("DrawDistance"), .25f,
                cold("DrawDistance"));
         if (c.draw_distance == 0)

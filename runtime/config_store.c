@@ -21,7 +21,7 @@ static bool have_saved, runtime_ready, runtime_fsr;
 static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in_background, window_focused = {1};
 static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_aa = {1}, live_msaa = {1},
                      live_vsync = {1}, live_face, live_menu_confirm, live_background = {1}, live_combo,
-                     live_smaa = {SMAA_ULTRA};
+                     live_smaa = {SMAA_ULTRA}, live_cmaa2 = {CMAA2_HIGH}, live_cmaa2_sharp;
 static void set_float(SDL_AtomicInt *slot, float value) {
     int bits; _Static_assert(sizeof bits == sizeof value, "32-bit float settings");
     memcpy(&bits, &value, sizeof bits); SDL_SetAtomicInt(slot, bits);
@@ -46,6 +46,9 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->background_input != saved.background_input) SDL_SetAtomicInt(&live_background, c->background_input);
     if (all || c->combo_window != saved.combo_window) SDL_SetAtomicInt(&live_combo, c->combo_window);
     if (all || c->smaa_quality != saved.smaa_quality) SDL_SetAtomicInt(&live_smaa, c->smaa_quality);
+    if (all || c->cmaa2_quality != saved.cmaa2_quality) SDL_SetAtomicInt(&live_cmaa2, c->cmaa2_quality);
+    if (all || c->cmaa2_extra_sharpness != saved.cmaa2_extra_sharpness)
+        SDL_SetAtomicInt(&live_cmaa2_sharp, c->cmaa2_extra_sharpness);
     if (all || strcmp(c->ldn_server, saved.ldn_server) || strcmp(c->ldn_key, saved.ldn_key)) {
         SDL_LockSpinlock(&live_ldn_lock);
         if (all || strcmp(c->ldn_server, saved.ldn_server)) memcpy(live_ldn_server, c->ldn_server, sizeof live_ldn_server);
@@ -58,7 +61,7 @@ static void publish_live(const Config *c, bool all) {
 // config_preview_end puts those back. A save keeps the previewed values: they are the file's from then on.
 static SDL_AtomicInt *const hot[] = {&live_fps, &live_fov, &live_mouse, &live_draw, &live_aa, &live_msaa, &live_vsync,
                                      &live_face, &live_menu_confirm, &live_background, &live_combo, &volume,
-                                     &mute_in_background, &live_smaa};
+                                     &mute_in_background, &live_smaa, &live_cmaa2, &live_cmaa2_sharp};
 #define NHOT (sizeof hot / sizeof hot[0])
 static int hot_before[NHOT];
 static bool previewing;
@@ -66,7 +69,8 @@ static int float_bits(float f) { int b; memcpy(&b, &f, sizeof b); return b; }
 static void hot_values(const Config *c, int v[NHOT]) {
     const int all[NHOT] = {float_bits((float)c->fps), float_bits(c->fov), float_bits(c->mouse_sensitivity),
                            float_bits(c->draw_distance), c->aa, c->msaa, c->vsync, c->face_buttons, c->menu_confirm,
-                           c->background_input, c->combo_window, c->volume, c->mute_in_background, c->smaa_quality};
+                           c->background_input, c->combo_window, c->volume, c->mute_in_background, c->smaa_quality,
+                           c->cmaa2_quality, c->cmaa2_extra_sharpness};
     memcpy(v, all, sizeof all);
 }
 void config_preview(const Config *draft) {
@@ -110,6 +114,8 @@ float config_live_mouse_sensitivity(void) { return get_float(&live_mouse); }
 float config_live_draw_distance(void) { return get_float(&live_draw); }
 int config_live_aa(void) { return runtime_fsr ? 0 : SDL_GetAtomicInt(&live_aa); }
 int config_live_smaa_quality(void) { return SDL_GetAtomicInt(&live_smaa); }
+int config_live_cmaa2_quality(void) { return SDL_GetAtomicInt(&live_cmaa2); }
+int config_live_cmaa2_extra_sharpness(void) { return SDL_GetAtomicInt(&live_cmaa2_sharp); }
 int config_live_msaa(void) {  // (SMAA 4x is S2x: MSAA 2x whatever MSAA says)
     return runtime_fsr ? 1 : SDL_GetAtomicInt(&live_aa) == AA_SMAA_4X ? 2 : SDL_GetAtomicInt(&live_msaa);
 }

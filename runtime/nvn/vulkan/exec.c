@@ -3251,11 +3251,12 @@ static bool post_aa_target(NvnTexture *src, VkPostAa *t) {
     bool has = st.rt.has_cview[0];
     t->src = vk_view(src, NULL, false, false, TEXTYPE_2D);
     t->dst = vk_view(dt, &st.rt.cview[0], has, true, TEXTYPE_2D);
-    t->dst_image = d->image;
+    t->dst_image = d->image, t->src_image = s->image;
     t->format = has && (st.rt.cview[0].setmask & 4) && vk_format(dt->format) == d->format ? vk_format(st.rt.cview[0].format)
                                                                                          : d->format;
     uint32_t lv = has && (st.rt.cview[0].setmask & 1) ? st.rt.cview[0].base_level : 0;
-    t->w = level_extent(d->width, lv), t->h = level_extent(d->height, lv);
+    t->w = level_extent(d->width, lv), t->h = level_extent(d->height, lv), t->level = lv;
+    if (s->width < t->w || s->height < t->h || s->format != t->format) t->src_image = VK_NULL_HANDLE;  // (not for copies)
     return t->src && t->dst;
 }
 static void post_aa_drawn(void) {
@@ -3306,10 +3307,15 @@ static bool fxaa_replaced(Prog *pr) {
     NvnTexture *src = shader_texture_object(1, &pr->fi->tex[0]);
     if (!src || src == st.rt.color[0]) return false;
     if (mode >= AA_SMAA_T2X && !g_temporal_on) mode = AA_SMAA;  // (until T2x / 4x runs, from the next frame on: SMAA 1x)
-    if (mode == AA_FXAA || mode == AA_SMAA) {
+    if (mode == AA_FXAA || mode == AA_CMAA2 || mode == AA_SMAA) {
         VkPostAa t;
-        if (!post_aa_target(src, &t) || !(mode == AA_SMAA ? vk_smaa(&t, config_live_smaa_quality()) : fxaa_311(&t)))
-            return false;
+        if (!post_aa_target(src, &t)) return false;
+        bool drawn = mode == AA_SMAA    ? vk_smaa(&t, config_live_smaa_quality())
+                     : mode == AA_CMAA2 ? vk_cmaa2(&t, config_live_cmaa2_quality(), config_live_cmaa2_extra_sharpness()) ||
+                                              fxaa_311(&t)  // (CMAA2 not possible: FXAA 3.11)
+                                        : fxaa_311(&t);
+        if (!drawn) return false;
+        gp_mark(mode == AA_SMAA ? "  SMAA 1x" : mode == AA_CMAA2 ? "  CMAA2 (or FXAA 3.11 for it)" : "  FXAA 3.11");
         post_aa_drawn();
         return true;
     }

@@ -192,6 +192,8 @@ static inline const char *settings_text(int language, const char *english) {
         {"Game", "Juego"},
         {"Anti-aliasing", "Suavizado de bordes"},
         {"SMAA quality", "Calidad de SMAA"},
+        {"CMAA2 quality", "Calidad de CMAA2"},
+        {"Extra sharpness", "Nitidez extra"},
         {"Low", "Baja"},
         {"Medium", "Media"},
         {"High", "Alta"},

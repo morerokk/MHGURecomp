@@ -165,6 +165,11 @@ int main(int argc, char **argv) {
         assert(config_parse(config_setting("AntiAliasing"),"SMAA",&x) && x.aa==AA_SMAA);
         assert(config_parse(config_setting("AntiAliasing"),"SMAAT2x",&x) && x.aa==AA_SMAA_T2X);
         assert(config_parse(config_setting("AntiAliasing"),"SMAA4x",&x) && x.aa==AA_SMAA_4X);
+        assert(config_parse(config_setting("AntiAliasing"),"CMAA2",&x) && x.aa==AA_CMAA2);
+        assert(config_defaults().cmaa2_quality==CMAA2_HIGH && !config_defaults().cmaa2_extra_sharpness);
+        assert(config_parse(config_setting("CMAA2Quality"),"ultra",&x) && x.cmaa2_quality==CMAA2_ULTRA);
+        assert(config_parse(config_setting("CMAA2ExtraSharpness"),"On",&x) && x.cmaa2_extra_sharpness);
+        assert(!config_restart_key("CMAA2Quality") && !config_restart_key("CMAA2ExtraSharpness"));
         assert(config_parse(config_setting("AntiAliasing"),"FXAA",&x) && x.aa==AA_FXAA);
         assert(config_parse(config_setting("FXAA"),"Game",&x) && x.aa==AA_GAME);
         assert(config_parse(config_setting("FXAA"),"off",&x) && x.aa==AA_OFF);
