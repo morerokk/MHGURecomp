@@ -156,5 +156,10 @@ int vk_pages_changed(uint64_t addr, uint64_t size, uint32_t since, uint32_t *now
 VkShaderModule vk_compile_glsl(const char *src, int stage, const char *name);  // NULL on failure (logged)
 VkShaderModule vk_builtin_shader(const char *name);  // internal shaders (clear, present)
 
+// ---- anti-aliasing in place of the game's FXAA pass (exec.c fxaa_replaced): the input that pass samples and the
+// colour target it draws into (format, size w x h), both in GENERAL layout; recorded outside a render pass
+typedef struct { VkImageView src, dst; VkFormat format; uint32_t w, h; } VkPostAa;
+bool vk_smaa(const VkPostAa *t, int quality);  // SMAA 1x, SMAA_* preset (smaa.c); false: not drawn
+
 // ---- device / window (device.c)
 void vk_save_png(const char *path, const uint8_t *rgba, uint32_t w, uint32_t h);

@@ -147,6 +147,10 @@ $(FSR4_STAMP):
 	@mkdir -p $(O) && rm -f $(O)/fsr4_patch_*.stamp && touch $@
 $(O)/rt/nvn/vulkan/fsr4.o: $(FSR4_STAMP)
 $(O)/rt/nvn/vulkan/fsr4.o: RTFLAGS += -DFSR4_DRIVER_PATCH=$(FSR4_DRIVER_PATCH)
+# SMAA (runtime/nvn/vulkan/smaa.c): third_party/smaa = SMAA.hlsl, embedded with .incbin (a path relative to the
+# directory make runs in), and its area / search textures as C arrays; MIT, unchanged from github.com/iryoku/smaa.
+$(O)/rt/nvn/vulkan/smaa.o: third_party/smaa/SMAA.hlsl third_party/smaa/Textures/AreaTex.h third_party/smaa/Textures/SearchTex.h
+$(O)/rt/nvn/vulkan/smaa.o: RTFLAGS += -Ithird_party/smaa/Textures
 # NULL_GPU=1: no renderer (runtime/nvn/backend_null.c: the game runs, nothing is drawn)
 ifeq ($(NULL_GPU),1)
 RTFLAGS  += -DMHGU_NULL_BACKEND

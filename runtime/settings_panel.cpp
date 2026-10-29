@@ -203,7 +203,8 @@ bool equal(const Config &a, const Config &b) {
     SAME(shader_prewarm);
     SAME(draw_distance);
     SAME(msaa);
-    SAME(fxaa);
+    SAME(aa);
+    SAME(smaa_quality);
     SAME(face_buttons);
     SAME(ldn_port);
     SAME(sync_small_monsters);
@@ -520,7 +521,8 @@ void reset_section() {
         c.shader_prewarm = f.shader_prewarm;
         c.draw_distance = f.draw_distance;
         c.msaa = f.msaa;
-        c.fxaa = f.fxaa;
+        c.aa = f.aa;
+        c.smaa_quality = f.smaa_quality;
         c.volume = f.volume;
         c.mute_in_background = f.mute_in_background;
         break;
@@ -778,7 +780,7 @@ std::vector<Row> main_rows() {
                 r.back().value = tr("Off (FSR)");
             }
         }
-        add_choice(r, "fxaa", "FXAA", c.fxaa, {tr("Off"), tr("Game"), tr("On")}, [](int v) { c.fxaa = v; });
+        add_choice(r, "aa", "Anti-aliasing", c.aa, {tr("Off"), tr("Game"), "FXAA", "SMAA"}, [](int v) { c.aa = v; });
         if (g_config.fsr) {
             r.back().cold = true;
             if (c.fsr) {
@@ -786,6 +788,9 @@ std::vector<Row> main_rows() {
                 r.back().value = tr("Off (FSR)");
             }
         }
+        if (c.aa == AA_SMAA && !c.fsr)
+            add_choice(r, "smaa", "SMAA quality", c.smaa_quality, {tr("Low"), tr("Medium"), tr("High"), tr("Ultra")},
+                       [](int v) { c.smaa_quality = v; });
         number(r, "drawdist", tr("Draw distance"), &c.draw_distance, lo("DrawDistance"), hi("DrawDistance"), .25f,
                cold("DrawDistance"));
         if (c.draw_distance == 0)

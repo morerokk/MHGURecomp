@@ -19,8 +19,9 @@
 static Config saved, startup;
 static bool have_saved, runtime_ready, runtime_fsr;
 static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in_background, window_focused = {1};
-static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
-                     live_vsync = {1}, live_face, live_menu_confirm, live_background = {1}, live_combo;
+static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_aa = {1}, live_msaa = {1},
+                     live_vsync = {1}, live_face, live_menu_confirm, live_background = {1}, live_combo,
+                     live_smaa = {SMAA_ULTRA};
 static void set_float(SDL_AtomicInt *slot, float value) {
     int bits; _Static_assert(sizeof bits == sizeof value, "32-bit float settings");
     memcpy(&bits, &value, sizeof bits); SDL_SetAtomicInt(slot, bits);
@@ -37,13 +38,14 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->fov != saved.fov) set_float(&live_fov, c->fov);
     if (all || c->mouse_sensitivity != saved.mouse_sensitivity) set_float(&live_mouse, c->mouse_sensitivity);
     if (all || c->draw_distance != saved.draw_distance) set_float(&live_draw, c->draw_distance);
-    if (all || c->fxaa != saved.fxaa) SDL_SetAtomicInt(&live_fxaa, c->fxaa);
+    if (all || c->aa != saved.aa) SDL_SetAtomicInt(&live_aa, c->aa);
     if (all || c->msaa != saved.msaa) SDL_SetAtomicInt(&live_msaa, c->msaa);
     if (all || c->vsync != saved.vsync) SDL_SetAtomicInt(&live_vsync, c->vsync);
     if (all || c->face_buttons != saved.face_buttons) SDL_SetAtomicInt(&live_face, c->face_buttons);
     if (all || c->menu_confirm != saved.menu_confirm) SDL_SetAtomicInt(&live_menu_confirm, c->menu_confirm);
     if (all || c->background_input != saved.background_input) SDL_SetAtomicInt(&live_background, c->background_input);
     if (all || c->combo_window != saved.combo_window) SDL_SetAtomicInt(&live_combo, c->combo_window);
+    if (all || c->smaa_quality != saved.smaa_quality) SDL_SetAtomicInt(&live_smaa, c->smaa_quality);
     if (all || strcmp(c->ldn_server, saved.ldn_server) || strcmp(c->ldn_key, saved.ldn_key)) {
         SDL_LockSpinlock(&live_ldn_lock);
         if (all || strcmp(c->ldn_server, saved.ldn_server)) memcpy(live_ldn_server, c->ldn_server, sizeof live_ldn_server);
@@ -54,17 +56,17 @@ static void publish_live(const Config *c, bool all) {
 // Quick apply (settings_panel.cpp): the menu's unsaved values of the hot settings are live while it is open. A value
 // back at the file's gets what was live before the menu changed anything (an environment override stays one), and
 // config_preview_end puts those back. A save keeps the previewed values: they are the file's from then on.
-static SDL_AtomicInt *const hot[] = {&live_fps, &live_fov, &live_mouse, &live_draw, &live_fxaa, &live_msaa, &live_vsync,
+static SDL_AtomicInt *const hot[] = {&live_fps, &live_fov, &live_mouse, &live_draw, &live_aa, &live_msaa, &live_vsync,
                                      &live_face, &live_menu_confirm, &live_background, &live_combo, &volume,
-                                     &mute_in_background};
+                                     &mute_in_background, &live_smaa};
 #define NHOT (sizeof hot / sizeof hot[0])
 static int hot_before[NHOT];
 static bool previewing;
 static int float_bits(float f) { int b; memcpy(&b, &f, sizeof b); return b; }
 static void hot_values(const Config *c, int v[NHOT]) {
     const int all[NHOT] = {float_bits((float)c->fps), float_bits(c->fov), float_bits(c->mouse_sensitivity),
-                           float_bits(c->draw_distance), c->fxaa, c->msaa, c->vsync, c->face_buttons, c->menu_confirm,
-                           c->background_input, c->combo_window, c->volume, c->mute_in_background};
+                           float_bits(c->draw_distance), c->aa, c->msaa, c->vsync, c->face_buttons, c->menu_confirm,
+                           c->background_input, c->combo_window, c->volume, c->mute_in_background, c->smaa_quality};
     memcpy(v, all, sizeof all);
 }
 void config_preview(const Config *draft) {
@@ -106,7 +108,8 @@ float config_live_fps(void) { return get_float(&live_fps); }
 float config_live_fov(void) { return get_float(&live_fov); }
 float config_live_mouse_sensitivity(void) { return get_float(&live_mouse); }
 float config_live_draw_distance(void) { return get_float(&live_draw); }
-int config_live_fxaa(void) { return runtime_fsr ? 0 : SDL_GetAtomicInt(&live_fxaa); }
+int config_live_aa(void) { return runtime_fsr ? 0 : SDL_GetAtomicInt(&live_aa); }
+int config_live_smaa_quality(void) { return SDL_GetAtomicInt(&live_smaa); }
 int config_live_msaa(void) { return runtime_fsr ? 1 : SDL_GetAtomicInt(&live_msaa); }
 int config_live_vsync(void) { return SDL_GetAtomicInt(&live_vsync); }
 int config_live_menu_confirm(void) { return SDL_GetAtomicInt(&live_menu_confirm); }

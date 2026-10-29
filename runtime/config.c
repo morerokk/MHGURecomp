@@ -17,7 +17,7 @@
 #include "config.h"
 #include "rt.h"
 
-#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, FXAA_ON, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", 5, 0.0f, 0.063f, 0.0312f
+#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, AA_FXAA, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", 5, 0.0f, 0.063f, 0.0312f, SMAA_ULTRA
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
@@ -63,10 +63,10 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "MSAA = Off\n"
     "\n"
-    "; FXAA: On is FXAA 3.11 with the settings below, Game is GU's own FXAA\n"
-    "; Off, Game, On\n"
-    "; Default: On\n"
-    "FXAA = On\n"
+    "; Anti-aliasing of the finished picture, in place of GU's own FXAA (Game): FXAA 3.11 or SMAA, with the settings below\n"
+    "; Off, Game, FXAA, SMAA\n"
+    "; Default: FXAA\n"
+    "AntiAliasing = FXAA\n"
     "\n"
     "; FXAA 3.11's quality preset (as Unreal's r.FXAA.Quality): 1 is fastest, 5 searches edges furthest\n"
     "; Between 1 and 5\n"
@@ -87,6 +87,11 @@ static const char DEFAULT_INI[] =
     "; Between 0 and 0.25\n"
     "; Default: 0.0312\n"
     "FXAAEdgeThresholdMin = 0.0312\n"
+    "\n"
+    "; SMAA's quality preset: higher finds more edges, longer ones and diagonals, and costs a little more\n"
+    "; Low, Medium, High, Ultra\n"
+    "; Default: Ultra\n"
+    "SMAAQuality = Ultra\n"
     "\n"
     "[Upscaler]\n"
     "; FSR temporal upscaling\n"
@@ -363,13 +368,15 @@ const ConfigSetting g_settings[] = {
     {"Display", "UIAnchor", SET_CHOICE, F(ui_anchor), 0, 0, 0, "Center|1|16:9,21:9|2,32:9|3,Edges", anchor_values, true,
      ERR_MISC},
     {"Anti-aliasing", "MSAA", SET_CHOICE, F(msaa), 0, 0, 0, "Off|none|0|1|1x,2x|2,4x|4,8x|8", msaa_values, false, ERR_MISC},
-    {"Anti-aliasing", "FXAA", SET_CHOICE, F(fxaa), 0, 0, 0, "Off|false|no|0,Game|original|gu|1,On|true|yes|2", NULL, false,
-     ERR_MISC},
+    // (FXAA = Off / Game / On, the key before SMAA, reads as the same setting)
+    {"Anti-aliasing", "AntiAliasing|FXAA", SET_CHOICE, F(aa), 0, 0, 0,
+     "Off|false|no|0,Game|original|gu|1,FXAA|on|true|yes|3.11|2,SMAA|3", NULL, false, ERR_MISC},
     {"Anti-aliasing", "FXAAQuality", SET_INT, F(fxaa_quality), 0, 1, 5, NULL, NULL, true, ERR_MISC},
     {"Anti-aliasing", "FXAASubpix", SET_FLOAT, F(fxaa_subpix), 0, 0.0f, 1.0f, NULL, NULL, true, ERR_MISC},
     {"Anti-aliasing", "FXAAEdgeThreshold", SET_FLOAT, F(fxaa_edge_threshold), 0, 0.03f, 0.5f, NULL, NULL, true, ERR_MISC},
     {"Anti-aliasing", "FXAAEdgeThresholdMin", SET_FLOAT, F(fxaa_edge_threshold_min), 0, 0.0f, 0.25f, NULL, NULL, true,
      ERR_MISC},
+    {"Anti-aliasing", "SMAAQuality", SET_CHOICE, F(smaa_quality), 0, 0, 0, "Low,Medium,High,Ultra", NULL, false, ERR_MISC},
     ON_OFF("Upscaler", "FSR", fsr, true),
     {"Upscaler", "Upscaler", SET_CHOICE, F(fsr_upscaler), 0, 0, 0, "FSR3|fsr3.1|3,FSR4|4", NULL, true, ERR_FSR},
     {"Upscaler", "FSRQuality", SET_CHOICE, F(fsr_quality), 0, 0, 0,
@@ -709,7 +716,7 @@ void config_load(void) {
     if (e && parse_size(e, &w, &h)) g_config.display_mode = DISPLAY_WINDOWED, g_config.width = w, g_config.height = h;
     if (getenv("MHGU_HIDDEN")) g_config.display_mode = DISPLAY_WINDOWED;
     if ((e = getenv("MHGU_MSAA"))) g_config.msaa = atoi(e) >= 8 ? 8 : atoi(e) >= 4 ? 4 : atoi(e) >= 2 ? 2 : 1;
-    if ((e = getenv("MHGU_FXAA"))) g_config.fxaa = atoi(e) >= FXAA_ON ? FXAA_ON : atoi(e) > 0 ? FXAA_GAME : FXAA_OFF;
+    if ((e = getenv("MHGU_FXAA"))) g_config.aa = atoi(e) >= AA_SMAA ? AA_SMAA : atoi(e) > 0 ? atoi(e) : AA_OFF;
     if ((e = getenv("MHGU_BACKGROUND_INPUT"))) g_config.background_input = atoi(e) != 0;
     if ((e = getenv("MHGU_PAD_POSITIONAL"))) g_config.face_buttons = atoi(e) ? FACE_POSITION : FACE_LABEL;
     if ((e = getenv("MHGU_LDN_PORT")) && atoi(e) > 0) g_config.ldn_port = atoi(e);
@@ -763,8 +770,8 @@ void config_load(void) {
         float r = ratio[g_config.fsr_quality];
         fit_aspect((int)(w / r + 0.5f), (int)(h / r + 0.5f), aspect, &w, &h);
         if (g_config.msaa > 1) LOG("[config] FSR is on: MSAA off (FSR does the anti-aliasing)\n");
-        if (g_config.fxaa) LOG("[config] FSR is on: FXAA off (FSR does the anti-aliasing)\n");
-        g_config.msaa = 1, g_config.fxaa = 0;
+        if (g_config.aa) LOG("[config] FSR is on: FXAA / SMAA off (FSR does the anti-aliasing)\n");
+        g_config.msaa = 1, g_config.aa = 0;
         // textures are sampled for the output size (AMD's recommendation: log2(render / output)); MHGU_FSR_LODBIAS
         // overrides (A/B)
         g_fsr_lod_bias = log2f((float)w / (float)g_fsr_output[0]);
@@ -793,15 +800,17 @@ void config_load(void) {
     config_runtime_init(&g_config);
 
     static const char *const modes[] = {"windowed", "fullscreen", "borderless"};
-    LOG("[config] %s: %s %dx%d, 3D %dx%d (shape %.3f, FOV x%.2f, HUD %.3f wide), %d fps, vsync %s, MSAA %dx, FXAA %s, "
-        "face buttons by %s, controller %s in the background\n", path, modes[g_config.display_mode], g_config.width,
-        g_config.height, g_config.render_w, g_config.render_h, g_render_aspect, g_fov_scale, g_ui_anchor_aspect,
-        g_config.fps, g_config.vsync ? "on" : "off",
-        g_config.msaa, g_config.fxaa == FXAA_ON ? "3.11" : g_config.fxaa == FXAA_GAME ? "the game's" : "off",
+    static const char *const aa[] = {"off", "the game's FXAA", "FXAA 3.11", "SMAA"};
+    LOG("[config] %s: %s %dx%d, 3D %dx%d (shape %.3f, FOV x%.2f, HUD %.3f wide), %d fps, vsync %s, MSAA %dx, "
+        "anti-aliasing %s, face buttons by %s, controller %s in the background\n", path, modes[g_config.display_mode],
+        g_config.width, g_config.height, g_config.render_w, g_config.render_h, g_render_aspect, g_fov_scale,
+        g_ui_anchor_aspect, g_config.fps, g_config.vsync ? "on" : "off", g_config.msaa, aa[g_config.aa & 3],
         g_config.face_buttons == FACE_LABEL ? "label" : "position", g_config.background_input ? "on" : "off");
-    if (g_config.fxaa == FXAA_ON)
+    if (g_config.aa == AA_FXAA)
         LOG("[config] FXAA 3.11: quality %d, sub-pixel blur %g, edge threshold %g, min %g\n", g_config.fxaa_quality,
             (double)g_config.fxaa_subpix, (double)g_config.fxaa_edge_threshold, (double)g_config.fxaa_edge_threshold_min);
+    static const char *const smaa[] = {"low", "medium", "high", "ultra"};
+    if (g_config.aa == AA_SMAA) LOG("[config] SMAA: %s preset\n", smaa[g_config.smaa_quality & 3]);
     const HpScale *hp = &g_config.hp;
     LOG("[config] monster HP in Hub quests: x%.2f / %.2f / %.2f / %.2f for 1-4 hunters, %d quest(s) set apart\n",
         hp->scale[0], hp->scale[1], hp->scale[2], hp->scale[3], hp->quests);

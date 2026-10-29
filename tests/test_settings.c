@@ -59,13 +59,13 @@ int main(int argc, char **argv) {
     assert(fabsf(config_live_fps()-144.5f)<0.001f && config_live_msaa()==1 && fabsf(config_audio_gain()-0.35f)<0.001f);
     float camera_before=camera_fovy(0.5f,g_render_aspect);
     c.menu_confirm = MENU_CONFIRM_SOUTH; c.menu_scale = 170; c.fps = 120; c.fov = 1.2f; c.volume = 25; c.confirm_exit = 0; c.language = 1; c.button_icons = 2;
-    c.fxaa=0; c.msaa=4; c.vsync=0; c.face_buttons=FACE_LABEL; c.background_input=0; c.mouse_sensitivity=2.5f;
+    c.aa=0; c.msaa=4; c.vsync=0; c.face_buttons=FACE_LABEL; c.background_input=0; c.mouse_sensitivity=2.5f;
     assert(config_save(&c,error,sizeof error) && !config_restart_required(&c));
     assert(config_live_fps()==120 && fabsf(config_live_fov()-1.2f)<0.001f);
-    assert(config_live_msaa()==4 && !config_live_vsync() && !config_live_fxaa());
+    assert(config_live_msaa()==4 && !config_live_vsync() && !config_live_aa());
     assert(config_live_face_buttons()==FACE_LABEL && !config_live_background_input());
     assert(config_live_mouse_sensitivity()==2.5f && camera_fovy(0.5f,g_render_aspect)<camera_before);
-    assert(g_config.fps==60 && g_config.fxaa==FXAA_ON && g_config.face_buttons==FACE_POSITION); // Boot snapshot is immutable.
+    assert(g_config.fps==60 && g_config.aa==AA_FXAA && g_config.face_buttons==FACE_POSITION); // Boot snapshot is immutable.
     c.hp.quest[0] = c.hp.quest[1]; c.hp.quests = 1;
     assert(config_save(&c, error, sizeof error));
     assert(fabsf(config_audio_gain() - 0.25f) < 0.001f && !config_confirm_exit());
@@ -108,10 +108,10 @@ int main(int argc, char **argv) {
     assert(!config_save(&bad, error, sizeof error));
     char *after = read_file(path); assert(!strcmp(text, after)); free(after);
     set_env("MHGU_CONFIG", "missing-settings-parent/settings.ini");
-    bad = c; bad.volume = 90; bad.language = 0; bad.fps=30; bad.fov=2; bad.msaa=1; bad.vsync=1; bad.fxaa=1; bad.face_buttons=FACE_POSITION; bad.background_input=1; bad.mouse_sensitivity=9;
+    bad = c; bad.volume = 90; bad.language = 0; bad.fps=30; bad.fov=2; bad.msaa=1; bad.vsync=1; bad.aa=1; bad.face_buttons=FACE_POSITION; bad.background_input=1; bad.mouse_sensitivity=9;
     assert(!config_save(&bad, error, sizeof error));
     assert(fabsf(config_audio_gain() - 0.25f) < 0.001f);
-    assert(config_live_fps()==120 && config_live_msaa()==4 && !config_live_vsync() && !config_live_fxaa());
+    assert(config_live_fps()==120 && config_live_msaa()==4 && !config_live_vsync() && !config_live_aa());
     assert(config_live_face_buttons()==FACE_LABEL && !config_live_background_input() && config_live_mouse_sensitivity()==2.5f);
     assert(fabsf(config_live_fov()-1.2f)<0.001f);
     assert(config_language() == 1); // Failed writes must not change the UI language.
@@ -156,13 +156,19 @@ int main(int argc, char **argv) {
     assert(config_defaults().draw_distance==1.0f);
     assert(config_defaults().mute_in_background==0);
     assert(config_defaults().combo_window==COMBO_LENIENT);
-    assert(config_defaults().fxaa==FXAA_ON && config_defaults().fxaa_quality==5 && config_defaults().fxaa_subpix==0.0f);
+    assert(config_defaults().aa==AA_FXAA && config_defaults().fxaa_quality==5 && config_defaults().fxaa_subpix==0.0f);
     assert(config_defaults().fxaa_edge_threshold==0.063f && config_defaults().fxaa_edge_threshold_min==0.0312f);
-    {   // FXAA's spellings (On was the game's pass before FXAA 3.11) and its 3.11 settings' ranges
+    assert(config_defaults().smaa_quality==SMAA_ULTRA);
+    {   // AntiAliasing's spellings, the older FXAA key's (On was FXAA 3.11) and FXAA 3.11's settings' ranges
         Config x=config_defaults();
-        assert(config_parse(config_setting("FXAA"),"Game",&x) && x.fxaa==FXAA_GAME);
-        assert(config_parse(config_setting("FXAA"),"off",&x) && x.fxaa==FXAA_OFF);
-        assert(config_parse(config_setting("FXAA"),"On",&x) && x.fxaa==FXAA_ON);
+        assert(config_setting("FXAA")==config_setting("AntiAliasing"));
+        assert(config_parse(config_setting("AntiAliasing"),"SMAA",&x) && x.aa==AA_SMAA);
+        assert(config_parse(config_setting("AntiAliasing"),"FXAA",&x) && x.aa==AA_FXAA);
+        assert(config_parse(config_setting("FXAA"),"Game",&x) && x.aa==AA_GAME);
+        assert(config_parse(config_setting("FXAA"),"off",&x) && x.aa==AA_OFF);
+        assert(config_parse(config_setting("FXAA"),"On",&x) && x.aa==AA_FXAA);
+        assert(config_parse(config_setting("SMAAQuality"),"high",&x) && x.smaa_quality==SMAA_HIGH);
+        assert(!config_restart_key("SMAAQuality"));
         assert(config_parse(config_setting("FXAAQuality"),"3",&x) && x.fxaa_quality==3);
         assert(!config_parse(config_setting("FXAAQuality"),"0",&x) && !config_parse(config_setting("FXAASubpix"),"1.5",&x));
         assert(config_parse(config_setting("FXAAEdgeThresholdMin"),"0.0625",&x) && x.fxaa_edge_threshold_min==0.0625f);
@@ -170,7 +176,7 @@ int main(int argc, char **argv) {
     }
     fsr_config.fsr=1;fsr_config.fsr_upscaler=FSR_UP_4;fsr_config.fsr_quality=FSR_BALANCED;
     fsr_config.fsr_sharpness=.65f;fsr_config.fsr_objmotion=0;fsr_config.fsr_reactive=.35f;fsr_config.fsr_animsurf=0;
-    fsr_config.msaa=8;fsr_config.fxaa=1;
+    fsr_config.msaa=8;fsr_config.aa=1;
     assert(config_save(&fsr_config,error,sizeof error));assert(config_restart_required(&fsr_config));
     text = read_file(path);
     assert(strstr(text, "Sharpness = 0.65\r\n") && strstr(text, "Reactive = 0.35\r\n") && strstr(text, "Upscaler = FSR4\r\n"));
@@ -179,10 +185,10 @@ int main(int argc, char **argv) {
     assert(fsr_saved.fsr && fsr_saved.fsr_upscaler==FSR_UP_4 && fsr_saved.fsr_quality==FSR_BALANCED);
     assert(fabsf(fsr_saved.fsr_sharpness-.65f)<.001f && fabsf(fsr_saved.fsr_reactive-.35f)<.001f);
     assert(!fsr_saved.fsr_objmotion && !fsr_saved.fsr_animsurf);
-    assert(config_live_msaa()==1 && config_live_fxaa()==0);
+    assert(config_live_msaa()==1 && config_live_aa()==0);
     fsr_saved.volume=37;assert(config_save(&fsr_saved,error,sizeof error));
-    assert(config_editable().msaa==8 && config_editable().fxaa==1);
-    assert(config_live_msaa()==1 && config_live_fxaa()==0); // Saving cannot undo FSR's AA override.
+    assert(config_editable().msaa==8 && config_editable().aa==1);
+    assert(config_live_msaa()==1 && config_live_aa()==0); // Saving cannot undo FSR's AA override.
     bad=fsr_saved;bad.fsr_quality=5;assert(!config_save(&bad,error,sizeof error));
     bad=fsr_saved;bad.fsr_upscaler=2;assert(!config_save(&bad,error,sizeof error));
     bad=fsr_saved;bad.fsr_sharpness=NAN;assert(!config_save(&bad,error,sizeof error));
@@ -196,8 +202,8 @@ int main(int argc, char **argv) {
         assert(config_editable().hp.quests==HP_QUESTS_MAX && config_editable().hp.quest[255].quest==50255);
     }
     fsr_saved.fsr=0;assert(config_save(&fsr_saved,error,sizeof error));
-    assert(config_live_msaa()==1 && config_live_fxaa()==0); // Remains active until restart.
-    g_config=initial;config_load();assert(config_live_msaa()==8 && config_live_fxaa()==1);
+    assert(config_live_msaa()==1 && config_live_aa()==0); // Remains active until restart.
+    g_config=initial;config_load();assert(config_live_msaa()==8 && config_live_aa()==1);
     remove(path);
     puts("PASS: INI round trip, Auto/Desktop, environment overrides, comments/unknown keys, duplicate aliases, quest removal, invalid input, atomic write failure, live volume and English/Spanish, icons, hot settings and restart classification.");
     return 0;

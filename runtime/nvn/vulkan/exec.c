@@ -3136,9 +3136,10 @@ static uint64_t prog_fs_hash(Prog *p) {
     return p->chash[1];
 }
 
-// FXAA (settings): the game's FXAA pass (recognised by its shader) draws as it is (Game), copies its input instead
-// (Off), or is FXAA 3.11 Quality (On: fxaa_311). The game's is an early FXAA 3 Quality with an edge threshold of 1/6,
-// its sub-pixel blur capped at 0.75 and 6 looks per side in 2-pixel steps (about 13 pixels).
+// [Anti-aliasing] AntiAliasing: the game's FXAA pass (recognised by its shader) draws as it is (Game), copies its
+// input instead (Off), or is FXAA 3.11 Quality (FXAA: fxaa_311) or SMAA 1x (SMAA: smaa.c) over the same input. The
+// game's is an early FXAA 3 Quality with an edge threshold of 1/6, its sub-pixel blur capped at 0.75 and 6 looks per
+// side in 2-pixel steps (about 13 pixels).
 #define FXAA_FS_HASH 0x8530ded68f4407dfull
 static void copy_texture(const TexRef *src, const TexRef *dst, uint64_t flags);
 
@@ -3196,8 +3197,9 @@ static VkPipeline fxaa_pipeline(VkRenderPass rp) {
     return p;
 }
 
-// FXAA 3.11 from src into the colour target, pixel for pixel as Off's copy; false: the game's own pass draws instead.
-static bool fxaa_311(NvnTexture *src) {
+// The game's FXAA pass about to be replaced: the pass ended, src and the colour target resolved, their views and the
+// target's size (false: not possible, the game's own pass draws instead). post_aa_drawn after a replacement drew.
+static bool post_aa_target(NvnTexture *src, VkPostAa *t) {
     NvnTexture *dt = st.rt.color[0];
     TexBackend *s = vk_tex(src, false), *d = vk_tex(dt, true);
     if (s->samples != 1 || d->samples != 1) return false;
@@ -3206,16 +3208,28 @@ static bool fxaa_311(NvnTexture *src) {
     vk_ms_resolve(s);
     vk_ms_resolve(d);
     bool has = st.rt.has_cview[0];
-    VkImageView sv = vk_view(src, NULL, false, false, TEXTYPE_2D), dv = vk_view(dt, &st.rt.cview[0], has, true, TEXTYPE_2D);
-    VkFormat f = has && (st.rt.cview[0].setmask & 4) && vk_format(dt->format) == d->format ? vk_format(st.rt.cview[0].format)
-                                                                                           : d->format;
-    VkRenderPass rp = vk_render_pass(&f, 1, VK_FORMAT_UNDEFINED, 1);
-    VkPipeline p = sv && dv ? fxaa_pipeline(rp) : VK_NULL_HANDLE;
-    if (!p) return false;
-    d->ms_valid = false;
-    renderer_mark_gpu_owned(dt);
+    t->src = vk_view(src, NULL, false, false, TEXTYPE_2D);
+    t->dst = vk_view(dt, &st.rt.cview[0], has, true, TEXTYPE_2D);
+    t->format = has && (st.rt.cview[0].setmask & 4) && vk_format(dt->format) == d->format ? vk_format(st.rt.cview[0].format)
+                                                                                         : d->format;
     uint32_t lv = has && (st.rt.cview[0].setmask & 1) ? st.rt.cview[0].base_level : 0;
-    uint32_t w = level_extent(d->width, lv), h = level_extent(d->height, lv);
+    t->w = level_extent(d->width, lv), t->h = level_extent(d->height, lv);
+    return t->src && t->dst;
+}
+static void post_aa_drawn(void) {
+    vk_tex(st.rt.color[0], true)->ms_valid = false;
+    renderer_mark_gpu_owned(st.rt.color[0]);
+    ss_forget();
+    stat_draws++;
+}
+
+// FXAA 3.11 from the game's FXAA input into its target, pixel for pixel as Off's copy; false: not drawn.
+static bool fxaa_311(const VkPostAa *t) {
+    VkRenderPass rp = vk_render_pass(&t->format, 1, VK_FORMAT_UNDEFINED, 1);
+    VkPipeline p = fxaa_pipeline(rp);
+    if (!p) return false;
+    VkImageView sv = t->src, dv = t->dst;
+    uint32_t w = t->w, h = t->h;
     int q = g_config.fxaa_quality >= 1 && g_config.fxaa_quality <= 5 ? g_config.fxaa_quality - 1 : 4;
     float pc[16] = {g_config.fxaa_subpix, g_config.fxaa_edge_threshold, g_config.fxaa_edge_threshold_min, (float)fxaa_presets[q].n};
     memcpy(pc + 4, fxaa_presets[q].step, sizeof fxaa_presets[q].step);
@@ -3238,20 +3252,24 @@ static bool fxaa_311(NvnTexture *src) {
     vkCmdSetScissor(cb, 0, 1, &area);
     vkCmdDraw(cb, 3, 1, 0, 0);
     vkCmdEndRenderPass(cb);
-    ss_forget();
-    stat_draws++;
     static bool logged;
     if (!logged) logged = true, LOG("[vk] FXAA 3.11 (quality %d) draws in place of the game's FXAA, %ux%u\n", q + 1, w, h);
     return true;
 }
 
 static bool fxaa_replaced(Prog *pr) {
-    int mode = config_live_fxaa();
-    if (mode == FXAA_GAME || prog_fs_hash(pr) != FXAA_FS_HASH || pr->fi->ntex != 1 || !st.rt.ncolor || !st.rt.color[0])
+    int mode = config_live_aa();
+    if (mode == AA_GAME || prog_fs_hash(pr) != FXAA_FS_HASH || pr->fi->ntex != 1 || !st.rt.ncolor || !st.rt.color[0])
         return false;
     NvnTexture *src = shader_texture_object(1, &pr->fi->tex[0]);
     if (!src || src == st.rt.color[0]) return false;
-    if (mode == FXAA_ON) return fxaa_311(src);
+    if (mode == AA_FXAA || mode == AA_SMAA) {
+        VkPostAa t;
+        if (!post_aa_target(src, &t) || !(mode == AA_SMAA ? vk_smaa(&t, config_live_smaa_quality()) : fxaa_311(&t)))
+            return false;
+        post_aa_drawn();
+        return true;
+    }
     TexRef s = {.tex = (uint64_t)(uintptr_t)src}, d = {.tex = (uint64_t)(uintptr_t)st.rt.color[0]};
     if (st.rt.has_cview[0]) d.view = st.rt.cview[0], d.has_view = 1;
     copy_texture(&s, &d, 0);

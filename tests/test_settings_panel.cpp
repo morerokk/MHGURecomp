@@ -275,7 +275,7 @@ int main() {
     back();
     selected("msaa");
     assert(config_live_msaa() == msaa_before && !settings_panel_dirty());
-    down(3);  // (msaa, fxaa, drawdist)
+    down(3);  // (msaa, aa, drawdist)
     selected("volume");
     confirm();
     selected("volume");
@@ -446,7 +446,7 @@ int main() {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     selected("fps");
-    down(8);  // (vsync, prewarm, msaa, fxaa, drawdist, volume, mutebg, fsr)
+    down(8);  // (vsync, prewarm, msaa, aa, drawdist, volume, mutebg, fsr)
     selected("fsr");
     confirm();
     assert(settings_panel_dirty());
