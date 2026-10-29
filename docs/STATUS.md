@@ -112,8 +112,14 @@ Fixed on the way (2026-10-20):
   copied (Off). Object motion: programs built before T2x was picked get their capture variant from programs.src the
   first time they are drawn with it on (exec.c capprog_later). Checked hidden in town: T2x every frame once the scene
   was up, camera matched every frame, no history resets, about 225 draws captured and paired a frame (0.4 ms CPU);
-  the picture clean, with no ghosting in the shots; FSR (FSR = On) still upscales every frame as before. Not checked:
-  turning it on / off in the menu, its GPU cost, and moving monsters.
+  FSR (FSR = On) still upscales every frame as before. Ghosting: SMAA's own resolve trusts the vectors, and on the
+  hunter they are often no better than the camera's (MHGU_FSR_MVCHECK, now also with T2x, sprinting left in town:
+  moving-object mask texels 0.033 along the vectors vs 0.034 along the camera's, while moving geometry with its own
+  vectors gets 0.028 vs 0.126), so the charge blade on a sprinting hunter's back was a see-through double. The resolve
+  now clamps the previous frame's colour to the current 3x3 neighbourhood and drops history where fsr.c's reactive
+  mask (the game's moving-object mask changing) is set: in the same sprint the hilt and the shield's rim are solid
+  again (the rim keeps SMAA 1x's steps where history is dropped). Not checked: turning it on / off in the menu, its GPU
+  cost, and moving monsters.
 - Frame rate: the settings' FPS or MHGU_FRAMERATE (default 60, 30..240) writes the engine's target fps (float at +0x3c of the object in
   global 0x2326764, the field theboy181's 60fps patch sets) each frame. Above the monitor's refresh rate it needs
   VSync = Off: see "Frame rates above 60". MHGU_VSYNC=0/1 overrides the setting: no vsync / classic vsync.

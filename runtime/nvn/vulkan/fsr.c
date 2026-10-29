@@ -1549,9 +1549,12 @@ static bool run_t2x(NvnTexture *h, NvnTexture *depth, NvnTexture *mask, const Ca
     vk_full_barrier(cb);
     Vectors v;
     if (!frame_vectors(cb, hb, db, mask, cam, false, &v)) return false;
+    if (check_pipe) prev_store(cb, hb);  // ((debug) MHGU_FSR_MVCHECK: this frame's input, before T2x writes over it)
     static const VkComponentMapping id = {0};
     VkImageView mv = vk_image_view(&img_mvf, VK_IMAGE_VIEW_TYPE_2D, img_mvf.format, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_COLOR_BIT);
-    if (!mv || !vk_smaa_t2x(&t, config_live_smaa_quality(), mv, camjit_t2x_phase(cam->jitter), !v.reset)) return false;
+    VkImageView react = v.react ? vk_image_view(&img_react, VK_IMAGE_VIEW_TYPE_2D, img_react.format, 0, 1, 0, 1, id,
+                                                VK_IMAGE_ASPECT_COLOR_BIT) : VK_NULL_HANDLE;
+    if (!mv || !vk_smaa_t2x(&t, config_live_smaa_quality(), mv, react, camjit_t2x_phase(cam->jitter), !v.reset)) return false;
     hb->ms_valid = false;
     if (v.reset) n_reset++;
     prev_cam = *cam;
@@ -1566,7 +1569,7 @@ static void t2x_hud_start(void) {
     bool have_cam = frame_camera(&cam);
     frame_fsr = depth && dn >= 16 && have_cam && run_t2x(g_h, depth, frame_mask(), &cam);
     VkPostAa t;
-    if (!frame_fsr && t2x_target(g_h, &t)) vk_smaa_t2x(&t, config_live_smaa_quality(), VK_NULL_HANDLE, -1, false);  // (SMAA 1x)
+    if (!frame_fsr && t2x_target(g_h, &t)) vk_smaa_t2x(&t, config_live_smaa_quality(), VK_NULL_HANDLE, VK_NULL_HANDLE, -1, false);  // (SMAA 1x)
     static int last = -1, nlog;
     if ((int)frame_fsr != last && nlog++ < 500)
         LOG("[t2x] frame %llu: %s\n", (unsigned long long)g_present_count + 1,

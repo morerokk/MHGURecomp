@@ -162,8 +162,9 @@ typedef struct { VkImageView src, dst; VkImage dst_image; VkFormat format; uint3
 bool vk_smaa(const VkPostAa *t, int quality);  // SMAA 1x, SMAA_* preset (smaa.c); false: not drawn
 // SMAA T2x in place (t->src and t->dst the same image; fsr.c at the start of the HUD): velocity = the motion vectors
 // (previous position - current, in pixels); phase: the frame's jitter (camjit_t2x_phase), -1 for none (then SMAA 1x);
-// history false: the last frame does not continue into this one (a cut). false: not drawn.
-bool vk_smaa_t2x(const VkPostAa *t, int quality, VkImageView velocity, int phase, bool history);
+// reactive (or VK_NULL_HANDLE): where history is dropped (0..1, fsr.c's reactive mask); history false: the last frame
+// does not continue into this one (a cut). false: not drawn.
+bool vk_smaa_t2x(const VkPostAa *t, int quality, VkImageView velocity, VkImageView reactive, int phase, bool history);
 
 // ---- device / window (device.c)
 void vk_save_png(const char *path, const uint8_t *rgba, uint32_t w, uint32_t h);

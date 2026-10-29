@@ -76,12 +76,30 @@ static const char *const fs_main[NPASS] = {
     "layout(location = 1) in vec4 offset;\n"
     "layout(location = 0) out vec4 o;\n"
     "void main() { o = SMAANeighborhoodBlendingPS(texcoord, offset, colorTex, blendTex, velocityTex); }\n",
+    // SMAAResolvePS (SMAA_REPROJECTION), with the previous frame's colour clamped to the range of the current frame's
+    // 3x3 neighbourhood: where the motion vectors are wrong (a limb the object vectors miss, the background a moving
+    // character uncovers) the old picture is not blended in as a ghost. No history from outside the picture, nor where
+    // the reactive mask (fsr.c: where the game's moving-object mask changed since the last frame) says a character moved.
     "layout(set = 0, binding = 0) uniform sampler2D currentColorTex;\n"
     "layout(set = 0, binding = 1) uniform sampler2D previousColorTex;\n"
     "layout(set = 0, binding = 2) uniform sampler2D velocityTex;\n"
+    "layout(set = 0, binding = 3) uniform sampler2D reactiveTex;\n"
     "layout(location = 0) in vec2 texcoord;\n"
     "layout(location = 0) out vec4 o;\n"
-    "void main() { o = vec4(SMAAResolvePS(texcoord, currentColorTex, previousColorTex, velocityTex).rgb, 1.0); }\n"};
+    "#define NB(x, y) c = textureLodOffset(currentColorTex, texcoord, 0.0, ivec2(x, y)).rgb; lo = min(lo, c); hi = max(hi, c);\n"
+    "void main() {\n"
+    "  vec2 velocity = -SMAA_DECODE_VELOCITY(textureLod(velocityTex, texcoord, 0.0));\n"
+    "  vec2 at = texcoord + velocity;\n"
+    "  vec4 current = textureLod(currentColorTex, texcoord, 0.0), previous = textureLod(previousColorTex, at, 0.0);\n"
+    "  vec3 lo = current.rgb, hi = current.rgb, c;\n"
+    "  NB(-1, -1) NB(0, -1) NB(1, -1) NB(-1, 0) NB(1, 0) NB(-1, 1) NB(0, 1) NB(1, 1)\n"
+    "  previous.rgb = clamp(previous.rgb, lo, hi);\n"
+    "  float delta = abs(current.a * current.a - previous.a * previous.a) / 5.0;\n"
+    "  float weight = 0.5 * saturate(1.0 - sqrt(delta) * SMAA_REPROJECTION_WEIGHT_SCALE);\n"
+    "  if (any(lessThan(at, vec2(0.0))) || any(greaterThan(at, vec2(1.0)))) weight = 0.0;\n"
+    "  weight *= 1.0 - saturate(textureLod(reactiveTex, texcoord, 0.0).r);\n"
+    "  o = vec4(mix(current.rgb, previous.rgb, weight), 1.0);\n"
+    "}\n"};
 static const char *const presets[4] = {"LOW", "MEDIUM", "HIGH", "ULTRA"};
 
 static VkShaderModule module(int pass, int quality, int stage) {
@@ -117,10 +135,10 @@ static VkPipeline pipeline(int pass, int quality, VkRenderPass rp) {
     for (int i = 0; i < n; i++)
         if (tab[i].pass == pass && tab[i].quality == quality && tab[i].rp == rp) return tab[i].p;
     if (!layout) {
-        VkDescriptorSetLayoutBinding b[3];
-        for (uint32_t i = 0; i < 3; i++)
+        VkDescriptorSetLayoutBinding b[4];
+        for (uint32_t i = 0; i < 4; i++)
             b[i] = (VkDescriptorSetLayoutBinding){i, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
-        VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 3, .pBindings = b};
+        VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 4, .pBindings = b};
         VK_CHECK(vkCreateDescriptorSetLayout(g_vk.dev, &li, NULL, &set_layout));
         VkPushConstantRange r = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32};
         VkPipelineLayoutCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
@@ -194,7 +212,7 @@ static Size sizes[4];
 static void pass(VkCommandBuffer cb, VkPipeline p, VkRenderPass rp, VkImageView target, uint32_t w, uint32_t h,
                  const VkDescriptorImageInfo *in, uint32_t nin, int subsample) {
     VkDescriptorSet set = vk_alloc_set(set_layout);
-    VkWriteDescriptorSet wr[3];
+    VkWriteDescriptorSet wr[4];
     for (uint32_t i = 0; i < nin; i++)
         wr[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = i,
                                        .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -293,7 +311,7 @@ bool vk_smaa(const VkPostAa *t, int quality) {
     return true;
 }
 
-bool vk_smaa_t2x(const VkPostAa *t, int quality, VkImageView velocity, int phase, bool history) {
+bool vk_smaa_t2x(const VkPostAa *t, int quality, VkImageView velocity, VkImageView reactive, int phase, bool history) {
     VkPipeline p[NPASS];
     VkRenderPass rp[NPASS];
     Size *z = prepare_all(t, quality, true, p, rp);
@@ -319,10 +337,11 @@ bool vk_smaa_t2x(const VkPostAa *t, int quality, VkImageView velocity, int phase
                                       {linear, velocity, VK_IMAGE_LAYOUT_GENERAL}};
     pass(cb, p[BLEND_T2X], rp[BLEND_T2X], cur->view, t->w, t->h, blend, 3, phase);
     bool use_prev = history && z->hist_ok;  // (else the resolve blends this frame with itself: just this frame)
-    VkDescriptorImageInfo resolve[3] = {{point, cur->view, VK_IMAGE_LAYOUT_GENERAL},
+    VkDescriptorImageInfo resolve[4] = {{point, cur->view, VK_IMAGE_LAYOUT_GENERAL},
                                         {linear, use_prev ? prev->view : cur->view, VK_IMAGE_LAYOUT_GENERAL},
-                                        {point, use_prev ? velocity : still.view, VK_IMAGE_LAYOUT_GENERAL}};
-    pass(cb, p[RESOLVE], rp[RESOLVE], t->dst, t->w, t->h, resolve, 3, phase);
+                                        {point, use_prev ? velocity : still.view, VK_IMAGE_LAYOUT_GENERAL},
+                                        {linear, reactive ? reactive : still.view, VK_IMAGE_LAYOUT_GENERAL}};
+    pass(cb, p[RESOLVE], rp[RESOLVE], t->dst, t->w, t->h, resolve, 4, phase);
     z->cur ^= 1;
     z->hist_ok = true;
     static bool logged;
