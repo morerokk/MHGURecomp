@@ -55,7 +55,9 @@ draft and requires a subsequent Save. A write failure preserves draft and file.
 Volume, FPS, FOV, draw distance, FXAA, MSAA, VSync, mouse sensitivity, face
 mapping, background input, combo window and confirmation policy apply as soon as
 they change in the draft (quick apply: `config_preview`), without Save or a
-restart; Save keeps them, and closing or discarding without saving puts back what
+restart; in an open list of a setting's values the highlighted one (d-pad, keys,
+or the mouse moving over it) is live before it is chosen, and Cancel puts the
+draft's back. Save keeps them, and closing or discarding without saving puts back what
 was live before (an unchanged environment override included). Render changes
 are consumed at render boundaries. Language, symbols and interface scale preview
 immediately and persist on Save. Cold fields carry an asterisk; the saved status

@@ -48,6 +48,7 @@ struct Choice {
     int selected;
     std::function<void(int)> set;
     std::string title;
+    bool preview = false;  // a setting's values: the highlighted one is live while the list is open (quick apply)
 };
 struct Keyboard {
     std::string title, original, buffer;
@@ -56,7 +57,7 @@ struct Keyboard {
     std::function<bool(const std::string &, std::string &)> commit;
 };
 struct State {
-    Config draft = {}, saved = {};
+    Config draft = {}, saved = {}, previewed = {};  // previewed: what quick apply last made live
     bool editing = false, floating = false, advanced = false, focus_request = true, saved_notice = false;
     int page = 0;
     View view = View::Main;
@@ -348,9 +349,24 @@ bool accept_keyboard() {
     pop();
     return true;
 }
-void choices(const Row &row, std::vector<std::string> names, int selected, std::function<void(int)> set) {
-    s.choice = {std::move(names), selected, std::move(set), row.title};
+void choices(const Row &row, std::vector<std::string> names, int selected, std::function<void(int)> set,
+             bool preview = false) {
+    s.choice = {std::move(names), selected, std::move(set), row.title, preview};
     push(View::Choices, "choice." + std::to_string(selected));
+}
+// Quick apply: the draft with the highlighted value of an open list of a setting's values in it (else the draft).
+Config live_draft() {
+    if (s.view != View::Choices || !s.choice.preview || s.focus.compare(0, 7, "choice.") ||
+        !isdigit((unsigned char)s.focus[7]))
+        return s.draft;
+    int i = atoi(s.focus.c_str() + 7);
+    if (i < 0 || i >= (int)s.choice.names.size())
+        return s.draft;
+    Config keep = s.draft;
+    s.choice.set(i);
+    Config live = s.draft;
+    s.draft = keep;
+    return live;
 }
 // What the settings table (config.c g_settings) says of a setting: does it need a restart, a number's range
 bool cold(const char *key) { return config_restart_key(key); }
@@ -375,7 +391,7 @@ void add_choice(std::vector<Row> &rows, const char *id, const char *name, int se
     r.cold = cold;
     r.adjust = [selected, names, set](int d) { set((selected + d + (int)names.size()) % (int)names.size()); };
     Row copy = r;
-    r.activate = [copy, names, selected, set]() { choices(copy, names, selected, set); };
+    r.activate = [copy, names, selected, set]() { choices(copy, names, selected, set, true); };
     rows.push_back(std::move(r));
 }
 void add_number(std::vector<Row> &rows, const std::string &id, const std::string &name,
@@ -1120,6 +1136,10 @@ void draw_rows(std::vector<Row> &rows) {
         ImGui::BeginDisabled(!r.enabled);
         bool clicked = ImGui::Button("###row", ImVec2(rw, h));
         ImGui::EndDisabled();
+        // In a list of values the mouse highlights what it moves over, so quick apply shows it before a click
+        ImVec2 moved = ImGui::GetIO().MouseDelta;
+        if (s.view == View::Choices && r.enabled && !selected && (moved.x || moved.y) && ImGui::IsItemHovered())
+            focus(r.id);
         ImGui::PopStyleColor(4);
         if (selected && r.enabled) {
             own_focus(w, id, rect);
@@ -1203,7 +1223,7 @@ void settings_panel(bool *open) {
         return;
     }
     if (!s.editing) {
-        s.draft = s.saved = config_editable();
+        s.draft = s.saved = s.previewed = config_editable();
         s.editing = true;
         s.view = View::Main;
         s.origins.clear();
@@ -1408,11 +1428,14 @@ void settings_panel(bool *open) {
         if (cmd == Command::Save && save())
             focus("reset");
     }
-    if (!equal(before, s.draft)) {  // quick apply: the hot settings show at once; Save keeps them
-        config_preview(&s.draft);
-        if (dirty())
-            s.saved_notice = false;
+    // Quick apply: the hot settings show at once, in an open list of values the highlighted one; Save keeps them
+    Config live = live_draft();
+    if (!equal(live, s.previewed)) {
+        config_preview(&live);
+        s.previewed = live;
     }
+    if (!equal(before, s.draft) && dirty())
+        s.saved_notice = false;
     if (ui_action_failed())
         s.error = tr("Restart failed. The game is still running.");
     if (!s.error.empty()) {

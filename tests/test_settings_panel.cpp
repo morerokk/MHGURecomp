@@ -263,7 +263,19 @@ int main() {
     tab();
     selected("display.mode");
     tab();
-    down(6);  // (fps, vsync, prewarm, msaa, fxaa, drawdist)
+    down(3);  // (fps, vsync, prewarm)
+    selected("msaa");
+    // Quick apply in a list of values: the highlighted one is live before it is chosen; Cancel puts it back
+    int msaa_before = config_live_msaa();
+    confirm();
+    selected("choice.0");
+    down();
+    selected("choice.1");
+    assert(config_live_msaa() == 2 && !settings_panel_dirty());
+    back();
+    selected("msaa");
+    assert(config_live_msaa() == msaa_before && !settings_panel_dirty());
+    down(3);  // (msaa, fxaa, drawdist)
     selected("volume");
     confirm();
     selected("volume");
