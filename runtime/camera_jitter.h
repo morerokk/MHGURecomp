@@ -19,8 +19,9 @@ void camjit_init(void);  // hooks (the jitter stays off until FSR or SMAA T2x tu
 // Renderer: jitter on or off from the next capture on, the 3D render size and the Halton sequence's length.
 void camjit_set(bool on, uint32_t render_w, uint32_t render_h, uint32_t phases);
 // SMAA T2x's two jitters (a quarter pixel right and down, then left and up, a frame each) in place of the Halton
-// sequence while on; camjit_t2x_phase: which of the two a capture's jitter is (0 or 1).
-void camjit_t2x(bool on);
+// sequence while on; smaa4x: SMAA 4x's (an eighth of a pixel right and up, then left and down); camjit_t2x_phase:
+// which of the two a capture's jitter is (0 or 1).
+void camjit_t2x(bool on, bool smaa4x);
 int camjit_t2x_phase(const float jitter[2]);
 bool camjit_latest(CamRecord *out);              // the newest capture (false: none yet)
 bool camjit_get(uint64_t seq, CamRecord *out);   // capture seq, while it is in the ring (the last 64)

@@ -121,6 +121,7 @@ typedef struct TexBackend {
     bool ms_valid;          // ms holds this image's contents (its last write was a pass through ms)
     bool ms_dirty;          // ms is newer than this image: resolved when this one is next read (exec.c vk_ms_resolve)
     VkFormat ms_fmt;        // the format ms is rendered as
+    bool ms_sampled;        // (of a multisampled image) shaders may read it too: SMAA 4x's S2x (smaa.c)
 } TexBackend;
 
 TexBackend *vk_tex(NvnTexture *t, bool for_render);  // backend image (uploads CPU contents unless for_render)
@@ -163,8 +164,14 @@ bool vk_smaa(const VkPostAa *t, int quality);  // SMAA 1x, SMAA_* preset (smaa.c
 // SMAA T2x in place (t->src and t->dst the same image; fsr.c at the start of the HUD): velocity = the motion vectors
 // (previous position - current, in pixels); phase: the frame's jitter (camjit_t2x_phase), -1 for none (then SMAA 1x);
 // reactive (or VK_NULL_HANDLE): where history is dropped (0..1, fsr.c's reactive mask); history false: the last frame
-// does not continue into this one (a cut). false: not drawn.
-bool vk_smaa_t2x(const VkPostAa *t, int quality, VkImageView velocity, VkImageView reactive, int phase, bool history);
+// does not continue into this one (a cut); spatial false: SMAA 4x, S2x is in the picture already (no edges here, and
+// nothing at all without a jitter). false: not drawn.
+bool vk_smaa_t2x(const VkPostAa *t, int quality, VkImageView velocity, VkImageView reactive, int phase, bool history,
+                 bool spatial);
+// SMAA S2x (4x's spatial half) as the resolve of a multisampled image (exec.c vk_ms_resolve): ms = a view of the 2x
+// image in SHADER_READ_ONLY_OPTIMAL layout, t->dst = the resolved image (t->src unused); phase: the frame's 4x jitter
+// (camjit_t2x_phase), -1 for none (S2x's own subsample indices). false: not drawn (resolve it as usual).
+bool vk_smaa_s2x(const VkPostAa *t, VkImageView ms, int quality, int phase);
 
 // ---- device / window (device.c)
 void vk_save_png(const char *path, const uint8_t *rgba, uint32_t w, uint32_t h);

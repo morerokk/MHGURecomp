@@ -16,7 +16,7 @@ typedef struct {
 } FsrDraw;
 
 extern bool g_fsr_on;  // FSR is on and works (set once at start-up: vk_fsr_init)
-// FSR, or SMAA T2x ([Anti-aliasing] AntiAliasing = SMAAT2x, picked live; never with FSR), runs: exec.c tells fsr.c
+// FSR, or SMAA T2x / 4x ([Anti-aliasing] AntiAliasing = SMAAT2x / SMAA4x, picked live; never with FSR), runs: exec.c tells fsr.c
 // the frame's draws (vk_fsr_draw) and captures them for object motion. T2x uses the same frame structure, camera,
 // jitter and motion vectors as FSR, at the render size and without stand-ins (vk_fsr_map is FSR's only).
 extern bool g_temporal_on;
@@ -29,6 +29,10 @@ void vk_fsr_draw(const FsrDraw *d);        // exec.c draw(): may run FSR / T2x (
 NvnTexture *vk_fsr_map(NvnTexture *t, bool depth);
 // device.c backend_present, every frame: the texture to show (FSR: its stand-in); also where SMAA T2x starts and stops
 NvnTexture *vk_fsr_present(NvnTexture *t);
+// SMAA 4x (exec.c vk_ms_resolve): whether b is this frame's 3D scene, to resolve by SMAA S2x (phase: the frame's jitter,
+// -1 for none), and that it was (the HUD start's T2x then adds no edges of its own).
+bool vk_s2x_target(TexBackend *b, int *phase);
+void vk_s2x_done(void);
 
 // ---- object motion ([Upscaler] ObjectMotion): a scene draw is drawn a second time through a variant of its vertex
 // shader that stores each vertex's clip position (gl_Position) in a buffer, indexed by gl_VertexIndex; the next frame's

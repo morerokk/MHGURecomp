@@ -14,8 +14,9 @@ enum { COMBO_LENIENT, COMBO_STRICT };  // [Controls] ComboInputWindow (runtime/h
 enum { MENU_CONFIRM_ORIGINAL, MENU_CONFIRM_SOUTH, MENU_CONFIRM_EAST };
 // [Anti-aliasing] AntiAliasing: what draws in place of the game's FXAA pass (nvn/vulkan/exec.c): nothing (its input
 // copied), the pass itself, FXAA 3.11, SMAA 1x (nvn/vulkan/smaa.c); SMAA T2x: nothing there, the jittered camera's
-// frames resolved at the start of the HUD instead (nvn/vulkan/fsr.c)
-enum { AA_OFF, AA_GAME, AA_FXAA, AA_SMAA, AA_SMAA_T2X };
+// frames resolved at the start of the HUD instead (nvn/vulkan/fsr.c); SMAA 4x: as T2x, with the scene in MSAA 2x
+// (whatever MSAA says) resolved by SMAA S2x
+enum { AA_OFF, AA_GAME, AA_FXAA, AA_SMAA, AA_SMAA_T2X, AA_SMAA_4X };
 enum { SMAA_LOW, SMAA_MEDIUM, SMAA_HIGH, SMAA_ULTRA };  // [Anti-aliasing] SMAAQuality: SMAA's presets
 
 // [Monster HP]: factors on the HP multiplier of Hub-type quests' large monsters

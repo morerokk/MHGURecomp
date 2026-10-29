@@ -44,6 +44,7 @@ static struct { uint32_t cam; float m[16]; } g_views[8];  // last view per camer
 static int g_nviews;
 static bool g_on;                   // jitter (renderer: FSR or SMAA T2x active on scene frames)
 static bool g_t2x;                  // SMAA T2x's two jitters instead of the Halton sequence
+static bool g_4x;                   // .. at SMAA 4x's half size
 static uint32_t g_rw = 1920, g_rh = 1080, g_phases = 8;
 static bool g_test;                 // MHGU_JITTER_TEST
 static float g_test_xy[2];
@@ -92,6 +93,7 @@ static void projection(Cpu *c) {
         jx = g_test_xy[0], jy = g_test_xy[1];
     } else if (g_on && g_t2x) {  // SMAA T2x: (0.25, -0.25), (-0.25, 0.25) with y up, as SMAA.hlsl lists them
         jx = jy = g_present_count & 1 ? -0.25f : 0.25f;
+        if (g_4x) jx *= 0.5f, jy *= -0.5f;  // SMAA 4x: (0.125, 0.125), (-0.125, -0.125) with y up
     } else if (g_on) {  // AMD's sequence: Halton(2, 3) - 0.5, phases = 8 (output / render)^2, one phase per frame
         uint32_t i = (uint32_t)(g_present_count % g_phases);
         jx = halton(i + 1, 2) - 0.5f;
@@ -130,9 +132,9 @@ void camjit_set(bool on, uint32_t render_w, uint32_t render_h, uint32_t phases) 
     pthread_mutex_unlock(&g_lock);
 }
 
-void camjit_t2x(bool on) {
+void camjit_t2x(bool on, bool smaa4x) {
     pthread_mutex_lock(&g_lock);
-    g_t2x = on;
+    g_t2x = on, g_4x = smaa4x;
     pthread_mutex_unlock(&g_lock);
 }
 

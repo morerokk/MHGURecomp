@@ -1127,6 +1127,30 @@ static VkPipeline resolve_pipeline(VkRenderPass rp, int kind) {  // kind 1 depth
     return p;
 }
 
+// SMAA 4x: the 3D scene's colour target resolved by SMAA S2x (smaa.c) from its 2x samples. false: not this one.
+static bool ms_resolve_s2x(VkCommandBuffer cb, TexBackend *b, TexBackend *m) {
+    int phase;
+    if (m->samples != 2 || !m->ms_sampled || !vk_s2x_target(b, &phase)) return false;
+    static const VkComponentMapping id = {0};
+    VkPostAa t = {.dst = vk_image_view(b, VK_IMAGE_VIEW_TYPE_2D, b->format, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_COLOR_BIT),
+                  .dst_image = b->image, .format = b->format, .w = b->width, .h = b->height};
+    VkImageView ms = vk_image_view(m, VK_IMAGE_VIEW_TYPE_2D, m->format, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_COLOR_BIT);
+    if (!t.dst || !ms) return false;
+    VkImageMemoryBarrier ib = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_ALL_WRITES,
+                               .dstAccessMask = VK_ACCESS_ALL, .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                               .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                               .image = m->image, .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    vkCmdPipelineBarrier(cb, VK_STAGES_ALL, VK_STAGES_ALL, 0, 0, NULL, 0, NULL, 1, &ib);
+    bool ok = vk_smaa_s2x(&t, ms, config_live_smaa_quality(), phase);
+    ib.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, ib.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    vkCmdPipelineBarrier(cb, VK_STAGES_ALL, VK_STAGES_ALL, 0, 0, NULL, 0, NULL, 1, &ib);
+    if (ok) vk_s2x_done();
+    ss_forget();
+    gp_mark("  resolve (SMAA S2x)");
+    return ok;
+}
+
 void vk_ms_resolve(TexBackend *b) {
     if (!b || !b->ms_dirty) return;
     b->ms_dirty = false;
@@ -1136,6 +1160,7 @@ void vk_ms_resolve(TexBackend *b) {
     VkCommandBuffer cb = vk_cmd();
     vk_full_barrier(cb);
     bool depth = b->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+    if (!depth && ms_resolve_s2x(cb, b, m)) return;
     VkImageLayout att = depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     VkImageMemoryBarrier ib = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_ALL_WRITES,
                                .dstAccessMask = VK_ACCESS_ALL, .oldLayout = att, .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -3280,7 +3305,7 @@ static bool fxaa_replaced(Prog *pr) {
         return false;
     NvnTexture *src = shader_texture_object(1, &pr->fi->tex[0]);
     if (!src || src == st.rt.color[0]) return false;
-    if (mode == AA_SMAA_T2X && !g_temporal_on) mode = AA_SMAA;  // (until T2x runs, from the next frame on: SMAA 1x)
+    if (mode >= AA_SMAA_T2X && !g_temporal_on) mode = AA_SMAA;  // (until T2x / 4x runs, from the next frame on: SMAA 1x)
     if (mode == AA_FXAA || mode == AA_SMAA) {
         VkPostAa t;
         if (!post_aa_target(src, &t) || !(mode == AA_SMAA ? vk_smaa(&t, config_live_smaa_quality()) : fxaa_311(&t)))

@@ -326,16 +326,21 @@ static TexBackend *ms_image(TexBackend *b, VkFormat format, VkImageAspectFlags a
 
 // MSAA (exec.c begin_pass): the multisampled image b's 3D scene passes render into. Only ever a render target (and a
 // transfer source for its resolve: exec.c vk_ms_resolve), kept in the attachment layout: on GCN1 a multisampled image
-// that shaders may read loses its compression (the scene passes took several times longer). NULL: not created.
+// that shaders may read loses its compression (the scene passes took several times longer). The exception: SMAA 4x's
+// colour images (2x), which its S2x reads. NULL: not created.
 TexBackend *vk_tex_ms(TexBackend *b, uint32_t samples) {
     bool depth = b->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+    bool sampled = !depth && samples == 2 && config_live_aa() == AA_SMAA_4X;
     TexBackend *m = b->ms;
-    if (m && m->samples == samples && m->width == b->width && m->height == b->height && m->format == b->format) return m;
+    if (m && m->samples == samples && m->width == b->width && m->height == b->height && m->format == b->format &&
+        m->ms_sampled == sampled)
+        return m;
     if (m) { destroy_image(m); free(m); b->ms = NULL; }
     b->ms_valid = b->ms_dirty = false;
-    b->ms = ms_image(b, b->format, b->aspect, samples, VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+    b->ms = ms_image(b, b->format, b->aspect, samples, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | (sampled ? VK_IMAGE_USAGE_SAMPLED_BIT : 0) |
                      (depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT),
                      depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    if (b->ms) b->ms->ms_sampled = sampled;
     return b->ms;
 }
 

@@ -110,7 +110,9 @@ float config_live_mouse_sensitivity(void) { return get_float(&live_mouse); }
 float config_live_draw_distance(void) { return get_float(&live_draw); }
 int config_live_aa(void) { return runtime_fsr ? 0 : SDL_GetAtomicInt(&live_aa); }
 int config_live_smaa_quality(void) { return SDL_GetAtomicInt(&live_smaa); }
-int config_live_msaa(void) { return runtime_fsr ? 1 : SDL_GetAtomicInt(&live_msaa); }
+int config_live_msaa(void) {  // (SMAA 4x is S2x: MSAA 2x whatever MSAA says)
+    return runtime_fsr ? 1 : SDL_GetAtomicInt(&live_aa) == AA_SMAA_4X ? 2 : SDL_GetAtomicInt(&live_msaa);
+}
 int config_live_vsync(void) { return SDL_GetAtomicInt(&live_vsync); }
 int config_live_menu_confirm(void) { return SDL_GetAtomicInt(&live_menu_confirm); }
 int config_live_face_buttons(void) { return SDL_GetAtomicInt(&live_face); }

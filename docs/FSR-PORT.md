@@ -319,4 +319,6 @@ Vulkan) could be added the same way by someone with an NVIDIA RTX card. The auth
 SMAA T2x (`[Anti-aliasing] AntiAliasing = SMAAT2x`, docs/STATUS.md) uses that preparation at the render size: `frame_vectors` (the prep,
 object motion and finish steps `run_fsr` runs first) and then `run_t2x` instead of an upscaler, in place, without stand-ins. For it the
 main camera's hooks are always in (`camjit_init`; without jitter they only record the camera), and `vk_fsr_present` is called every frame
-(it returns at once while neither FSR nor T2x runs).
+(it returns at once while neither FSR nor T2x runs). SMAA 4x (`SMAA4x`) is the same T2x with a smaller jitter, plus `vk_s2x_target`:
+which resolve of a multisampled image is the scene's, for `exec.c` to resolve it by SMAA S2x. Object motion is captured in MSAA passes
+too (the capture variant discards rasterization, so its pipeline has no sample count to match).

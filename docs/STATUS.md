@@ -118,8 +118,20 @@ Fixed on the way (2026-10-20):
   vectors gets 0.028 vs 0.126), so the charge blade on a sprinting hunter's back was a see-through double. The resolve
   now clamps the previous frame's colour to the current 3x3 neighbourhood and drops history where fsr.c's reactive
   mask (the game's moving-object mask changing) is set: in the same sprint the hilt and the shield's rim are solid
-  again (the rim keeps SMAA 1x's steps where history is dropped). Not checked: turning it on / off in the menu, its GPU
-  cost, and moving monsters.
+  again (the rim keeps SMAA 1x's steps where history is dropped). With MSAA on, draws are captured for object motion
+  too (they were not: FSR, the only user before, turns MSAA off). SMAA4x is SMAA 4x, S2x temporally jittered: it
+  renders the scene with MSAA 2x whatever MSAA says (config_live_msaa; the menu shows MSAA as "2x (SMAA 4x)"), and
+  where exec.c resolves the scene's colour target (vk_ms_resolve, once a frame before the post passes read it; the
+  target is the one most scene draws went to at the last start of the HUD, fsr.c vk_s2x_target) smaa.c's
+  vk_smaa_s2x takes each of the two samples apart (only 4x's 2x colour images are made shader-readable: textures.c
+  vk_tex_ms), runs edges and weights on each with 4x's subsample indices for the sample and the frame's jitter, and
+  writes the two blended and averaged. The camera jitters by (0.125, -0.125) / (-0.125, 0.125) render pixels
+  (SMAA.hlsl's 4x jitters with y down), and at the start of the HUD the T2x resolve runs without its own edges (PACK:
+  the picture and the velocity's length). A frame where S2x did not run gets T2x there. Checked hidden in town at
+  1920x1080 on an RTX 3090: S2x 0.4-0.95 ms a frame, the GPU frame 1.8-4 ms (T2x 1.4-2.1 ms), 47-50 frames a second
+  with object motion every frame; switched live (MHGU_CONTROL "aa <n>", as the menu previews it) T2x -> 4x -> T2x ->
+  SMAA -> 4x, MSAA following; standing and sprinting shots clean, the charge blade solid. Not checked: moving
+  monsters, and GPUs without the standard 2x sample positions.
 - Frame rate: the settings' FPS or MHGU_FRAMERATE (default 60, 30..240) writes the engine's target fps (float at +0x3c of the object in
   global 0x2326764, the field theboy181's 60fps patch sets) each frame. Above the monitor's refresh rate it needs
   VSync = Off: see "Frame rates above 60". MHGU_VSYNC=0/1 overrides the setting: no vsync / classic vsync.
