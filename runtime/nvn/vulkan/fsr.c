@@ -1545,6 +1545,8 @@ static bool run_t2x(NvnTexture *h, NvnTexture *depth, NvnTexture *mask, const Ca
     }
     VkPostAa t;
     if (!t2x_target(h, &t)) return false;
+    vk_ms_resolve(db);  // (MSAA: the scene depth and the mask up to date; usually already, the game's post read them)
+    if (mask) vk_ms_resolve(vk_tex(mask, true));
     VkCommandBuffer cb = vk_cmd();
     vk_full_barrier(cb);
     Vectors v;

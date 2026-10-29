@@ -3649,9 +3649,10 @@ static void draw(CmdRec *r, bool indexed) {
     else vkCmdDrawIndexed(cb, icount, inst, 0, base_vertex, base_inst);
     stat_draws++;
     if (g_fsr_objvel && g_temporal_on && (pr->fsrcap || capprog_later(pr)) &&
-        (k.depth_write || (k.depth_test && pr->vi->cbuf_dynamic)) && inst == 1 && pass_samples == 1) {
+        (k.depth_write || (k.depth_test && pr->vi->cbuf_dynamic)) && inst == 1) {
         // FSR object motion: the same draw again through the capture variant of its vertex shader (rasterizer
-        // discard), which stores each vertex's clip position for the velocity pass (fsr.c)
+        // discard), which stores each vertex's clip position for the velocity pass (fsr.c). MSAA passes too (SMAA
+        // T2x): with rasterization discarded the pipeline has no sample count to match.
         FsrCapture fc = {.color0 = st.rt.ncolor ? st.rt.color[0] : NULL, .depth = st.rt.depth, .vs_code = st.program->stages[0].code_addr,
                          .used_streams = k.used_streams, .iaddr = indexed ? r->x[3] : 0, .mode = mode, .count = count,
                          .first = first, .base_vertex = base_vertex, .idx = use_index ? ib.ptr : NULL, .itype = itype_vk,
