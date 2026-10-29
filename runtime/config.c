@@ -2,7 +2,7 @@
 // folder argument, the current folder). A missing file is written with the defaults, so
 // deleting it resets everything; keys that are missing or not understood keep their defaults (the log says which).
 //   MHGU_CONFIG=<path>   another settings file
-//   MHGU_WINDOW=WxH      windowed at that size, MHGU_RENDER=WxH  3D resolution, MHGU_MSAA=1|2|4|8, MHGU_FXAA=0|1,
+//   MHGU_WINDOW=WxH      windowed at that size, MHGU_RENDER=WxH  3D resolution, MHGU_MSAA=1|2|4|8, MHGU_FXAA=0|1|2,
 //                        MHGU_PAD_POSITIONAL=0|1 (test runs; override the file)
 #include <ctype.h>
 #include <float.h>
@@ -17,7 +17,7 @@
 #include "config.h"
 #include "rt.h"
 
-#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", ""
+#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, FXAA_ON, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", 5, 0.0f, 0.063f, 0.0312f
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
@@ -63,9 +63,30 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "MSAA = Off\n"
     "\n"
-    "; GU's default FXAA\n"
+    "; FXAA: On is FXAA 3.11 with the settings below, Game is GU's own FXAA\n"
+    "; Off, Game, On\n"
     "; Default: On\n"
     "FXAA = On\n"
+    "\n"
+    "; FXAA 3.11's quality preset (as Unreal's r.FXAA.Quality): 1 is fastest, 5 searches edges furthest\n"
+    "; Between 1 and 5\n"
+    "; Default: 5\n"
+    "FXAAQuality = 5\n"
+    "\n"
+    "; FXAA 3.11's sub-pixel blur: lower is sharper, 0 is off, 0.75 is the usual default\n"
+    "; Between 0 and 1\n"
+    "; Default: 0\n"
+    "FXAASubpix = 0\n"
+    "\n"
+    "; Contrast an edge needs before FXAA 3.11 smooths it: lower smooths more edges, 0.166 is the usual default\n"
+    "; Between 0.03 and 0.5\n"
+    "; Default: 0.063\n"
+    "FXAAEdgeThreshold = 0.063\n"
+    "\n"
+    "; Contrast below which FXAA 3.11 leaves dark edges alone: lower smooths more of them, 0.0833 is the usual default\n"
+    "; Between 0 and 0.25\n"
+    "; Default: 0.0312\n"
+    "FXAAEdgeThresholdMin = 0.0312\n"
     "\n"
     "[Upscaler]\n"
     "; FSR temporal upscaling\n"
@@ -342,7 +363,13 @@ const ConfigSetting g_settings[] = {
     {"Display", "UIAnchor", SET_CHOICE, F(ui_anchor), 0, 0, 0, "Center|1|16:9,21:9|2,32:9|3,Edges", anchor_values, true,
      ERR_MISC},
     {"Anti-aliasing", "MSAA", SET_CHOICE, F(msaa), 0, 0, 0, "Off|none|0|1|1x,2x|2,4x|4,8x|8", msaa_values, false, ERR_MISC},
-    ON_OFF("Anti-aliasing", "FXAA", fxaa, false),
+    {"Anti-aliasing", "FXAA", SET_CHOICE, F(fxaa), 0, 0, 0, "Off|false|no|0,Game|original|gu|1,On|true|yes|2", NULL, false,
+     ERR_MISC},
+    {"Anti-aliasing", "FXAAQuality", SET_INT, F(fxaa_quality), 0, 1, 5, NULL, NULL, true, ERR_MISC},
+    {"Anti-aliasing", "FXAASubpix", SET_FLOAT, F(fxaa_subpix), 0, 0.0f, 1.0f, NULL, NULL, true, ERR_MISC},
+    {"Anti-aliasing", "FXAAEdgeThreshold", SET_FLOAT, F(fxaa_edge_threshold), 0, 0.03f, 0.5f, NULL, NULL, true, ERR_MISC},
+    {"Anti-aliasing", "FXAAEdgeThresholdMin", SET_FLOAT, F(fxaa_edge_threshold_min), 0, 0.0f, 0.25f, NULL, NULL, true,
+     ERR_MISC},
     ON_OFF("Upscaler", "FSR", fsr, true),
     {"Upscaler", "Upscaler", SET_CHOICE, F(fsr_upscaler), 0, 0, 0, "FSR3|fsr3.1|3,FSR4|4", NULL, true, ERR_FSR},
     {"Upscaler", "FSRQuality", SET_CHOICE, F(fsr_quality), 0, 0, 0,
@@ -682,7 +709,7 @@ void config_load(void) {
     if (e && parse_size(e, &w, &h)) g_config.display_mode = DISPLAY_WINDOWED, g_config.width = w, g_config.height = h;
     if (getenv("MHGU_HIDDEN")) g_config.display_mode = DISPLAY_WINDOWED;
     if ((e = getenv("MHGU_MSAA"))) g_config.msaa = atoi(e) >= 8 ? 8 : atoi(e) >= 4 ? 4 : atoi(e) >= 2 ? 2 : 1;
-    if ((e = getenv("MHGU_FXAA"))) g_config.fxaa = atoi(e) != 0;
+    if ((e = getenv("MHGU_FXAA"))) g_config.fxaa = atoi(e) >= FXAA_ON ? FXAA_ON : atoi(e) > 0 ? FXAA_GAME : FXAA_OFF;
     if ((e = getenv("MHGU_BACKGROUND_INPUT"))) g_config.background_input = atoi(e) != 0;
     if ((e = getenv("MHGU_PAD_POSITIONAL"))) g_config.face_buttons = atoi(e) ? FACE_POSITION : FACE_LABEL;
     if ((e = getenv("MHGU_LDN_PORT")) && atoi(e) > 0) g_config.ldn_port = atoi(e);
@@ -770,8 +797,11 @@ void config_load(void) {
         "face buttons by %s, controller %s in the background\n", path, modes[g_config.display_mode], g_config.width,
         g_config.height, g_config.render_w, g_config.render_h, g_render_aspect, g_fov_scale, g_ui_anchor_aspect,
         g_config.fps, g_config.vsync ? "on" : "off",
-        g_config.msaa, g_config.fxaa ? "on" : "off", g_config.face_buttons == FACE_LABEL ? "label" : "position",
-        g_config.background_input ? "on" : "off");
+        g_config.msaa, g_config.fxaa == FXAA_ON ? "3.11" : g_config.fxaa == FXAA_GAME ? "the game's" : "off",
+        g_config.face_buttons == FACE_LABEL ? "label" : "position", g_config.background_input ? "on" : "off");
+    if (g_config.fxaa == FXAA_ON)
+        LOG("[config] FXAA 3.11: quality %d, sub-pixel blur %g, edge threshold %g, min %g\n", g_config.fxaa_quality,
+            (double)g_config.fxaa_subpix, (double)g_config.fxaa_edge_threshold, (double)g_config.fxaa_edge_threshold_min);
     const HpScale *hp = &g_config.hp;
     LOG("[config] monster HP in Hub quests: x%.2f / %.2f / %.2f / %.2f for 1-4 hunters, %d quest(s) set apart\n",
         hp->scale[0], hp->scale[1], hp->scale[2], hp->scale[3], hp->quests);

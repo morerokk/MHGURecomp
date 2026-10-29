@@ -778,7 +778,7 @@ std::vector<Row> main_rows() {
                 r.back().value = tr("Off (FSR)");
             }
         }
-        add_bool(r, "fxaa", "FXAA", &c.fxaa);
+        add_choice(r, "fxaa", "FXAA", c.fxaa, {tr("Off"), tr("Game"), tr("On")}, [](int v) { c.fxaa = v; });
         if (g_config.fsr) {
             r.back().cold = true;
             if (c.fsr) {

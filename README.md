@@ -142,7 +142,9 @@ without saving puts them back); the settings marked * at the next start. Details
   `AspectRatio` (Auto follows the window: 16:10 and anything wider fill it, narrower gets 16:10 with bars), `FOV`
   (1.0 = the game's), `UIAnchor` (Center keeps the HUD in the middle 16:9 on an ultrawide screen, Edges spreads it
   to the sides)
-- `[Anti-aliasing]`: `MSAA` (Off / 2x / 4x / 8x), `FXAA` (On / Off)
+- `[Anti-aliasing]`: `MSAA` (Off / 2x / 4x / 8x), `FXAA` (Off / Game: GU's own / On: FXAA 3.11, the default), and
+  FXAA 3.11's `FXAAQuality` (1-5, Unreal's presets 10, 13, 15, 29 and 39; default 5), `FXAASubpix` (sub-pixel blur,
+  0-1; default 0), `FXAAEdgeThreshold` (default 0.063) and `FXAAEdgeThresholdMin` (default 0.0312)
 - `[Upscaler]`: `FSR` (Off / On, default Off), `FSRQuality` (NativeAA / Quality / Balanced / Performance /
   UltraPerformance), `Sharpness`, and `Upscaler` (FSR3, the default, or FSR4: needs an AMD RDNA 4 GPU and its driver, and an exe built with `make FSR4_DRIVER_PATCH=1`;
   falls back to FSR 3.1). FSR replaces MSAA and FXAA while it is on. Details: `docs/FSR-PORT.md`, `docs/FSR4-PORT.md`

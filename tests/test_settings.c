@@ -65,7 +65,7 @@ int main(int argc, char **argv) {
     assert(config_live_msaa()==4 && !config_live_vsync() && !config_live_fxaa());
     assert(config_live_face_buttons()==FACE_LABEL && !config_live_background_input());
     assert(config_live_mouse_sensitivity()==2.5f && camera_fovy(0.5f,g_render_aspect)<camera_before);
-    assert(g_config.fps==60 && g_config.fxaa==1 && g_config.face_buttons==FACE_POSITION); // Boot snapshot is immutable.
+    assert(g_config.fps==60 && g_config.fxaa==FXAA_ON && g_config.face_buttons==FACE_POSITION); // Boot snapshot is immutable.
     c.hp.quest[0] = c.hp.quest[1]; c.hp.quests = 1;
     assert(config_save(&c, error, sizeof error));
     assert(fabsf(config_audio_gain() - 0.25f) < 0.001f && !config_confirm_exit());
@@ -156,6 +156,18 @@ int main(int argc, char **argv) {
     assert(config_defaults().draw_distance==1.0f);
     assert(config_defaults().mute_in_background==0);
     assert(config_defaults().combo_window==COMBO_LENIENT);
+    assert(config_defaults().fxaa==FXAA_ON && config_defaults().fxaa_quality==5 && config_defaults().fxaa_subpix==0.0f);
+    assert(config_defaults().fxaa_edge_threshold==0.063f && config_defaults().fxaa_edge_threshold_min==0.0312f);
+    {   // FXAA's spellings (On was the game's pass before FXAA 3.11) and its 3.11 settings' ranges
+        Config x=config_defaults();
+        assert(config_parse(config_setting("FXAA"),"Game",&x) && x.fxaa==FXAA_GAME);
+        assert(config_parse(config_setting("FXAA"),"off",&x) && x.fxaa==FXAA_OFF);
+        assert(config_parse(config_setting("FXAA"),"On",&x) && x.fxaa==FXAA_ON);
+        assert(config_parse(config_setting("FXAAQuality"),"3",&x) && x.fxaa_quality==3);
+        assert(!config_parse(config_setting("FXAAQuality"),"0",&x) && !config_parse(config_setting("FXAASubpix"),"1.5",&x));
+        assert(config_parse(config_setting("FXAAEdgeThresholdMin"),"0.0625",&x) && x.fxaa_edge_threshold_min==0.0625f);
+        assert(config_restart_key("FXAAQuality") && !config_restart_key("FXAA"));
+    }
     fsr_config.fsr=1;fsr_config.fsr_upscaler=FSR_UP_4;fsr_config.fsr_quality=FSR_BALANCED;
     fsr_config.fsr_sharpness=.65f;fsr_config.fsr_objmotion=0;fsr_config.fsr_reactive=.35f;fsr_config.fsr_animsurf=0;
     fsr_config.msaa=8;fsr_config.fxaa=1;

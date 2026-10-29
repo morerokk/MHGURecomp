@@ -92,8 +92,12 @@ Fixed on the way (2026-10-20):
   with MHGU_CONTROL "gpuprof" (GPU timestamps per pass): the multisampled passes cost ~3 ms more at 4x, a colour
   resolve ~1.6 ms, the depth / stencil resolve ~9 ms (the driver decompressing it; Vulkan 1.2 render pass resolves
   were as slow, and a sampleable multisampled image loses its compression: passes several times slower).
-- FXAA (settings FXAA = On / Off): the game's FXAA pass is recognised by its fragment shader's code hash
-  (FXAA_FS_HASH, exec.c) and becomes a copy of its input when off.
+- FXAA (settings FXAA = Off / Game / On): the game's FXAA pass is recognised by its fragment shader's code hash
+  (FXAA_FS_HASH, exec.c). Game draws it as it is: an early FXAA 3 Quality reading luma from alpha, edge threshold 1/6,
+  sub-pixel blur capped at 0.75, 6 looks per side in 2-pixel steps. Off makes it a copy of its input. On draws FXAA
+  3.11 Quality instead (exec.c fxaa_311, shaders.c "fxaa.frag") over the same input, with FXAAQuality (UE5's
+  r.FXAA.Quality 1-5: presets 10, 13, 15, 29, 39), FXAASubpix, FXAAEdgeThreshold and FXAAEdgeThresholdMin (defaults:
+  preset 39, 0, 0.063, 0.0312).
 - Frame rate: the settings' FPS or MHGU_FRAMERATE (default 60, 30..240) writes the engine's target fps (float at +0x3c of the object in
   global 0x2326764, the field theboy181's 60fps patch sets) each frame. Above the monitor's refresh rate it needs
   VSync = Off: see "Frame rates above 60". MHGU_VSYNC=0/1 overrides the setting: no vsync / classic vsync.

@@ -12,6 +12,7 @@ enum { DISPLAY_WINDOWED, DISPLAY_FULLSCREEN, DISPLAY_BORDERLESS };
 enum { FACE_POSITION, FACE_LABEL };
 enum { COMBO_LENIENT, COMBO_STRICT };  // [Controls] ComboInputWindow (runtime/hle/combowin.c)
 enum { MENU_CONFIRM_ORIGINAL, MENU_CONFIRM_SOUTH, MENU_CONFIRM_EAST };
+enum { FXAA_OFF, FXAA_GAME, FXAA_ON };  // [Anti-aliasing] FXAA: none, the game's own pass, FXAA 3.11 (nvn/vulkan/exec.c)
 
 // [Monster HP]: factors on the HP multiplier of Hub-type quests' large monsters
 #define HP_QUESTS_MAX 256
@@ -31,7 +32,7 @@ typedef struct {
     int fps;                  // frame rate cap: 30..240
     int vsync;                // 1: present without tearing (mailbox / FIFO, at most the refresh rate), 0: immediate
     int msaa;                 // samples of the 3D scene: 1 (off), 2, 4, 8
-    int fxaa;                 // the game's own FXAA pass: 1 on, 0 off
+    int fxaa;                 // FXAA_*: the game's FXAA pass as it is, skipped, or replaced by FXAA 3.11 Quality
     int face_buttons;         // FACE_*: controller face buttons by position (the Switch layout) or by their labels
     int ldn_port;             // local play: the port a hosted hub listens on (TCP; UDP for LAN search)
     char ldn_join[256];       // local play: hosts to search besides the LAN (host[:port], comma separated)
@@ -64,6 +65,10 @@ typedef struct {
     int combo_window;         // [Controls] ComboInputWindow: COMBO_*, how long a press waits for a second button
     char ldn_server[256];     // [Multiplayer] Server: hub server for internet hubs (host[:port]); "" the default, "Off" none
     char ldn_key[64];         // [Multiplayer] Key: matchmaking key, hubs seen only by players with the same; "" public
+    // [Anti-aliasing] FXAA = On: FXAA 3.11 Quality's preset (1: 10, 2: 13, 3: 15, 4: 29, 5: 39, as UE5's
+    // r.FXAA.Quality), sub-pixel blur, and the local contrast an edge needs (relative, and below which dark edges stay)
+    int fxaa_quality;
+    float fxaa_subpix, fxaa_edge_threshold, fxaa_edge_threshold_min;
 } Config;
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
 // Cloud VM; a DuckDNS name, so it can move without a release). "" = no default.

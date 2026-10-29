@@ -3136,14 +3136,122 @@ static uint64_t prog_fs_hash(Prog *p) {
     return p->chash[1];
 }
 
-// FXAA off (settings): the game's FXAA pass (recognised by its shader) copies its input instead.
+// FXAA (settings): the game's FXAA pass (recognised by its shader) draws as it is (Game), copies its input instead
+// (Off), or is FXAA 3.11 Quality (On: fxaa_311). The game's is an early FXAA 3 Quality with an edge threshold of 1/6,
+// its sub-pixel blur capped at 0.75 and 6 looks per side in 2-pixel steps (about 13 pixels).
 #define FXAA_FS_HASH 0x8530ded68f4407dfull
 static void copy_texture(const TexRef *src, const TexRef *dst, uint64_t flags);
-static bool fxaa_skipped(Prog *pr) {
-    if (config_live_fxaa() || prog_fs_hash(pr) != FXAA_FS_HASH || pr->fi->ntex != 1 || !st.rt.ncolor || !st.rt.color[0])
+
+// FXAA 3.11's quality presets as [Anti-aliasing] FXAAQuality 1..5 picks them (UE5's r.FXAA.Quality): 10, 13, 15,
+// 29, 39. The edge search's steps, in pixels: the first look, then each further one (the last is taken without a look).
+static const struct { int n; float step[12]; } fxaa_presets[5] = {
+    {3, {1.5f, 3.0f, 12.0f}},
+    {6, {1.0f, 1.5f, 2.0f, 2.0f, 4.0f, 12.0f}},
+    {8, {1.0f, 1.5f, 2.0f, 2.0f, 2.0f, 2.0f, 4.0f, 12.0f}},
+    {12, {1.0f, 1.5f, 2.0f, 2.0f, 2.0f, 2.0f, 2.0f, 2.0f, 2.0f, 2.0f, 4.0f, 8.0f}},
+    {12, {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.5f, 2.0f, 2.0f, 2.0f, 2.0f, 4.0f, 8.0f}}};
+static VkDescriptorSetLayout fxaa_set_layout;
+static VkPipelineLayout fxaa_layout;
+
+static VkPipeline fxaa_pipeline(VkRenderPass rp) {
+    static struct { VkRenderPass rp; VkPipeline p; } tab[8];
+    static int n;
+    for (int i = 0; i < n; i++) if (tab[i].rp == rp) return tab[i].p;
+    if (!fxaa_layout) {
+        VkDescriptorSetLayoutBinding b = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
+        VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &b};
+        VK_CHECK(vkCreateDescriptorSetLayout(g_vk.dev, &li, NULL, &fxaa_set_layout));
+        VkPushConstantRange r = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, 64};
+        VkPipelineLayoutCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
+                                         .pSetLayouts = &fxaa_set_layout, .pushConstantRangeCount = 1, .pPushConstantRanges = &r};
+        VK_CHECK(vkCreatePipelineLayout(g_vk.dev, &ci, NULL, &fxaa_layout));
+    }
+    VkPipelineShaderStageCreateInfo stages[2] = {
+        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
+         .module = vk_builtin_shader("resolve.vert"), .pName = "main"},
+        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+         .module = vk_builtin_shader("fxaa.frag"), .pName = "main"}};
+    VkPipelineVertexInputStateCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    VkPipelineInputAssemblyStateCreateInfo ia = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+                                                 .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
+    VkPipelineViewportStateCreateInfo vs = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1,
+                                            .scissorCount = 1};
+    VkPipelineRasterizationStateCreateInfo rs = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+                                                 .polygonMode = VK_POLYGON_MODE_FILL, .lineWidth = 1};
+    VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+                                               .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
+    VkPipelineColorBlendAttachmentState att = {.colorWriteMask = 0xF};
+    VkPipelineColorBlendStateCreateInfo cb = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+                                              .attachmentCount = 1, .pAttachments = &att};
+    VkDynamicState dyn[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dy = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 2,
+                                           .pDynamicStates = dyn};
+    VkGraphicsPipelineCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .stageCount = 2,
+                                       .pStages = stages, .pVertexInputState = &vi, .pInputAssemblyState = &ia,
+                                       .pViewportState = &vs, .pRasterizationState = &rs, .pMultisampleState = &ms,
+                                       .pColorBlendState = &cb, .pDynamicState = &dy, .layout = fxaa_layout, .renderPass = rp};
+    VkPipeline p = VK_NULL_HANDLE;
+    if (vkCreateGraphicsPipelines(g_vk.dev, g_vk.pcache, 1, &pi, NULL, &p) != VK_SUCCESS) LOG("[vk] FXAA pipeline failed\n");
+    if (n < 8) tab[n].rp = rp, tab[n++].p = p;
+    return p;
+}
+
+// FXAA 3.11 from src into the colour target, pixel for pixel as Off's copy; false: the game's own pass draws instead.
+static bool fxaa_311(NvnTexture *src) {
+    NvnTexture *dt = st.rt.color[0];
+    TexBackend *s = vk_tex(src, false), *d = vk_tex(dt, true);
+    if (s->samples != 1 || d->samples != 1) return false;
+    vk_end_pass();
+    st.rt_dirty = true;
+    vk_ms_resolve(s);
+    vk_ms_resolve(d);
+    bool has = st.rt.has_cview[0];
+    VkImageView sv = vk_view(src, NULL, false, false, TEXTYPE_2D), dv = vk_view(dt, &st.rt.cview[0], has, true, TEXTYPE_2D);
+    VkFormat f = has && (st.rt.cview[0].setmask & 4) && vk_format(dt->format) == d->format ? vk_format(st.rt.cview[0].format)
+                                                                                           : d->format;
+    VkRenderPass rp = vk_render_pass(&f, 1, VK_FORMAT_UNDEFINED, 1);
+    VkPipeline p = sv && dv ? fxaa_pipeline(rp) : VK_NULL_HANDLE;
+    if (!p) return false;
+    d->ms_valid = false;
+    renderer_mark_gpu_owned(dt);
+    uint32_t lv = has && (st.rt.cview[0].setmask & 1) ? st.rt.cview[0].base_level : 0;
+    uint32_t w = level_extent(d->width, lv), h = level_extent(d->height, lv);
+    int q = g_config.fxaa_quality >= 1 && g_config.fxaa_quality <= 5 ? g_config.fxaa_quality - 1 : 4;
+    float pc[16] = {g_config.fxaa_subpix, g_config.fxaa_edge_threshold, g_config.fxaa_edge_threshold_min, (float)fxaa_presets[q].n};
+    memcpy(pc + 4, fxaa_presets[q].step, sizeof fxaa_presets[q].step);
+    VkCommandBuffer cb = vk_cmd();
+    vk_full_barrier(cb);
+    VkDescriptorSet set = vk_alloc_set(fxaa_set_layout);
+    VkDescriptorImageInfo ii = {vk_default_sampler(true), sv, VK_IMAGE_LAYOUT_GENERAL};
+    VkWriteDescriptorSet wr = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 0, .descriptorCount = 1,
+                               .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii};
+    vkUpdateDescriptorSets(g_vk.dev, 1, &wr, 0, NULL);
+    VkRect2D area = {{0, 0}, {w, h}};
+    VkRenderPassBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, .renderPass = rp,
+                                .framebuffer = vk_framebuffer(rp, &dv, 1, w, h), .renderArea = area};
+    vkCmdBeginRenderPass(cb, &bi, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, fxaa_layout, 0, 1, &set, 0, NULL);
+    vkCmdPushConstants(cb, fxaa_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pc, pc);
+    VkViewport vp = {0, 0, (float)w, (float)h, 0, 1};
+    vkCmdSetViewport(cb, 0, 1, &vp);
+    vkCmdSetScissor(cb, 0, 1, &area);
+    vkCmdDraw(cb, 3, 1, 0, 0);
+    vkCmdEndRenderPass(cb);
+    ss_forget();
+    stat_draws++;
+    static bool logged;
+    if (!logged) logged = true, LOG("[vk] FXAA 3.11 (quality %d) draws in place of the game's FXAA, %ux%u\n", q + 1, w, h);
+    return true;
+}
+
+static bool fxaa_replaced(Prog *pr) {
+    int mode = config_live_fxaa();
+    if (mode == FXAA_GAME || prog_fs_hash(pr) != FXAA_FS_HASH || pr->fi->ntex != 1 || !st.rt.ncolor || !st.rt.color[0])
         return false;
     NvnTexture *src = shader_texture_object(1, &pr->fi->tex[0]);
     if (!src || src == st.rt.color[0]) return false;
+    if (mode == FXAA_ON) return fxaa_311(src);
     TexRef s = {.tex = (uint64_t)(uintptr_t)src}, d = {.tex = (uint64_t)(uintptr_t)st.rt.color[0]};
     if (st.rt.has_cview[0]) d.view = st.rt.cview[0], d.has_view = 1;
     copy_texture(&s, &d, 0);
@@ -3197,7 +3305,7 @@ static void draw(CmdRec *r, bool indexed) {
     Prog *pr = get_program(st.program, &vkey, &fkey);
     if (!pr) { stat_skipped++; return; }
     if (!await_build(&pr->state, pr, 0)) { skip_draw(&stat_skip_prog); return; }
-    if (fxaa_skipped(pr)) return;
+    if (fxaa_replaced(pr)) return;
     NvnTexture *movie = movie_picture(pr);
     uint32_t mode = (uint32_t)r->x[0];
     VkPrimitiveTopology topo;

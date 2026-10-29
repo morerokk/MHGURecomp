@@ -332,6 +332,59 @@ static const char *builtin_src(const char *name, int *stage) {
                "  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
                "}\n";
     }
+    if (!strcmp(name, "fxaa.frag")) {
+        *stage = STAGE_FRAGMENT;
+        // FXAA 3.11 Quality (Timothy Lottes' algorithm) over the game's FXAA input, which holds its luma in alpha (as the
+        // game's own pass reads it). pc.a: sub-pixel blur, edge threshold, edge threshold min, the number of search
+        // steps; pc.p: the steps (in pixels) of the quality preset (exec.c fxaa_presets).
+        return "#version 450\n"
+               "layout(set = 0, binding = 0) uniform sampler2D t;\n"
+               "layout(push_constant) uniform P { vec4 a; vec4 p[3]; } pc;\n"
+               "layout(location = 0) out vec4 o;\n"
+               "float luma(vec2 uv) { return textureLod(t, uv, 0.0).a; }\n"
+               "#define AT(x, y) textureLodOffset(t, pos, 0.0, ivec2(x, y)).a\n"
+               "void main() {\n"
+               "  vec2 rcp = 1.0 / vec2(textureSize(t, 0)), pos = gl_FragCoord.xy * rcp;\n"
+               "  vec4 rgbyM = textureLod(t, pos, 0.0);\n"
+               "  float lumaM = rgbyM.a, lumaN = AT(0, -1), lumaS = AT(0, 1), lumaW = AT(-1, 0), lumaE = AT(1, 0);\n"
+               "  float rangeMax = max(max(max(lumaN, lumaW), max(lumaE, lumaS)), lumaM);\n"
+               "  float range = rangeMax - min(min(min(lumaN, lumaW), min(lumaE, lumaS)), lumaM);\n"
+               "  if (range < max(pc.a.z, rangeMax * pc.a.y)) { o = rgbyM; return; }\n"
+               "  float lumaNW = AT(-1, -1), lumaNE = AT(1, -1), lumaSW = AT(-1, 1), lumaSE = AT(1, 1);\n"
+               "  float lumaNS = lumaN + lumaS, lumaWE = lumaW + lumaE;\n"
+               "  float edgeHorz = abs(lumaNW + lumaSW - 2.0 * lumaW) + 2.0 * abs(lumaNS - 2.0 * lumaM) + abs(lumaNE + lumaSE - 2.0 * lumaE);\n"
+               "  float edgeVert = abs(lumaSW + lumaSE - 2.0 * lumaS) + 2.0 * abs(lumaWE - 2.0 * lumaM) + abs(lumaNW + lumaNE - 2.0 * lumaN);\n"
+               "  bool horzSpan = edgeHorz >= edgeVert;\n"
+               "  float lengthSign = horzSpan ? rcp.y : rcp.x;\n"
+               "  if (!horzSpan) { lumaN = lumaW; lumaS = lumaE; }\n"
+               "  float subpixC = clamp(abs(((lumaNS + lumaWE) * 2.0 + lumaNW + lumaSW + lumaNE + lumaSE) / 12.0 - lumaM) / range, 0.0, 1.0);\n"
+               "  float gradientN = lumaN - lumaM, gradientS = lumaS - lumaM;\n"
+               "  bool pairN = abs(gradientN) >= abs(gradientS);\n"
+               "  float gradientScaled = max(abs(gradientN), abs(gradientS)) * 0.25;\n"
+               "  if (pairN) lengthSign = -lengthSign;\n"
+               "  float lumaHalf = ((pairN ? lumaN : lumaS) + lumaM) * 0.5;\n"
+               "  vec2 posB = pos + (horzSpan ? vec2(0.0, lengthSign) : vec2(lengthSign, 0.0)) * 0.5;\n"
+               "  vec2 off = horzSpan ? vec2(rcp.x, 0.0) : vec2(0.0, rcp.y);\n"
+               "  vec2 posN = posB - off * pc.p[0].x, posP = posB + off * pc.p[0].x;\n"
+               "  float endN = luma(posN) - lumaHalf, endP = luma(posP) - lumaHalf;\n"
+               "  bool doneN = abs(endN) >= gradientScaled, doneP = abs(endP) >= gradientScaled;\n"
+               "  int steps = int(pc.a.w);\n"
+               "  for (int i = 1; i < steps && !(doneN && doneP); i++) {  // the last step is taken without a look\n"
+               "    float s = pc.p[i >> 2][i & 3];\n"
+               "    if (!doneN) posN -= off * s;\n"
+               "    if (!doneP) posP += off * s;\n"
+               "    if (i == steps - 1) break;\n"
+               "    if (!doneN) { endN = luma(posN) - lumaHalf; doneN = abs(endN) >= gradientScaled; }\n"
+               "    if (!doneP) { endP = luma(posP) - lumaHalf; doneP = abs(endP) >= gradientScaled; }\n"
+               "  }\n"
+               "  float dstN = horzSpan ? pos.x - posN.x : pos.y - posN.y, dstP = horzSpan ? posP.x - pos.x : posP.y - pos.y;\n"
+               "  bool goodSpan = ((dstN < dstP ? endN : endP) < 0.0) != (lumaM < lumaHalf);\n"
+               "  float pixelOffset = goodSpan ? 0.5 - min(dstN, dstP) / (dstN + dstP) : 0.0;\n"
+               "  float subpixF = (3.0 - 2.0 * subpixC) * subpixC * subpixC;\n"
+               "  float offset = max(pixelOffset, subpixF * subpixF * pc.a.x) * lengthSign;\n"
+               "  o = vec4(textureLod(t, pos + (horzSpan ? vec2(0.0, offset) : vec2(offset, 0.0)), 0.0).rgb, lumaM);\n"
+               "}\n";
+    }
     if (!strcmp(name, "resolve.frag.depth") || !strcmp(name, "resolve.frag.depth.s")) {
         *stage = STAGE_FRAGMENT;
         if (name[18] == '.')

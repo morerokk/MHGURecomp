@@ -189,6 +189,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Invalid interface scale.", "Escala del menú no válida."},
         {"On", "Sí"},
         {"Off", "No"},
+        {"Game", "Juego"},
         {"Windowed", "Ventana"},
         {"Fullscreen", "Pantalla completa"},
         {"Borderless", "Sin bordes"},
