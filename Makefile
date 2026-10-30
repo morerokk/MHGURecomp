@@ -19,11 +19,15 @@ O        ?= obj
 CC       := clang
 CXX      := clang++
 GENARCH  ?= -march=x86-64-v3  # AVX2 + FMA (Haswell or newer)
+# GENARCH_SSE4: the game code once more for CPUs without them (Sandy / Ivy Bridge, AMD before Excavator), needing
+# SSE4.2 at most, as mhgugame-sse4, which runtime/gamelib.c loads on those. Empty: not built.
+GENARCH_SSE4 ?= -march=x86-64-v2
 GENFLAGS := -O1 -fno-strict-aliasing -ffp-contract=off -fno-math-errno -Wno-return-type -Wno-unused-label \
-            -Wno-parentheses-equality -Wno-unused-value -fvisibility=hidden -Iruntime $(GENARCH)
+            -Wno-parentheses-equality -Wno-unused-value -fvisibility=hidden -Iruntime
 
 GEN_SRC  := $(wildcard $(GEN)/main/*.c) $(wildcard $(GEN)/sdk/*.c)
 GEN_OBJ  := $(patsubst $(GEN)/%.c,$(O)/gen/%.o,$(GEN_SRC)) $(O)/gen/tools/gamelib_entry.o
+GEN_OBJ_SSE4 := $(patsubst $(GEN)/%.c,$(O)/gen-sse4/%.o,$(GEN_SRC)) $(O)/gen-sse4/tools/gamelib_entry.o
 RT_SRC   := $(wildcard runtime/*.c) $(wildcard runtime/hle/*.c) $(wildcard runtime/services/*.c) $(wildcard runtime/net/*.c) \
             runtime/nvn/objects.c runtime/nvn/cmdbuf.c runtime/nvn/nvn_args.c runtime/nvn/tegra.c runtime/nvn/formats.c \
             runtime/nvn/backend_null.c runtime/nvn/astc.c runtime/nvn/maxwell/translate.c $(wildcard runtime/nvn/vulkan/*.c) \
@@ -67,6 +71,7 @@ LDFLAGS  := -fuse-ld=lld -Wl,--stack,16777216 -lSDL3 $(AV_LIBS) -lvulkan-1 -lsha
             -lbcrypt -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic \
             -Wl,--export-all-symbols -Wl,--out-implib,$(O)/mhgurecomp.dll.a
 GAMELIB  := $(B)/mhgugame.dll
+GAMELIB_SSE4 := $(B)/mhgugame-sse4.dll
 GAMELIB_LDFLAGS := -shared -fuse-ld=lld -static-libgcc $(O)/mhgurecomp.dll.a
 UPDATER  := $(B)/mhgurecomp-updater.exe
 # (a window program; zlib linked in, WinHTTP is Windows')
@@ -83,13 +88,15 @@ GLIBC_MAX  := 2.41
 GLIBC_WRAP := sqrtf acosf atan2f sinh cosh
 LDFLAGS  += $(foreach f,$(GLIBC_WRAP),-Wl,--wrap=$(f))
 GAMELIB  := $(B)/mhgugame.so
+GAMELIB_SSE4 := $(B)/mhgugame-sse4.so
 GAMELIB_LDFLAGS := -shared -fuse-ld=lld
 UPDATER  := $(B)/mhgurecomp-updater
 # (libcurl: opened at run time, updater/http.c)
 UPD_LDFLAGS := -fuse-ld=lld -lSDL3 -lz -ldl
 endif
 
-# GAMELIB_ID: what the game code library is compiled against. A library with another id is refused at startup.
+# GAMELIB_ID: what the game code library is compiled against. A library with another id is refused at startup. (Not
+# GENARCH: both libraries have the same interface.)
 GAMELIB_SRCS := tools/gen.py tools/lifter.py tools/neon.py tools/nso.py tools/gamelib_entry.c \
                 runtime/hle/hle_symbols.txt runtime/cpu.h runtime/vfp.h runtime/neon_rt.h runtime/gamelib.h
 GAMELIB_ID := $(shell (cat $(GAMELIB_SRCS); echo '$(GENFLAGS)') | sha256sum | cut -c1-16)
@@ -156,7 +163,8 @@ else
 RT_CXX   := $(O)/rt/nvn/vulkan/vma.o $(FSR_OBJ)
 endif
 
-all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) data licenses pipelist
+GAMELIBS := $(if $(GEN_SRC),$(GAMELIB) $(if $(strip $(GENARCH_SSE4)),$(GAMELIB_SSE4)))
+all: $(EXE) $(GAMELIBS) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) data licenses pipelist
 
 # Host-only INI/settings regression test: no game dump or generated code required.
 .PHONY: test-settings
@@ -167,7 +175,10 @@ test-settings:
 
 $(O)/gen/%.o: $(GEN)/%.c runtime/cpu.h runtime/vfp.h runtime/neon_rt.h
 	@mkdir -p $(dir $@)
-	@$(CC) $(GENFLAGS) -c $< -o $@
+	@$(CC) $(GENFLAGS) $(GENARCH) -c $< -o $@
+$(O)/gen-sse4/%.o: $(GEN)/%.c runtime/cpu.h runtime/vfp.h runtime/neon_rt.h
+	@mkdir -p $(dir $@)
+	@$(CC) $(GENFLAGS) $(GENARCH_SSE4) -c $< -o $@
 
 
 # the id as a file, rewritten only when it changes: both sides of the library interface rebuild together
@@ -176,7 +187,10 @@ $(O)/gamelib.id: FORCE
 
 $(O)/gen/tools/gamelib_entry.o: tools/gamelib_entry.c $(O)/gamelib.id
 	@mkdir -p $(dir $@)
-	$(CC) $(GENFLAGS) -DGAMELIB_ID='"$(GAMELIB_ID)"' -c $< -o $@
+	$(CC) $(GENFLAGS) $(GENARCH) -DGAMELIB_ID='"$(GAMELIB_ID)"' -c $< -o $@
+$(O)/gen-sse4/tools/gamelib_entry.o: tools/gamelib_entry.c $(O)/gamelib.id
+	@mkdir -p $(dir $@)
+	$(CC) $(GENFLAGS) $(GENARCH_SSE4) -DGAMELIB_ID='"$(GAMELIB_ID)"' -c $< -o $@
 $(O)/rt/gamelib.o: $(O)/gamelib.id
 $(O)/rt/gamelib.o: RTFLAGS += -DGAMELIB_ID='"$(GAMELIB_ID)"'
 $(O)/shader.id: FORCE
@@ -295,6 +309,10 @@ $(GAMELIB): $(GEN_OBJ) | $(EXE)
 	@mkdir -p $(O)
 	$(CC) $(GAMELIB_LDFLAGS) -o $(O)/gamelib.tmp $^
 	mv -f $(O)/gamelib.tmp $@
+$(GAMELIB_SSE4): $(GEN_OBJ_SSE4) | $(EXE)
+	@mkdir -p $(O)
+	$(CC) $(GAMELIB_LDFLAGS) -o $(O)/gamelib-sse4.tmp $^
+	mv -f $(O)/gamelib-sse4.tmp $@
 
 PY := $(firstword $(wildcard tools/venv/Scripts/python.exe) $(wildcard tools/venv/bin/python) python3)
 
@@ -307,7 +325,7 @@ PY := $(firstword $(wildcard tools/venv/Scripts/python.exe) $(wildcard tools/ven
 # (--with: MSYS2 packages linked into the executable or into a bundled DLL, whose licenses go along too: the static
 # GCC runtime, VulkanMemoryAllocator, and glslang / SPIRV-Tools inside shaderc's DLL)
 LICENSE_PKGS := libstdc++ libgcc libwinpthread vulkan-memory-allocator glslang spirv-tools zlib
-bundle: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER)
+bundle: $(EXE) $(GAMELIBS) $(UPDATER)
 	@$(PY) tools/bundle_dlls.py "$$(cygpath -m "$$(dirname "$$(command -v $(CC))")")" $(B) $^ \
 	    --licenses $(B)/licenses --with $(LICENSE_PKGS)
 
