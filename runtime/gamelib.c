@@ -57,7 +57,7 @@ static void check_cpu(const char *path, const uint32_t *needs) {
 }
 
 // The game code is built for x86-64-v3 (AVX2, FMA, BMI2...: Haswell, Excavator or newer). On an older CPU its first such
-// instruction stops the game ("illegal instruction"), so there it is the library built without them (GAMELIB_NAME_NOAVX2).
+// instruction stops the game ("illegal instruction"), so there it is the library built without them (GAMELIB_NAME_SSE4).
 static bool cpu_has_v3(void) {
 #if defined(__x86_64__)
     __builtin_cpu_init();
@@ -86,7 +86,7 @@ bool gamelib_load(char *why, size_t why_size) {
         snprintf(path, sizeof path, "%s%s", exe, GAMELIB_NAME);
         if (!cpu_has_v3()) {
             snprintf(main_path, sizeof main_path, "%s", path);
-            snprintf(path, sizeof path, "%s%s", exe, GAMELIB_NAME_NOAVX2);
+            snprintf(path, sizeof path, "%s%s", exe, GAMELIB_NAME_SSE4);
             LOG("[gamelib] the CPU has no AVX2 / FMA / BMI2: the game code built without them\n");
         }
 #endif
