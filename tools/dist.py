@@ -28,8 +28,8 @@ def files(build, platform):
         extra = sorted(n for n in os.listdir(build) if n.lower().endswith('.dll') and n not in programs)
     else:
         programs = ['mhgurecomp', 'mhgugame.so', 'mhgurecomp-updater']
-        # (the game code for CPUs without AVX2, when built: Makefile GENARCH_NOAVX2; on Windows a .dll like the others)
-        programs += [n for n in ['mhgugame-noavx2.so'] if os.path.isfile(os.path.join(build, n))]
+        # (the game code for CPUs without AVX2, when built: Makefile GENARCH_SSE4; on Windows a .dll like the others)
+        programs += [n for n in ['mhgugame-sse4.so'] if os.path.isfile(os.path.join(build, n))]
         extra = []
     out = []
     for n in programs + extra:
