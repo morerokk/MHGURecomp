@@ -302,7 +302,7 @@ Useful targets and options:
 - `make test-lift`: checks the recompiler against the Unicorn CPU emulator on thousands of the game's instructions.
 - `make clean`: removes the compiled files (`obj\` and the program files in `build\`). It keeps `build\data`.
 - The game code is built twice: `mhgugame` for CPUs with AVX2 / FMA / BMI2 (`GENARCH=-march=x86-64-v3`) and
-  `mhgugame-noavx2` for older ones (`GENARCH_NOAVX2=-march=x86-64-v2`); the game loads the one its CPU runs. `GENARCH_NOAVX2=`
+  `mhgugame-sse4` for older ones (`GENARCH_SSE4=-march=x86-64-v2`); the game loads the one its CPU runs. `GENARCH_SSE4=`
   (empty) builds only the first.
 - `FFMPEG=system`: links the system's FFmpeg libraries instead of building them (see below).
 

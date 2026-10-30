@@ -15,7 +15,7 @@
 static const GameLibTables *g_tables;
 
 // The game code is built for x86-64-v3 (AVX2, FMA, BMI2...: Haswell, Excavator or newer). On an older CPU its first such
-// instruction stops the game ("illegal instruction"), so there it is the library built without them (GAMELIB_NAME_NOAVX2).
+// instruction stops the game ("illegal instruction"), so there it is the library built without them (GAMELIB_NAME_SSE4).
 static bool cpu_has_v3(void) {
 #if defined(__x86_64__)
     __builtin_cpu_init();
@@ -39,7 +39,7 @@ bool gamelib_load(char *why, size_t why_size) {
         if (bs > slash) slash = bs;
         if (slash) slash[1] = 0; else exe[0] = 0;
         v3 = cpu_has_v3();
-        snprintf(path, sizeof path, "%s%s", exe, v3 ? GAMELIB_NAME : GAMELIB_NAME_NOAVX2);
+        snprintf(path, sizeof path, "%s%s", exe, v3 ? GAMELIB_NAME : GAMELIB_NAME_SSE4);
         if (!v3) LOG("[gamelib] the CPU has no AVX2 / FMA / BMI2: the game code built without them\n");
     }
 #ifdef _WIN32

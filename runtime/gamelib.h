@@ -7,14 +7,14 @@
 
 #include "cpu.h"
 
-// GAMELIB_NAME_NOAVX2: the same, built for CPUs without AVX2 / FMA / BMI2 (Makefile GENARCH_NOAVX2)
+// GAMELIB_NAME_SSE4: the same, built for CPUs without AVX2 / FMA / BMI2 (Makefile GENARCH_SSE4)
 #if defined(_WIN32)
 #define GAMELIB_NAME "mhgugame.dll"
-#define GAMELIB_NAME_NOAVX2 "mhgugame-noavx2.dll"
+#define GAMELIB_NAME_SSE4 "mhgugame-sse4.dll"
 #define GAMELIB_EXPORT __declspec(dllexport)
 #else
 #define GAMELIB_NAME "mhgugame.so"
-#define GAMELIB_NAME_NOAVX2 "mhgugame-noavx2.so"
+#define GAMELIB_NAME_SSE4 "mhgugame-sse4.so"
 #define GAMELIB_EXPORT __attribute__((visibility("default")))
 #endif
 
