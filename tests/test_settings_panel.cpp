@@ -270,6 +270,10 @@ int main() {
     }
     fs::remove_all("obj/settings-test/mods/Eee");
     tab();
+    selected("cheat.0");
+    confirm();
+    assert(!cheats_enabled(0));
+    tab();
     selected("language");
     tab();
     selected("display.mode");
@@ -381,6 +385,7 @@ int main() {
     tab();
     tab();
     tab();
+    tab();
     selected("language");
     down(6);
     selected("restart");
@@ -407,6 +412,7 @@ int main() {
     assert(w->Size.x <= io.DisplaySize.x);
     assert(w->ContentSize.x <= w->InnerRect.GetWidth() + 1);
     float top = w->Pos.y;
+    press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     selected("hp.0");

@@ -172,7 +172,7 @@ anti-aliasing, VSync, controls and volume apply when you save; the settings mark
 - `[Audio]`: `Volume` (0 to 100: the whole game), `MuteInBackground` (On / Off, default Off: no sound while the
   game's window is in the background)
 - `[Application]`: `ConfirmExit` (ask before the window closes), and the settings menu's `Language` (English /
-  Spanish), `ButtonIcons` (Xbox / Switch / PlayStation) and `MenuScale` (100 to 200 percent), and `Updates` (Ask /
+  French / Spanish / German / Italian / Traditional_Chinese / Simplified_Chinese), `ButtonIcons` (Xbox / Switch / PlayStation) and `MenuScale` (100 to 200 percent), and `Updates` (Ask /
   Auto / Off: what `mhgurecomp-updater` does, see "Staying up to date")
 
 ### Multiplayer
@@ -231,7 +231,8 @@ starting with its name in square brackets:
 04000000 000DFAB4 E1A00080
 ```
 
-- To turn off a file without deleting it, start its name with `_`.
+- To turn off a file without deleting it, start its name with `_` (its cheats load in the off state).
+- The **Cheats** tab of the settings menu (F1, or Minus + Plus) lists all loaded cheats and lets you switch them on and off in real time (changes to game code and memory apply or revert cleanly at once, with no restart required). "Turn all cheats off" disables all cheats. Choices made in the menu are remembered in `cheats\cheats_state.ini`.
 - Cheats that change the game's code also work: the port runs each changed function in an interpreter. That
   function runs slower, which only matters for functions the game calls very often.
 - `log.txt` lists the cheats it loaded, and any it couldn't read.

@@ -12,6 +12,7 @@ enum { DISPLAY_WINDOWED, DISPLAY_FULLSCREEN, DISPLAY_BORDERLESS };
 enum { FACE_POSITION, FACE_LABEL };
 enum { COMBO_LENIENT, COMBO_STRICT };  // [Controls] ComboInputWindow (runtime/hle/combowin.c)
 enum { MENU_CONFIRM_ORIGINAL, MENU_CONFIRM_SOUTH, MENU_CONFIRM_EAST };
+enum { RECOMP_LANG_ENGLISH, RECOMP_LANG_FRENCH, RECOMP_LANG_SPANISH, RECOMP_LANG_GERMAN, RECOMP_LANG_ITALIAN, RECOMP_LANG_TRADITIONAL_CHINESE, RECOMP_LANG_SIMPLIFIED_CHINESE };
 
 // [Monster HP]: factors on the HP multiplier of Hub-type quests' large monsters
 #define HP_QUESTS_MAX 256
@@ -46,7 +47,7 @@ typedef struct {
     int background_input;     // the controller keeps working while the window is in the background (runtime/ui.c)
     int volume;               // host master volume, 0..100; independent of the game's music / SFX settings
     int button_icons;         // 0: Xbox, 1: Switch, 2: PlayStation (visual guides only)
-    int language;             // 0: English, 1: Spanish (host menu only)
+    int language;             // RECOMP_LANG_*: 0: English, 1: French, 2: Spanish, 3: German, 4: Italian, 5: Traditional_Chinese, 6: Simplified_Chinese (host menu only)
     int menu_scale;           // host UI text/layout scale, 100..200 percent
     int menu_confirm;         // independent confirmation policy for the host settings menu
     int confirm_exit;         // ask before closing the application

@@ -16,14 +16,14 @@ def literals(text):
 class SettingsLocaleTest(unittest.TestCase):
     def test_catalog_and_visible_labels(self):
         catalog = (ROOT / "runtime/settings_locale.h").read_text(encoding="utf-8")
-        pairs = [tuple(literals(value)) for value in re.findall(
-            r'\{\s*' + LITERAL + r'\s*,\s*' + LITERAL + r'\s*\}', catalog)]
-        keys = [en for en, _ in pairs]
-        self.assertTrue(pairs)
+        raw_entries = [literals(value) for value in re.findall(r'\{([^{}]+)\}', catalog)]
+        entries = [e for e in raw_entries if len(e) == 7]
+        keys = [e[0] for e in entries]
+        self.assertTrue(entries)
         self.assertFalse([key for key, count in Counter(keys).items() if count > 1])
-        self.assertTrue(all(en.strip() and es.strip() for en, es in pairs))
+        self.assertTrue(all(all(text.strip() for text in e) for e in entries))
         self.assertNotIn(chr(0xfffd), catalog)
-        translations = dict(pairs)
+        translations = {e[0]: e[2] for e in entries}
         self.assertEqual(translations["Miscellaneous"], "Misceláneos")
         self.assertEqual(translations["Hunter"], "Cazador")
         self.assertEqual(translations["Reset this tab"], "Restablecer esta pestaña")
@@ -32,7 +32,9 @@ class SettingsLocaleTest(unittest.TestCase):
         source = re.sub(r'//[^\n]*|/\*.*?\*/', '', source, flags=re.S)
         # INI keys looked up in the settings table (cold("Mode"), lo("FPS")...) are not shown
         source = re.sub(r'\b(?:cold|lo|hi)\(' + LITERAL + r'\)', '', source)
-        unchanged = {"English", "Español", "Xbox", "Switch", "PlayStation",
+        unchanged = {"English", "Français", "Español", "Deutsch", "Italiano",
+                     "Traditional_Chinese", "Simplified_Chinese",
+                     "Xbox", "Switch", "PlayStation",
                      "FSR", "FSR 3.1", "FSR 4", "MSAA", "FXAA", "Settings##main"}
         visible = {text for text in literals(source) if text and
                    (text[0].isupper() or " " in text) and any(c.isalpha() for c in text)}
@@ -41,7 +43,7 @@ class SettingsLocaleTest(unittest.TestCase):
 
         # notices on screen (runtime/net/ldn.c: UI_TEXT("..."))
         notices = literals(" ".join(re.findall(r'UI_TEXT\((' + LITERAL + r')\)',
-                                               (ROOT / "runtime/net/ldn.c").read_text(encoding="utf-8"))))
+                                                (ROOT / "runtime/net/ldn.c").read_text(encoding="utf-8"))))
         self.assertTrue(notices)
         self.assertFalse(set(notices) - set(keys), f"Untranslated notices: {sorted(set(notices) - set(keys))}")
 

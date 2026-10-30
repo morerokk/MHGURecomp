@@ -6,6 +6,7 @@
 #include "app_actions.h"
 #include "overlay.h"
 #include "modorder.h"
+#include "cheats_ui.h"
 #include "net/net.h"
 #include "imgui_internal.h"
 #include <SDL3/SDL.h>
@@ -84,7 +85,7 @@ std::string fmt(const char *text, ...) {
     return buffer;
 }
 // The Mods tab: the mods folder's state (modorder.h), which is saved with the rest of the settings
-constexpr int PAGES = 7, MODS_PAGE = 5;
+constexpr int PAGES = 8, MODS_PAGE = 5, CHEATS_PAGE = 6, APP_PAGE = 7;
 struct ScanResult {
     std::vector<std::string> names;  // (the order ModConflict's indexes are in)
     ModScan scan = {};
@@ -534,7 +535,11 @@ void reset_section() {
         std::sort(mods.draft.begin(), mods.draft.end(),
                   [](const ModEntry &a, const ModEntry &b) { return strcasecmp(a.name, b.name) < 0; });
         break;
-    case 6:
+    case CHEATS_PAGE:  // back to the start: on unless the file's name starts with '_'
+        for (int i = 0; i < cheats_count(); ++i)
+            cheats_set_enabled(i, cheats_file(i)[0] != '_');
+        break;
+    case APP_PAGE:
         c.language = f.language;
         c.menu_scale = f.menu_scale;
         c.confirm_exit = f.confirm_exit;
@@ -704,6 +709,24 @@ void mods_rows(std::vector<Row> &r) {
             }
         mods.scan.reset();
     });
+}
+// The Cheats tab: the cheats cheats.c loaded, switched on and off at once (no Save, no restart: cheats_set_enabled
+// applies and undoes their changes in memory, and remembers the choice in cheats/cheats_state.ini)
+void cheats_rows(std::vector<Row> &r) {
+    int n = cheats_count();
+    if (!n)
+        action(r, "cheats.none", tr("No cheats found in the cheats folder"), []() {});
+    for (int i = 0; i < n; ++i) {
+        Row row;
+        row.id = "cheat." + std::to_string(i);
+        row.title = std::string(cheats_master(i) ? "{" : "") + cheats_name(i) + (cheats_master(i) ? "}" : "");
+        row.value = tr(cheats_enabled(i) ? "On" : "Off");
+        row.adjust = [i](int d) { cheats_set_enabled(i, d > 0); };
+        row.activate = [i]() { cheats_set_enabled(i, !cheats_enabled(i)); };
+        r.push_back(std::move(row));
+    }
+    if (n)
+        action(r, "cheats.off", tr("Turn all cheats off"), []() { cheats_disable_all(); });
 }
 std::vector<Row> main_rows() {
     std::vector<Row> r;
@@ -877,8 +900,11 @@ std::vector<Row> main_rows() {
     case MODS_PAGE:
         mods_rows(r);
         break;
-    case 6:
-        add_choice(r, "language", "Language", c.language, {"English", "Español"},
+    case CHEATS_PAGE:
+        cheats_rows(r);
+        break;
+    case APP_PAGE:
+        add_choice(r, "language", "Language", c.language, {"English", "Français", "Español", "Deutsch", "Italiano", "Traditional_Chinese", "Simplified_Chinese"},
                    [](int v) { c.language = v; }, cold("Language"));
         number(r, "scale", "Interface scale (%)", &c.menu_scale, (int)lo("MenuScale"), (int)hi("MenuScale"), 10, cold("MenuScale"));
         add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, cold("ConfirmExit"));
@@ -1277,7 +1303,7 @@ void settings_panel(bool *open) {
             first_page((s.page + 1) % PAGES);
         if (pressed(ImGuiKey_GamepadL1))
             first_page((s.page + PAGES - 1) % PAGES);
-        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Miscellaneous", "Mods", "App"};
+        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Miscellaneous", "Mods", "Cheats", "App"};
         float avail = ImGui::GetContentRegionAvail().x;
         float fw = ImGui::GetFontSize();
         ImVec2 scrolling_start = ImGui::GetCursorScreenPos();
@@ -1421,6 +1447,8 @@ void settings_panel(bool *open) {
             ImGui::TextWrapped("%s", tr("FSR overrides MSAA and FXAA while active."));
         if (s.page == MODS_PAGE)
             ImGui::TextWrapped("%s", tr("Mods load from top to bottom: a later mod wins. Select a conflict to choose which mod is used. Press Save, then restart."));
+        if (s.page == CHEATS_PAGE)
+            ImGui::TextWrapped("%s", tr("Cheats apply at once and are remembered. A cheat that changes the game's code makes that function run in the interpreter."));
         ImGui::TextUnformatted(tr("* Restart required"));
         // Keep scroll space for the pinned hints so the last action can scroll fully above them.
         ImGui::Dummy(ImVec2(1, guides.height + ImGui::GetStyle().ItemSpacing.y));

@@ -219,7 +219,7 @@ static const char DEFAULT_INI[] =
     "ConfirmExit = On\n"
     "\n"
     "; Language of the settings menu (F1, or Minus + Plus on a controller)\n"
-    "; English, Spanish\n"
+    "; English, French, Spanish, German, Italian, Traditional_Chinese, Simplified_Chinese\n"
     "; Default: English\n"
     "Language = English\n"
     "\n"
@@ -376,7 +376,9 @@ const ConfigSetting g_settings[] = {
     {"Audio", "Volume", SET_INT, F(volume), 0, 0, 100, NULL, NULL, false, ERR_MISC},
     ON_OFF("Audio", "MuteInBackground", mute_in_background, false),
     ON_OFF("Application", "ConfirmExit", confirm_exit, false),
-    {"Application", "Language", SET_CHOICE, F(language), 0, 0, 0, "English|en,Spanish|es", NULL, false, ERR_LANGUAGE},
+    {"Application", "Language", SET_CHOICE, F(language), 0, 0, 0,
+     "English|en,French|fr|Français|Francais,Spanish|es|Español|Espanol,German|de|Deutsch,Italian|it|Italiano,Traditional_Chinese|Traditional Chinese|Chinese_Trad|zh_hant|zh-hant|繁體中文,Simplified_Chinese|Simplified Chinese|Chinese_Simplified|Chinese_Simplifed|zh_hans|zh-hans|简体中文",
+     NULL, false, ERR_LANGUAGE},
     {"Application", "ButtonIcons", SET_CHOICE, F(button_icons), 0, 0, 0, "Xbox,Switch,PlayStation", NULL, false, ERR_ICONS},
     {"Application", "MenuScale", SET_INT, F(menu_scale), 0, 100, 200, NULL, NULL, false, ERR_SCALE},
     {"Application", "Updates", SET_CHOICE, F(updates), 0, 0, 0, "Ask,Auto|automatic,Off|never", NULL, false, ERR_UPDATES},

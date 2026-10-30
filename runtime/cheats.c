@@ -6,18 +6,24 @@
 // that description), once before the game starts and then once per frame the game presents, from the window loop
 // (as Atmosphere runs them beside the game). Memory regions: main is the main module (0x200000), heap, alias and aslr
 // the regions GetInfo reports to the game; an address that is not mapped reads as 0 and is not written.
+// [toggle patch] Cheats can be switched on and off while the game runs (cheats_set_enabled, for the F1 menu). Each cheat
+// keeps a journal of every byte it wrote (the byte before, and the byte it wrote last); switching it off puts back the
+// bytes that still hold what the cheat wrote and leaves the others alone (the game has reused that memory). A file whose
+// name starts with '_' is loaded but off; cheats/cheats_state.ini remembers what the menu switched.
 // A write into the game's code: the port runs code compiled ahead of time, which never sees it, so the function
 // holding the changed word runs in the interpreter from then on (dispatch_interpret: that function alone, at the
 // interpreter's speed); words written into the room after the code (padding up to the read-only data, where cheats
 // put new code) are interpreted when the changed code jumps there. A call already running when the code changes
 // finishes the old code.
 #include <ctype.h>
+#include <stdatomic.h>
 #include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
 
+#include "cheats_ui.h"
 #include "hle/input.h"
 #include "interp.h"
 #include "mods.h"
@@ -36,18 +42,32 @@ typedef struct {
     uint32_t w[5];
 } Op;
 
+typedef struct {  // one byte written by a cheat: the byte before it, and the byte it wrote last
+    uint32_t a;
+    uint8_t orig, last, used;
+} JEnt;
+
 typedef struct {
     char name[96], file[64];
     bool master;
+    bool enabled;
     Op *ops;
     int nops;
+    JEnt *jt;  // the journal: open-addressing table, jcap a power of two
+    uint32_t jcap, jcount;
 } Cheat;
 
 static Cheat *cheats;
 static int ncheats;
 static uint64_t reg[16], saved[16], statics[128];
 static uint64_t keys;
-static const Cheat *cur;  // the one running (for the log)
+static Cheat *cur;  // the one running (for the log, and its journal)
+
+// The menu (cheats_set_enabled...) may run on another thread than the window loop (cheats_frame): one lock around
+// everything that runs or changes a cheat. The critical sections are short.
+static atomic_flag lock = ATOMIC_FLAG_INIT;
+static void lock_cheats(void) { while (atomic_flag_test_and_set_explicit(&lock, memory_order_acquire)) {} }
+static void unlock_cheats(void) { atomic_flag_clear_explicit(&lock, memory_order_release); }
 
 const char *cheats_dir(void) {
     const char *e = getenv("MHGU_CHEATS_DIR");
@@ -149,8 +169,11 @@ static const char *decode(Cheat *ch, const uint32_t *w, int n) {
 }
 
 // ------------------------------------------------------------------ loading
+static bool load_off;  // the file being loaded starts with '_': its cheats are loaded but off
+
 static void add_cheat(const char *file, const char *name, bool master, const uint32_t *w, int n, const char *bad) {
     Cheat ch = {0};
+    ch.enabled = !load_off;
     snprintf(ch.name, sizeof ch.name, "%s", name);
     snprintf(ch.file, sizeof ch.file, "%s", file);
     ch.master = master;
@@ -249,14 +272,89 @@ static void code_changed(uint32_t a) {
                         a - m->base);
 }
 
+static bool in_code(uint64_t a, uint32_t t) {  // does [a, a+t) touch the game's code?
+    for (int i = 0; i < 2 && i < g_nmodules; i++) {
+        const Module *m = &g_modules[i];
+        if (a < m->base + m->ro_off && a + t > m->base + m->text_off) return true;
+    }
+    return false;
+}
+
+// ---- the journal of a cheat (what it needs to be switched off)
+static uint32_t jhash(uint32_t a) { return a * 2654435761u; }
+
+static void jgrow(Cheat *c) {
+    uint32_t cap = c->jcap ? c->jcap * 2 : 64;
+    JEnt *t = calloc(cap, sizeof(JEnt));
+    for (uint32_t i = 0; i < c->jcap; i++) {
+        if (!c->jt[i].used) continue;
+        uint32_t k = jhash(c->jt[i].a) & (cap - 1);
+        while (t[k].used) k = (k + 1) & (cap - 1);
+        t[k] = c->jt[i];
+    }
+    free(c->jt);
+    c->jt = t;
+    c->jcap = cap;
+}
+
+static void jnote(Cheat *c, uint32_t a, uint8_t nb, uint8_t before) {
+    if ((c->jcount + 1) * 10 >= c->jcap * 7) jgrow(c);
+    uint32_t k = jhash(a) & (c->jcap - 1);
+    while (c->jt[k].used && c->jt[k].a != a) k = (k + 1) & (c->jcap - 1);
+    JEnt *e = &c->jt[k];
+    if (!e->used) *e = (JEnt){a, before, nb, 1}, c->jcount++;  // the first write: the byte as the game had it
+    else e->last = nb;
+}
+
+// Bytes the game has already rewritten (an object that is gone...) are not worth keeping.
+static void jprune(Cheat *c) {
+    JEnt *old = c->jt;
+    uint32_t n = c->jcap;
+    c->jt = NULL;
+    c->jcap = c->jcount = 0;
+    for (uint32_t i = 0; i < n; i++)
+        if (old[i].used && kernel_mapped(old[i].a, 1) && *(uint8_t *)G2H(old[i].a) == old[i].last)
+            jnote(c, old[i].a, old[i].last, old[i].orig);
+    free(old);
+}
+
+static int cmp_u32(const void *a, const void *b) {
+    uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
+    return x < y ? -1 : x > y;
+}
+
+// Switch a cheat off: every byte that still holds what the cheat wrote gets its old value back.
+static void revert(Cheat *c) {
+    uint32_t *words = NULL;
+    int nw = 0, cap = 0;
+    cur = c;
+    for (uint32_t i = 0; i < c->jcap; i++) {
+        const JEnt *e = &c->jt[i];
+        if (!e->used || !kernel_mapped(e->a, 1)) continue;
+        uint8_t *p = G2H(e->a);
+        if (*p != e->last || e->last == e->orig) continue;  // changed by the game since, or nothing to undo
+        *p = e->orig;
+        if (in_code(e->a, 1)) {
+            if (nw == cap) words = realloc(words, (cap = cap ? cap * 2 : 16) * sizeof *words);
+            words[nw++] = e->a & ~3u;
+        }
+    }
+    free(c->jt);
+    c->jt = NULL;
+    c->jcap = c->jcount = 0;
+    if (nw) {  // the interpreter must see the code as it is again
+        qsort(words, nw, sizeof *words, cmp_u32);
+        for (int i = 0; i < nw; i++)
+            if (!i || words[i] != words[i - 1]) code_changed(words[i]);
+    }
+    free(words);
+}
+
 static void wr(uint64_t a, uint32_t t, uint64_t v) {
     if (!kernel_mapped(a, t)) return;
     uint8_t *p = G2H((uint32_t)a);
-    bool code = false;
-    for (int i = 0; i < 2 && i < g_nmodules; i++) {
-        const Module *m = &g_modules[i];
-        if (a < m->base + m->ro_off && a + t > m->base + m->text_off) code = true;
-    }
+    bool code = in_code(a, t);
+    for (uint32_t i = 0; i < t; i++) jnote(cur, (uint32_t)a + i, ((uint8_t *)&v)[i], p[i]);
     if (code && !memcmp(p, &v, t)) return;
     memcpy(p, &v, t);
     if (code)
@@ -472,12 +570,90 @@ static void run(Cheat *ch) {
         i = next;
     }
     if (budget < 0) LOG("[cheats] %s: ran too long (a loop that never ends?): stopped for this frame\n", ch->name);
+    if (ch->jcount > 4096) jprune(ch);
 }
 
 static void run_all(void) {
     for (int pass = 0; pass < 2; pass++)  // master codes first
         for (int i = 0; i < ncheats; i++)
-            if (cheats[i].master == !pass) run(&cheats[i]);
+            if (cheats[i].enabled && cheats[i].master == !pass) run(&cheats[i]);
+}
+
+// ------------------------------------------------------------------ what the menu switched
+static void state_path(char *out, size_t n) { snprintf(out, n, "%s/cheats_state.ini", cheats_dir()); }
+
+static void state_save(void) {  // one line per cheat: 1|0 TAB file TAB name
+    char path[1100];
+    state_path(path, sizeof path);
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    for (int i = 0; i < ncheats; i++) fprintf(f, "%d\t%s\t%s\n", cheats[i].enabled, cheats[i].file, cheats[i].name);
+    fclose(f);
+}
+
+static void state_load(void) {
+    char path[1100], line[512];
+    state_path(path, sizeof path);
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    while (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        char *file = strchr(line, '\t');
+        if (!file) continue;
+        *file++ = 0;
+        char *name = strchr(file, '\t');
+        if (!name) continue;
+        *name++ = 0;
+        for (int i = 0; i < ncheats; i++)
+            if (!strcmp(cheats[i].file, file) && !strcmp(cheats[i].name, name)) cheats[i].enabled = line[0] == '1';
+    }
+    fclose(f);
+}
+
+// ------------------------------------------------------------------ for the F1 menu
+int cheats_count(void) { return ncheats; }
+const char *cheats_name(int i) { return i >= 0 && i < ncheats ? cheats[i].name : ""; }
+const char *cheats_file(int i) { return i >= 0 && i < ncheats ? cheats[i].file : ""; }
+bool cheats_master(int i) { return i >= 0 && i < ncheats && cheats[i].master; }
+bool cheats_enabled(int i) { return i >= 0 && i < ncheats && cheats[i].enabled; }
+
+// Does it only write fixed values (a patch, mostly of the game's code: it runs in the interpreter)?
+bool cheats_is_patch(int i) {
+    if (i < 0 || i >= ncheats || !cheats[i].nops) return false;
+    for (int k = 0; k < cheats[i].nops; k++)
+        if (cheats[i].ops[k].type != 0x0) return false;
+    return true;
+}
+
+// Switch a cheat on or off now. Returns its state afterwards.
+bool cheats_set_enabled(int i, bool on) {
+    if (i < 0 || i >= ncheats) return false;
+    Cheat *c = &cheats[i];
+    lock_cheats();
+    if (c->enabled != on) {
+        if (on) {
+            c->enabled = true;
+            run(c);  // at once: its changes to the game's code are in place before the next frame
+        } else {
+            revert(c);
+            c->enabled = false;
+        }
+        state_save();
+    }
+    bool now = c->enabled;
+    unlock_cheats();
+    return now;
+}
+
+void cheats_disable_all(void) {
+    lock_cheats();
+    for (int i = 0; i < ncheats; i++)
+        if (cheats[i].enabled) {
+            revert(&cheats[i]);
+            cheats[i].enabled = false;
+        }
+    state_save();
+    unlock_cheats();
 }
 
 // ------------------------------------------------------------------ entry points
@@ -489,7 +665,7 @@ void cheats_init(void) {
     struct dirent *e;
     while ((e = readdir(d)) && n < 256) {
         size_t l = strlen(e->d_name);
-        if (e->d_name[0] != '_' && e->d_name[0] != '.' && l > 4 && !strcasecmp(e->d_name + l - 4, ".txt"))
+        if (e->d_name[0] != '.' && l > 4 && !strcasecmp(e->d_name + l - 4, ".txt"))
             names[n++] = strdup(e->d_name);
     }
     closedir(d);
@@ -497,9 +673,12 @@ void cheats_init(void) {
     for (int i = 0; i < n; i++) {
         char path[1024];
         snprintf(path, sizeof path, "%s/%s", cheats_dir(), names[i]);
+        load_off = names[i][0] == '_';
         load_file(path, names[i]);
         free(names[i]);
     }
+    load_off = false;
+    state_load();
     if (ncheats) run_all();  // (before the game starts: changes to its code are in place from the start)
 }
 
@@ -521,5 +700,7 @@ void cheats_frame(void) {
     if (s[2] > T) b |= 1u << 22;
     if (s[3] < -T) b |= 1u << 23;
     keys = b;
+    lock_cheats();
     run_all();
+    unlock_cheats();
 }

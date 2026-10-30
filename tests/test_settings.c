@@ -49,7 +49,7 @@ int main(int argc, char **argv) {
     assert(config_save(&volume_only,error,sizeof error));
     assert(fabsf(config_live_fov()-1.6f)<0.001f && fabsf(config_live_fps()-144.5f)<0.001f);
     float camera_before=camera_fovy(0.5f,g_render_aspect);
-    c.menu_confirm = MENU_CONFIRM_SOUTH; c.menu_scale = 170; c.fps = 120; c.fov = 1.2f; c.volume = 25; c.confirm_exit = 0; c.language = 1; c.button_icons = 2;
+    c.menu_confirm = MENU_CONFIRM_SOUTH; c.menu_scale = 170; c.fps = 120; c.fov = 1.2f; c.volume = 25; c.confirm_exit = 0; c.language = 2; c.button_icons = 2;
     c.fxaa=0; c.msaa=4; c.vsync=0; c.face_buttons=FACE_LABEL; c.background_input=0; c.mouse_sensitivity=2.5f;
     assert(config_save(&c,error,sizeof error) && !config_restart_required(&c));
     assert(config_live_fps()==120 && fabsf(config_live_fov()-1.2f)<0.001f);
@@ -60,16 +60,16 @@ int main(int argc, char **argv) {
     c.hp.quest[0] = c.hp.quest[1]; c.hp.quests = 1;
     assert(config_save(&c, error, sizeof error));
     assert(fabsf(config_audio_gain() - 0.25f) < 0.001f && !config_confirm_exit());
-    assert(config_language() == 1);
+    assert(config_language() == 2);
     assert(config_restart_required(&c));
     Config restored=c; restored.hp=initial.hp; // Reconstruct the loaded quest overrides, not compiled defaults.
     restored.hp.quests=2; restored.hp.quest[0].quest=101;
     for(int i=0;i<4;i++) restored.hp.quest[0].scale[i]=0.6f;
     restored.hp.quest[1]=c.hp.quest[0];
     assert(!config_restart_required(&restored));
-    assert(!strcmp(settings_text(1, "Language"), "Idioma"));
+    assert(!strcmp(settings_text(2, "Language"), "Idioma"));
     assert(!strcmp(settings_text(0, "Language"), "Language"));
-    assert(!strcmp(settings_text(1, "Duplicate quest ID."), "ID de misión repetido."));
+    assert(!strcmp(settings_text(2, "Duplicate quest ID."), "ID de misión repetido."));
     char *text = read_file(path);
     assert(strstr(text, "; Keep this comment\r\n"));
     assert(strstr(text, "; camera comment"));
@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
     bad.menu_scale=201;assert(!config_save(&bad,error,sizeof error));
     bad = c; bad.button_icons = 3;
     assert(!config_save(&bad, error, sizeof error));
-    bad = c; bad.language = 2;
+    bad = c; bad.language = 7;
     assert(!config_save(&bad, error, sizeof error));
     bad = c; bad.fov = NAN;
     assert(!config_save(&bad, error, sizeof error));
@@ -105,12 +105,12 @@ int main(int argc, char **argv) {
     assert(config_live_fps()==120 && config_live_msaa()==4 && !config_live_vsync() && !config_live_fxaa());
     assert(config_live_face_buttons()==FACE_LABEL && !config_live_background_input() && config_live_mouse_sensitivity()==2.5f);
     assert(fabsf(config_live_fov()-1.2f)<0.001f);
-    assert(config_language() == 1); // Failed writes must not change the UI language.
+    assert(config_language() == 2); // Failed writes must not change the UI language.
     set_env("MHGU_CONFIG", path);
     set_env("MHGU_WINDOW", ""); set_env("MHGU_FOV", ""); set_env("MHGU_FRAMERATE", "");
     g_config = initial; config_load();
     Config loaded = config_editable();
-    assert(loaded.language == 1 && config_language() == 1 && loaded.button_icons == 2);
+    assert(loaded.language == 2 && config_language() == 2 && loaded.button_icons == 2);
     assert(loaded.menu_scale == 170 && loaded.menu_confirm == MENU_CONFIRM_SOUTH);
     assert(config_live_menu_confirm() == MENU_CONFIRM_SOUTH);
     assert(loaded.fps == 120 && loaded.volume == 25 && loaded.hp.quests == 1);

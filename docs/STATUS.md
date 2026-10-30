@@ -873,6 +873,13 @@ runs, the skill table is the cheat's; without the fix, exception c00000fd. Teste
 docs/research/skill-points.md on the test save in a quest (exact), a VM test cheat (loops, registers, master first, C4
 once per press, a bad cheat refused), the Linux build. Log: "[cheats] <file>: <n> cheat(s): ...", "[cheats] <cheat>:
 changes the code at main+<x>: the function at main+<y> runs in the interpreter now".
+Cheats toggle & menu (runtime/cheats.c, runtime/cheats_ui.h, runtime/settings_panel.cpp, 2026-10-30): Cheats can be
+switched on and off while the game runs from the Cheats tab in the settings menu (cheats_set_enabled). Each cheat
+records an open-addressing journal (JEnt, jnote) of written bytes (original byte, last written byte, and address);
+disabling a cheat restores any bytes that still match what the cheat wrote (leaving memory reused by the game untouched)
+and restores function code. Choices are remembered in cheats/cheats_state.ini. Cheat files prefixed with '_' load disabled
+by default. Thread-safe atomic flag lock protects live cheat execution from UI toggles. Settings menu expanded to 8 tabs
+with full translations for 7 languages (English, French, Spanish, German, Italian, Traditional_Chinese, Simplified_Chinese).
 
 Skill points (docs/research/skill-points.md; extras/cheats): f_2df824 totals them, rows at [obj+0x188] (12 bytes:
 +4 activation, +6 tree, +8..+14 points per slot weapon/head/body/arms/waist/legs/talisman, +15 total, s8). "Skill
