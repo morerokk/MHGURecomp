@@ -56,10 +56,22 @@ static void check_cpu(const char *path, const uint32_t *needs) {
 #endif
 }
 
+// The game code is built for x86-64-v3 (AVX2, FMA, BMI2...: Haswell, Excavator or newer). On an older CPU its first such
+// instruction stops the game ("illegal instruction"), so there it is the library built without them (GAMELIB_NAME_NOAVX2).
+static bool cpu_has_v3(void) {
+#if defined(__x86_64__)
+    __builtin_cpu_init();
+    return __builtin_cpu_supports("x86-64-v3");
+#else
+    return true;
+#endif
+}
+
 bool gamelib_load(char *why, size_t why_size) {
     if (g_tables) return true;
     char path[1100];
     const char *env = getenv("MHGU_GAME_LIB");
+    char main_path[1100] = "";  // (the AVX2 library, tried when the CPU's own is missing)
     if (env && *env) {
         snprintf(path, sizeof path, "%s", env);
     } else {
@@ -72,15 +84,22 @@ bool gamelib_load(char *why, size_t why_size) {
         if (bs > slash) slash = bs;
         if (slash) slash[1] = 0; else exe[0] = 0;
         snprintf(path, sizeof path, "%s%s", exe, GAMELIB_NAME);
+        if (!cpu_has_v3()) {
+            snprintf(main_path, sizeof main_path, "%s", path);
+            snprintf(path, sizeof path, "%s%s", exe, GAMELIB_NAME_NOAVX2);
+            LOG("[gamelib] the CPU has no AVX2 / FMA / BMI2: the game code built without them\n");
+        }
 #endif
     }
 #ifdef _WIN32
     HMODULE h = LoadLibraryA(path);
+    if (!h && main_path[0]) h = LoadLibraryA(strcpy(path, main_path));  // (no build for this CPU: check_cpu says so)
     if (!h) { snprintf(why, why_size, "can't load %s (error %lu): run `make gen` and `make` first", path, GetLastError()); return false; }
     check_cpu(path, (const uint32_t *)(void *)GetProcAddress(h, GAMELIB_CPU_NEEDS));
     GameLibEntry entry = (GameLibEntry)(void *)GetProcAddress(h, GAMELIB_ENTRY);
 #else
     void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (!h && main_path[0]) h = dlopen(strcpy(path, main_path), RTLD_NOW | RTLD_LOCAL);  // (as above)
     if (!h) { snprintf(why, why_size, "%s", dlerror()); return false; }
     check_cpu(path, (const uint32_t *)dlsym(h, GAMELIB_CPU_NEEDS));
     GameLibEntry entry = (GameLibEntry)dlsym(h, GAMELIB_ENTRY);
