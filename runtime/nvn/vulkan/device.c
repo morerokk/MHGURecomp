@@ -165,7 +165,10 @@ static void create_device(void) {
     VkPhysicalDeviceFeatures2 have = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &f11_have};
     vkGetPhysicalDeviceFeatures2(g_vk.phys, &have);
     if (!f12_have.timelineSemaphore) FATAL("the GPU driver has no timeline semaphores (Vulkan 1.2 required)\n");
-    g_vk.divisor = g_vk.divisor && div_have.vertexAttributeInstanceRateDivisor;
+    VkPhysicalDeviceVulkan12Properties p12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
+    VkPhysicalDeviceProperties2 p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &p12};
+    vkGetPhysicalDeviceProperties2(g_vk.phys, &p2);
+    maxwell_ftz32 = p12.shaderDenormFlushToZeroFloat32 && !getenv("MHGU_VK_NO_FTZ");  // (translate.c glsl_ftz32)    g_vk.divisor = g_vk.divisor && div_have.vertexAttributeInstanceRateDivisor;
     g_vk.custom_border = g_vk.custom_border && cbc_have.customBorderColors && cbc_have.customBorderColorWithoutFormat;
 
     VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT div = {
@@ -218,8 +221,8 @@ static void create_device(void) {
                              .pQueueCreateInfos = &qi, .enabledExtensionCount = n_ext, .ppEnabledExtensionNames = ext};
     VK_CHECK(vkCreateDevice(g_vk.phys, &di, NULL, &g_vk.dev));
     vkGetDeviceQueue(g_vk.dev, g_vk.qfam, 0, &g_vk.queue);
-    LOG("[vk] features: divisor %d, custom border %d, BC %d, ASTC %d\n", g_vk.divisor, g_vk.custom_border,
-        h->textureCompressionBC, h->textureCompressionASTC_LDR);
+    LOG("[vk] features: divisor %d, custom border %d, BC %d, ASTC %d, denormals flushed on request %d\n", g_vk.divisor,
+        g_vk.custom_border, h->textureCompressionBC, h->textureCompressionASTC_LDR, maxwell_ftz32);
 
     // MSAA (settings): as many samples as asked for that colour and depth attachments both support and shaders can
     // read from depth (its resolve is a shader: exec.c vk_ms_resolve)

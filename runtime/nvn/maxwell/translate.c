@@ -23,6 +23,7 @@
 #include "shader.h"
 
 uint64_t maxwell_gmem_base, maxwell_gmem_size;
+bool maxwell_ftz32;
 const uint8_t *maxwell_dbg_code;
 uint32_t maxwell_dbg_pc;
 int maxwell_dbg_reg;
@@ -1750,8 +1751,13 @@ static void glsl_rewrite(Ctx *c, Str *o, const char *src) {
     }
 }
 
+// The game's float maths flushes denormals to zero (FMUL / FFMA .FTZ, nearly all of them), as Maxwell does. A GPU that
+// leaves it to the shader (Intel) is asked to, as the suspect for far monsters drawn with white patches there (issue
+// #96); NVIDIA can't be asked (maxwell_ftz32 false) and draws them right. MHGU_VK_NO_FTZ=1: not asked (to compare).
+static const char glsl_ftz32[] =
+    "#extension GL_EXT_spirv_intrinsics : require\n"
+    "spirv_execution_mode(extensions = [\"SPV_KHR_float_controls\"], capabilities = [4465], 4460, 32);\n";  // DenormFlushToZero 32
 static const char glsl_prelude[] =
-    "#version 460\n"
     "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
     "#extension GL_KHR_shader_subgroup_basic : require\n"
     "#extension GL_KHR_shader_subgroup_shuffle : require\n"
@@ -1819,7 +1825,7 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
     if (c->fail) { free(body.buf); free(c->body.buf); free(c); return info; }
     int set = stage == STAGE_FRAGMENT ? 1 : 0;
     Str s = {0};
-    sp(&s, "%s", glsl_prelude);
+    sp(&s, "#version 460\n%s%s", maxwell_ftz32 ? glsl_ftz32 : "", glsl_prelude);
     for (int i = 0; i < 18; i++) {
         if (!(info->cbuf_mask & (1u << i))) continue;
         uint32_t n = info->cbuf_size[i] / 16;
