@@ -140,7 +140,8 @@ GAMELIB  := $(B)/mhgugame.so
 GAMELIB_LDFLAGS := -shared -fuse-ld=lld
 UPDATER  := $(B)/mhgurecomp-updater
 # (libcurl: opened at run time, updater/http.c)
-UPD_LDFLAGS := -fuse-ld=lld $(SDL_LIBS) -lz -ldl $(GLIBC_WRAP_FLAGS)
+# (-lm: linux_glibc.c's wrappers call libm's old symbol versions; bundled SDL3 carried -lm in SDL_LIBS, system SDL3 does not)
+UPD_LDFLAGS := -fuse-ld=lld $(SDL_LIBS) -lz -ldl -lm $(GLIBC_WRAP_FLAGS)
 endif
 
 # GAMELIB_ID: what the game code library is compiled against. A library with another id is refused at startup.
