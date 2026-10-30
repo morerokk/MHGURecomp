@@ -93,6 +93,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Settings path is too long.", "La ruta de configuración es demasiado larga."},
         {"Cannot read the existing settings file.", "No se puede leer el archivo de configuración."},
         {"Cannot create a temporary settings file.", "No se puede crear un archivo temporal de configuración."},
+        {"Too many settings to save (ENTRY_MAX).", "Demasiados ajustes para guardar (ENTRY_MAX)."},
         {"Could not save settings; the previous file was kept.", "No se pudo guardar. Se ha conservado el archivo anterior."},
         {"Button icons", "Iconos del mando"},
         {"Invalid button icon layout.", "Estilo de iconos no válido."},

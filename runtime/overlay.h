@@ -1,5 +1,5 @@
-// Forge's ImGui overlay (runtime/overlay.cpp): its menu window with the plugins' settings, drawn over the game.
-// C and C++.
+// Forge's ImGui overlay (runtime/overlay.cpp): its menu window with the plugins' settings, drawn over the game - and
+// the runtime's own status line (overlay_status), with or without Forge. C and C++.
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
@@ -32,6 +32,13 @@ void overlay_pad(const OverlayPad *p);
 
 // The game's thread, once a frame (after the plugins' forge_onUpdate): the overlay's frame, plugins' UI included.
 void overlay_frame(void *cpu);
+
+// Any thread: a line of text in the window's lower left corner, over the game (full screen too), such as how far the
+// shader warm-up is; NULL or "": none. It starts ImGui without Forge when no plugin did.
+void overlay_status(const char *text);
+// The game's thread, as it presents a frame (runtime/nvn/vulkan/device.c, before taking the Vulkan lock): the overlay's
+// frame when no Forge plugin hooks the game's frame update (forge.c calls overlay_frame then).
+void overlay_tick(void);
 
 // Render thread, inside the window image's render pass (runtime/nvn/vulkan/device.c, under the Vulkan lock).
 typedef struct {

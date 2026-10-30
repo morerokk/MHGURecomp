@@ -14,6 +14,8 @@ typedef struct { const char *name; HostFn fn; } HleImplEntry;
 #define HLE_CAT(a, b) HLE_CAT2(a, b)
 #if defined(__linux__)
 #define HLE_SECTION "hle_impls"
+#elif defined(__APPLE__)
+#define HLE_SECTION "__DATA,hle_impls"  // Mach-O: bounds from ld64's section$start / section$end (runtime/dispatch.c)
 #else
 #define HLE_SECTION ".hle$m"  // between the .hle$a / .hle$z markers in runtime/dispatch.c
 #endif

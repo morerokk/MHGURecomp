@@ -139,7 +139,7 @@ bool config_validate(const Config *c, char *error, size_t size) {
 
 // What config_save writes: a setting of the table (setting) or a Quest<number> entry (setting NULL)
 typedef struct { const ConfigSetting *setting; const char *section; char key[64], value[256]; bool seen; } Entry;
-#define ENTRY_MAX (HP_QUESTS_MAX + 64)
+#define ENTRY_MAX (HP_QUESTS_MAX + 128)  // (every setting of g_settings, 66 now, and the quests set apart)
 static void normalize(const char *s, char *out, size_t size) {
     size_t n = 0;
     for (; *s && n + 1 < size; s++)
@@ -180,6 +180,7 @@ bool config_save(const Config *c, char *error, size_t error_size) {
     if (!config_validate(c, error, error_size)) return false;
     static Entry entries[ENTRY_MAX];  // (big: off the stack)
     int n = 0;
+    if (g_nsettings + c->hp.quests > ENTRY_MAX) return fail(error, error_size, "Too many settings to save (ENTRY_MAX).");
     for (int i = 0; i < g_nsettings; i++) {
         Entry *e = &entries[n++];
         e->setting = &g_settings[i], e->section = g_settings[i].section, e->seen = false;

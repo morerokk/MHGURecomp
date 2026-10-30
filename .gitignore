@@ -4,6 +4,11 @@
 /obj/
 /build-linux/
 /obj-linux/
+/app/
+/release/
+/third_party/macos-deps/
+/third_party/vk_mem_alloc/
+*.dylib
 /run/
 /game/
 /save/

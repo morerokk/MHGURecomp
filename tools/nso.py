@@ -3,7 +3,50 @@ dynamic info (symbols, REL relocations)."""
 import struct
 import sys
 
-import lz4.block
+try:
+    import lz4.block
+
+    def lz4_block(src, size):
+        return lz4.block.decompress(src, uncompressed_size=size)
+except ImportError:  # (macOS's own python3, which builds the game code on a player's Mac: tools/build_gamecode.py)
+    def lz4_block(src, size):
+        """An LZ4 block, decompressed: literals, then a match (offset back into the output, length) per sequence."""
+        dst = bytearray()
+        i, n = 0, len(src)
+        while i < n:
+            token = src[i]
+            i += 1
+            lit = token >> 4
+            if lit == 15:
+                while True:
+                    b = src[i]
+                    i += 1
+                    lit += b
+                    if b != 255:
+                        break
+            dst += src[i:i + lit]
+            i += lit
+            if i >= n:
+                break
+            off = src[i] | src[i + 1] << 8
+            i += 2
+            length = token & 15
+            if length == 15:
+                while True:
+                    b = src[i]
+                    i += 1
+                    length += b
+                    if b != 255:
+                        break
+            length += 4
+            start = len(dst) - off
+            if off >= length:
+                dst += dst[start:start + length]
+            else:  # (overlapping: the last `off` bytes repeat)
+                dst += (dst[start:] * (length // off + 1))[:length]
+        if len(dst) != size:
+            raise ValueError(f"LZ4 block: {len(dst)} bytes, {size} expected")
+        return bytes(dst)
 
 DT_NULL, DT_NEEDED, DT_PLTRELSZ, DT_HASH, DT_STRTAB, DT_SYMTAB, DT_RELA, DT_RELASZ = 0, 1, 2, 4, 5, 6, 7, 8
 DT_STRSZ, DT_INIT, DT_FINI, DT_REL, DT_RELSZ, DT_JMPREL = 10, 12, 13, 17, 18, 23
@@ -24,7 +67,7 @@ class Nso:
             comp_size = struct.unpack_from('<I', raw, 0x60 + i * 4)[0]
             data = raw[file_off:file_off + comp_size]
             if flags & (1 << i):
-                data = lz4.block.decompress(data, uncompressed_size=dec_size)
+                data = lz4_block(data, dec_size)
             segs.append((mem_off, data))
         self.bss_size = struct.unpack_from('<I', raw, 0x3C)[0]
         self.text = (segs[0][0], len(segs[0][1]))

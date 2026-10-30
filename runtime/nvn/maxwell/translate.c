@@ -1673,6 +1673,9 @@ static void glsl_rewrite(Ctx *c, Str *o, const char *src) {
         {"ulong", "uint64_t"}, {"rsqrt", "inversesqrt"}, {"rint", "roundEven"}, {"front_facing", "gl_FrontFacing"},
         {"point_coord", "gl_PointCoord"}, {"lane", "gl_SubgroupInvocationID"}, {"vid", "uint(gl_VertexIndex)"},
         {"iid", "uint(gl_InstanceIndex)"},
+        // (prelude helpers under their own names: MoltenVK's SPIRV-Cross keeps function names, and a GLSL fmin / fmax
+        // next to Metal's own is an ambiguous call there)
+        {"fmin", "nv_fmin"}, {"fmax", "nv_fmax"},
     };
     const char *p = src;
     while (*p) {
@@ -1773,8 +1776,8 @@ static const char glsl_prelude[] =
     // MSL semantics: saturate(NaN) = 0, fmin/fmax return the non-NaN operand
     "float saturate(float x) { return isnan(x) ? 0.0f : clamp(x, 0.0f, 1.0f); }\n"
     "vec2 saturate(vec2 x) { return vec2(saturate(x.x), saturate(x.y)); }\n"
-    "float fmin(float a, float b) { return isnan(a) ? b : (isnan(b) ? a : min(a, b)); }\n"
-    "float fmax(float a, float b) { return isnan(a) ? b : (isnan(b) ? a : max(a, b)); }\n"
+    "float nv_fmin(float a, float b) { return isnan(a) ? b : (isnan(b) ? a : min(a, b)); }\n"
+    "float nv_fmax(float a, float b) { return isnan(a) ? b : (isnan(b) ? a : max(a, b)); }\n"
     "uint clz(uint v) { return v == 0u ? 32u : uint(31 - findMSB(v)); }\n"
     "uint popcount(uint v) { return uint(bitCount(v)); }\n"
     "uint mulhi(uint a, uint b) { uint hi, lo; umulExtended(a, b, hi, lo); return hi; }\n"
@@ -1848,11 +1851,17 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         sp(&s, "layout(std140, set = %d, binding = 19) uniform Tint { vec4 ltint[2]; };\n", set);
         info->uses_tint = true;
     }
-    // NVN's fixed-function alpha test (color target 0 written as float, alpha included)
-    int alpha_func = stage == STAGE_FRAGMENT && key && key->alpha_func >= 1 && key->alpha_func <= 7 &&
-                     (c->omap_target & 0x8) && key->rt_kind[0] == 0 ? key->alpha_func : 0;
-    if (alpha_func)
+    // NVN's fixed-function alpha test (color target 0 written as float, alpha included): its function is a
+    // specialization constant (constant_id 0, set per pipeline; 0 = none: the test compiles away), so one program
+    // serves every alpha test - a separate program per function was a cold shader compile on its first draw. MSAA's
+    // sample coverage form stays a variant of its own (key->alpha_coverage, with key->alpha_func).
+    bool alpha_target = stage == STAGE_FRAGMENT && key && key->glsl && (c->omap_target & 0x8) && key->rt_kind[0] == 0;
+    int alpha_func = alpha_target && key->alpha_coverage > 1 && key->alpha_func >= 1 && key->alpha_func <= 7
+                         ? key->alpha_func : 0;
+    bool alpha_spec = alpha_target && !alpha_func;
+    if (alpha_func || alpha_spec)
         sp(&s, "layout(std140, set = %d, binding = %d) uniform AlphaRef { vec4 alpha_ref; };\n", set, ALPHA_REF_BUFFER_INDEX);
+    if (alpha_spec) sp(&s, "layout(constant_id = 0) const int nvn_alpha_func = 0;\n");
     for (int i = 0; i < info->ntex; i++) {
         ShaderTexture *t = &info->tex[i];
         sp(&s, "layout(set = %d, binding = %d) uniform %s t%d;\n", set, 32 + i, glsl_sampler_type(t), i);
@@ -1956,6 +1965,16 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
                    alpha_func <= 4 ? "alpha_ref.x - c0.a" : "c0.a - alpha_ref.x", cov);
             else
                 sp(&s, "  if (!(%s)) discard;\n", pass[alpha_func]);
+        } else if (alpha_spec) {
+            sp(&s, "  switch (nvn_alpha_func) {\n"
+                   "  case 1: discard;\n"
+                   "  case 2: if (!(c0.a < alpha_ref.x)) discard; break;\n"
+                   "  case 3: if (!(c0.a == alpha_ref.x)) discard; break;\n"
+                   "  case 4: if (!(c0.a <= alpha_ref.x)) discard; break;\n"
+                   "  case 5: if (!(c0.a > alpha_ref.x)) discard; break;\n"
+                   "  case 6: if (!(c0.a != alpha_ref.x)) discard; break;\n"
+                   "  case 7: if (!(c0.a >= alpha_ref.x)) discard; break;\n"
+                   "  }\n");
         }
         if (c->omap_depth) {
             if (c->reg_used[r + 1]) sp(&s, "  gl_FragDepth = as_f(r%d);\n", r + 1);

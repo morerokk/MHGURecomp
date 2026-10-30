@@ -10,6 +10,9 @@
 #if defined(_WIN32)
 #define GAMELIB_NAME "mhgugame.dll"
 #define GAMELIB_EXPORT __declspec(dllexport)
+#elif defined(__APPLE__)
+#define GAMELIB_NAME "mhgugame.dylib"
+#define GAMELIB_EXPORT __attribute__((visibility("default")))
 #else
 #define GAMELIB_NAME "mhgugame.so"
 #define GAMELIB_EXPORT __attribute__((visibility("default")))
@@ -37,6 +40,7 @@ extern "C" {
 // Loads the game code library (next to the executable, or MHGU_GAME_LIB). false: why says what's wrong.
 bool gamelib_load(char *why, size_t why_size);
 const GameLibTables *gamelib_tables(void);
+const char *gamelib_id(void);  // the id a game code library must have for this runtime
 #ifdef __cplusplus
 }
 #endif

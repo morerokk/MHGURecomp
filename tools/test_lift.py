@@ -8,6 +8,7 @@ Needs clang on PATH (MSYS2 UCRT64). Exit status 0 when everything matches.
 """
 import argparse
 import os
+import platform
 import random
 import re
 import struct
@@ -227,7 +228,9 @@ def main():
     with open(os.path.join(work, 'pattern.bin'), 'wb') as f:
         f.write(PATTERN)
     exe = os.path.join(work, 'harness.exe')
-    cmd = ['clang', '-O1', '-fno-strict-aliasing', '-ffp-contract=off', '-march=x86-64-v3', '-w',
+    # the game code's target (Makefile GENARCH): Apple Silicon or x86-64-v3
+    arch = '-mcpu=apple-m1' if platform.machine() == 'arm64' and sys.platform == 'darwin' else '-march=x86-64-v3'
+    cmd = ['clang', '-O1', '-fno-strict-aliasing', '-ffp-contract=off', arch, '-w',
            f'-I{os.path.join(ROOT, "runtime")}', '-o', exe, os.path.join(HERE, 'test_harness.c'),
            os.path.join(work, 'tests.c'), os.path.join(ROOT, 'runtime', 'simd_int.c'),
            os.path.join(ROOT, 'runtime', 'neon.c')] + ([os.path.join(ROOT, 'runtime', 'interp.c')] if args.interp else [])

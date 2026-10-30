@@ -7,6 +7,9 @@
 
 #if defined(__linux__)
 extern const ServiceDef __start_services[], __stop_services[];
+#elif defined(__APPLE__)
+extern const ServiceDef __start_services[] __asm("section$start$__DATA$services");
+extern const ServiceDef __stop_services[] __asm("section$end$__DATA$services");
 #else
 // PE/COFF: .svc$a < .svc$m (entries, ipc.h) < .svc$z (the linker sorts by the text after '$')
 __attribute__((section(".svc$a"), used)) static const ServiceDef __start_services[1];

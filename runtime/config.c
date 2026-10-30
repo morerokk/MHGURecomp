@@ -130,6 +130,9 @@ static const char DEFAULT_INI[] =
     "\n"
     "; Translate all of the game's shaders in the background at startup, so fewer things are drawn black the first time\n"
     "; they appear. The first start does this in about 20 seconds while the logos play; it needs about 340 MB in the cache folder.\n"
+#ifdef __APPLE__
+    "; On the Mac each shader is also prepared for Metal, a few minutes on the first start (\"Preparing shaders\" in the window).\n"
+#endif
     "; Default: On\n"
     "ShaderPrewarm = On\n"
     "\n"
@@ -282,6 +285,93 @@ static const char DEFAULT_INI[] =
     "; Ask, Auto, Off\n"
     "; Default: Ask\n"
     "Updates = Ask\n";
+
+// The macOS Settings window's and menu's rows (config.h SettingRow): every setting of the file but the per-quest
+// Quest<number> entries, in file order. Values are written into the file as given here. Left out: Upscaler (FSR 4 is
+// AMD's, for Windows) and Updates (there is no mhgurecomp-updater on the Mac).
+#define ONOFF "On|Off"
+#define KEYBIND(key, title) {"Keybinds", "Keybinds", key, title, SETTING_TEXT, NULL, NULL, true, false}
+const SettingRow g_setting_rows[] = {
+    {"Display", "Display", "Mode", "Mode", SETTING_CHOICE, "Borderless|Fullscreen|Windowed",
+     "Borderless (full screen)|Fullscreen (exclusive)|Windowed", true, true},
+    {"Display", "Display", "Resolution", "Resolution", SETTING_VALUE, "Desktop|1280x720|1600x900|1920x1080|2560x1440|3840x2160",
+     NULL, false, true},
+    {"Display", "Display", "RenderResolution", "3D Resolution", SETTING_VALUE, "Auto|1280x720|1920x1080|2560x1440|3840x2160",
+     NULL, false, true},
+    {"Display", "Display", "AspectRatio", "Aspect Ratio", SETTING_VALUE, "Auto|16:9|16:10|21:9|32:9", NULL, false, true},
+    {"Display", "Display", "FOV", "Field of View", SETTING_VALUE, "0.8|0.9|1.0|1.1|1.2|1.3|1.5", NULL, true, true},
+    {"Display", "Display", "UIAnchor", "HUD on Wide Screens", SETTING_CHOICE, "Center|Edges|21:9|32:9",
+     "Center (16:9)|Edges|21:9|32:9", false, true},
+    {"Graphics", "Anti-aliasing", "MSAA", "MSAA", SETTING_CHOICE, "Off|2x|4x|8x", NULL, true, true},
+    {"Graphics", "Anti-aliasing", "FXAA", "FXAA", SETTING_CHOICE, ONOFF, NULL, true, true},
+    {"Graphics", "Anti-aliasing", "FXAAMode", "FXAA Type", SETTING_CHOICE, "Original|3_11", "Original (the game's)|FXAA 3.11",
+     true, true},
+    {"Graphics", "Upscaler", "FSR", "FSR 3.1 Upscaler", SETTING_CHOICE, ONOFF, NULL, false, true},
+    {"Graphics", "Upscaler", "FSRQuality", "FSR Quality", SETTING_CHOICE, "NativeAA|Quality|Balanced|Performance|UltraPerformance",
+     "Native AA|Quality (1.5x)|Balanced (1.7x)|Performance (2x)|Ultra Performance (3x)", false, true},
+    {"Graphics", "Upscaler", "Sharpness", "FSR Sharpness", SETTING_VALUE, "0|0.4|0.6|0.8|1.0", NULL, false, false},
+    {"Graphics", "Upscaler", "ObjectMotion", "FSR Object Motion", SETTING_CHOICE, ONOFF, NULL, false, false},
+    {"Graphics", "Upscaler", "Reactive", "FSR Reactive Mask", SETTING_VALUE, "0|0.5|0.7|0.9|1.0", NULL, false, false},
+    {"Graphics", "Upscaler", "AnimSurf", "FSR Animated Surfaces", SETTING_CHOICE, ONOFF, NULL, false, false},
+    {"Graphics", "Graphics", "DrawDistance", "Draw Distance (People in Towns)", SETTING_VALUE, "0|0.5|1.0|1.5|2.0|3.0", NULL,
+     true, true},
+    {"Graphics", "Performance", "FPS", "Frame Rate Cap", SETTING_VALUE, "30|60|90|120|144|240", NULL, true, true},
+    {"Graphics", "Performance", "VSync", "VSync", SETTING_CHOICE, ONOFF, NULL, true, true},
+    {"Graphics", "Performance", "ShaderPrewarm", "Shader Prewarm", SETTING_CHOICE, ONOFF, NULL, false, true},
+    {"Controls", "Controls", "FaceButtons", "Face Buttons", SETTING_CHOICE, "Position|Label",
+     "By Position (Switch layout)|By Label", true, true},
+    {"Controls", "Controls", "MenuConfirm", "Confirm in the F1 Menu", SETTING_CHOICE, "Original|South|East",
+     "As in the Game|South (bottom button)|East (right button)", true, false},
+    {"Controls", "Controls", "BackgroundInput", "Controller in the Background", SETTING_CHOICE, ONOFF, NULL, true, true},
+    {"Controls", "Controls", "ComboInputWindow", "Two-Button Inputs", SETTING_CHOICE, "Lenient|Strict", NULL, true, false},
+    {"Controls", "Controls", "ChatKey", "Chat Key", SETTING_VALUE, "/|T|Y|Return", NULL, true, false},
+    {"Controls", "Mouse", "MouseSensitivity", "Mouse Sensitivity", SETTING_VALUE, "0.5|0.75|1.0|1.5|2.0|3.0", NULL, true, true},
+    KEYBIND("MoveUp", "Move Up"),
+    KEYBIND("MoveDown", "Move Down"),
+    KEYBIND("MoveLeft", "Move Left"),
+    KEYBIND("MoveRight", "Move Right"),
+    KEYBIND("Walk", "Walk"),
+    KEYBIND("A", "A"),
+    KEYBIND("B", "B"),
+    KEYBIND("X", "X"),
+    KEYBIND("Y", "Y"),
+    KEYBIND("L", "L"),
+    KEYBIND("R", "R"),
+    KEYBIND("ZL", "ZL"),
+    KEYBIND("ZR", "ZR"),
+    KEYBIND("Plus", "Plus"),
+    KEYBIND("Minus", "Minus"),
+    KEYBIND("DpadUp", "D-pad Up"),
+    KEYBIND("DpadDown", "D-pad Down"),
+    KEYBIND("DpadLeft", "D-pad Left"),
+    KEYBIND("DpadRight", "D-pad Right"),
+    KEYBIND("LeftStickClick", "Left Stick Click"),
+    KEYBIND("RightStickClick", "Right Stick Click"),
+    {"Multiplayer", "Multiplayer", "Port", "Port", SETTING_VALUE, "39500", NULL, false, false},
+    {"Multiplayer", "Multiplayer", "Join", "Join Addresses", SETTING_TEXT, NULL, NULL, true, false},
+    {"Multiplayer", "Multiplayer", "Server", "Hub Server", SETTING_TEXT, NULL, NULL, true, false},
+    {"Multiplayer", "Multiplayer", "Key", "Matchmaking Key", SETTING_TEXT, NULL, NULL, true, false},
+    {"Multiplayer", "Multiplayer", "SyncSmallMonsters", "Sync Small Monsters", SETTING_CHOICE, ONOFF, NULL, false, true},
+    {"Monster HP", "Monster HP", "1Player", "1 Hunter", SETTING_VALUE, "0.5|0.75|1.0|1.25|1.5|2.0", NULL, true, false},
+    {"Monster HP", "Monster HP", "2Players", "2 Hunters", SETTING_VALUE, "0.5|0.75|1.0|1.25|1.5|2.0", NULL, true, false},
+    {"Monster HP", "Monster HP", "3Players", "3 Hunters", SETTING_VALUE, "0.5|0.75|1.0|1.25|1.5|2.0", NULL, true, false},
+    {"Monster HP", "Monster HP", "4Players", "4 Hunters", SETTING_VALUE, "0.5|0.75|1.0|1.25|1.5|2.0", NULL, true, false},
+    {"Multiplayer", "Village Quests", "VillageQuestsInHub", "Village Quests in the Hub", SETTING_CHOICE, ONOFF, NULL, true, true},
+    {"Multiplayer", "Village Quests", "HubHP", "Village Quest HP in the Hub", SETTING_VALUE, "1.0|1.5|2.0|3.0", NULL, true, false},
+    {"Extras", "Bonus Content", "BonusContent", "Bonus Content", SETTING_CHOICE, ONOFF, NULL, false, true},
+    {"Extras", "Audio", "Volume", "Volume", SETTING_VALUE, "0|25|50|75|100", NULL, true, true},
+    {"Extras", "Audio", "MuteInBackground", "Mute in the Background", SETTING_CHOICE, ONOFF, NULL, true, true},
+    {"Extras", "Application", "ConfirmExit", "Ask Before Closing", SETTING_CHOICE, ONOFF, NULL, true, true},
+    {"Extras", "Application", "Language", "F1 Menu Language", SETTING_CHOICE, "English|Spanish", "English|Español", true, false},
+    {"Extras", "Application", "ButtonIcons", "F1 Menu Button Icons", SETTING_CHOICE, "Xbox|Switch|PlayStation", NULL, true,
+     false},
+    {"Extras", "Application", "MenuScale", "F1 Menu Size (%)", SETTING_VALUE, "100|125|150|175|200", NULL, true, false},
+};
+const int g_nsetting_rows = (int)(sizeof g_setting_rows / sizeof g_setting_rows[0]);
+// The per-quest Monster HP entries (Quest<number> = factors): set, listed and removed through config_set / config_quests
+// / config_remove like the table's.
+static const SettingRow quest_row = {"Monster HP", "Monster HP", "Quest", "Quest", SETTING_TEXT, NULL, NULL, true, false};
+static char g_start_values[sizeof g_setting_rows / sizeof g_setting_rows[0]][64];  // as the game started (config_load)
 
 void config_path(char *buf, size_t size) {
     const char *e = getenv("MHGU_CONFIG");
@@ -841,7 +931,9 @@ void config_load(void) {
     render_auto = !g_config.render_w;
     config_store_loaded(&g_config);
     const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
-    desktop_w = dm ? dm->w : 1920, desktop_h = dm ? dm->h : 1080;
+    // (in pixels: a mode's size is in points where pixel_density is above 1, as on a Retina Mac)
+    float density = dm && dm->pixel_density > 0.0f ? dm->pixel_density : 1.0f;
+    desktop_w = dm ? (int)(dm->w * density + 0.5f) : 1920, desktop_h = dm ? (int)(dm->h * density + 0.5f) : 1080;
     if (!g_config.width) g_config.width = desktop_w, g_config.height = desktop_h;
 
     const char *e = getenv("MHGU_WINDOW");
@@ -944,4 +1036,204 @@ void config_load(void) {
         hp->scale[0], hp->scale[1], hp->scale[2], hp->scale[3], hp->quests);
     LOG("[config] Village quests at the Hub counter: %s (their HP x%.2f first)\n", g_config.village_in_hub ? "on" : "off",
         hp->village);
+    for (int i = 0; i < g_nsetting_rows; i++)
+        config_get(g_setting_rows[i].key, g_start_values[i], sizeof g_start_values[i]);
+}
+
+// ---- the macOS Settings window's and menu's side (config.h SettingRow)
+
+// Is this line "<key> = ..." (any spacing and case)? Its value then, trimmed, without a comment.
+static bool line_value(const char *line, const char *key, char *val, size_t size) {
+    char k[64], want[64];
+    const char *eq = strchr(line, '=');
+    const char *s = line;
+    while (isspace((unsigned char)*s)) s++;
+    if (!eq || *s == ';' || *s == '#' || *s == '[' || (size_t)(eq - s) >= sizeof k) return false;
+    snprintf(k, sizeof k, "%.*s", (int)(eq - s), s);
+    snprintf(want, sizeof want, "%s", key);
+    squash(k);
+    squash(want);
+    if (strcmp(k, want)) return false;
+    char v[256];
+    snprintf(v, sizeof v, "%s", eq + 1);
+    char *c = strpbrk(v, ";#\r\n");
+    if (c) *c = 0;
+    snprintf(val, size, "%s", trim(v));
+    return true;
+}
+
+bool config_get(const char *key, char *buf, size_t size) {
+    char path[1100], line[512];
+    config_path(path, sizeof path);
+    FILE *f = fopen(path, "r");
+    bool found = false;
+    while (f && !found && fgets(line, sizeof line, f)) found = line_value(line, key, buf, size);
+    if (f) fclose(f);
+    for (const char *p = DEFAULT_INI; !found && *p;) {  // (not in the file: the default)
+        const char *e = strchr(p, '\n');
+        snprintf(line, sizeof line, "%.*s", (int)(e ? e - p : (long)strlen(p)), p);
+        found = line_value(line, key, buf, size);
+        p = e ? e + 1 : p + strlen(p);
+    }
+    return found;
+}
+
+static bool is_quest_key(const char *key) {
+    return !strncasecmp(key, "quest", 5) && isdigit((unsigned char)key[5]) && strspn(key + 5, "0123456789") == strlen(key + 5);
+}
+
+// A Quest<number> entry's factors into h (as config_load reads them); false: not factors it takes, or no room.
+static bool put_quest(HpScale *h, const char *key, const char *value) {
+    char v[256];
+    snprintf(v, sizeof v, "%s", value);
+    squash(v);
+    float f[4];
+    int n = parse_factors(v, f);
+    unsigned long q = strtoul(key + 5, NULL, 10);
+    if (!q || (n != 1 && n != 4)) return false;
+    int i = 0;
+    while (i < h->quests && h->quest[i].quest != q) i++;
+    if (i == HP_QUESTS_MAX) return false;
+    h->quest[i].quest = (uint32_t)q;
+    for (int j = 0; j < 4; j++) h->quest[i].scale[j] = f[n == 4 ? j : 0];
+    if (i == h->quests) h->quests++;
+    return true;
+}
+
+// What the parser makes of a value for a key: the saved values (config_editable) with it set, into *out.
+static bool parse_into(const char *key, const char *value, Config *out) {
+    *out = config_editable();
+    if (is_quest_key(key)) return put_quest(&out->hp, key, value);
+    const ConfigSetting *s = config_setting(key);
+    return s && config_parse(s, value, out) && config_valid(s, out);
+}
+
+bool config_same_value(const char *key, const char *a, const char *b) {
+    char x[128], y[128], *ex, *ey;
+    snprintf(x, sizeof x, "%s", a);
+    snprintf(y, sizeof y, "%s", b);
+    squash(x);
+    squash(y);
+    if (!strcmp(x, y)) return true;
+    double dx = strtod(x, &ex), dy = strtod(y, &ey);  // (numbers: 1.0 == 1)
+    if (ex != x && ey != y && !*ex && !*ey) return dx == dy;
+    // (other spellings of one value, such as UIAnchor 1 for Center or MSAA 1x for Off: what the parser makes of them)
+    const ConfigSetting *s = key ? config_setting(key) : NULL;
+    if (!s) return false;
+    static Config ca, cb;  // (big: off the stack; the main thread's)
+    return parse_into(key, a, &ca) && parse_into(key, b, &cb) && config_equal(s, &ca, &cb);
+}
+
+bool config_restart_pending(const char *key) {
+    char now[64];
+    for (int i = 0; i < g_nsetting_rows; i++) {
+        const SettingRow *r = &g_setting_rows[i];
+        if (key ? strcmp(r->key, key) : r->live) continue;
+        if (config_get(r->key, now, sizeof now) && !config_same_value(r->key, now, g_start_values[i])) return true;
+    }
+    return false;
+}
+
+static const SettingRow *row_of(const char *key) {
+    for (int i = 0; i < g_nsetting_rows; i++) if (!strcmp(g_setting_rows[i].key, key)) return &g_setting_rows[i];
+    return is_quest_key(key) ? &quest_row : NULL;
+}
+
+bool config_live(const char *key) {
+    const SettingRow *r = row_of(key);
+    return r && r->live;
+}
+
+bool config_check(const char *key, const char *value) {
+    const SettingRow *r = row_of(key);
+    if (!r) return false;
+    // (the parser drops dashes - "Borderless-Window" - so "-1" would read as 1: no dash in a number or a size)
+    if ((r->kind == SETTING_VALUE || r == &quest_row) && strchr(value, '-')) return false;
+    static Config parsed;  // (the parser is the judge)
+    return parse_into(key, value, &parsed);
+}
+
+void config_quests(void (*fn)(unsigned quest, const char *value, void *ctx), void *ctx) {
+    char path[1100], line[512], key[64], val[256];
+    config_path(path, sizeof path);
+    FILE *f = fopen(path, "r");
+    while (f && fgets(line, sizeof line, f)) {
+        const char *s = line, *eq = strchr(line, '=');
+        while (isspace((unsigned char)*s)) s++;
+        if (!eq || *s == ';' || *s == '#' || (size_t)(eq - s) >= sizeof key) continue;
+        snprintf(key, sizeof key, "%.*s", (int)(eq - s), s);
+        snprintf(key, sizeof key, "%s", trim(key));
+        if (is_quest_key(key) && line_value(line, key, val, sizeof val)) fn((unsigned)strtoul(key + 5, NULL, 10), val, ctx);
+    }
+    if (f) fclose(f);
+}
+
+bool config_remove(const char *key) {
+    if (!is_quest_key(key)) return false;
+    char path[1100], tmp[1200], line[512], val[256];
+    config_path(path, sizeof path);
+    snprintf(tmp, sizeof tmp, "%s.new", path);
+    FILE *f = fopen(path, "r"), *o = fopen(tmp, "w");
+    if (!f || !o) { if (f) fclose(f); if (o) fclose(o); return false; }
+    while (fgets(line, sizeof line, f))
+        if (!line_value(line, key, val, sizeof val)) fputs(line, o);
+    fclose(f);
+    if (fclose(o) != 0 || rename(tmp, path) != 0) { remove(tmp); return false; }
+    static Config c;  // (and from the saved values and the running game's list)
+    c = config_editable();
+    unsigned long q = strtoul(key + 5, NULL, 10);
+    for (HpScale *h = &c.hp; h; h = h == &c.hp ? &g_config.hp : NULL)
+        for (int i = 0; i < h->quests; i++)
+            if (h->quest[i].quest == q) { h->quest[i] = h->quest[--h->quests]; break; }
+    config_store_loaded(&c);
+    LOG("[config] %s removed\n", key);
+    return true;
+}
+
+bool config_set(const char *key, const char *value) {
+    const SettingRow *st = row_of(key);
+    if (!st || !config_check(key, value)) return false;
+    const char *name = st == &quest_row ? key : st->key;  // (the name written for a new line)
+    char path[1100], tmp[1200], line[512], old[256];
+    config_path(path, sizeof path);
+    snprintf(tmp, sizeof tmp, "%s.new", path);
+    FILE *f = fopen(path, "r"), *o = fopen(tmp, "w");
+    if (!o) { if (f) fclose(f); return false; }
+    bool done = false, in_section = false;
+    int blanks = 0;  // (blank lines held back: a key added at a section's end goes before them)
+    char section[64];
+    snprintf(section, sizeof section, "[%s]", st->section);
+    while (f && fgets(line, sizeof line, f)) {
+        const char *s = line;
+        while (isspace((unsigned char)*s)) s++;
+        if (!*s) { blanks++; continue; }
+        if (!done && in_section && *s == '[') {  // (the key is missing from its section: add it at the section's end)
+            fprintf(o, "%s = %s\n", name, value);
+            done = true;
+        }
+        for (; blanks; blanks--) fputs("\n", o);
+        if (*s == '[') in_section = !strncasecmp(s, section, strlen(section));
+        if (!done && line_value(line, key, old, sizeof old)) {  // (the key's spelling and the line's comment stay)
+            const char *eq = strchr(line, '='), *cmt = strpbrk(eq, ";#");
+            int cl = cmt ? (int)strcspn(cmt, "\r\n") : 0;
+            fprintf(o, "%.*s= %s%s%.*s\n", (int)(eq - line), line, value, cl ? " " : "", cl, cmt ? cmt : "");
+            done = true;
+            continue;
+        }
+        fputs(line, o);
+    }
+    if (!done) fprintf(o, "%s%s\n%s = %s\n", in_section ? "" : "\n", in_section ? "" : section, name, value);
+    for (; blanks; blanks--) fputs("\n", o);
+    if (f) fclose(f);
+    if (fclose(o) != 0 || rename(tmp, path) != 0) { remove(tmp); return false; }
+    LOG("[config] %s = %s%s\n", name, value, st->live ? "" : " (at the next start)");
+    static Config c;  // (the saved values: what the F1 menu starts from; the live values follow them, config_store.c)
+    parse_into(name, value, &c);
+    config_store_loaded(&c);
+    if (st->live) {
+        if (st == &quest_row) put_quest(&g_config.hp, name, value);
+        else config_parse(config_setting(name), value, &g_config);
+        g_fov_scale = g_config.fov;  // (derived at load)
+    }
+    return true;
 }

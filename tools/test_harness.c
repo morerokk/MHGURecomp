@@ -58,6 +58,10 @@ int main(int argc, char **argv) {
     _setmode(_fileno(stdout), _O_BINARY);
     if (!VirtualAlloc((void *)(uintptr_t)GUEST_BASE, 0x100000000ull, MEM_RESERVE, PAGE_READWRITE)) return 4;
     AddVectoredExceptionHandler(1, commit_on_touch);
+#elif defined(__APPLE__)
+    // no MAP_FIXED_NOREPLACE: ask for the address as a hint and refuse anything else
+    if (mmap((void *)(uintptr_t)GUEST_BASE, 0x100000000ull, PROT_READ | PROT_WRITE,
+             MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0) != (void *)(uintptr_t)GUEST_BASE) return 4;
 #else
     if (mmap((void *)(uintptr_t)GUEST_BASE, 0x100000000ull, PROT_READ | PROT_WRITE,
              MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE | MAP_NORESERVE, -1, 0) == MAP_FAILED) return 4;

@@ -316,17 +316,19 @@ static void control_poll(void) {
                 SDL_Event event = {0}; event.type = SDL_EVENT_QUIT; SDL_PushEvent(&event);
                 continue;
             }
-            if (!strcmp(cmd, "sdlkey")) {  // sdlkey [ctrl+]<SDL key name>: a key pressed and released (Insert: Forge's menu)
-                bool ctrl = !SDL_strncasecmp(arg, "ctrl+", 5);
-                SDL_Scancode sc = SDL_GetScancodeFromName(arg + (ctrl ? 5 : 0));
+            if (!strcmp(cmd, "sdlkey")) {  // sdlkey [ctrl+|alt+]<SDL key name>: a key pressed and released (Insert: Forge's
+                                           // menu; alt+Return: full screen <-> window)
+                bool ctrl = !SDL_strncasecmp(arg, "ctrl+", 5), alt = !SDL_strncasecmp(arg, "alt+", 4);
+                SDL_Scancode sc = SDL_GetScancodeFromName(arg + (ctrl ? 5 : alt ? 4 : 0));
                 SDL_Event e = {0};
                 e.key.type = SDL_EVENT_KEY_DOWN, e.key.scancode = sc, e.key.key = SDL_GetKeyFromScancode(sc, 0, false);
-                e.key.down = true, e.key.mod = ctrl ? SDL_KMOD_LCTRL : 0;
+                e.key.down = true, e.key.mod = ctrl ? SDL_KMOD_LCTRL : alt ? SDL_KMOD_LALT : 0;
                 SDL_PushEvent(&e);
                 e.key.type = SDL_EVENT_KEY_UP, e.key.down = false;
                 SDL_PushEvent(&e);
-                if (ctrl) {  // (then Ctrl's own release, as a keyboard sends it: no modifier left)
-                    e.key.scancode = SDL_SCANCODE_LCTRL, e.key.key = SDLK_LCTRL, e.key.mod = 0;
+                if (ctrl || alt) {  // (then the modifier's own release, as a keyboard sends it: no modifier left)
+                    e.key.scancode = ctrl ? SDL_SCANCODE_LCTRL : SDL_SCANCODE_LALT, e.key.key = ctrl ? SDLK_LCTRL : SDLK_LALT;
+                    e.key.mod = 0;
                     SDL_PushEvent(&e);
                 }
                 LOG("[control] key %s (%d)\n", arg, (int)sc);
@@ -383,6 +385,24 @@ static void control_poll(void) {
                 test_until = plat_now_ns() + (uint64_t)atoi(arg3) * 1000000ull;
                 continue;
             }
+            if (!strcmp(cmd, "set") || !strcmp(cmd, "unset")) {  // set <Key> <Value...> / unset <Quest<n>>: as the
+                                                                   // Settings window does (config_set / config_remove)
+                const char *v = strstr(line + strlen(cmd), arg);
+                char value[256] = "";
+                if (v) snprintf(value, sizeof value, "%s", v + strlen(arg) + strspn(v + strlen(arg), " \t"));
+                value[strcspn(value, "\r\n")] = 0;
+                if (!strcmp(cmd, "unset")) config_remove(arg);
+                else if (config_set(arg, value) && config_live(arg)) ui_setting_changed(arg);
+                else if (!config_check(arg, value)) LOG("[control] set %s: \"%s\" refused\n", arg, value);
+                continue;
+            }
+#ifdef __APPLE__
+            if (!strcmp(cmd, "settingsshot")) {  // settingsshot <folder>: the Settings window's tabs as PNGs (macOS)
+                void plat_settings_snapshot(const char *dir);
+                plat_settings_snapshot(arg[0] ? arg : ".");
+                continue;
+            }
+#endif
             if (!strcmp(cmd, "textkey")) {
                 textinput_key(!strcmp(arg, "enter") ? TI_ENTER : !strcmp(arg, "escape") ? TI_CANCEL : TI_NONE);
                 continue;

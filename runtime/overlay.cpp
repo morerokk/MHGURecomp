@@ -42,6 +42,10 @@ SDL_Window *ui_window(void);
 }
 
 static std::atomic<bool> g_enabled, g_ready, g_open;
+static std::atomic<bool> g_forge_frames;  // forge.c's frame hook builds the frames (else overlay_tick)
+static std::mutex g_status_lock;
+static char g_status[160];
+static std::atomic<bool> g_status_on;
 static std::atomic<bool> g_settings_open, g_forge_open;
 static int g_menu_key;
 static float g_font_size;
@@ -165,7 +169,7 @@ bool overlay_event(const SDL_Event *e) {
         overlay_toggle_settings();
         return true;
     }
-    if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && (int)e->key.scancode == g_menu_key) {
+    if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && g_menu_key > 0 && (int)e->key.scancode == g_menu_key) {
         set_open(!g_forge_open);
         return true;
     }
@@ -365,14 +369,18 @@ static void forge_style(ImGuiStyle &style) {  // Forge's own (source/forge/graph
     c[ImGuiCol_NavWindowingDimBg] = c[ImGuiCol_ModalWindowDimBg] = dim;
 }
 
+static std::mutex g_init_lock;
 void overlay_init(const char *font_path, float font_size, int menu_key) {
 #ifdef MHGU_NULL_BACKEND
     return;
 #endif
+    std::lock_guard<std::mutex> l(g_init_lock);
+    if (g_enabled) return;  // (the status line's started it already: overlay_tick)
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
-    io.IniFilename = "forge_imgui.ini";  // (window positions; in the game folder, beside mhgurecomp.ini)
+    // (window positions, for Forge's menu: in the game folder, beside mhgurecomp.ini; the status line alone keeps none)
+    io.IniFilename = menu_key > 0 ? "forge_imgui.ini" : nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
     io.BackendPlatformName = "mhgurecomp";
@@ -387,8 +395,40 @@ void overlay_init(const char *font_path, float font_size, int menu_key) {
     g_base_style = ImGui::GetStyle();
     g_menu_key = menu_key;
     g_enabled = true;
-    LOG("[forge] ImGui %s overlay: %s opens the menu (font %s, %.0f px)\n", IMGUI_VERSION,
-        SDL_GetScancodeName((SDL_Scancode)menu_key), font ? font_path : "ImGui's", g_font_size);
+    if (menu_key > 0)
+        LOG("[forge] ImGui %s overlay: %s opens the menu (font %s, %.0f px)\n", IMGUI_VERSION,
+            SDL_GetScancodeName((SDL_Scancode)menu_key), font ? font_path : "ImGui's", g_font_size);
+}
+
+void overlay_status(const char *text) {
+    std::lock_guard<std::mutex> l(g_status_lock);
+    snprintf(g_status, sizeof g_status, "%s", text ? text : "");
+    g_status_on = g_status[0] != 0;
+}
+
+static bool notice_due(uint64_t now);
+
+void overlay_tick(void) {
+    if (g_forge_frames || (!g_status_on && !g_enabled && !notice_due(SDL_GetTicksNS()))) return;
+    if (!g_enabled) overlay_init(nullptr, 0, 0);  // (ImGui's own font; no menu)
+    overlay_frame(nullptr);
+}
+
+// The status line: small, in the lower left corner, on a dark rounded backing so it reads over any scene.
+static void draw_status(float scale) {
+    char text[sizeof g_status];
+    {
+        std::lock_guard<std::mutex> l(g_status_lock);
+        snprintf(text, sizeof text, "%s", g_status);
+    }
+    if (!text[0]) return;
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    float size = g_font_size * scale, pad = 6 * scale, margin = 14 * scale;
+    ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, 0, text);
+    ImVec2 at(margin + pad, ImGui::GetIO().DisplaySize.y - margin - pad - ts.y);
+    dl->AddRectFilled(ImVec2(at.x - pad, at.y - pad), ImVec2(at.x + ts.x + pad, at.y + ts.y + pad),
+                      IM_COL32(0, 0, 0, 150), 4 * scale);
+    dl->AddText(ImGui::GetFont(), size, at, IM_COL32(235, 235, 235, 255), text);
 }
 
 // ------------------------------------------------------------------ notices (any thread -> game thread)
@@ -478,15 +518,16 @@ static void snap_clear(void) {
 }
 
 void overlay_frame(void *cpu) {
+    if (cpu) g_forge_frames = true;
     if (!g_ready) return;
     if (!g_settings_open) { bool closed = false; settings_panel(&closed); }
-    bool open = g_open, free_render = forge_plugins_have(FORGE_IMGUI_FREE_RENDER);
+    bool open = g_open, free_render = cpu && forge_plugins_have(FORGE_IMGUI_FREE_RENDER), status = g_status_on;
     uint64_t now = SDL_GetTicksNS();
     bool notice = notice_due(now);
     char line[256];
     bool chat = chat_composing(line, sizeof line);
     ImGuiIO &io = ImGui::GetIO();
-    if (!open && !free_render && !notice && !chat) {  // (nothing to draw)
+    if (!open && !free_render && !status && !notice && !chat) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
         apply_input(io);  // (keep the queue short)
@@ -509,7 +550,7 @@ void overlay_frame(void *cpu) {
     g_last_ns = now;
     apply_input(io);
 
-    if (!g_plugins_init) {  // (Forge: right after its context is made)
+    if (cpu && !g_plugins_init) {  // (Forge: right after its context is made)
         g_plugins_init = true;
         forge_imgui_init(cpu);
     }
@@ -548,7 +589,8 @@ void overlay_frame(void *cpu) {
         ImGui::End();
         if (!keep) set_open(false);
     }
-    forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);
+    if (cpu) forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);
+    if (status) draw_status(scale);
     if (notice) draw_notice(now, scale);
     if (chat) draw_chat(line, now, scale);
     ImGui::Render();

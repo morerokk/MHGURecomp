@@ -28,6 +28,9 @@ static int override_count;
 // Host implementations registered by name (HLE_FUNC)
 #if defined(__linux__)
 extern const HleImplEntry __start_hle_impls[], __stop_hle_impls[];
+#elif defined(__APPLE__)
+extern const HleImplEntry __start_hle_impls[] __asm("section$start$__DATA$hle_impls");
+extern const HleImplEntry __stop_hle_impls[] __asm("section$end$__DATA$hle_impls");
 #else
 // PE/COFF: the linker sorts .hle$a < .hle$m (entries, hle.h) < .hle$z by the text after '$'.
 __attribute__((section(".hle$a"), used)) static const HleImplEntry __start_hle_impls[1];

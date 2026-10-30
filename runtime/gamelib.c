@@ -49,3 +49,4 @@ bool gamelib_load(char *why, size_t why_size) {
 }
 
 const GameLibTables *gamelib_tables(void) { return g_tables; }
+const char *gamelib_id(void) { return GAMELIB_ID; }

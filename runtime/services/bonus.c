@@ -5,7 +5,8 @@
 // ones were out, and the item packs and Palicos came from it. That server can't be reached from the port, so the
 // downloads are taken from a save that has them instead: a "donor" `system` file in the bonus folder beside
 // mhgurecomp.exe (bonus\system; with a game folder argument: in the current folder), else in the player's folder
-// (%APPDATA%\MHGURecomp\bonus\system); MHGU_BONUS_DIR overrides both.
+// (%APPDATA%\MHGURecomp\bonus\system), else (a macOS app) in the app's Contents/Resources/bonus; MHGU_BONUS_DIR
+// overrides them all.
 //
 // Save file layout (MHGU v1.4.0, 0x4eb8bc bytes): a 0x24-byte header (+0x1c: data size, +0x34/+0x38/+0x3c: the three
 // character slots, relative to 0x24), then the shared data. Two regions hold the downloads, and in a save that never
@@ -48,6 +49,14 @@ static const char *bonus_path(void) {
     snprintf(path, sizeof path, "bonus/system");
     if (!access(path, F_OK)) return path;
     snprintf(path, sizeof path, "%s/../bonus/system", g_save_dir);
+#ifdef __APPLE__
+    // a macOS release app carries it in Contents/Resources/bonus (tools/make_app.py --bonus); the player's own wins
+    char exe[1024];
+    if (access(path, F_OK) && plat_in_app_bundle() && plat_exe_path(exe, sizeof exe) && strrchr(exe, '/')) {
+        *strrchr(exe, '/') = 0;
+        snprintf(path, sizeof path, "%s/../Resources/bonus/system", exe);
+    }
+#endif
     return path;
 }
 

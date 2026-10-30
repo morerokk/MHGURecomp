@@ -124,6 +124,7 @@ void ui_init(void);                      // SDL and the game window, before the 
 int ui_run(void);                        // the host main thread's event loop
 struct SDL_Window *ui_window(void);
 void ui_toggle_fullscreen(void);         // Alt+Enter: windowed <-> full screen
+void ui_setting_changed(const char *key);  // a live setting was changed (config_set): apply it
 extern volatile uint64_t g_present_count;  // frames the game presented (the renderer counts them)
 union SDL_Event;
 void host_input_event(const union SDL_Event *e);
