@@ -28,6 +28,7 @@
 #include <unistd.h>
 
 #include "../platform.h"
+#include "linux_context.h"
 
 #ifndef MAP_FIXED_NOREPLACE
 #define MAP_FIXED_NOREPLACE 0x100000
@@ -311,12 +312,17 @@ static void fault_handler(int sig, siginfo_t *si, void *uc) {
     ucontext_t *ctx = (ucontext_t *)uc;
     uint64_t fa = si && si->si_addr ? (uint64_t)(uintptr_t)si->si_addr : 0;
     if ((sig == SIGSEGV || sig == SIGBUS) && lazy_commit(fa)) {  // (a guest page first touched: back it, resume)
-        if (plat_touch_hook) plat_touch_hook(fa - g_lo, (ctx->uc_mcontext.gregs[REG_ERR] & 2) != 0);
+        // Unknown ARM write intent is treated conservatively as a possible write.
+        if (plat_touch_hook) plat_touch_hook(fa - g_lo, linux_fault_write(ctx) != 0);
         return;
     }
+#if defined(__aarch64__)
+    uint64_t pc = ctx->uc_mcontext.pc, lr = ctx->uc_mcontext.regs[30];
+#else
     uint64_t pc = (uint64_t)ctx->uc_mcontext.gregs[REG_RIP];
     uint64_t sp = (uint64_t)ctx->uc_mcontext.gregs[REG_RSP], lr = 0, end = 0;
     if (plat_committed(sp, &end) && end - sp >= 8) lr = *(const uint64_t *)(uintptr_t)sp;
+#endif
     char what[80];
     snprintf(what, sizeof what, "%s (code %d, addr %llx)", sig_name(sig), si ? si->si_code : 0,
              (unsigned long long)fa);

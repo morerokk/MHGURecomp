@@ -1,5 +1,5 @@
 # MHGU Recomp build
-# Windows: MSYS2 UCRT64 (clang, lld, make; see README.md). Linux: clang (planned).
+# Windows: MSYS2 UCRT64. Linux: clang, natively or cross-compiled (see README.md).
 #
 #   make gen GAME=<folder with exefs/ and romfs/>   recompile the game code from your own dump into generated/
 #   make -j4                                        build build/mhgurecomp(.exe) and the game code library, with its
@@ -16,9 +16,47 @@ GAME     ?= ../mhgu/game
 GEN      ?= generated
 B        ?= build
 O        ?= obj
-CC       := clang
-CXX      := clang++
-GENARCH  ?= -march=x86-64-v3  # AVX2 + FMA (Haswell or newer)
+CC       := $(if $(filter default undefined,$(origin CC)),clang,$(CC))
+CXX      := $(if $(filter default undefined,$(origin CXX)),clang++,$(CXX))
+HOST_ARCH := $(shell uname -m)
+TARGET_ARCH ?= $(HOST_ARCH)
+normalize_arch = $(if $(filter arm64 aarch64,$(1)),aarch64,$(if $(filter amd64 x86_64,$(1)),x86_64,$(1)))
+override TARGET_ARCH := $(call normalize_arch,$(TARGET_ARCH))
+HOST_ARCH := $(call normalize_arch,$(HOST_ARCH))
+ifeq ($(filter x86_64 aarch64,$(TARGET_ARCH)),)
+$(error Unsupported TARGET_ARCH=$(TARGET_ARCH))
+endif
+ifeq ($(PLATFORM)-$(TARGET_ARCH),windows-aarch64)
+$(error ARM64 is supported on Linux only)
+endif
+SYSROOT ?=
+TEST_RUNNER ?=
+JOBS ?= $(shell nproc)
+TARGET_FLAGS :=
+CMAKE_TARGET_FLAGS :=
+FFMPEG_TARGET_FLAGS :=
+ifeq ($(PLATFORM)-$(TARGET_ARCH),linux-aarch64)
+TARGET_FLAGS += --target=aarch64-linux-gnu
+ifneq ($(HOST_ARCH),$(TARGET_ARCH))
+CMAKE_TARGET_FLAGS += -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+    -DCMAKE_C_COMPILER_TARGET=aarch64-linux-gnu -DCMAKE_CXX_COMPILER_TARGET=aarch64-linux-gnu \
+    -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld
+FFMPEG_TARGET_FLAGS += --enable-cross-compile --arch=aarch64 --target-os=linux \
+    --ar=llvm-ar --nm=llvm-nm --ranlib=llvm-ranlib --strip=llvm-strip --extra-ldflags=-fuse-ld=lld
+endif
+ifneq ($(SYSROOT),)
+TARGET_FLAGS += --sysroot=$(SYSROOT) --gcc-toolchain=$(SYSROOT)/usr
+CMAKE_TARGET_FLAGS += -DCMAKE_SYSROOT=$(SYSROOT) -DCMAKE_FIND_ROOT_PATH=$(SYSROOT) \
+    -DCMAKE_C_COMPILER_EXTERNAL_TOOLCHAIN=$(SYSROOT)/usr -DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=$(SYSROOT)/usr \
+    -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+    -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
+export PKG_CONFIG_SYSROOT_DIR := $(SYSROOT)
+export PKG_CONFIG_LIBDIR := $(SYSROOT)/usr/lib/aarch64-linux-gnu/pkgconfig:$(SYSROOT)/usr/lib/pkgconfig:$(SYSROOT)/usr/share/pkgconfig
+unexport PKG_CONFIG_PATH
+endif
+endif
+OBJDUMP ?= $(if $(filter aarch64,$(TARGET_ARCH)),llvm-objdump,objdump)
+GENARCH  ?= $(if $(filter aarch64,$(TARGET_ARCH)),-march=armv8-a,-march=x86-64-v3)  # generic release CPUs
 GENFLAGS := -O1 -fno-strict-aliasing -ffp-contract=off -fno-math-errno -Wno-return-type -Wno-unused-label \
             -Wno-parentheses-equality -Wno-unused-value -fvisibility=hidden -Iruntime $(GENARCH)
 
@@ -49,6 +87,7 @@ FFMPEG_CONF   := --disable-everything --disable-programs --disable-doc --disable
                  --enable-parser=h264,aac --enable-decoder=h264,aac
 # (nasm: FFmpeg's assembly for x86; without it the plain C versions, fast enough for 960x540 movies)
 FFMPEG_CONF   += $(if $(shell command -v nasm 2>/dev/null),,--disable-x86asm)
+FFMPEG_CONF   += $(FFMPEG_TARGET_FLAGS)
 ifeq ($(FFMPEG),system)
 AV_LIBS  := -lavformat -lavcodec -lavutil
 AV_DEPS  :=
@@ -84,9 +123,9 @@ SHADERC_CONF  := -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON -DSHADERC_SK
                  -DENABLE_GLSLANG_BINARIES=OFF -DGLSLANG_TESTS=OFF
 # (MAKEFLAGS=: cmake's own make runs on its own, not in this one's jobs)
 CMAKE_BUILD   = cd $(1) && MAKEFLAGS= cmake -S src -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=$(CC) \
-                    -DCMAKE_CXX_COMPILER=$(CXX) -DCMAKE_POSITION_INDEPENDENT_CODE=ON $(2) > configure.log 2>&1 \
+                    -DCMAKE_CXX_COMPILER=$(CXX) $(CMAKE_TARGET_FLAGS) -DCMAKE_POSITION_INDEPENDENT_CODE=ON $(2) > configure.log 2>&1 \
                     || { tail -20 configure.log; exit 1; }; \
-                MAKEFLAGS= cmake --build build --parallel $$(nproc) $(3) > build.log 2>&1 || { tail -30 build.log; exit 1; }
+                MAKEFLAGS= cmake --build build --parallel $(JOBS) $(3) > build.log 2>&1 || { tail -30 build.log; exit 1; }
 ifeq ($(SDL3),system)
 SDL_DEPS :=
 SDL_LIBS := -lSDL3
@@ -213,16 +252,16 @@ endif
 
 all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) data licenses pipelist
 
-# Host-only INI/settings regression test: no game dump or generated code required.
+# INI/settings regression test: no game dump or generated code required.
 .PHONY: test-settings
 test-settings: $(LIB_STAMPS)
 	@mkdir -p $(O)/settings-test
-	$(CC) $(RTFLAGS) tests/test_settings.c runtime/config.c runtime/config_store.c $(SDL_LIBS) -lm -o $(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe)
-	$(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe) $(O)/settings-test/settings.ini
+	$(CC) $(TARGET_FLAGS) $(if $(filter aarch64,$(TARGET_ARCH)),-fuse-ld=lld) $(RTFLAGS) tests/test_settings.c runtime/config.c runtime/config_store.c $(SDL_LIBS) -lm -o $(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe)
+	$(TEST_RUNNER) $(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe) $(O)/settings-test/settings.ini
 
 $(O)/gen/%.o: $(GEN)/%.c runtime/cpu.h runtime/vfp.h runtime/neon_rt.h
 	@mkdir -p $(dir $@)
-	@$(CC) $(GENFLAGS) -c $< -o $@
+	@$(CC) $(TARGET_FLAGS) $(GENFLAGS) -c $< -o $@
 
 
 # the id as a file, rewritten only when it changes: both sides of the library interface rebuild together
@@ -231,7 +270,7 @@ $(O)/gamelib.id: FORCE
 
 $(O)/gen/tools/gamelib_entry.o: tools/gamelib_entry.c $(O)/gamelib.id
 	@mkdir -p $(dir $@)
-	$(CC) $(GENFLAGS) -DGAMELIB_ID='"$(GAMELIB_ID)"' -c $< -o $@
+	$(CC) $(TARGET_FLAGS) $(GENFLAGS) -DGAMELIB_ID='"$(GAMELIB_ID)"' -c $< -o $@
 $(O)/rt/gamelib.o: $(O)/gamelib.id
 $(O)/rt/gamelib.o: RTFLAGS += -DGAMELIB_ID='"$(GAMELIB_ID)"'
 $(O)/shader.id: FORCE
@@ -245,52 +284,52 @@ $(O)/rt/main.o: RTFLAGS += -DMHGU_VERSION='"$(VERSION)"'
 
 $(O)/rt/%.o: runtime/%.c $(RT_HDRS)
 	@mkdir -p $(dir $@)
-	$(CC) $(RTFLAGS) -c $< -o $@
+	$(CC) $(TARGET_FLAGS) $(RTFLAGS) -c $< -o $@
 
 $(O)/rt/forge_imgui.o: runtime/forge_imgui_thunks.inc $(IMGUI)/cimgui.h
 $(O)/rt/forge_imgui.o: RTFLAGS += -DCIMGUI_NO_EXPORT -Wno-unused-variable
 
 $(O)/rt/overlay.o: runtime/overlay.cpp runtime/overlay.h runtime/forge.h
 	@mkdir -p $(dir $@)
-	$(CXX) $(IMGUIFLAGS) $(if $(filter 1,$(NULL_GPU)),-DMHGU_NULL_BACKEND) -Wall -Iruntime -c $< -o $@
+	$(CXX) $(TARGET_FLAGS) $(IMGUIFLAGS) $(if $(filter 1,$(NULL_GPU)),-DMHGU_NULL_BACKEND) -Wall -Iruntime -c $< -o $@
 
 $(O)/rt/settings_panel.o: runtime/settings_panel.cpp runtime/settings_panel.h runtime/modorder.h runtime/config.h runtime/settings_locale.h runtime/settings_icons.h runtime/app_actions.h runtime/overlay.h runtime/net/net.h
 	@mkdir -p $(dir $@)
-	$(CXX) $(IMGUIFLAGS) -Wall -Iruntime -c $< -o $@
+	$(CXX) $(TARGET_FLAGS) $(IMGUIFLAGS) -Wall -Iruntime -c $< -o $@
 
 $(O)/imgui/%.o: $(IMGUI)/%.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(IMGUIFLAGS) -w -c $< -o $@
+	$(CXX) $(TARGET_FLAGS) $(IMGUIFLAGS) -w -c $< -o $@
 
 $(O)/rt/nvn/vulkan/vma.o: runtime/nvn/vulkan/vma.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) -O2 -w -Ithird_party/vk_mem_alloc -c $< -o $@
+	$(CXX) $(TARGET_FLAGS) -O2 -w -Ithird_party/vk_mem_alloc -c $< -o $@
 
 $(O)/fsr/%.c.o: $(FSR)/%.c
 	@mkdir -p $(dir $@)
-	$(CC) -std=c11 $(FSRFLAGS) -c $< -o $@
+	$(CC) $(TARGET_FLAGS) -std=c11 $(FSRFLAGS) -c $< -o $@
 
 $(O)/fsr/%.cpp.o: $(FSR)/%.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) -std=c++17 $(FSRFLAGS) -include $(FSR)/src/$(if $(filter windows,$(PLATFORM)),ffx_mingw_portability.hpp,ffx_1_1_4_portability.hpp) -c $< -o $@
+	$(CXX) $(TARGET_FLAGS) -std=c++17 $(FSRFLAGS) -include $(FSR)/src/$(if $(filter windows,$(PLATFORM)),ffx_mingw_portability.hpp,ffx_1_1_4_portability.hpp) -c $< -o $@
 
 $(EXE): $(RT_OBJ) $(AV_DEPS)
 	@mkdir -p $(dir $@)
-	$(CXX) -o $@ $^ $(LDFLAGS)
+	$(CXX) $(TARGET_FLAGS) -o $@ $^ $(LDFLAGS)
 	$(GLIBC_CHECK)
 
 # The updater (updater/updater.c): started in place of the game, it installs the latest release and starts the game.
 UPD_OBJ  := $(patsubst updater/%.c,$(O)/updater/%.o,$(wildcard updater/*.c))
 # (the glibc wrappers and the newer SDL, as the game's)
 UPD_OBJ  += $(if $(filter windows,$(PLATFORM)),,$(O)/rt/platform/linux_glibc.o $(if $(SDL_DEPS),$(O)/rt/platform/linux_sdl.o))
-$(O)/updater/%.o: updater/%.c updater/updater.h $(O)/version.id
+$(O)/updater/%.o: updater/%.c updater/updater.h updater/arch.h $(O)/version.id
 	@mkdir -p $(dir $@)
-	$(CC) -O2 -g -Wall $(OSFLAGS) $(LIB_INC) -DMHGU_VERSION='"$(VERSION)"' -c $< -o $@
+	$(CC) $(TARGET_FLAGS) -O2 -g -Wall $(OSFLAGS) $(LIB_INC) -DMHGU_VERSION='"$(VERSION)"' -c $< -o $@
 # (SDL3 / shaderc: their headers before anything is compiled, their archives in LDFLAGS / UPD_LDFLAGS)
 $(RT_OBJ) $(UPD_OBJ): $(LIB_STAMPS)
 $(UPDATER): $(UPD_OBJ)
 	@mkdir -p $(dir $@)
-	$(CC) -o $@ $^ $(UPD_LDFLAGS)
+	$(CC) $(TARGET_FLAGS) -o $@ $^ $(UPD_LDFLAGS)
 	$(GLIBC_CHECK)
 
 # (Linux: a program starts with glibc GLIBC_MAX and libstdc++ GLIBCXX_MAX or later, see LDFLAGS; this checks the one
@@ -298,7 +337,7 @@ $(UPDATER): $(UPD_OBJ)
 GLIBCXX_MAX := 3.4.32
 ifneq ($(PLATFORM),windows)
 define GLIBC_CHECK
-@new=$$(objdump -T $@ | awk -v max=$(GLIBC_MAX) -v cxx=$(GLIBCXX_MAX) ' \
+@new=$$($(OBJDUMP) -T $@ | awk -v max=$(GLIBC_MAX) -v cxx=$(GLIBCXX_MAX) ' \
 	  match($$0, /GLIBC_[0-9.]+/) { split(substr($$0, RSTART + 6, RLENGTH - 6), v, "."); split(max, m, "."); \
 	    if (v[1] * 1000 + v[2] > m[1] * 1000 + m[2]) print "  " $$NF " (glibc " v[1] "." v[2] ")" } \
 	  match($$0, /GLIBCXX_[0-9.]+/) { split(substr($$0, RSTART + 8, RLENGTH - 8), v, "."); split(cxx, m, "."); \
@@ -328,9 +367,9 @@ $(eval $(call FETCH,third_party/shaderc/SPIRV-Headers-$(SPIRV_VER).tar.gz,https:
 $(FFMPEG_DIR)/.built: $(FFMPEG_TAR)
 	rm -rf $(FFMPEG_DIR) && mkdir -p $(FFMPEG_DIR)/src
 	tar -xJf $< -C $(FFMPEG_DIR)/src --strip-components=1
-	cd $(FFMPEG_DIR)/src && ./configure --prefix="$(abspath $(FFMPEG_DIR))" --cc=$(CC) $(FFMPEG_CONF) > ../configure.log \
+	cd $(FFMPEG_DIR)/src && ./configure --prefix="$(abspath $(FFMPEG_DIR))" --cc="$(CC) $(TARGET_FLAGS)" $(FFMPEG_CONF) > ../configure.log \
 	    || { tail -20 ../configure.log; exit 1; }
-	$(MAKE) -C $(FFMPEG_DIR)/src install > $(FFMPEG_DIR)/build.log || { tail -30 $(FFMPEG_DIR)/build.log; exit 1; }
+	$(MAKE) -j$(JOBS) -C $(FFMPEG_DIR)/src install > $(FFMPEG_DIR)/build.log || { tail -30 $(FFMPEG_DIR)/build.log; exit 1; }
 	touch $@
 	@echo "ffmpeg: FFmpeg $(FFMPEG_VER) (H.264 + AAC in MP4) built in $(FFMPEG_DIR)"
 
@@ -410,7 +449,7 @@ $(B)/licenses/shaderc.txt: $(SHADERC_DIR)/.built
 
 $(GAMELIB): $(GEN_OBJ) | $(EXE)
 	@mkdir -p $(O)
-	$(CC) $(GAMELIB_LDFLAGS) -o $(O)/gamelib.tmp $^
+	$(CC) $(TARGET_FLAGS) $(GAMELIB_LDFLAGS) -o $(O)/gamelib.tmp $^
 	mv -f $(O)/gamelib.tmp $@
 
 PY := $(firstword $(wildcard tools/venv/Scripts/python.exe) $(wildcard tools/venv/bin/python) python3)
@@ -442,13 +481,13 @@ $(B)/data/.complete:
 	fi
 
 gen:
-	cd tools && ../$(PY) gen.py sdk ../$(GAME)/exefs/sdk 0x02400000 ../$(GEN)/sdk --hle ../runtime/hle/hle_symbols.txt
-	cd tools && ../$(PY) gen.py main ../$(GAME)/exefs/main 0x00200000 ../$(GEN)/main
+	$(PY) tools/gen.py sdk "$(GAME)/exefs/sdk" 0x02400000 "$(GEN)/sdk" --hle runtime/hle/hle_symbols.txt
+	$(PY) tools/gen.py main "$(GAME)/exefs/main" 0x00200000 "$(GEN)/main"
 
 # differential test of the recompiler against Unicorn (tools/test_lift.py)
 test-lift:
-	cd tools && ../$(PY) test_lift.py ../$(GAME)/exefs/main 0x00200000 --tests 6000
-	cd tools && ../$(PY) test_lift.py ../$(GAME)/exefs/sdk 0x02400000 --tests 6000
+	$(PY) tools/test_lift.py "$(GAME)/exefs/main" 0x00200000 --tests 6000 --cc "$(CC) $(TARGET_FLAGS) -fuse-ld=lld" --genarch="$(GENARCH)" --runner "$(TEST_RUNNER)"
+	$(PY) tools/test_lift.py "$(GAME)/exefs/sdk" 0x02400000 --tests 6000 --cc "$(CC) $(TARGET_FLAGS) -fuse-ld=lld" --genarch="$(GENARCH)" --runner "$(TEST_RUNNER)"
 
 runtime-objs: $(RT_OBJ)
 
@@ -456,7 +495,7 @@ clean:  # (keeps $(B)/data, and the settings, caches and saves wherever the game
 	rm -rf $(O) $(B)/*.dll $(B)/*.so $(EXE) $(UPDATER) $(B)/vkprobe.exe
 
 # make dist VERSION=0.10.4: the release archive of the build folder, for GitHub (tools/dist.py): in $(DIST)/,
-# Windows-MHGURecomp.<version>.zip or Linux-MHGURecomp.<version>.tar.gz (permissions kept), holding the programs,
+# Windows-MHGURecomp.<version>.zip or Linux[ARM64]-MHGURecomp.<version>.tar.gz (permissions kept), holding the programs,
 # the game code, the DLLs, licenses/, BONUS (the donor save for bonus/system, when given) and the empty folders the
 # player fills; never the game files, mods, settings or caches of $(B). It prints each archive's size and SHA-256.
 DIST  ?= dist
@@ -464,7 +503,7 @@ BONUS ?= $(wildcard $(B)/bonus/system)
 dist: all
 	@echo '$(VERSION)' | grep -Eq '^[0-9]+(\.[0-9]+)*$$' || \
 	  { echo "dist: '$(VERSION)' is not a release version: make dist VERSION=<the release's tag, e.g. 0.10.4>"; exit 1; }
-	$(PY) tools/dist.py $(B) $(DIST) $(PLATFORM) $(VERSION) $(if $(BONUS),--bonus "$(BONUS)")
+	$(PY) tools/dist.py $(B) $(DIST) $(PLATFORM) $(VERSION) --arch $(TARGET_ARCH) $(if $(BONUS),--bonus "$(BONUS)")
 
 .PHONY: all gen test-lift runtime-objs clean bundle data licenses pipelist dist FORCE
 
@@ -472,10 +511,17 @@ dist: all
 .PHONY: test-settings-panel
 test-settings-panel: $(O)/rt/settings_panel.o $(O)/rt/modorder.o $(O)/rt/arcmerge.o $(O)/rt/config.o $(O)/rt/config_store.o $(O)/imgui/imgui/imgui.o $(O)/imgui/imgui/imgui_draw.o $(O)/imgui/imgui/imgui_tables.o $(O)/imgui/imgui/imgui_widgets.o $(LIB_STAMPS)
 	@mkdir -p $(O)/settings-test
-	$(CXX) $(IMGUIFLAGS) -Iruntime tests/test_settings_panel.cpp $(filter %.o,$^) $(SDL_LIBS) -o $(O)/settings-test/test-settings-panel$(if $(filter windows,$(PLATFORM)),.exe)
-	$(O)/settings-test/test-settings-panel$(if $(filter windows,$(PLATFORM)),.exe)
+	$(CXX) $(TARGET_FLAGS) $(if $(filter aarch64,$(TARGET_ARCH)),-fuse-ld=lld) $(IMGUIFLAGS) -Iruntime tests/test_settings_panel.cpp $(filter %.o,$^) $(SDL_LIBS) -o $(O)/settings-test/test-settings-panel$(if $(filter windows,$(PLATFORM)),.exe)
+	$(TEST_RUNNER) $(O)/settings-test/test-settings-panel$(if $(filter windows,$(PLATFORM)),.exe)
 
 # Translation coverage for both host-menu languages; no game files required.
 .PHONY: test-settings-locale
 test-settings-locale:
 	$(PY) tests/test_settings_locale.py
+
+# Real lazy-page faults and fatal signal context; no game files required.
+.PHONY: test-linux-fault
+test-linux-fault:
+	@mkdir -p $(O)/platform-test
+	$(CC) $(TARGET_FLAGS) -fuse-ld=lld -O2 -g -Wall -Wextra -Werror -Iruntime tests/test_linux_fault.c runtime/platform/linux.c -ldl -pthread -o $(O)/platform-test/test-linux-fault
+	$(TEST_RUNNER) $(O)/platform-test/test-linux-fault

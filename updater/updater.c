@@ -24,12 +24,12 @@
 #include <SDL3/SDL_main.h>
 
 #include "updater.h"
+#include "arch.h"
 
 #ifdef _WIN32
 #include <windows.h>
 #define GAME_EXE "mhgurecomp.exe"
 #define GAME_LIB "mhgugame.dll"
-#define ASSET_PREFIXES "Windows-"
 #else
 #include <dirent.h>
 #include <errno.h>
@@ -37,7 +37,6 @@
 #include <unistd.h>
 #define GAME_EXE "mhgurecomp"
 #define GAME_LIB "mhgugame.so"
-#define ASSET_PREFIXES "Linux-,ArchLinux-"  // (ArchLinux-: up to 0.11.4)
 #endif
 #define LATEST_URL "https://api.github.com/repos/morerokk/MHGURecomp/releases/latest"
 
@@ -357,12 +356,7 @@ static const Asset *pick_asset(const Release *r) {
     const Asset *best = NULL;
     for (int i = 0; i < r->nassets; i++) {
         const Asset *a = &r->assets[i];
-        bool mine = false;
-        for (const char *p = ASSET_PREFIXES; *p;) {
-            size_t n = strcspn(p, ",");
-            mine |= !strncmp(a->name, p, n);
-            p += n + (p[n] == ',');
-        }
+        bool mine = update_asset_matches(a->name);
         size_t len = strlen(a->name);
         bool tgz = len > 7 && !strcmp(a->name + len - 7, ".tar.gz"), zip = len > 4 && !strcmp(a->name + len - 4, ".zip");
         if (!mine || !(tgz || zip)) continue;
@@ -471,6 +465,22 @@ static int SDLCALL worker(void *arg) {
     bool complete = false, has_lib = false;
     for (int i = 0; i < x.n; i++) complete |= !strcmp(x.items[i].rel, GAME_EXE), has_lib |= !strcmp(x.items[i].rel, GAME_LIB);
     if (ok && !(complete && has_lib)) ok = false, snprintf(why, sizeof why, "the release has no %s or %s", GAME_EXE, GAME_LIB);
+#ifndef _WIN32
+    // Check the complete payload before moving any installed files aside.
+    const char *programs[] = {GAME_EXE, GAME_LIB, "mhgurecomp-updater"};
+    for (size_t i = 0; ok && i < sizeof programs / sizeof *programs; i++) {
+        char file[2048];
+        snprintf(file, sizeof file, "%s/%s", newdir, programs[i]);
+        unsigned char header[64];
+        FILE *f = fopen(file, "rb");
+        size_t n = f ? fread(header, 1, sizeof header, f) : 0;
+        if (f) fclose(f);
+        if (!update_elf_matches(header, n)) {
+            ok = false;
+            snprintf(why, sizeof why, "%s is missing or has the wrong ELF architecture", programs[i]);
+        }
+    }
+#endif
     if (ok) {
         ulog("[update] installing %d files\n", x.n);
         ok = install(&x, why, sizeof why);

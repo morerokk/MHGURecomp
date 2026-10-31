@@ -30,7 +30,7 @@ Status: fully playable, but there may be some bugs. I've played a dozen hunts wi
 
 - OS: Windows 10/11 64-bit, or Linux 64-bit with glibc 2.39 or newer (Ubuntu 24.04, Linux Mint 22, Debian 13,
   SteamOS 3.7, Arch, Fedora 40 or newer) and a Vulkan driver
-- CPU: Any CPU from 2014 or newer (needs AVX2 support)
+- CPU: x86-64 with AVX2, or AArch64 (ARMv8-A) on Linux. Windows ARM64 is not supported.
 - GPU: Any GPU from 2016 or newer (needs Vulkan 1.2 support), and at least 1GB of VRAM
 - RAM: 4GB
 - The game files for Monster Hunter Generations Ultimate, version 1.4.0. You can extract these from your Switch or Ryujinx with patches pre-applied.
@@ -339,16 +339,22 @@ git fetch --tags                          # (so builds between releases know the
 make dist VERSION=0.10.4 BONUS=<path to the bonus savegame's system file>
 ```
 
-On Windows that writes `dist\Windows-MHGURecomp.0.10.4.zip`; on Linux (or in WSL, with `B=build-linux
+On Windows that writes `dist\Windows-MHGURecomp.0.10.4.zip`; on Linux x86-64 (or in WSL, with `B=build-linux
 O=obj-linux`) `dist/Linux-MHGURecomp.0.10.4.tar.gz`, which keeps the programs executable. Each holds one folder
 with `mhgurecomp(.exe)`, `mhgugame.dll` / `.so`, `mhgurecomp-updater(.exe)`, the bundled DLLs, `licenses\`,
 `bonus\system` (from `BONUS`, else left empty), and empty `data\`, `mods\` and `cheats\` folders; never anything of
 the game's, or the build folder's settings, caches or mods. `make dist` prints each archive's SHA-256.
+Linux ARM64 uses `dist/LinuxARM64-MHGURecomp.0.10.4.tar.gz` and a `LinuxARM64-MHGURecomp` folder.
+Pass the same `TARGET_ARCH`, `SYSROOT`, `B` and `O` as for the build (see below).
+Packaging requires the complete build, including the target's `mhgugame.so`.
 
-Upload both archives to a GitHub release whose tag is exactly that version (`0.10.4`, no `v`), as a normal release,
+Upload the platform archives to a GitHub release whose tag is exactly that version (`0.10.4`, no `v`), as a normal release,
 not a pre-release. The updater only looks at GitHub's "latest" release, compares its tag with its own version as
-numbers (0.10.10 is newer than 0.10.9), and picks the asset starting with `Windows-` (`.zip`) or `Linux-`
-(`.tar.gz`, else `.zip`; `ArchLinux-`, the name up to 0.11.4, as well). GitHub records each upload's SHA-256, which the updater checks. To hold a broken release
+numbers (0.10.10 is newer than 0.10.9), and picks the matching prefix: `Windows-MHGURecomp.` (`.zip`),
+`Linux-MHGURecomp.` (x86-64; also the old `ArchLinux-MHGURecomp.`) or `LinuxARM64-MHGURecomp.`
+(ARM64; `.tar.gz`, else `.zip`). The ARM prefix must not start with `Linux-`: older x86-64 updaters accept
+any name with that prefix. Linux updates also check the runtime, game library and updater ELF architecture
+before installing. GitHub records each upload's SHA-256, which the updater checks. To hold a broken release
 back, make it a draft or pre-release: the updater then sees the previous one as the latest.
 
 The version comes from `git describe --tags`. A build that isn't exactly a tag (`0.10.3-4-gabc1234`) never updates
@@ -421,6 +427,38 @@ hold links to the game files (`ln -s /mnt/c/.../exefs build-linux/data/exefs`, s
 own Vulkan driver (dzn, Vulkan on Direct3D 12) can't create the renderer's pipeline layouts, so use Mesa's software
 one with `VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json`. WSLg can't capture the mouse (clicks still work as
 buttons), and screenshots come out black there.
+
+#### Linux ARM64
+
+`TARGET_ARCH` defaults to the host architecture (`x86_64` or `aarch64`; `amd64` and `arm64` are aliases).
+Native ARM64 builds use the Linux dependencies above. Cross-builds from x86-64 Linux use host Clang/LLD,
+LLVM tools, CMake, Python, pkg-config and Wayland scanner, with headers and libraries from an **external
+AArch64 Linux sysroot**. Do not use the x86-64 host's `/usr` as that sysroot.
+
+See [Building for Linux ARM64](docs/BUILD-LINUX-ARM64.md) for the complete Fedora x86-64 recipe: host packages,
+Python environment, VMA 3.4.0, optional rootless Podman preparation of an Ubuntu 24.04 ARM64 sysroot,
+compiler checks, game generation, tests and device use. Podman prepares dependencies only; the existing
+Makefile builds on the host. An existing compatible sysroot does not need Podman.
+
+```bash
+export ARM_SYSROOT=/absolute/path/to/aarch64-sysroot
+export GAME_DUMP=/absolute/path/to/game
+python3 -m venv tools/venv
+tools/venv/bin/python -m pip install -r tools/requirements.txt
+make gen GAME="$GAME_DUMP"
+make -j4 JOBS=4 TARGET_ARCH=aarch64 SYSROOT="$ARM_SYSROOT" \
+    B=build-arm64 O=obj-arm64 GAME="$GAME_DUMP"
+```
+
+Use separate `B` and `O` directories for each architecture/sysroot; their defaults remain `build` and `obj`.
+`JOBS` limits each bundled dependency build, not the total process count; `-j` controls outer make jobs.
+ARM game code defaults to `-march=armv8-a`; x86-64 retains `-march=x86-64-v3`. CPU flags, but not the absolute
+sysroot path, enter the game-library identity. The existing glibc 2.39 / GLIBCXX_3.4.32 ceilings still apply;
+a newer native distribution may exceed them.
+
+This is Linux, not Android support. The device still needs the renderer's Vulkan features and enough virtual
+address space for the guest mapping. QEMU regression tests do not validate graphics or gameplay.
+Test the complete build on the target device before publishing an ARM64 release.
 
 ## Repository layout
 

@@ -1,8 +1,8 @@
 """Pack a build folder into its release archive, for GitHub (make dist).
 
-usage: python tools/dist.py <build dir> <out dir> <windows|linux> <version> [--bonus <file>]
+usage: python tools/dist.py <build dir> <out dir> <windows|linux> <version> [--arch x86_64|aarch64] [--bonus <file>]
 
-Windows: <out>/Windows-MHGURecomp.<version>.zip; Linux: <out>/Linux-MHGURecomp.<version>.tar.gz (the programs
+Windows: <out>/Windows-MHGURecomp.<version>.zip; Linux: <out>/Linux[ARM64]-MHGURecomp.<version>.tar.gz (the programs
 keep their executable permission). Inside, one folder of the same name holds what a player copies: the game, its code
 library, the updater, the DLLs (Windows), pipelines.list, licenses/, bonus/system (--bonus: the donor save of the free downloads) and
 the empty data/, mods/ and cheats/ folders, with a note in data/ of what goes there. Nothing else of the build folder:
@@ -57,9 +57,27 @@ def check_version(build, platform, version):
             sys.exit(f'dist: {p} was not built as version {version} (make dist VERSION={version} rebuilds it)')
 
 
+def check_arch(build, arch):
+    machine = 183 if arch == 'aarch64' else 62
+    for name in ('mhgurecomp', 'mhgugame.so', 'mhgurecomp-updater'):
+        with open(os.path.join(build, name), 'rb') as f:
+            h = f.read(64)
+        if not (len(h) == 64 and h[:7] == b'\x7fELF\x02\x01\x01'
+                and int.from_bytes(h[16:18], 'little') in (2, 3)
+                and int.from_bytes(h[18:20], 'little') == machine
+                and h[20:24] == b'\x01\0\0\0' and h[52:54] == b'\x40\0'):
+            sys.exit(f'dist: {name} is not a Linux {arch} ELF64 binary')
+
+
 def main():
     args = sys.argv[1:]
     bonus = None
+    arch = 'x86_64'  # old callers package Linux x86-64
+    if '--arch' in args:
+        i = args.index('--arch')
+        arch = args[i + 1]
+        del args[i:i + 2]
+    arch = {'arm64': 'aarch64', 'amd64': 'x86_64'}.get(arch, arch)
     if '--bonus' in args:
         i = args.index('--bonus')
         bonus = args[i + 1]
@@ -67,9 +85,14 @@ def main():
     if len(args) != 4 or args[2] not in ('windows', 'linux'):
         sys.exit(__doc__)
     build, out_dir, platform, version = args
+    if arch not in ('x86_64', 'aarch64') or (platform == 'windows' and arch != 'x86_64'):
+        sys.exit(f'dist: unsupported platform/architecture: {platform}/{arch}')
     check_version(build, platform, version)
+    if platform == 'linux':
+        check_arch(build, arch)
     # (Linux-: up to 0.11.4 ArchLinux-, when it needed Arch's SDL3 and shaderc; every updater takes both)
-    top = ('Windows' if platform == 'windows' else 'Linux') + '-MHGURecomp'
+    top = ('Windows' if platform == 'windows' else
+           'LinuxARM64' if arch == 'aarch64' else 'Linux') + '-MHGURecomp'
     name = f'{top}.{version}' + ('.zip' if platform == 'windows' else '.tar.gz')
     entries = files(build, platform)
     if bonus:

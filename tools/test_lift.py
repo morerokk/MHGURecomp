@@ -4,12 +4,15 @@ register, flag, VFP register and the scratch memory are compared.
 
 Usage: test_lift.py <nso> <base> [--tests N] [--vectors K] [--seed S] [--only REGEX] [--interp]
 --interp runs the same instructions through the interpreter (runtime/interp.c) instead.
-Needs clang on PATH (MSYS2 UCRT64). Exit status 0 when everything matches.
+--cc selects the compiler and target flags; --genarch selects CPU flags; --runner selects an optional emulator.
+Needs clang on PATH. Exit status 0 when everything matches.
 """
 import argparse
 import os
+import platform
 import random
 import re
+import shlex
 import struct
 import subprocess
 import sys
@@ -162,6 +165,10 @@ def main():
     ap.add_argument('--only')
     ap.add_argument('--keep', action='store_true')
     ap.add_argument('--interp', action='store_true', help='test runtime/interp.c instead of the lifted C')
+    ap.add_argument('--cc', default='clang -fuse-ld=lld', help='compiler command including target flags')
+    ap.add_argument('--genarch', default=('-march=armv8-a' if platform.machine().lower()
+                                         in ('aarch64', 'arm64') else '-march=x86-64-v3'))
+    ap.add_argument('--runner', default='', help='optional runner, e.g. qemu-aarch64 -L SYSROOT')
     args = ap.parse_args()
     rng = random.Random(args.seed)
 
@@ -214,6 +221,8 @@ def main():
             vecs.append((ti, st))
             expect.append(res)
             meta.append((x, w, dis))
+    if not vecs:
+        sys.exit('No runnable vectors; this is not a passing test.')
     src.append('typedef void (*T)(Cpu *);\nT tests[] = {' + ', '.join(f't{i}' for i in range(len(picked))) + '};\n')
     src.append(f'int ntests = {len(picked)};\n')
     open(os.path.join(work, 'tests.c'), 'w').write(''.join(src))
@@ -227,20 +236,24 @@ def main():
     with open(os.path.join(work, 'pattern.bin'), 'wb') as f:
         f.write(PATTERN)
     exe = os.path.join(work, 'harness.exe')
-    cmd = ['clang', '-O1', '-fno-strict-aliasing', '-ffp-contract=off', '-march=x86-64-v3', '-w',
+    cmd = shlex.split(args.cc) + ['-O1', '-fno-strict-aliasing', '-ffp-contract=off'] + shlex.split(args.genarch) + ['-w',
            f'-I{os.path.join(ROOT, "runtime")}', '-o', exe, os.path.join(HERE, 'test_harness.c'),
            os.path.join(work, 'tests.c'), os.path.join(ROOT, 'runtime', 'simd_int.c'),
            os.path.join(ROOT, 'runtime', 'neon.c')] + ([os.path.join(ROOT, 'runtime', 'interp.c')] if args.interp else [])
+    if os.name != 'nt':
+        cmd.append('-lm')
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode:
         print(r.stderr[:6000], file=sys.stderr)
         sys.exit(2)
-    out = subprocess.run([exe, work], capture_output=True)
+    out = subprocess.run(shlex.split(args.runner) + [exe, work], capture_output=True)
     if out.returncode:
         print('harness failed', out.returncode, out.stderr.decode()[:2000], file=sys.stderr)
         sys.exit(2)
     data = out.stdout
     rec = 15 * 4 + 4 * 4 + 32 * 8 + 4
+    if len(data) != rec * len(expect):
+        sys.exit(f'Invalid harness output size: {len(data)}, expected {rec * len(expect)}')
     fails = {}
     nan_diffs = 0
     for i, (res, (x, w, dis)) in enumerate(zip(expect, meta)):
