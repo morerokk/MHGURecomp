@@ -14,7 +14,7 @@ This targets **AArch64 Linux with glibc**, not Android.
 ## Choose a build path
 
 - **Native AArch64 Linux:** install the Linux development dependencies in
-  the [README](../README.md#linux), including Clang/LLD, LLVM tools, CMake,
+  the [manual Linux guide](BUILD-LINUX-MANUAL.md#native-linux-dependencies), including Clang/LLD, LLVM tools, CMake,
   Python, pkg-config, VMA and the Vulkan/SDL desktop development files.
   Prepare Python and VMA as below. Run `make gen`, then
   `make -j4 JOBS=2 TARGET_ARCH=aarch64 B=build-arm64 O=obj-arm64 GAME=...`.

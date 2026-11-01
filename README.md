@@ -359,7 +359,8 @@ with `mhgurecomp(.exe)`, `mhgugame.dll` / `.so`, `mhgurecomp-updater(.exe)`, the
 `bonus\system` (from `BONUS`, else left empty), and empty `data\`, `mods\` and `cheats\` folders; never anything of
 the game's, or the build folder's settings, caches or mods. `make dist` prints each archive's SHA-256.
 Linux ARM64 uses `dist/LinuxARM64-MHGURecomp.0.10.4.tar.gz` and a `LinuxARM64-MHGURecomp` folder.
-Pass the same `TARGET_ARCH`, `SYSROOT`, `B` and `O` as for the build (see below).
+Pass the same `TARGET_ARCH`, `SYSROOT`, `B` and `O` as for the build.
+See the [manual Linux guide](docs/BUILD-LINUX-MANUAL.md#linux-arm64).
 Packaging requires the complete build, including the target's `mhgugame.so`.
 
 Upload the platform archives to a GitHub release whose tag is exactly that version (`0.10.4`, no `v`), as a normal release,
@@ -387,106 +388,88 @@ described above.
 
 ### Linux
 
-To build both Linux release packages on an x86-64 Linux host, use Docker:
+Use Docker on an **x86-64 Linux PC** to build both Linux packages.
+One x86-64 tools image also cross-compiles the ARM64 package.
+These packages target Linux with glibc, not Android.
+You need your own complete MHGU 1.4.0 dump.
 
-```bash
-bash tools/build-linux-release.sh --game "/absolute/path/to/data" \
-  --version 0.12.0 --jobs 2
-```
+1. Install Docker from the [official installation guide](https://docs.docker.com/engine/install/).
+2. Configure access with the [Linux post-installation guide](https://docs.docker.com/engine/install/linux-postinstall/)
+   or the [rootless guide](https://docs.docker.com/engine/security/rootless/).
+   The `docker` group grants root-level privileges.
+3. Check that this command shows the Docker server without `sudo`:
 
-This produces the x86-64 and ARM64 archives in `dist/`.
-Your dump stays on your host and enters a read-only container mount.
-The tools image does not contain the game.
-See [Build both Linux packages](docs/BUILD-LINUX-DOCKER.md) for requirements,
-Podman, Fedora, caches, and device tests.
-The manual build instructions follow.
+   ```bash
+   docker info
+   ```
 
-The Windows build runs under Proton / Wine. A native Linux build is supported as well: the Makefile picks
-`runtime/platform/linux.c` when `uname -s` isn't Windows and everything else is shared. Tested on Gentoo
-x86_64 with clang under Wayland (NVIDIA). Besides `make`, `git`, `clang`, `lld` and Python 3.10 or newer it
-needs:
+4. Open **Actions → Linux builder** in the repository you trust.
+   Select a successful run on `master` or `linux-arm64-0118`, not a PR run.
+   Make sure **Publish the tools image** also passed.
+   Copy that run's full source commit SHA.
+   If no image exists yet, use the [local builder option](docs/BUILD-LINUX-DOCKER.md#build-the-tools-image-locally).
 
-- the Vulkan loader and headers, plus `curl` and optionally `nasm` for building FFmpeg (see "FFmpeg" above; no
-  FFmpeg package needed);
-- `cmake` and the development files of what SDL uses on a desktop: X11 (with Xcursor, Xext, Xfixes, Xi, Xrandr,
-  Xss, Xtst), Wayland (wayland-protocols, libxkbcommon, libdecor), PipeWire, PulseAudio, ALSA, libudev and D-Bus.
-  Like FFmpeg, the first build downloads pinned releases of SDL3 and shaderc (with glslang and SPIRV-Tools) to
-  `third_party/`, checked against their SHA-256, and links them in statically, so the game runs on distributions
-  that have neither (Ubuntu 24.04 has no SDL3) and the release needs nothing besides glibc, libstdc++ and the
-  Vulkan loader. SDL still loads X11 / Wayland and the audio server from the system when it runs, and when the system
-  has an SDL3 of the same version or newer (new controllers, fixes), the game uses that one instead: `log.txt` says
-  which (`[ui] SDL ...`), and `MHGU_SDL=bundled` keeps the built-in one. That takes a few
-  minutes, once; the build stops if SDL didn't find one of those (`SDL3_NEED`). `make SDL3=system SHADERC=system`
-  links the system's `libSDL3.so.0` / `libshaderc_shared.so.1` instead, as a distribution package would;
-- `vk_mem_alloc.h` (3.4.0) in `third_party/vk_mem_alloc/`, which the Makefile has on the include path (a
-  distro package that installs the header where the compiler looks by default works just as well);
-- `zenity` or `kdialog` for the dialog on a fatal error. Without either, the message goes to the terminal and
-  to `log.txt` as usual;
-- for the updater: zlib's headers to build it, and `libcurl.so.4` (curl) when it runs, which SteamOS and the
-  usual desktop distributions have. It loads libcurl itself, so without it the updater just starts the game.
+5. Clone that repository and select the same commit.
+   For a fork, replace `morerokk/MHGURecomp` with its owner and repository name.
 
-```bash
-python3 -m venv tools/venv && tools/venv/bin/pip install -r tools/requirements.txt
-make gen GAME=../mhgu/game       # as above: the folder holding exefs/ and romfs/
-make -j8 GAME=../mhgu/game
-cd build && ./mhgurecomp
-```
+   ```bash
+   REPOSITORY=morerokk/MHGURecomp
+   OWNER=${REPOSITORY%%/*}
+   read -r -p "Full source SHA from the successful run: " REVISION
+   git clone "https://github.com/$REPOSITORY.git" MHGURecomp-linux
+   cd MHGURecomp-linux
+   git checkout --detach "$REVISION"
+   IMAGE="ghcr.io/${OWNER,,}/mhgurecomp-builder:$REVISION"
+   docker pull "$IMAGE"
+   ```
 
-`build/` becomes the game folder exactly as on Windows: `mhgurecomp`, `mhgugame.so` with the recompiled game
-code and `data/` as hard links to your game files, nothing else; the ini, caches and `mods/` are written beside
-them when it runs (`MHGU_HOME=<folder>` puts those there instead). Saves go to
-`$XDG_DATA_HOME/MHGURecomp/save`, default `~/.local/share/MHGURecomp/save` — the folder the Windows build
-keeps them in under `%APPDATA%`, same layout, so moving a save across is copying `save_0`.
+   Use the SHA from a run that published an image, not any latest commit.
+   Documentation-only pushes do not publish an image.
+   A public image needs no GitHub login, fork, or Actions setup.
+   The upstream image is available only after an upstream publication.
+   A fork's image belongs to that fork's owner.
 
-From Windows, the Linux build can be made in WSL with Arch Linux (`wsl --install -d archlinux`), straight from the
-Windows checkout, into its own folders so the Windows build is left alone:
+6. Build both packages with your local dump:
 
-```bash
-pacman -Syu --needed make git clang lld python cmake vulkan-headers vulkan-icd-loader nasm vulkan-swrast \
-    libx11 libxcursor libxext libxfixes libxi libxrandr libxss libxtst wayland wayland-protocols libxkbcommon \
-    libdecor pipewire libpulse alsa-lib systemd-libs dbus
-mkdir -p /usr/local/include/vma && cp /mnt/c/msys64/ucrt64/include/vma/vk_mem_alloc.h /usr/local/include/vma/
-make -j16 B=build-linux O=obj-linux     # in the repository, under /mnt/c/...
-```
+   ```bash
+   bash tools/build-linux-release.sh --game "/absolute/path/to/data" \
+     --version 0.12.0 --jobs 2 --image "$IMAGE" --skip-image-build
+   ```
 
-Arch has no package for `vk_mem_alloc.h`; MSYS2's (3.4.0) is the one the Windows build uses. `build-linux/data` can
-hold links to the game files (`ln -s /mnt/c/.../exefs build-linux/data/exefs`, same for `romfs`, then
-`touch build-linux/data/.complete`) instead of a second copy. It also runs there, in a WSLg window, slowly: WSL's
-own Vulkan driver (dzn, Vulkan on Direct3D 12) can't create the renderer's pipeline layouts, so use Mesa's software
-one with `VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json`. WSLg can't capture the mouse (clicks still work as
-buttons), and screenshots come out black there.
+   The dump folder must contain `exefs/main`, `exefs/sdk`, and `romfs/`.
+   Do not run the build command with `sudo`.
+   The dump enters a read-only local mount.
+   Neither GitHub Actions nor GHCR receives it.
+
+7. Check both package hashes:
+
+   ```bash
+   (cd dist && sha256sum -c SHA256SUMS)
+   ```
+
+   The packages are `dist/Linux-MHGURecomp.0.12.0.tar.gz` for x86-64
+   and `dist/LinuxARM64-MHGURecomp.0.12.0.tar.gz` for ARM64.
+   Each contains game-derived `mhgugame.so`, but no raw dump or saves.
+   Do not upload these private builds to CI or GHCR.
+
+8. Extract each package on its target device.
+   Add your own `exefs` and `romfs` folders under its `data/` folder.
+   Start `mhgurecomp`, not the updater, for the first test.
+   Back up your saves first.
+
+Actions publishes tools, not playable game packages.
+See [Build both Linux packages](docs/BUILD-LINUX-DOCKER.md)
+for Podman, Fedora, caches, device tests, and the maintainer's Actions/GHCR setup.
+For native builds or WSL, use the [advanced manual guide](docs/BUILD-LINUX-MANUAL.md).
 
 #### Linux ARM64
 
-`TARGET_ARCH` defaults to the host architecture (`x86_64` or `aarch64`; `amd64` and `arm64` are aliases).
-Native ARM64 builds use the Linux dependencies above. Cross-builds from x86-64 Linux use host Clang/LLD,
-LLVM tools, CMake, Python, pkg-config and Wayland scanner, with headers and libraries from an **external
-AArch64 Linux sysroot**. Do not use the x86-64 host's `/usr` as that sysroot.
-
-See [Building for Linux ARM64](docs/BUILD-LINUX-ARM64.md) for the complete Fedora x86-64 recipe: host packages,
-Python environment, VMA 3.4.0, optional rootless Podman preparation of an Ubuntu 24.04 ARM64 sysroot,
-compiler checks, game generation, tests and device use. Podman prepares dependencies only; the existing
-Makefile builds on the host. An existing compatible sysroot does not need Podman.
-
-```bash
-export ARM_SYSROOT=/absolute/path/to/aarch64-sysroot
-export GAME_DUMP=/absolute/path/to/game
-python3 -m venv tools/venv
-tools/venv/bin/python -m pip install -r tools/requirements.txt
-make gen GAME="$GAME_DUMP"
-make -j4 JOBS=4 TARGET_ARCH=aarch64 SYSROOT="$ARM_SYSROOT" \
-    B=build-arm64 O=obj-arm64 GAME="$GAME_DUMP"
-```
-
-Use separate `B` and `O` directories for each architecture/sysroot; their defaults remain `build` and `obj`.
-`JOBS` limits each bundled dependency build, not the total process count; `-j` controls outer make jobs.
-ARM game code defaults to `-march=armv8-a`; x86-64 retains `-march=x86-64-v3`. CPU flags, but not the absolute
-sysroot path, enter the game-library identity. The existing glibc 2.39 / GLIBCXX_3.4.32 ceilings still apply;
-a newer native distribution may exceed them.
-
-This is Linux, not Android support. The device still needs the renderer's Vulkan features and enough virtual
-address space for the guest mapping. QEMU regression tests do not validate graphics or gameplay.
-Test the complete build on the target device before publishing an ARM64 release.
+The Docker command above builds ARM64 without a manual sysroot setup.
+For native ARM64 builds or manual cross-builds, use the
+[manual Linux overview](docs/BUILD-LINUX-MANUAL.md#linux-arm64)
+and the [detailed ARM64 guide](docs/BUILD-LINUX-ARM64.md).
+The device still needs the renderer's Vulkan features and enough virtual address space.
+QEMU checks do not validate graphics or gameplay.
 
 ## Repository layout
 
