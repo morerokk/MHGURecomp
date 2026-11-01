@@ -56,6 +56,11 @@ int main(int argc, char **argv) {
     assert(config_live_msaa()==4 && !config_live_vsync() && !config_live_fxaa());
     assert(config_live_face_buttons()==FACE_LABEL && !config_live_background_input());
     assert(config_live_mouse_sensitivity()==2.5f && camera_fovy(0.5f,g_render_aspect)<camera_before);
+    assert(camera_fovy(0.5f,g_render_aspect*1.002f)<camera_before && camera_fovy(0.5f,g_render_aspect*1.1f)==0.5f); // (pixel rounding)
+    float aspect_was=g_render_aspect; uint32_t size_was[2]={g_render_size[0],g_render_size[1]};
+    g_render_aspect=3.57778f, g_render_size[0]=426, g_render_size[1]=118; // (FSR Ultra Performance at 1280x720: 0.9% off)
+    assert(camera_fovy(0.5f,426.0f/118.0f)!=0.5f && camera_fovy(0.5f,3.3f)==0.5f);
+    g_render_aspect=aspect_was, g_render_size[0]=size_was[0], g_render_size[1]=size_was[1];
     assert(g_config.fps==60 && g_config.fxaa==1 && g_config.face_buttons==FACE_POSITION); // Boot snapshot is immutable.
     c.hp.quest[0] = c.hp.quest[1]; c.hp.quests = 1;
     assert(config_save(&c, error, sizeof error));

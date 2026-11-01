@@ -9,6 +9,7 @@
 #include "config.h"
 #include "app_actions.h"
 #include "overlay.h"
+#include "hle/chat.h"
 #include "mods.h"
 #include "rt.h"
 
@@ -67,7 +68,8 @@ static void fit_desktop(int *w, int *h) {
 }
 
 // Full screen as the settings say (exclusive: the monitor mode closest to Resolution; else borderless desktop), or
-// windowed. The cursor only shows in a window.
+// windowed. The cursor only shows in a window, or over a menu or the chat box (they show it only as they open, so it
+// stays shown when full screen comes while one is open: F11, Alt+Enter).
 static void set_fullscreen(bool on) {
     bool was = SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN;
     if (on && !was) SDL_GetWindowSize(window, &win_w, &win_h);
@@ -92,7 +94,7 @@ static void set_fullscreen(bool on) {
         SDL_SetWindowSize(window, win_w, win_h);
         SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     }
-    if (on) SDL_HideCursor(); else SDL_ShowCursor();
+    if (on && !overlay_menu_open() && !chat_active()) SDL_HideCursor(); else SDL_ShowCursor();
 }
 
 void ui_init(void) {

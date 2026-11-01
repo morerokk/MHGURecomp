@@ -8,7 +8,12 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifdef __ANDROID__
+#define GUEST_BASE 0x1000000000ull   // 64 GB: most Android kernels give a process 512 GB (39-bit addresses), and map
+                                     // its libraries and heap near the top of that
+#else
 #define GUEST_BASE 0x10000000000ull  // 1 TB: claimed at startup (runtime/main.c)
+#endif
 
 typedef struct __attribute__((aligned(16))) Cpu {
     uint32_t r[16];          // 0: r0-r14 (r13 sp, r14 lr); r[15] unused (pc reads are constants)

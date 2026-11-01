@@ -37,6 +37,7 @@ typedef struct {
     VkSemaphore timeline;      // value = last completed submission number
     VkCommandPool pool;        // render thread only
     bool divisor, demote, custom_border, depth_clamp, stencil_export, sample_shading;
+    bool bc;                   // textureCompressionBC (MHGU_NO_BC=1: off, as phone GPUs report; textures.c decodes BC)
     volatile uint32_t msaa;    // samples for the 3D scene's passes (settings MSAA, as far as the GPU allows): 1 = off
     uint32_t msaa_counts;      // the sample counts MSAA can use (bits 2, 4, 8)
     bool fsr_fp16, fsr_storage_wo_format;  // FSR (fsr.c): shaderFloat16 / shaderStorageImageWriteWithoutFormat enabled
@@ -117,6 +118,7 @@ typedef struct TexBackend {
     uint32_t pending_w, pending_h, pending_stride;
     uint8_t astc_bw, astc_bh;  // ASTC without GPU support: decoded to RGBA8 on upload (runtime/nvn/astc.c)
     bool astc_srgb;
+    uint8_t bcn;               // BC without GPU support (BCN_*): decoded on upload (runtime/nvn/bcn.c)
     struct TexBackend *ms;  // MSAA: the multisampled image this one is rendered through (textures.c vk_tex_ms)
     bool ms_valid;          // ms holds this image's contents (its last write was a pass through ms)
     bool ms_dirty;          // ms is newer than this image: resolved when this one is next read (exec.c vk_ms_resolve)
@@ -128,6 +130,11 @@ typedef struct TexBackend {
 
 bool vk_wide_rt_on(void);  // (textures.c) RGBA8 render targets as RGBA16 UNORM ([Graphics] SmoothGradients)
 void vk_rt_widen(NvnTexture *t, bool wide);  // (exec.c begin_pass, outside a render pass)
+// Images of a compressed format the GPU lacks (ASTC on desktop, BC on phones) hold decoded texels: blocks
+// (row-major, w x h texels' worth) -> w*h texels of vk_tex_texel_size bytes, tightly packed.
+static inline bool vk_tex_decoded(const TexBackend *b) { return b->astc_bw || b->bcn; }
+uint32_t vk_tex_texel_size(const TexBackend *b);
+void vk_tex_decode(const TexBackend *b, const uint8_t *blocks, uint32_t w, uint32_t h, uint8_t *out);
 
 TexBackend *vk_tex(NvnTexture *t, bool for_render);  // backend image (uploads CPU contents unless for_render)
 VkFormat vk_format(uint32_t nvn_format);

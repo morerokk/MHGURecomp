@@ -1,6 +1,7 @@
 """Build/release regression tests using public code and explicit header fixtures."""
 import itertools
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -14,13 +15,24 @@ def probe(*args):
     names = ("TARGET_ARCH", "TARGET_FLAGS", "CMAKE_TARGET_FLAGS",
              "FFMPEG_TARGET_FLAGS", "GENARCH", "GAMELIB_ID", "B", "O",
              "CC", "CXX", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR",
-             "UPD_LDFLAGS", "FFMPEG_CC")
+             "UPD_LDFLAGS", "FFMPEG_CC", "ABI", "TRIPLE", "UPDATER",
+             "GLIBC_WRAP_FLAGS", "RT_SRC", "MAKEFILE_LIST", "FFMPEG_CONF")
     recipe = "probe:\n\t@printf '%s\\n' " + " ".join(
         f"'{name}=$({name})'" for name in names)
     recipe += " 'GLIBC_CHECK_ENABLED=$(if $(value GLIBC_CHECK),yes,no)'\n"
-    return subprocess.run(["make", "-s", "-f", "Makefile", "-f", "-",
-                           "probe", *args], input=recipe, cwd=ROOT,
-                          capture_output=True, text=True)
+    with tempfile.TemporaryDirectory(prefix="mhgu-config-") as tmp:
+        fixture_args = []
+        if "PLATFORM=android" in args:
+            # Empty directories only. No SDK tools or compilation run here.
+            sdk = Path(tmp) / "configuration-fixture-not-sdk"
+            ndk = sdk / "ndk" / "fixture"
+            (ndk / "toolchains/llvm/prebuilt/test-host/bin").mkdir(parents=True)
+            (sdk / "cmake/fixture/bin").mkdir(parents=True)
+            fixture_args = [f"ANDROID_SDK={sdk}", f"NDK={ndk}"]
+        return subprocess.run(["make", "-s", "-f", "Makefile", "-f", "-",
+                               "probe", *args, *fixture_args],
+                              input=recipe, cwd=ROOT,
+                              capture_output=True, text=True)
 
 
 def elf_header(machine):
@@ -95,6 +107,30 @@ class BuildTests(unittest.TestCase):
                         self.assertIn(f"{name}=\n", result.stdout)
                     self.assertNotIn("--target=aarch64-linux-gnu", result.stdout)
                     self.assertNotIn("/desktop/sysroot", result.stdout)
+                    values = dict(line.split("=", 1)
+                                  for line in result.stdout.splitlines())
+                    arch = "aarch64" if abi == "arm64-v8a" else "x86_64"
+                    triple = f"{arch}-linux-android29"
+                    self.assertIn("android/android.mk",
+                                  values["MAKEFILE_LIST"].split())
+                    self.assertNotIn("tools/desktop-arch.mk",
+                                     values["MAKEFILE_LIST"].split())
+                    self.assertEqual(values["ABI"], abi)
+                    self.assertEqual(values["TRIPLE"], triple)
+                    self.assertEqual(values["CC"], values["FFMPEG_CC"] +
+                                     f" --target={triple} -fPIC")
+                    self.assertEqual(values["CXX"], values["FFMPEG_CC"] +
+                                     f"++ --target={triple} -fPIC")
+                    self.assertEqual(values["B"], "build-android")
+                    self.assertEqual(values["O"], f"obj-android/{abi}")
+                    self.assertEqual(values["UPDATER"], "")
+                    self.assertEqual(values["GLIBC_WRAP_FLAGS"], "")
+                    self.assertNotIn("linux_glibc.c", values["RT_SRC"])
+                    flags = shlex.split(values["FFMPEG_CONF"])
+                    self.assertIn("--host-cc=clang", flags)
+                    self.assertIn("--target-os=android", flags)
+                    self.assertIn(f"--arch={arch}", flags)
+                    self.assertIn(f"--extra-cflags=--target={triple}", flags)
 
     def test_glibc_check_is_linux_only(self):
         for platform in ("linux", "windows", "android"):

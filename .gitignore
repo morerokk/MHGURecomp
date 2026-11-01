@@ -30,6 +30,8 @@ __pycache__/
 # the hub server built in place (server/README.md)
 server/mhgurecomp-hubserver
 server/mhgurecomp-hubserver.exe
+/build-android/
+/obj-android/
 
 # Private container work must never enter a commit or build context.
 /.linux-release/

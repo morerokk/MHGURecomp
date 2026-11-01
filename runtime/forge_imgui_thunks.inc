@@ -1550,34 +1550,6 @@ HLE_FUNC("ImDrawList_AddCircleFilled", ig_ImDrawList_AddCircleFilled) {
     IG_LEAVE(c);
 }
 
-HLE_FUNC("ImDrawList_AddConcavePolyFilled", ig_ImDrawList_AddConcavePolyFilled) {
-    uint32_t a0 = c->r[0];
-    uint32_t a1 = c->r[1];
-    uint32_t a2 = c->r[2];
-    uint32_t a3 = c->r[3];
-    IG_ENTER(c);
-    void *ha0 = m_in(a0, 7);
-    void *ha1 = m_in(a1, 116);
-    ImDrawList_AddConcavePolyFilled(ha0, ha1, a2, a3);
-    m_after(a0);
-    m_after(a1);
-    IG_LEAVE(c);
-}
-
-HLE_FUNC("ImDrawList_AddConvexPolyFilled", ig_ImDrawList_AddConvexPolyFilled) {
-    uint32_t a0 = c->r[0];
-    uint32_t a1 = c->r[1];
-    uint32_t a2 = c->r[2];
-    uint32_t a3 = c->r[3];
-    IG_ENTER(c);
-    void *ha0 = m_in(a0, 7);
-    void *ha1 = m_in(a1, 116);
-    ImDrawList_AddConvexPolyFilled(ha0, ha1, a2, a3);
-    m_after(a0);
-    m_after(a1);
-    IG_LEAVE(c);
-}
-
 HLE_FUNC("ImDrawList_AddDrawCmd", ig_ImDrawList_AddDrawCmd) {
     uint32_t a0 = c->r[0];
     IG_ENTER(c);
@@ -1717,22 +1689,6 @@ HLE_FUNC("ImDrawList_AddNgonFilled", ig_ImDrawList_AddNgonFilled) {
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddNgonFilled(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, a2, a3, a4);
     m_after(a0);
-    IG_LEAVE(c);
-}
-
-HLE_FUNC("ImDrawList_AddPolyline", ig_ImDrawList_AddPolyline) {
-    uint32_t a0 = c->r[0];
-    uint32_t a1 = c->r[1];
-    uint32_t a2 = c->r[2];
-    uint32_t a3 = c->r[3];
-    float a4 = ig_f(STK(0));
-    uint32_t a5 = STK(1);
-    IG_ENTER(c);
-    void *ha0 = m_in(a0, 7);
-    void *ha1 = m_in(a1, 116);
-    ImDrawList_AddPolyline(ha0, ha1, a2, a3, a4, a5);
-    m_after(a0);
-    m_after(a1);
     IG_LEAVE(c);
 }
 
@@ -14753,7 +14709,7 @@ HLE_FUNC("igWindowRectRelToAbs", ig_igWindowRectRelToAbs) {
     c->r[0] = ret_;
 }
 
-// 1444 functions; not provided (19):
+// 1441 functions; not provided (19):
 //   ImDrawList_AddCallback (callback ImDrawCallback)
 //   ImGuiSelectionBasicStorage_GetNextSelectedItem (argument void**)
 //   ImGuiStorage_GetVoidPtrRef (returns void**)

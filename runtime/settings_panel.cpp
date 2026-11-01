@@ -63,6 +63,7 @@ struct Keyboard {
     size_t cursor = 0, capacity = 255;
     bool upper = false, select_all = false;
     std::function<bool(const std::string &, std::string &)> commit;
+    bool paste_only = false;  // (Add a cheat: Paste / Clear / Add / Cancel instead of the on-screen keys)
 };
 struct State {
     Config draft = {}, saved = {};
@@ -298,6 +299,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(menu_scale);
     SAME(menu_confirm);
     SAME(confirm_exit);
+    SAME(show_fps);
     SAME(updates);
     SAME(hp.village);
     SAME(hp.quests);
@@ -406,6 +408,18 @@ void keyboard(const std::string &title, const std::string &initial, size_t cap,
     s.keyboard = {title, initial, initial, initial.size(), cap, false, false, std::move(commit)};
     push(View::Keyboard, "key.0");
 }
+void insert(const std::string &text);
+void paste_box(const std::string &title, size_t cap, std::function<bool(const std::string &, std::string &)> commit) {
+    s.keyboard = {title, "", "", 0, cap, false, false, std::move(commit), true};
+    push(View::Keyboard, "key.paste");
+}
+void paste_clipboard() {
+    char *clip = SDL_GetClipboardText();
+    if (clip) {
+        insert(clip);
+        SDL_free(clip);
+    }
+}
 void insert(const std::string &text) {
     if (s.keyboard.select_all) {
         s.keyboard.buffer.clear();
@@ -512,6 +526,29 @@ void number(std::vector<Row> &r, const char *id, const char *name, int *p, int l
         r, id, tr(name), [p]() { return (double)*p; }, [p](double v) { *p = (int)v; }, low, high, step, true,
         key);
 }
+// The largest window the screens can show (the Resolution rows' range): the displays' desktop sizes and fullscreen
+// modes (DSR / VSR ones included), at most the file's 16384; 16384 when no display is known
+void screen_max(int &w, int &h) {
+    static int mw, mh;
+    if (!mw) {
+        int n = 0;
+        SDL_DisplayID *ids = SDL_GetDisplays(&n);
+        for (int i = 0; ids && i < n; ++i) {
+            if (const SDL_DisplayMode *d = SDL_GetDesktopDisplayMode(ids[i]))
+                mw = std::max(mw, d->w), mh = std::max(mh, d->h);
+            int m = 0;
+            SDL_DisplayMode **modes = SDL_GetFullscreenDisplayModes(ids[i], &m);
+            for (int k = 0; modes && k < m; ++k)
+                mw = std::max(mw, modes[k]->w), mh = std::max(mh, modes[k]->h);
+            SDL_free(modes);
+        }
+        SDL_free(ids);
+        if (mw < 320 || mh < 180)
+            mw = mh = 16384;
+        mw = std::min(mw, 16384), mh = std::min(mh, 16384);
+    }
+    w = mw, h = mh;
+}
 void number(std::vector<Row> &r, const std::string &id, const std::string &name, float *p, float low,
             float high, float step, const char *key = nullptr) {
     add_number(
@@ -527,6 +564,8 @@ void header(std::vector<Row> &rows, const std::string &id, const std::string &ti
     r.enabled = false;
     rows.push_back(std::move(r));
 }
+// A gap between groups of rows (a header without a title)
+void spacer(std::vector<Row> &rows, const std::string &id) { header(rows, id, ""); }
 void action(std::vector<Row> &rows, const std::string &id, const std::string &name, std::function<void()> fn,
             bool enabled = true) {
     Row r;
@@ -700,6 +739,7 @@ void reset_section() {
         c.fsr_objmotion = f.fsr_objmotion;
         c.fsr_reactive = f.fsr_reactive;
         c.fsr_animsurf = f.fsr_animsurf;
+        c.show_fps = f.show_fps;
         c.fps = f.fps;
         c.vsync = f.vsync;
         c.shader_prewarm = f.shader_prewarm;
@@ -713,8 +753,6 @@ void reset_section() {
         break;
     case 2:
         c.face_buttons = f.face_buttons;
-        c.menu_confirm = f.menu_confirm;
-        c.button_icons = f.button_icons;
         c.background_input = f.background_input;
         c.combo_window = f.combo_window;
         c.mouse_sensitivity = f.mouse_sensitivity;
@@ -726,10 +764,10 @@ void reset_section() {
         SDL_strlcpy(c.ldn_join, f.ldn_join, sizeof c.ldn_join);
         SDL_strlcpy(c.ldn_server, f.ldn_server, sizeof c.ldn_server);
         SDL_strlcpy(c.ldn_key, f.ldn_key, sizeof c.ldn_key);
-        c.sync_small_monsters = f.sync_small_monsters;
-        c.village_in_hub = f.village_in_hub;
         break;
     case 4:
+        c.sync_small_monsters = f.sync_small_monsters;
+        c.village_in_hub = f.village_in_hub;
         c.hp = f.hp;
         quest_keys();
         break;
@@ -747,6 +785,8 @@ void reset_section() {
         c.language = f.language;
         c.menu_theme = f.menu_theme;
         c.menu_scale = f.menu_scale;
+        c.menu_confirm = f.menu_confirm;
+        c.button_icons = f.button_icons;
         c.confirm_exit = f.confirm_exit;
         c.updates = f.updates;
         c.bonus_content = f.bonus_content;
@@ -826,7 +866,27 @@ void conflict_rows(std::vector<Row> &r) {
         }
     }
 }
+// "Add a cheat": a text box to paste one into (Ctrl+V); Accept checks it, adds it to cheats/added.txt and turns it on
+void add_cheat() {
+    paste_box(tr("Copy a cheat (its [Name] line and its codes), then Paste and Add."), 65536,
+             [](const std::string &text, std::string &error) {
+                 int before = cheats_count();
+                 char err[256];
+                 if (!cheats_add(text.c_str(), err, sizeof err)) {
+                     error = tr(err);
+                     return false;
+                 }
+                 for (int i = before; i < cheats_count(); ++i) {  // (on, and running from the next frame)
+                     cheat_tab.draft.push_back(1);
+                     cheat_tab.saved.push_back(1);
+                 }
+                 return true;
+             });
+}
 void cheat_rows(std::vector<Row> &r) {
+    action(r, "cheats.add", tr("Add a cheat"), []() { add_cheat(); });
+    r.back().help = tr("Paste a cheat code (Atmosphere format, as for Ryujinx). It is saved in cheats/added.txt and turns on right away.");
+    header(r, "cheats.header", tr("Cheats"));
     if (cheat_tab.draft.empty())
         action(r, "cheats.none", tr("No cheats found in the cheats folder"), []() {});
     for (int i = 0; i < (int)cheat_tab.draft.size(); ++i) {
@@ -901,6 +961,7 @@ void mods_rows(std::vector<Row> &r) {
         };
         r.push_back(std::move(row));
     }
+    header(r, "mods.header", tr("Load order"));  // (the rows below are not mods)
     if (!result->done) {
         action(r, "mods.scanning", tr("Checking for conflicts..."), []() {});
     } else {
@@ -958,8 +1019,10 @@ std::vector<Row> main_rows() {
             },
             ini("Resolution"));
         if (c.width) {
-            number(r, "display.width", "Width", &c.width, 320, 16384, 80, ini("Resolution"));
-            number(r, "display.height", "Height", &c.height, 180, 16384, 45, ini("Resolution"));
+            int sw, sh;
+            screen_max(sw, sh);
+            number(r, "display.width", "Width", &c.width, 320, sw, 80, ini("Resolution"));
+            number(r, "display.height", "Height", &c.height, 180, sh, 45, ini("Resolution"));
         }
         add_choice(
             r, "render.auto", "Render resolution", !c.render_w ? 0 : 1, {tr("Auto"), tr("Custom")},
@@ -983,6 +1046,11 @@ std::vector<Row> main_rows() {
             [](int v) { c.ui_anchor = v + 1; }, ini("UIAnchor"));
         break;
     case 1:
+        header(r, "audio.header", tr("Audio"));
+        number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
+        add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
+        header(r, "graphics.header", tr("Graphics"));
+        add_bool(r, "show.fps", "FPS counter", &c.show_fps, ini("ShowFPS"));
         number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, ini("FPS"));
         {  // left / right: one frame per second more or less; Confirm: the common ones
             static const int presets[] = {30, 60, 90, 120, 150, 240};
@@ -1038,8 +1106,6 @@ std::vector<Row> main_rows() {
         if (c.draw_distance == 0)
             r.back().value = tr("No limit");
         add_bool(r, "smooth", "Smooth gradients", &c.smooth_gradients, ini("SmoothGradients"));
-        number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
-        add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
         add_bool(r, "fsr", "FSR", &c.fsr, ini("FSR"));
         if (c.fsr) {
             add_choice(
@@ -1063,11 +1129,6 @@ std::vector<Row> main_rows() {
     case 2:
         add_choice(r, "face", "Face buttons", c.face_buttons, {tr("Position"), tr("Label")},
                    [](int v) { c.face_buttons = v; }, ini("FaceButtons"));
-        add_choice(r, "menu.confirm", "Confirm button (recomp)", c.menu_confirm,
-                   {tr("Original"), tr("Bottom button"), tr("Right button")},
-                   [](int v) { s.draft.menu_confirm = v; }, ini("MenuConfirm"));
-        add_choice(r, "icons", "Button icons", c.button_icons, {"Xbox", "Switch", "PlayStation"},
-                   [](int v) { c.button_icons = v; }, ini("ButtonIcons"));
         add_bool(r, "background", "Background input", &c.background_input, ini("BackgroundInput"));
         add_choice(r, "combo", "Combo input window", c.combo_window, {tr("Lenient"), tr("Strict")},
                    [](int v) { c.combo_window = v; }, ini("ComboInputWindow"));
@@ -1084,8 +1145,6 @@ std::vector<Row> main_rows() {
              ini("Server"));
         text(r, "key", "Matchmaking key", c.ldn_key, sizeof c.ldn_key, *c.ldn_key ? c.ldn_key : tr("Public"), ini("Key"));
         hub_check(r);
-        add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, ini("SyncSmallMonsters"));
-        add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, ini("VillageQuestsInHub"));
         header(r, "discord.header", "Discord");
         add_bool(r, "discord", "Discord Rich Presence", &c.discord, ini("RichPresence"));
         add_bool(r, "discord.hunter", "Show hunter name and HR", &c.discord_hunter, ini("ShowHunter"));
@@ -1093,6 +1152,9 @@ std::vector<Row> main_rows() {
     case 4: {
         const char *per_quest =
             tr("HP multipliers for single quests, by their quest ID: in those quests they are used instead of the ones above.");
+        header(r, "hub.header", tr("Hub"));
+        add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, ini("SyncSmallMonsters"));
+        add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, ini("VillageQuestsInHub"));
         header(r, "hp.header", tr("Monster HP Scaling"));
         for (int i = 0; i < 4; i++)
             number(r, "hp." + std::to_string(i), std::to_string(i + 1) + " " + tr(i == 0 ? "Hunter" : "Hunters"), &c.hp.scale[i],
@@ -1163,15 +1225,12 @@ std::vector<Row> main_rows() {
         cheat_rows(r);
         break;
     case APP_PAGE:
+        header(r, "look.header", tr("Appearance"));
         add_choice(r, "language", "Language", c.language, {"English", "Español"},
                    [](int v) { c.language = v; }, ini("Language"));
         add_choice(r, "theme", "Menu theme", c.menu_theme, {tr("Gold"), tr("Blue"), tr("Hunter")},
                    [](int v) { c.menu_theme = v; }, ini("Theme"));
         number(r, "scale", "Interface scale (%)", &c.menu_scale, (int)lo("MenuScale"), (int)hi("MenuScale"), 10, ini("MenuScale"));
-        add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, ini("ConfirmExit"));
-        add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
-                   [](int v) { c.updates = v; }, ini("Updates"));
-        add_bool(r, "bonus", "Bonus content", &c.bonus_content, ini("BonusContent"));
         action(r, "detach", tr(s.floating ? "Attach menu" : "Detach menu"),
                []() {
                    s.floating = !s.floating;
@@ -1188,9 +1247,23 @@ std::vector<Row> main_rows() {
                 s.move_start = s.move_position = w->Pos;
                 push(View::Move, "move.accept");
             });
+        header(r, "menu.controls.header", tr("Menu controls"));
+        add_choice(r, "menu.confirm", "Confirm button (recomp)", c.menu_confirm,
+                   {tr("Original"), tr("Bottom button"), tr("Right button")},
+                   [](int v) { s.draft.menu_confirm = v; }, ini("MenuConfirm"));
+        add_choice(r, "icons", "Button icons", c.button_icons, {"Xbox", "Switch", "PlayStation"},
+                   [](int v) { c.button_icons = v; }, ini("ButtonIcons"));
+        header(r, "general.header", tr("General"));
+        add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, ini("ConfirmExit"));
+        add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
+                   [](int v) { c.updates = v; }, ini("Updates"));
+        add_bool(r, "bonus", "Bonus content", &c.bonus_content, ini("BonusContent"));
+        break;
+    }
+    spacer(r, "actions.gap");  // (Save and Reset this tab, and on Menu Options Restart and Exit game, apart)
+    if (s.page == APP_PAGE) {
         action(r, "restart", tr("Restart"), []() { push(View::Restart, "dialog.cancel"); });
         action(r, "exit", tr("Exit game"), []() { push(View::Exit, "dialog.cancel"); });
-        break;
     }
     action(r, "save", tr("Save"), []() { s.command = Command::Save; }, dirty());
     action(r, "reset", tr("Reset this tab"), []() { push(View::Reset, "dialog.cancel"); });
@@ -1238,7 +1311,15 @@ std::vector<Row> rows_for_view(bool *open) {
     if (s.view == View::Main)
         return main_rows();
     std::vector<Row> r;
-    if (s.view == View::Keyboard) {
+    if (s.view == View::Keyboard && s.keyboard.paste_only) {
+        action(r, "key.paste", tr("Paste"), []() { paste_clipboard(); });
+        action(r, "key.clear", tr("Clear"), []() {
+            s.keyboard.buffer.clear();
+            s.keyboard.cursor = 0;
+        });
+        action(r, "key.accept", tr("Add"), []() { accept_keyboard(); });
+        action(r, "key.cancel", tr("Cancel"), []() { pop(); });
+    } else if (s.view == View::Keyboard) {
         std::string chars = "1234567890abcdefghijklmnopqrstuvwxyz.:,-_/@";
         if (s.keyboard.upper)
             for (char &c : chars)
@@ -1961,13 +2042,8 @@ void settings_panel(bool *open) {
         }
         if (pressed(ImGuiKey_Backspace, true))
             erase_previous();
-        if (io.KeyCtrl && pressed(ImGuiKey_V)) {
-            char *clip = SDL_GetClipboardText();
-            if (clip) {
-                insert(clip);
-                SDL_free(clip);
-            }
-        }
+        if (io.KeyCtrl && pressed(ImGuiKey_V))
+            paste_clipboard();
         if (io.KeyCtrl && pressed(ImGuiKey_A))
             s.keyboard.select_all = true;
         if (pressed(ImGuiKey_Delete, true) && s.keyboard.select_all)
@@ -2052,9 +2128,10 @@ void settings_panel(bool *open) {
             ImGui::PushStyleColor(ImGuiCol_Text, vec(theme().warn));
             ImGui::TextWrapped("%s", tr("Online: only use cheats when everyone in the lobby agrees to it."));
             ImGui::PopStyleColor();
-            ImGui::TextWrapped("%s", tr("Cheats turn on and off when you press Save, no restart needed. Turning one off undoes its changes to the game's code; values it already changed (money, items) stay. New cheat files show up after a restart."));
+            ImGui::TextWrapped("%s", tr("Cheats turn on and off when you press Save, no restart needed. Turning one off undoes its changes to the game's code; values it already changed (money, items) stay. Cheats added with Add a cheat work right away; new cheat files in the folder show up after a restart."));
         }
-        ImGui::TextUnformatted(tr("* Restart required"));
+        if (std::any_of(rows.begin(), rows.end(), [](const Row &r) { return r.cold; }))  // (the rows with " *")
+            ImGui::TextUnformatted(tr("* Restart required"));
         // Keep scroll space for the pinned hints so the last action can scroll fully above them.
         ImGui::Dummy(ImVec2(1, guides.height + help_area + ImGui::GetStyle().ItemSpacing.y));
     }

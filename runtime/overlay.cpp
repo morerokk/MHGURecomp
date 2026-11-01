@@ -34,6 +34,8 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #include "hle/chat.h"
 #include "settings_panel.h"
 
+extern "C" volatile uint64_t g_present_count;  // (runtime/rt.h: frames the game presented)
+
 #define LOG(...) fprintf(stderr, __VA_ARGS__)
 
 extern "C" {
@@ -482,6 +484,28 @@ static void draw_chat(const char *line, uint64_t now, float scale) {
     dl->AddText(font, size, ImVec2(p0.x + bar + pad, p0.y + pad), ink, text.c_str(), nullptr, wrap);
 }
 
+// The frame rate ([Performance] ShowFPS): frames the game presented, counted over half a second. An ImGui window of
+// its own, so it can be dragged while the settings menu (which gets the mouse) is open; ImGui keeps where it was put in
+// forge_imgui.ini
+static void draw_fps(uint64_t now) {
+    static uint64_t t0, f0;
+    static float fps, ms;
+    uint64_t frames = g_present_count;
+    if (!t0 || frames < f0) t0 = now, f0 = frames;
+    if (now - t0 >= 500000000ull) {
+        uint64_t n = frames - f0;
+        fps = n * 1e9f / (float)(now - t0);
+        ms = n ? (now - t0) / 1e6f / n : 0;
+        t0 = now, f0 = frames;
+    }
+    ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowBgAlpha(0.6f);
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                             ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+    if (ImGui::Begin("FPS##counter", nullptr, flags)) ImGui::Text("%.0f FPS  %.1f ms", fps, ms);
+    ImGui::End();
+}
+
 // ------------------------------------------------------------------ frames (game thread)
 static std::mutex g_snap_lock;  // the copy the render thread draws
 static ImDrawData g_snap;
@@ -505,7 +529,8 @@ void overlay_frame(void *cpu) {
     char line[256];
     bool chat = chat_composing(line, sizeof line);
     ImGuiIO &io = ImGui::GetIO();
-    if (!open && !free_render && !notice && !chat) {  // (nothing to draw)
+    bool fps = config_show_fps();
+    if (!open && !free_render && !notice && !chat && !fps) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
         apply_input(io);  // (keep the queue short)
@@ -570,6 +595,7 @@ void overlay_frame(void *cpu) {
     forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);
     if (notice) draw_notice(now, scale);
     if (chat) draw_chat(line, now, scale);
+    if (fps) draw_fps(now);
     ImGui::Render();
 
     ImDrawData *dd = ImGui::GetDrawData();

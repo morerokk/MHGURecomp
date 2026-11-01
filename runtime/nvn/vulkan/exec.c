@@ -305,6 +305,33 @@ static VkSpan guest_copy(uint64_t addr, uint64_t size) {
     return s;
 }
 
+// Vertex streams: a draw binds the rest of a vertex pool from where its own vertices start, so the draws of one pool
+// (the equipment box's icons, one quad each) bind ranges that share their end. The first copy (or vertex cache buffer)
+// serves the later ones that start inside it, at their offset, until guest memory changes.
+#define VTAIL_TAB 1024
+static struct { uint64_t addr, end, gen; VkSpan span; } vtail[VTAIL_TAB];
+static uint32_t vtail_slot(uint64_t end) { uint64_t h = end * 0x9E3779B97F4A7C15ull; return (uint32_t)(h ^ (h >> 32)) & (VTAIL_TAB - 1); }
+static bool vtail_find(uint64_t addr, uint64_t size, VkSpan *out) {
+    uint32_t slot = vtail_slot(addr + size);
+    if (vtail[slot].gen != gcopy_gen || vtail[slot].end != addr + size || vtail[slot].addr > addr) return false;
+    uint64_t d = addr - vtail[slot].addr;
+    *out = vtail[slot].span;
+    out->off += d;
+    if (out->ptr) out->ptr = (uint8_t *)out->ptr + d;
+    return true;
+}
+static void vtail_put(uint64_t addr, uint64_t size, VkSpan span) {
+    uint32_t slot = vtail_slot(addr + size);
+    vtail[slot].addr = addr; vtail[slot].end = addr + size; vtail[slot].gen = gcopy_gen; vtail[slot].span = span;
+}
+static VkSpan guest_copy_vertex(uint64_t addr, uint64_t size) {
+    VkSpan s;
+    if (vtail_find(addr, size, &s)) return s;
+    s = guest_copy(addr, size);
+    vtail_put(addr, size, s);
+    return s;
+}
+
 static bool guest_range_ok(uint64_t addr, uint64_t size) { return addr && addr < GUEST_SPACE && size <= GUEST_SPACE - addr; }
 
 // ---- vertex cache: device-local copies of bound vertex ranges, kept across submissions and refreshed only when the
@@ -745,6 +772,9 @@ static bool ui_loading_pass;  // this pass draws the loading screen (its backdro
 static bool ui_title_pass;  // this pass draws the title screen (its layout, layer 108 at the canvas centre, came first)
 static bool ui_frontend_pass;  // this pass draws a front-end screen (Main Menu, Character Select: its 16:9 backdrop, layer
                                // 250 at the canvas centre, came first)
+// The frame (g_present_count) whose backdrop that was: with FSR, Character Select's backdrop goes through FSR with the
+// hunter as the scene, so the HUD drawn over it starts a pass of its own, after the backdrop's
+static uint64_t ui_frontend_frame = UINT64_MAX;
 static bool ui_stamp_pass;  // this pass draws the Quest Complete stamp (its borders, layer 97 at x 640, y 53 / 687, came first)
 static bool ui_results_pass, ui_results_last;  // this pass / the last pass with HUD in it draws the quest results screen
 static bool ui_meownster_pass;  // this pass draws the Meownster Hunters return screen (its map frame, layer 105, came first)
@@ -762,7 +792,7 @@ static struct {
     int n, predict;  // predict: the anchor this group got last frame (ui_group_known), -1 if not seen
     float z, x0, y0, xmin, xmax, ymin, ymax;
     uint8_t anchors;  // (bit per vertical anchor among its pieces)
-    struct { float *m, pos_y; uint8_t vanchor; uint32_t recent; } p[UI_GROUP_MAX];
+    struct { float *m, pos_x, pos_y; uint8_t vanchor; uint32_t recent; } p[UI_GROUP_MAX];
 } ui_group;
 // Each group's final anchor, by its first piece (layer and place): the HUD is drawn the same way every frame, so the
 // scissors of a group's pieces, recorded before the group is complete, take the anchor it got last frame
@@ -791,9 +821,49 @@ static int ui_group_vanchor(void) {
     float above = ui_group.ymin, below = 720.0f - ui_group.ymax;  // (piece centres: the edges and corners lie on the frame)
     return above < 0.5f * below ? 0 : below < 0.5f * above ? 2 : 1;
 }
+// Wider than 16:9 (a menu window, cbuf_info) the group is placed sideways as one, from where the whole of it sits:
+// centred on the canvas (a dialog: its sides mirror about x 640) Centre, else the half it is in (a submenu beside the
+// menu it opened from stays with it)
+static int ui_group_hside(float x0, float x1) {
+    return x0 <= 640.0f && x1 >= 640.0f && fabsf(x0 + x1 - 1280.0f) < 8.0f ? 2 : x0 + x1 < 1280.0f ? 0 : 1;
+}
+static int ui_float_cmp(const void *a, const void *b) {
+    float x = *(const float *)a, y = *(const float *)b;
+    return (x > y) - (x < y);
+}
+static void ui_group_hend(int n) {
+    float x0 = ui_group.xmin, x1 = ui_group.xmax, cut = INFINITY, asp = g_render_aspect;
+    int h = ui_group_hside(x0, x1), h2 = h;
+    // Across the middle, not centred, with nothing of it over a quarter of the canvas: two things side by side on one
+    // row (the smithy's title at the top left and its page counter at the top right), each placed by its own side
+    if (h != 2 && x0 < 640.0f && x1 > 640.0f) {
+        static float xs[UI_GROUP_MAX];
+        for (int i = 0; i < n; i++) xs[i] = ui_group.p[i].pos_x;
+        qsort(xs, (size_t)n, sizeof xs[0], ui_float_cmp);
+        int k = 0;
+        for (int i = 1; i < n; i++)
+            if (xs[i] - xs[i - 1] > (k ? xs[k] - xs[k - 1] : 0.0f)) k = i;
+        if (k && xs[k] - xs[k - 1] > 320.0f) cut = xs[k], h = ui_group_hside(x0, xs[k - 1]), h2 = ui_group_hside(xs[k], x1);
+    }
+    float s = (16.0f / 9.0f) / asp, anchor = g_ui_anchor_aspect < asp ? g_ui_anchor_aspect : asp;
+    float left = 640.0f * (1.0f - anchor / asp);
+    for (int i = 0; i < n; i++) {
+        float x = ui_group.p[i].pos_x;
+        int a = x < cut ? h : h2;
+        ui_group.p[i].m[12] = a == 0 ? left + x * s : a == 1 ? 1280.0f - left - (1280.0f - x) * s : 640.0f + (x - 640.0f) * s;
+        if (ui_nrecent - ui_group.p[i].recent <= UI_RECENT) ui_recent[ui_group.p[i].recent % UI_RECENT].hanchor = (uint8_t)a;
+    }
+    if (g_hudtrace_active)
+        LOG("[hud] group z %.1f: %d pieces, x %.1f..%.1f -> %c%c (cut %.1f)\n", ui_group.z, n, x0, x1, "LRC"[h], "LRC"[h2], cut);
+}
 static void ui_group_end(void) {
     int n = ui_group.n;
     if (!n) return;
+    if (g_render_aspect > 16.0f / 9.0f) {
+        ui_group.n = 0;
+        ui_group_hend(n);
+        return;
+    }
     int v = n < 2 ? -1 : ui_group_vanchor();
     ui_group_remember(v >= 0 ? v : ui_group.p[0].vanchor);
     ui_group.n = 0;
@@ -810,9 +880,11 @@ static void ui_group_add(float *m, float pos_z, float pos_x, float pos_y, int va
     // Not near: more than 400 above or below (a frame drawn as its corners only, the help windows' 336 high, is one group;
     // the target cam at y 42..82 and the Hunter Arts prompts below y 600 are two), or a piece of another anchor beside the
     // group both sideways and vertically (the Guild Card's page counter, top right, next to its page; a window's own
-    // pieces line up with the rest of it on one side: its other corner, its bottom edge)
+    // pieces line up with the rest of it on one side: its other corner, its bottom edge). Wider than 16:9 by place alone:
+    // the pieces' own anchors are the ones that split a window there.
     const float margin = 24.0f;
-    bool apart = !(ui_group.anchors & (1u << vanchor)) && (pos_x < ui_group.xmin - margin || pos_x > ui_group.xmax + margin) &&
+    bool apart = (g_render_aspect > 16.0f / 9.0f || !(ui_group.anchors & (1u << vanchor))) &&
+                 (pos_x < ui_group.xmin - margin || pos_x > ui_group.xmax + margin) &&
                  (pos_y < ui_group.ymin - margin || pos_y > ui_group.ymax + margin);
     if (ui_group.n && (fabsf(pos_z - ui_group.z) > 0.5f || pos_y < ui_group.ymin - 400.0f || pos_y > ui_group.ymax + 400.0f ||
                        apart || ui_group.n == UI_GROUP_MAX))
@@ -825,7 +897,8 @@ static void ui_group_add(float *m, float pos_z, float pos_x, float pos_y, int va
     ui_group.xmin = fminf(ui_group.xmin, pos_x), ui_group.xmax = fmaxf(ui_group.xmax, pos_x);
     ui_group.ymin = fminf(ui_group.ymin, pos_y), ui_group.ymax = fmaxf(ui_group.ymax, pos_y);
     ui_group.anchors |= (uint8_t)(1u << vanchor);
-    ui_group.p[ui_group.n].m = m, ui_group.p[ui_group.n].pos_y = pos_y, ui_group.p[ui_group.n].vanchor = (uint8_t)vanchor;
+    ui_group.p[ui_group.n].m = m, ui_group.p[ui_group.n].pos_x = pos_x, ui_group.p[ui_group.n].pos_y = pos_y;
+    ui_group.p[ui_group.n].vanchor = (uint8_t)vanchor;
     ui_group.p[ui_group.n].recent = ui_nrecent - 1;  // (cbuf_info recorded it just before)
     ui_group.n++;
 }
@@ -1445,7 +1518,7 @@ static void begin_pass(void) {
     pass_w = minw; pass_h = minh;
     ui_loading_pass = false;
     ui_title_pass = false;
-    ui_frontend_pass = false;
+    ui_frontend_pass = ui_frontend_frame == g_present_count;
     ui_stamp_pass = false;
     ui_results_pass = false;
     ui_meownster_pass = false;
@@ -2648,12 +2721,16 @@ static void plist_load(void) {
     if (e && *e) {
         snprintf(path, sizeof path, "%s", e);
     } else {
+#ifdef __ANDROID__
+        snprintf(path, sizeof path, "pipelines.list");  // (the APK's copy, unpacked into the app's folder: android.c)
+#else
         char exe[1024];
         if (!plat_exe_path(exe, sizeof exe)) return;
         char *s = strrchr(exe, '/'), *bs = strrchr(exe, '\\');
         if (bs > s) s = bs;
         if (s) s[1] = 0; else exe[0] = 0;
         snprintf(path, sizeof path, "%spipelines.list", exe);
+#endif
     }
     FILE *f = fopen(path, "rb");
     if (!f) return;
@@ -3020,7 +3097,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 }
                 // Front-end screens keep their backdrop 16:9: the HUD stays on it as with the 16:9 anchor. Edges / 21:9 / 32:9
                 // took their centred menus (layer 100, x 640, anchored Right) and the help box (96) off it, to the sides.
-                if (fabsf(pos_z - 250.0f) < 0.5f && fabsf(pos_x - 640.0f) < 0.5f && fabsf(pos_y - 360.0f) < 0.5f) ui_frontend_pass = true;
+                if (fabsf(pos_z - 250.0f) < 0.5f && fabsf(pos_x - 640.0f) < 0.5f && fabsf(pos_y - 360.0f) < 0.5f)
+                    ui_frontend_pass = true, ui_frontend_frame = g_present_count;
                 float anchor_aspect = ui_frontend_pass ? 16.0f / 9.0f : g_ui_anchor_aspect;  // (config.c: 16:9 .. the screen's)
                 if (anchor_aspect > g_render_aspect) anchor_aspect = g_render_aspect;
                 float a_ratio = anchor_aspect / g_render_aspect;
@@ -3166,6 +3244,15 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // cinematic's at y 0 / 720, the Quest Complete border sliding in from y 739).
                     grouped = sy < 1.0f && !(ui_loading_pass && pos_z >= 94.0f && pos_z < 109.5f) && fabsf(pos_z - 103.0f) >= 0.5f &&
                               fabsf(pos_z - 105.0f) >= 0.5f && pos_y >= 10.0f && pos_y <= 712.0f;
+                    // Wider than 16:9 one anchor per window sideways, for the menus (97, the text over them 98) and the
+                    // windows and prompts of 100. By its own place a piece went left of x 430 and right of it (all of 100
+                    // right): the item box's Manage Equipment submenu (x 333..563) lost its body and right corners to the
+                    // right, its Rotate / Camera prompts (100, x 18..98, under the menu) and the Multiplayer dialog (over
+                    // the middle) went right. Not on the screens placed whole above, nor the bars that belong to an edge.
+                    if (s < 1.0f && (fabsf(pos_z - 97.0f) < 0.5f || fabsf(pos_z - 98.0f) < 0.5f || fabsf(pos_z - 100.0f) < 0.5f) &&
+                        !ui_frontend_pass && !ui_title_pass && !ui_loading_pass && !ui_stamp_pass && !ui_results_pass &&
+                        !ui_results_last && !ui_meownster_pass && pos_y >= 10.0f && pos_y <= 712.0f)
+                        grouped = true;
                     vgroup = v;
                     if (g_hudtrace_active)
                         LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f -> %c%c %.1f,%.1f%s sc %d,%d %dx%d\n", pos_z, pos_x, pos_y, m[0], m[1], m[4],
@@ -3770,8 +3857,11 @@ static void draw(CmdRec *r, bool indexed) {
             if (v.size && (need > v.size || v.size <= (4u << 20))) need = v.size;
             VkBuffer cached;
             if (!v.addr || !guest_range_ok(v.addr, need)) { static const uint8_t zero[256]; sp = vk_transient_copy(zero, 256, 16); }
-            else if (v.size && guest_range_ok(v.addr, v.size) && vcache(v.addr, v.size, &cached)) sp = (VkSpan){cached, 0, NULL};
-            else sp = guest_copy(v.addr, need ? need : 16);
+            else if (v.size && guest_range_ok(v.addr, v.size) && vtail_find(v.addr, v.size, &sp)) {}
+            else if (v.size && guest_range_ok(v.addr, v.size) && vcache(v.addr, v.size, &cached)) {
+                sp = (VkSpan){cached, 0, NULL};
+                vtail_put(v.addr, v.size, sp);
+            } else sp = guest_copy_vertex(v.addr, need ? need : 16);
         }
         VkDeviceSize off = sp.off;
         if ((ss.vb_known >> s & 1) && ss.vb[s] == sp.buf && ss.vo[s] == off) continue;
@@ -3922,7 +4012,7 @@ static void copy_buffer_to_texture(uint64_t src, const TexRef *dst) {
     vk_ms_resolve(b);
     b->ms_valid = false;
     renderer_mark_gpu_owned(t);
-    if (b->aspect == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) || b->astc_bw) return;
+    if (b->aspect == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) return;
     bool array = b->layers > 1 && b->depth == 1;
     uint32_t hb = ((uint32_t)rg[4] + fi->bh - 1) / fi->bh, wb = ((uint32_t)rg[3] + fi->bw - 1) / fi->bw;
     uint32_t out_bpb = b->wide ? 8 : fi->bpb == 3 ? 4 : fi->bpb;  // (wide: RGBA8 texels widened to RGBA16)
@@ -3930,9 +4020,17 @@ static void copy_buffer_to_texture(uint64_t src, const TexRef *dst) {
     if (!guest_range_ok(src, img * nz)) return;
     VkCommandBuffer cb = vk_cmd();
     vk_full_barrier(cb);
-    uint64_t out_row = (uint64_t)wb * out_bpb;
-    VkSpan s = vk_transient(out_row * hb * nz, 16);
-    for (uint32_t z = 0; z < nz; z++)
+    bool decode = vk_tex_decoded(b);  // (blocks the GPU can't read: decoded texels, the region's size)
+    uint64_t out_row = decode ? (uint64_t)rg[3] * vk_tex_texel_size(b) : (uint64_t)wb * out_bpb;
+    VkSpan s = vk_transient(out_row * (decode ? (uint32_t)rg[4] : hb) * nz, 16);
+    uint8_t *blocks = decode ? malloc((uint64_t)wb * fi->bpb * hb) : NULL;
+    for (uint32_t z = 0; z < nz; z++) {
+        if (decode) {
+            for (uint32_t y = 0; y < hb; y++)
+                memcpy(blocks + (uint64_t)y * wb * fi->bpb, G2H((uint32_t)(src + (uint64_t)z * img + (uint64_t)y * row)), (uint64_t)wb * fi->bpb);
+            vk_tex_decode(b, blocks, (uint32_t)rg[3], (uint32_t)rg[4], (uint8_t *)s.ptr + (uint64_t)z * rg[4] * out_row);
+            continue;
+        }
         for (uint32_t y = 0; y < hb; y++) {
             const uint8_t *sr = (const uint8_t *)G2H((uint32_t)(src + (uint64_t)z * img + (uint64_t)y * row));
             uint8_t *dr = (uint8_t *)s.ptr + ((uint64_t)z * hb + y) * out_row;
@@ -3940,7 +4038,10 @@ static void copy_buffer_to_texture(uint64_t src, const TexRef *dst) {
             else if (b->wide) for (uint32_t x = 0; x < wb * 4; x++) ((uint16_t *)dr)[x] = (uint16_t)(sr[x] * 257);
             else for (uint32_t x = 0; x < wb; x++) { memcpy(dr + x * 4, sr + x * 3, 3); dr[x * 4 + 3] = 255; }
         }
-    VkBufferImageCopy c = {.bufferOffset = s.off, .bufferRowLength = wb * fi->bw, .bufferImageHeight = hb * fi->bh,
+    }
+    free(blocks);
+    VkBufferImageCopy c = {.bufferOffset = s.off, .bufferRowLength = decode ? (uint32_t)rg[3] : wb * fi->bw,
+                           .bufferImageHeight = decode ? (uint32_t)rg[4] : hb * fi->bh,
                            .imageSubresource = {b->aspect & VK_IMAGE_ASPECT_DEPTH_BIT ? VK_IMAGE_ASPECT_DEPTH_BIT : b->aspect,
                                                 (uint32_t)level, array ? (uint32_t)rg[2] : 0, array ? nz : 1},
                            .imageOffset = {rg[0], rg[1], array ? 0 : rg[2]},

@@ -478,6 +478,42 @@ static void guest_free(Cpu *c, uint32_t p) {
     guest_call(c, guest_sym("free"));
 }
 
+// Point lists (ImDrawList_AddPolyline, AddConvexPolyFilled, AddConcavePolyFilled): the plugin's array of num_points
+// ImVec2, two floats each as on the host, read where it is. The generator mirrors one ImVec2, so ImGui read the rest
+// past it: lines to points all over the screen, or a crash (the DPS meter's graph: MHGURecomp issue 151).
+static const ImVec2_c *points(uint32_t a, int n) {
+    return a && n > 0 && n <= (1 << 20) && kernel_mapped(a, (uint32_t)n * sizeof(ImVec2_c)) ? (const ImVec2_c *)G2H(a) : NULL;
+}
+HLE_FUNC("ImDrawList_AddPolyline", ig_ImDrawList_AddPolyline) {
+    uint32_t a0 = c->r[0], a1 = c->r[1], a2 = c->r[2], a3 = c->r[3];
+    float a4 = ig_f(STK(0));
+    uint32_t a5 = STK(1);
+    IG_ENTER(c);
+    void *ha0 = m_in(a0, T_ImDrawList);
+    const ImVec2_c *p = points(a1, (int)a2);
+    if (ha0 && p) ImDrawList_AddPolyline(ha0, p, (int)a2, a3, a4, a5);
+    m_after(a0);
+    IG_LEAVE(c);
+}
+HLE_FUNC("ImDrawList_AddConvexPolyFilled", ig_ImDrawList_AddConvexPolyFilled) {
+    uint32_t a0 = c->r[0], a1 = c->r[1], a2 = c->r[2], a3 = c->r[3];
+    IG_ENTER(c);
+    void *ha0 = m_in(a0, T_ImDrawList);
+    const ImVec2_c *p = points(a1, (int)a2);
+    if (ha0 && p) ImDrawList_AddConvexPolyFilled(ha0, p, (int)a2, a3);
+    m_after(a0);
+    IG_LEAVE(c);
+}
+HLE_FUNC("ImDrawList_AddConcavePolyFilled", ig_ImDrawList_AddConcavePolyFilled) {
+    uint32_t a0 = c->r[0], a1 = c->r[1], a2 = c->r[2], a3 = c->r[3];
+    IG_ENTER(c);
+    void *ha0 = m_in(a0, T_ImDrawList);
+    const ImVec2_c *p = points(a1, (int)a2);
+    if (ha0 && p) ImDrawList_AddConcavePolyFilled(ha0, p, (int)a2, a3);
+    m_after(a0);
+    IG_LEAVE(c);
+}
+
 // Glyph ranges: ImGui's own list is host memory, so a plugin gets a copy of it in guest memory (the guest's malloc),
 // made at the first call. BuildRanges: the generator leaves it out (its ImVector<ImWchar> out argument, the plugin's:
 // 32-bit Size, Capacity, Data). The ranges are appended to it as ImGui does, its Data grown with the guest's malloc /
