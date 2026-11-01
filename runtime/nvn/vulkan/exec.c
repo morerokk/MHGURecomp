@@ -3923,6 +3923,7 @@ static void copy_buffer_to_texture(uint64_t src, const TexRef *dst) {
     b->ms_valid = false;
     renderer_mark_gpu_owned(t);
     if (b->aspect == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) || b->astc_bw) return;
+    if (b->bc) return;  // (BC decoded on the CPU, textures.c bc_cpu_format: no blocks to copy into, as ASTC above)
     bool array = b->layers > 1 && b->depth == 1;
     uint32_t hb = ((uint32_t)rg[4] + fi->bh - 1) / fi->bh, wb = ((uint32_t)rg[3] + fi->bw - 1) / fi->bw;
     uint32_t out_bpb = b->wide ? 8 : fi->bpb == 3 ? 4 : fi->bpb;  // (wide: RGBA8 texels widened to RGBA16)
