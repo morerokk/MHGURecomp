@@ -1,6 +1,6 @@
 // FSR 4 (AMD's machine-learning upscaler) as an alternative to FSR 3.1 ([Upscaler] Upscaler = FSR4): runtime/nvn/vulkan/fsr4.c.
 // It takes exactly the inputs fsr.c prepares for FSR 3.1 and is dispatched where the FSR 3.1 dispatch would be.
-// Windows only: the upscaler is the Vulkan provider of AMD's driver (amdvkffx64.dll); on other systems, or when it
+// Windows only: the upscaler is AMD's FSR SDK Vulkan upscaler (amd_fidelityfx_loader_vk.dll); on other systems, or when it
 // cannot start, everything here says "no" and fsr.c keeps using FSR 3.1.
 #pragma once
 #include "vk.h"

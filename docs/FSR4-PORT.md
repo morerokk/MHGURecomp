@@ -1,4 +1,4 @@
-# FSR 4 upscaler (2026-10-26)
+# FSR 4 upscaler (2026-10-26, moved to AMD's FSR SDK 2.4.0 on 2026-11-01)
 
 AMD's machine-learning upscaler (FSR 4, provider "FSR 4.1.2") as an alternative to FSR 3.1 in the Vulkan renderer
 (`docs/FSR-PORT.md` describes FSR 3.1 and everything around it, which this builds on). It runs **natively on Vulkan**,
@@ -6,8 +6,8 @@ on the game's own VkDevice and command buffer: no Direct3D 12 bridge, no shared 
 exactly the inputs fsr.c prepares for FSR 3.1 (colour, depth, camera + object motion vectors, reactive mask, jitter,
 camera near / far / FOV) and is dispatched where the FSR 3.1 dispatch is. Default stays FSR 3.1, FSR stays Off by default.
 
-Tested on: RX 9070 XT, Adrenalin 26.10.1 (Vulkan driver 1.4.359), Windows 11. FSR 4 needs an RDNA 4 GPU and the
-driver package that contains `amdvkffx64.dll` (v2.4.0.4370 here).
+Tested on: RX 9070 XT, Adrenalin 26.10.1 (Vulkan driver 1.4.359), Windows 11. Measurements below were taken on the driver route
+of the first version; the SDK 2.4.0 route is re-tested in the notes at the end.
 
 ## Settings
 
@@ -18,7 +18,7 @@ driver package that contains `amdvkffx64.dll` (v2.4.0.4370 here).
     Sharpness = 0.8        ; the provider's RCAS sharpening (same key as FSR 3.1)
 
 An existing mhgurecomp.ini has no `Upscaler` key (only whole missing sections are added): add the line by hand.
-Test overrides: `MHGU_FSR_UPSCALER=3|4`, `MHGU_FSR4_DLL=<path>` (another DLL; a missing path shows the fallback),
+Test overrides: `MHGU_FSR_UPSCALER=3|4`, `MHGU_FSR4_LOADER=<path>` (another loader DLL; a missing path shows the fallback),
 `MHGU_FSR4_LINEAR=1` (colour not flagged as gamma-encoded, A/B), `MHGU_FSR4_FAILTEST=n` (the n-th FSR 4 dispatch is
 reported as failed, to see the fallback), `MHGU_FSR_DEBUG=1` (FFX input checks), `MHGU_FSR_LOG=1` (per second:
 `upscaler FSR 4.1.2, FSR 4 frames N`).
@@ -27,63 +27,45 @@ To try it: set `FSR = On`, `Upscaler = FSR4` (any FSRQuality) and start the game
 
 ## What is included
 
-FSR 4 on Vulkan is part of this port and is **opt-in**: it needs `FSR = On` and `Upscaler = FSR4` (default `FSR3`; FSR itself is Off by
-default), and if it cannot start the game uses FSR 3.1 instead (every reason is logged with a `[fsr4]` line). No AMD file is in this
-repository or in a release.
+> **2026-11-01: moved to AMD's FSR SDK 2.4.0.** The first version of this port (2026-10-26) predates the SDK's Vulkan DLLs and
+> reached the FSR 4 provider inside the AMD driver (`amdvkffx64.dll`) by patching one import of that DLL in memory. SDK 2.4.0
+> ships the Vulkan loader and upscaler DLLs, so that route and the patch (`FSR4_DRIVER_PATCH`) are gone: FSR 4 now goes through
+> AMD's own loader, the way AMD intends. Sections below that still describe the driver route are history (marked as such).
 
-Routes, tried in this order (each logs which one was used; `MHGU_FSR4_ROUTE=driver|loader` tries just one, for testing):
-1. **the driver's provider**: the game loads `amdvkffx64.dll` from the player's AMD driver and asks it for the FSR 4 provider. Log:
-   `SDK-module check hook installed`, `route: the driver's provider`.
-2. **a loader DLL beside the exe** (experimental, see below): used through the public ffx-api (`ffxQuery` to find a 4.x version, then
-   `ffxCreateContext` / `ffxDispatch`). Log: `loader ...`, `route: the player-supplied loader`.
-3. **FSR 3.1.**
+FSR 4 on Vulkan is **opt-in**: it needs `FSR = On` and `Upscaler = FSR4` (default `FSR3`; FSR itself is Off by default), and if it
+cannot start the game uses FSR 3.1 instead (every reason is logged with a `[fsr4]` line).
 
-## Getting the FSR 4 DLL
+Route (the only one): `amd_fidelityfx_loader_vk.dll` beside `mhgurecomp.exe` (or `MHGU_FSR4_LOADER=<path>`) is loaded at run time. It
+finds `amd_fidelityfx_upscaler_vk.dll` beside the exe (or beside itself). The game asks the loader for the upscaler versions (`ffxQuery`),
+takes the newest 4.x one and creates and dispatches it through the public ffx-api (`ffxCreateContext` / `ffxDispatch`). Log:
+`loader ..., file version`, `loader offers upscaler 4.1.2 ...`, `route: AMD's FSR SDK loader`.
 
-No AMD file is in this repository or in a release. On a Radeon with FSR 4 support (RDNA 4) and a recent Adrenalin driver there is nothing to
-download: the driver installs `amdvkffx64.dll` itself and the game finds it automatically: beside `mhgurecomp.exe` if you put a copy there,
-else in the driver-store folder of your GPU, else the newest copy under
-`C:\Windows\System32\DriverStore\FileRepository\u*.inf_amd64_*\B*\amdvkffx64.dll`. `MHGU_FSR4_DLL=<path>` uses a different file.
+## The AMD DLLs
 
-The driver only hands out its provider when it sees the FidelityFX loader modules in the process (it asks with `GetModuleHandleW`), so the game,
-in its own memory only (nothing on disk), points that one import of the driver DLL at a function that answers "loaded" for an `amd_fidelityfx_*`
-module and defers to the real function for everything else (`patch_import` in `fsr4.c`; the idea comes from reading OptiScaler's source, no code
-copied). A driver update that changes that check could stop it working; then FSR 3.1 is used.
+They are **AMD's signed binaries from FSR SDK 2.4.0, unmodified**: `amd_fidelityfx_loader_vk.dll` (39 KB) and
+`amd_fidelityfx_upscaler_vk.dll` (36 MB). They are not in this repository (`*.dll` and `third_party/fsr-sdk/` are git-ignored). On
+Windows `make` downloads them once from AMD's tagged release (`github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK`, tag `v2.4.0`),
+checks their SHA-256, copies them into `build/` (the game folder) and writes AMD's licence into `build/licenses/AMD-FSR-SDK.txt`, so a
+release carries them with the notice AMD's licence asks for. `make FSR_SDK=none` builds without them (FSR 4 then needs the player to
+drop the two DLLs beside the exe, else FSR 3.1).
 
-*Experimental, route 2:* the code also accepts a loader DLL named `amd_fidelityfx_vk.dll` placed beside `mhgurecomp.exe` (or
-`MHGU_FSR4_LOADER=<path>`), used through the public ffx-api without any patching, if one exists that offers FSR 4. The `amd_fidelityfx_vk.dll`
-v1.0.1 found on the test machine does not (it offers FSR 3.1.4 and 2.3.3 only, so the game logged `this loader offers no FSR 4` and ran FSR 3.1).
-This route is implemented but unverified; its backend descriptor id (0x3, from ffx-api's public Vulkan header) is an assumption.
-
-Notes: the vendored `third_party/ffx-api` headers and the FSR 3.1 sources in `third_party/fsr-vulkan` are MIT per AMD's licence file in the
-FidelityFX SDK (texts kept and listed in `THIRD_PARTY_NOTICES`). The in-memory import step changes AMD's driver DLL in this process; the author
-has not reviewed it against AMD's driver terms. For that reason the patch is **off by default**: a normal `make` compiles none of it and FSR 4 is then
-only available if a loader as described above exists, otherwise FSR 3.1 runs. `make FSR4_DRIVER_PATCH=1` builds the driver route in (this is what the
-measurements below were made with); it is a build switch, so a distribution can decide, or players can build it themselves.
+AMD's licence for these binaries (SDK `docs/license.md`): redistribution in binary form only, free of charge, with the licence text
+reproduced; no reverse engineering, decompilation or disassembly. That is why they are bundled, never modified or linked into the
+executable, and why they stay under AMD's licence, separate from this repository's (`THIRD_PARTY_NOTICES` says so). The `ffx-api`
+headers in `third_party/ffx-api` are the SDK's MIT-licensed ones. FSR 4 is verified on an RDNA 4 GPU; the SDK 2.4 also
+supports RDNA 2 / 3 (INT8 models), which the game now attempts but is untested (see "Not done").
 
 ## How it works (runtime/nvn/vulkan/fsr4.c, fsr4.h)
 
-- The AMD Vulkan driver package carries `amdvkffx64.dll`. It exports `UpdateFfxApiProvider` / `UpdateFfxApiProviderEx`,
-  the FidelityFX "external provider" hook (the same one the D3D12 side uses with `amdxcffx64.dll`; the MIT ffx-api
-  source of SDK 1.1.4, `ffx_provider.cpp`, shows the D3D12 caller). Called with a description type it fills in a table of
-  function pointers (create / destroy / configure / query / dispatch, plus `isSupported`), for the upscaler: FSR 4.
-- (Route 1 only, `FSR4_DRIVER_PATCH=1`.) Found at start-up: beside the exe, else in the driver store folder of the GPU (D3DKMT user-mode driver path of the
-  Vulkan device's LUID), else the newest copy in `System32\DriverStore\FileRepository`. Loaded with LoadLibrary at
-  run time; **nothing of AMD's is built in or shipped** (`*.dll` is git-ignored).
-- The driver only hands out providers when it sees FidelityFX loader modules loaded: it asks
-  `GetModuleHandleW(L"amd_fidelityfx_loader_vk.dll")` / `..._upscaler_vk.dll`. Without them the call fails with
-  E_INVALIDARG (checked). fsr4.c patches that one import of the driver DLL so it gets the DLL itself as the answer.
-  This is how OptiScaler (GPL-3.0; its source was read as a reference for how the driver is reached and which
-  descriptors it takes - no code copied) does it; the code here is fresh.
-- Context: `ffxCreateContext` through the provider with `ffxCreateContextDescUpscale` (flag
-  `FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE`) -> the Vulkan backend descriptor (SDK 2.x type id `0x01000003`, same layout
-  as `ffxCreateBackendVKDesc`: device, physical device, vkGetDeviceProcAddr) -> a version descriptor (`0x0001000B`,
-  version 4.1.2; the driver accepts 4.0.0 .. 4.1.2). Created once, at the first FSR frame (66-73 ms), because the
-  ratio does not change during a run.
-- Dispatch: `ffxDispatchDescUpscale` (the ffx-api 1.1.4 layout works unchanged) with VkImage resources and the
-  command buffer; all images are in GENERAL (the renderer's rule) = state "unordered access" for every resource. Colour
-  is the game's gamma-encoded LDR RGBA8, so `FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB` is set (depth: standard Z, no
-  flags; motion vectors in render pixels, jitter removed; motionVectorScale 1; preExposure 1).
+- Loader: `LoadLibraryEx` of `amd_fidelityfx_loader_vk.dll` (beside the exe), then `GetProcAddress` for `ffxQuery`, `ffxCreateContext`,
+  `ffxDestroyContext`, `ffxDispatch`. `ffxQuery` with `FFX_API_QUERY_DESC_TYPE_GET_VERSIONS` and a `VkDeviceContext` (device, physical
+  device, vkGetDeviceProcAddr) lists the upscaler versions this GPU gets; the newest "4.x" is used via `ffxOverrideVersion`.
+- Context: `ffxCreateContext` with `ffxCreateContextDescUpscale` (flag `FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE`) -> the Vulkan backend
+  descriptor (`ffxCreateBackendVKDesc`, id `0x01000003`) -> `ffxCreateContextDescUpscaleVersion` (`FFX_UPSCALER_VERSION`, 4.1.2) ->
+  the version override. Created once, at the first FSR frame, because the ratio does not change during a run.
+- Dispatch: `ffxDispatchDescUpscale` with VkImage resources and the command buffer; all images are in GENERAL (the renderer's rule) =
+  state "unordered access" for every resource. Colour is the game's gamma-encoded LDR RGBA8, so `FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB`
+  is set (depth: standard Z, no flags; motion vectors in render pixels, jitter removed; motionVectorScale 1; preExposure 1).
 - Jitter: the same picture shift FSR 3.1 gets (the camera hook applies AMD's Halton jitter, 8 (output/render)^2 phases).
 - fsr.c: `run_fsr` is shared; after the prep / object-velocity / finish passes it records either the FSR 3.1 dispatch
   or `vk_fsr4_dispatch`. On any FSR 4 failure it logs why, switches FSR 4 off for the run and records the FSR 3.1
@@ -94,19 +76,20 @@ measurements below were made with); it is a build switch, so a distribution can 
   full subgroups, shaderFloat16 / Int8 / Int16, buffer device address, Vulkan memory model, 8 / 16-bit storage,
   variable pointers, descriptor indexing, storage image read / write without format); instance apiVersion 1.3 instead
   of 1.2 (its SPIR-V is 1.6). If the GPU lacks any of it: logged, FSR 3.1 runs. With FSR off or `FSR3` nothing changes.
+  (These were worked out against the driver's provider; whether SDK 2.4's upscaler DLL asks for the same set is checked by the
+  first run, see the test notes.)
 
-Log lines (log.txt / stdout): `[fsr4] loaded <path> (<where>), file version`, `SDK-module check hook installed`,
-`driver provider "FSR 4.1.2" id 0x...`, `the provider accepts this device`, `FSR 4.1.2 context WxH -> WxH created in N ms
-(...formats...)`, `first FSR 4.1.2 dispatch recorded`, `[fsr] on (FSR 4.1.2): ...`, failures: `[fsr4] ... FSR 3.1 is used` /
-`... FSR 4 is off from here on, FSR 3.1 takes over`.
+Log lines (log.txt / stdout): `[fsr4] loader <path>, file version`, `loader offers upscaler 4.1.2 (id 0x...)`,
+`route: AMD's FSR SDK loader`, `FSR 4.1.2 context WxH -> WxH created in N ms (...formats...)`, `first FSR 4.1.2 dispatch recorded`,
+`[fsr] on (FSR 4.1.2): ...`, failures: `[fsr4] ... FSR 3.1 is used` / `... FSR 4 is off from here on, FSR 3.1 takes over`.
 
 ## Files
 
 New: `runtime/nvn/vulkan/fsr4.c`, `fsr4.h`; `third_party/ffx-api/` (ffx_api.h, ffx_api_types.h, ffx_upscale.h from the
-FidelityFX SDK v1.1.4, MIT, licence file kept); this file.
+FSR SDK v2.4.0, MIT, licence file kept; `vk/ffx_api_vk.h` added); this file.
 Changed: `runtime/config.c/.h` (`Upscaler` key, `MHGU_FSR_UPSCALER`), `runtime/nvn/vulkan/device.c` (the FSR 4 extensions,
 features, apiVersion), `runtime/nvn/vulkan/fsr.c` (the branch in `run_fsr`, init, a log line), `Makefile`
-(`-Ithird_party/ffx-api`, `-lversion`, `FSR4_DRIVER_PATCH`, default 0). Not changed: shaders, textures, exec.c, the camera / jitter code.
+(`-Ithird_party/ffx-api`, `-lversion`, `FSR_SDK`: downloads and bundles AMD's two DLLs and their licence text), `.gitignore`, `THIRD_PARTY_NOTICES`. Not changed: shaders, textures, exec.c, the camera / jitter code.
 
 Note: the conventions used here (4.x provider chosen by version id, gamma-encoded LDR colour with the non-linear flags,
 depth / motion-vector conventions, one jitter convention for all providers) were worked out with a Direct3D 12 route
@@ -161,28 +144,43 @@ shimmer on static detail; the standing frames flicker like FSR 3.1's).
   storage-image sampled-type width mismatches in its RCAS / reprojection shaders (7 messages), plus the two old renderer
   messages (a 1D image view, a fragment output without attachment). The driver compiles and runs them (frames are right).
 
-## Verified for the routes (final branch, 25 s quest-101 runs each, RX 9070 XT)
+## Verified for the SDK 2.4.0 route
 
-- `FSR4_DRIVER_PATCH=1` (not the default): driver route, `FSR 4.1.2`, 60 FSR 4 frames a second, no exception. With `MHGU_FSR4_ROUTE=loader` and the v1.0.1 loader: `this loader offers no FSR 4`, FSR 3.1 ran.
-- `FSR4_DRIVER_PATCH=0` (the default): no loader supplied: `no loader supplied`, `no FSR 4 route available: FSR 3.1 is used`, FSR 3.1 ran; with the v1.0.1 loader: same fallback. No exception.
-- Not verified: the loader route with a loader that offers FSR 4 (none available).
+- Builds: `make` downloads the two DLLs, checks their SHA-256, copies them into `build/` with `licenses/AMD-FSR-SDK.txt`; `fsr4.c` compiles.
+- Run tests on the RX 9070 XT (2026-11-01, unattended quest 101 on a copy of the save, 1920x1080 window, picture 1918x822 -> 1920x822,
+  Quality):
+  - `make test-lift` (recompiler against Unicorn, 6000 instructions each for main and sdk): 0 failing instructions
+    (7 NaN-payload differences in main, none in sdk).
+  - FSR 4 (`MHGU_FSR=1 MHGU_FSR_UPSCALER=4`): the loader (file version 1.0.2.4555) offers upscalers 4.1.2, 3.1.6 and 2.3.4; 4.1.2 is
+    picked, context created in 58 ms, first dispatch recorded, 60 FSR 4 frames per second, no fallback, no errors. The screenshot
+    (still scene and after a camera turn) is clean: no corruption, no ghosting, HUD unmoved. The GENERAL-layout / "unordered access"
+    state the renderer uses for every resource is accepted by the SDK Vulkan backend. Whole frame 2.02 ms on the GPU profile.
+  - FSR 3.1 (`MHGU_FSR_UPSCALER=3`): unchanged, "FSR 4 frames 0", 2.26 ms (a different moment of the scene, not a like-for-like timing).
+  - Fallback (`MHGU_FSR4_FAILTEST=100`): the 100th dispatch is reported failed, log says "FSR 4 is off from here on, FSR 3.1 takes
+    over", FSR 3.1 runs from then on and the picture is fine.
+  - After the relaxed device gate and the FSR 3.1.6 reproject fix (same scene): log `GPU features: cooperative matrix 1, float8 1/1,
+    integer dot product 1`; FSR 4 still 60 FSR 4 frames a second, 2.04 ms; FSR 3.1 1.96 ms, both running with no errors.
+  - Not run: Vulkan validation layer, the other quality presets, a large monster fight, other GPUs (RDNA 2 / 3).
 
 ## Not done / known issues
 
-- Only tested with the one provider this driver gives (4.1.2), only the Vulkan renderer on Windows, an RX 9070 XT.
-  Other GPUs: the provider's `isSupported` decides (FSR 4 needs cooperative matrix + float8; RDNA 3 uses INT8 models in
-  the driver package, untested).
+- Only tested with provider 4.1.2, only the Vulkan renderer on Windows, an RX 9070 XT. SDK 2.4.0 adds FSR 4.1 for RDNA 2 / 3 (INT8,
+  a lighter model on some APUs). The device gate no longer demands RDNA 4's cooperative matrix + float8: it requires only the
+  baseline (synchronization2, subgroup size control, fp16 / int8 / int16, buffer device address, memory model), switches on
+  cooperative matrix, float8 and integer dot products where the GPU has them, and leaves the decision to AMD's loader (no 4.x
+  version offered, or the context fails: FSR 3.1, logged). **Not tested on any RDNA 2 / 3 card** (none here); whether the INT8
+  models need a Vulkan extension this list lacks is unknown (AMD's licence forbids looking inside the DLL, and the SDK docs do
+  not list one). The log line `[fsr4] GPU features: ...` shows what the GPU offered.
 - Linux: unconfirmed whether FSR 4 on Vulkan runs there. FSR 4 is expected to come to Linux, but whether AMD's DLL route or
   a similar trick works there is not confirmed yet. In this build the FSR 4 code is compiled out on non-Windows and
   FSR 3.1 is used (the FSR 3.1 code was syntax-checked for Linux with gcc, not linked or run).
 - Tested by the author in game since: a large monster fight (no ghosting or shimmer seen), the village. Not tested:
   4K, multiplayer.
-- Loading uses a hook on the driver DLL's import table (see above); a driver whose DLL checks other modules would refuse
-  (then: `the driver gave no upscaler provider`, FSR 3.1). The driver DLL is trusted code loaded from the driver store
-  (or beside the exe: do not put a copy there you do not trust).
+- The loader and upscaler DLLs are trusted code loaded from beside the exe (the build puts AMD's, checked by SHA-256, there):
+  do not put a copy there you do not trust.
 - FSR 4 on the AMD driver recreates its network (pipelines) when the ratio changes; the context is created once so
   this port never does. Changing Upscaler / FSRQuality needs a restart (as FSR 3.1's quality already did).
 - The colour input is gamma-encoded LDR: FSR 4 was designed for that as well as HDR; `MHGU_FSR4_LINEAR=1` compares.
 - The FSR 4 GPU cost in the table includes the shared prep / finish passes (~0.5 ms at 720p), measured with the
   renderer's gpuprof, not with the provider's own timestamps.
-- `DX12 bridge`: not built (not needed: the driver's Vulkan provider works).
+- `DX12 bridge`: not built (not needed: the Vulkan provider works).

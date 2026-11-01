@@ -192,16 +192,16 @@ FFX_PASS := $(FFX)/src/backends/vk/shaders/fsr3upscaler
 $(O)/fsr/src/ffx_fsr3_glsl.c.o: FSRFLAGS += -DFFX_GPU_DIR='"$(FFX_GPU)"' -DFFX_PASS_DIR='"$(FFX_PASS)"'
 $(O)/fsr/src/ffx_fsr3_glsl.c.o: $(wildcard $(FFX_GPU)/*.h $(FFX_GPU)/*/*.h $(FFX_PASS)/*.glsl)
 RTFLAGS  += -I$(FSR)/include -Ithird_party/ffx-api
-# FSR4_DRIVER_PATCH=1 (opt-in): FSR 4 can use the AMD driver's own amdvkffx64.dll directly, which needs one in-memory patch of
-# that DLL's GetModuleHandleW import (runtime/nvn/vulkan/fsr4.c, docs/FSR4-PORT.md). The default, FSR4_DRIVER_PATCH=0, leaves
-# all of that code out: nothing of AMD's is touched, and FSR 4 is only used through a loader DLL the player supplies (else FSR 3.1).
-FSR4_DRIVER_PATCH ?= 0
 .DEFAULT_GOAL := all
-FSR4_STAMP := $(O)/fsr4_patch_$(FSR4_DRIVER_PATCH).stamp
-$(FSR4_STAMP):
-	@mkdir -p $(O) && rm -f $(O)/fsr4_patch_*.stamp && touch $@
-$(O)/rt/nvn/vulkan/fsr4.o: $(FSR4_STAMP)
-$(O)/rt/nvn/vulkan/fsr4.o: RTFLAGS += -DFSR4_DRIVER_PATCH=$(FSR4_DRIVER_PATCH)
+# FSR 4 (Windows): AMD's FSR SDK 2.4.0 loader and upscaler DLLs (runtime/nvn/vulkan/fsr4.c). They are AMD's signed binaries,
+# redistributable unmodified in binary form with AMD's licence text (kept in build/licenses/AMD-FSR-SDK.txt); they are not in
+# this repository, the build downloads them from AMD's tagged SDK release once and checks them against their SHA-256.
+# FSR_SDK=none builds without them (FSR 4 then falls back to FSR 3.1 at run time unless the player supplies them).
+FSR_SDK     ?= $(if $(filter windows,$(PLATFORM)),bundled,none)
+FSR_SDK_VER := 2.4.0
+FSR_SDK_URL := https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v$(FSR_SDK_VER)/Kits/FidelityFX
+FSR_SDK_DIR := third_party/fsr-sdk
+FSR_SDK_DLLS := amd_fidelityfx_loader_vk.dll amd_fidelityfx_upscaler_vk.dll
 # NULL_GPU=1: no renderer (runtime/nvn/backend_null.c: the game runs, nothing is drawn)
 ifeq ($(NULL_GPU),1)
 RTFLAGS  += -DMHGU_NULL_BACKEND
@@ -211,7 +211,7 @@ else
 RT_CXX   := $(O)/rt/nvn/vulkan/vma.o $(FSR_OBJ)
 endif
 
-all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) data licenses pipelist
+all: $(EXE) $(if $(filter bundled,$(FSR_SDK)),$(addprefix $(B)/,$(FSR_SDK_DLLS))) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) data licenses pipelist
 
 # Host-only INI/settings regression test: no game dump or generated code required.
 .PHONY: test-settings
@@ -324,6 +324,22 @@ $(eval $(call FETCH,third_party/shaderc/glslang-$(GLSLANG_VER).tar.gz,https://gi
 $(eval $(call FETCH,third_party/shaderc/SPIRV-Tools-$(SPIRV_VER).tar.gz,https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/vulkan-sdk-$(SPIRV_VER).tar.gz,e6c83a215538fbfd265ccf398d3877985055df1273dbed73912bd05307664688))
 $(eval $(call FETCH,third_party/shaderc/SPIRV-Headers-$(SPIRV_VER).tar.gz,https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-$(SPIRV_VER).tar.gz,5b3a0d099f5c7649e29c0938476c462e71d66ad89a0bde42fa1ba3eb476956c9))
 
+ifeq ($(FSR_SDK),bundled)
+$(eval $(call FETCH,$(FSR_SDK_DIR)/amd_fidelityfx_loader_vk.dll,$(FSR_SDK_URL)/signedbin/amd_fidelityfx_loader_vk.dll,38a56a01fb3565c0757d9f5c1e4e69de4b65e5f2e5769b323b200dc1f142bab9))
+$(eval $(call FETCH,$(FSR_SDK_DIR)/amd_fidelityfx_upscaler_vk.dll,$(FSR_SDK_URL)/signedbin/amd_fidelityfx_upscaler_vk.dll,4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7))
+$(eval $(call FETCH,$(FSR_SDK_DIR)/license.md,$(FSR_SDK_URL)/docs/license.md,32357259b965d6a8001e9e508ba60eda6034027c5923a7d226ffbaff813c2bfb))
+$(B)/amd_fidelityfx_%_vk.dll: $(FSR_SDK_DIR)/amd_fidelityfx_%_vk.dll
+	@mkdir -p $(dir $@)
+	cp $< $@
+$(B)/licenses/AMD-FSR-SDK.txt: $(FSR_SDK_DIR)/license.md
+	@mkdir -p $(dir $@)
+	@{ echo "This program ships AMD's FSR SDK $(FSR_SDK_VER) DLLs, unmodified, in binary form: amd_fidelityfx_loader_vk.dll and"; \
+	   echo "amd_fidelityfx_upscaler_vk.dll (FSR 4 upscaling), from https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK"; \
+	   echo "(tag v$(FSR_SDK_VER)). They are used under AMD's licence, reproduced below, and are not covered by this program's own"; \
+	   echo "licence. This program's source code is at https://github.com/morerokk/MHGURecomp."; \
+	   echo; cat $<; } > $@
+endif
+
 # the bundled FFmpeg: configure, build into $(FFMPEG_DIR)
 $(FFMPEG_DIR)/.built: $(FFMPEG_TAR)
 	rm -rf $(FFMPEG_DIR) && mkdir -p $(FFMPEG_DIR)/src
@@ -382,7 +398,8 @@ $(B)/pipelines.list: extras/pipelines.list
 	cp $< $@
 
 licenses: $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt) \
-          $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt)
+          $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt) \
+          $(if $(filter bundled,$(FSR_SDK)),$(B)/licenses/AMD-FSR-SDK.txt)
 $(B)/licenses/%.txt: %
 	@mkdir -p $(dir $@)
 	cp $< $@

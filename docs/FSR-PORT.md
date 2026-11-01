@@ -245,7 +245,7 @@ better than native + FXAA. Quality and below pay off on slower GPUs or very high
 - Not tested in game: UltraPerformance, the hunter creation and equipment preview screens (the character select
   was), a large monster in a fight (only herbivores in quest 101's area 2), multiplayer, Alt+Enter / borderless on
   another monitor size.
-- FSR 4: see docs/FSR4-PORT.md (`Upscaler = FSR4`, native Vulkan through the driver); block matching / animated surfaces / HUD layer: see above.
+- FSR 4: see docs/FSR4-PORT.md (`Upscaler = FSR4`, native Vulkan through AMD's FSR SDK DLLs); block matching / animated surfaces / HUD layer: see above.
 
 ## Test commands (Git Bash; the game must not be running while building)
 

@@ -30,3 +30,6 @@ __pycache__/
 # the hub server built in place (server/README.md)
 server/mhgurecomp-hubserver
 server/mhgurecomp-hubserver.exe
+
+# AMD FSR SDK DLLs and licence, downloaded by the build (see Makefile FSR_SDK)
+third_party/fsr-sdk/
