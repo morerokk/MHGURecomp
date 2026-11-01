@@ -22,6 +22,18 @@ extern "C" void ui_request_action(bool restart) { requested = restart ? 2 : 1; }
 extern "C" bool ui_action_failed(void) { return false; }
 extern "C" int ldn_hub_status(const char *, const char *, int *, int *) { return 0; }
 extern "C" void ldn_hub_check(const char *, const char *) {}
+// (cheats.c: two cheats, a master code and one that can be turned off)
+static bool cheat_on[2] = {true, true};
+extern "C" int cheats_count(void) { return 2; }
+extern "C" const char *cheats_name(int i) { return i ? "Test cheat" : "Master"; }
+extern "C" const char *cheats_file(int i) { (void)i; return "test.txt"; }
+extern "C" bool cheats_master(int i) { return i == 0; }
+extern "C" bool cheats_on(int i) { return cheat_on[i]; }
+extern "C" bool cheats_set(const bool *on, int n, char *, size_t) {
+    for (int i = 0; i < n && i < 2; i++)
+        cheat_on[i] = on[i];
+    return true;
+}
 extern "C" int overlay_face_position(int semantic) {
     const int p[] = {1, 0, 3, 2};
     return p[semantic];

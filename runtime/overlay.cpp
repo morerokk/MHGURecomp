@@ -27,6 +27,7 @@ static void ImGui_ImplVulkan_NewFrame() {}
 static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #endif
 
+#include "config.h"
 #include "forge.h"
 #include "menu_confirm.h"
 #include "overlay.h"
@@ -161,6 +162,9 @@ bool overlay_event(const SDL_Event *e) {
     if (!g_enabled) return false;
     if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && settings_panel_key((int)e->key.scancode)) return true;
     if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN && settings_panel_mouse(e->button.button)) return true;
+    if (e->type == SDL_EVENT_MOUSE_WHEEL &&
+        settings_panel_wheel(e->wheel.integer_y * (e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1)))
+        return true;
     if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && e->key.scancode == SDL_SCANCODE_F1) {
         overlay_toggle_settings();
         return true;
@@ -457,10 +461,25 @@ static void draw_chat(const char *line, uint64_t now, float scale) {
     chat_set_box((p0.x - vp->WorkPos.x) / vp->WorkSize.x, (p0.y - vp->WorkPos.y) / vp->WorkSize.y,
                  (p1.x - vp->WorkPos.x) / vp->WorkSize.x, (p1.y - vp->WorkPos.y) / vp->WorkSize.y);
     ImDrawList *dl = ImGui::GetForegroundDrawList();
-    dl->AddRectFilled(p0, p1, IM_COL32(6, 10, 17, 235), 6 * scale);
-    dl->AddRectFilled(p0, ImVec2(p0.x + bar, p1.y), IM_COL32(111, 216, 255, 255), 6 * scale, ImDrawFlags_RoundCornersLeft);
-    dl->AddText(font, size, ImVec2(p0.x + bar + pad, p0.y + pad), IM_COL32(244, 247, 252, 255), text.c_str(), nullptr,
-                wrap);
+    // In the settings menu's colours ([Application] Theme, runtime/settings_panel.cpp theme()): Blue and Gold a panel
+    // with a bar at its left, Hunter the game's window with a red and green rule along its top and bottom
+    int theme = settings_panel_theme();
+    if (theme == THEME_HUNTER) {
+        float line = 2 * scale;
+        dl->AddRectFilled(p0, p1, IM_COL32(50, 25, 24, 236));
+        dl->AddRect(p0, p1, IM_COL32(0, 0, 0, 255), 0, 0, 2 * scale);
+        dl->AddRectFilled(p0, ImVec2(p1.x, p0.y + line), IM_COL32(176, 34, 30, 255));
+        dl->AddRectFilled(ImVec2(p0.x, p0.y + line), ImVec2(p1.x, p0.y + line * 1.7f), IM_COL32(80, 142, 54, 255));
+        dl->AddRectFilled(ImVec2(p0.x, p1.y - line * 1.7f), ImVec2(p1.x, p1.y - line), IM_COL32(80, 142, 54, 255));
+        dl->AddRectFilled(ImVec2(p0.x, p1.y - line), p1, IM_COL32(176, 34, 30, 255));
+    } else {
+        bool gold = theme == THEME_GOLD;
+        dl->AddRectFilled(p0, p1, gold ? IM_COL32(34, 25, 19, 240) : IM_COL32(6, 10, 17, 235), 6 * scale);
+        dl->AddRectFilled(p0, ImVec2(p0.x + bar, p1.y), gold ? IM_COL32(213, 162, 79, 255) : IM_COL32(111, 216, 255, 255),
+                          6 * scale, ImDrawFlags_RoundCornersLeft);
+    }
+    ImU32 ink = theme == THEME_GOLD ? IM_COL32(242, 216, 170, 255) : IM_COL32(244, 247, 252, 255);
+    dl->AddText(font, size, ImVec2(p0.x + bar + pad, p0.y + pad), ink, text.c_str(), nullptr, wrap);
 }
 
 // ------------------------------------------------------------------ frames (game thread)

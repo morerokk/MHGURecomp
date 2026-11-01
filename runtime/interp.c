@@ -510,7 +510,7 @@ static uint32_t signed_mul(Cpu *c, uint32_t pc, uint32_t w) {
 
 static uint32_t media(Cpu *c, uint32_t pc, uint32_t w) {
     uint32_t op1 = BITS(w, 20, 5), op2 = BITS(w, 5, 3), rd = BITS(w, 12, 4), rm = BITS(w, 0, 4);
-    if ((op1 & 0x1C) == 0) {  // parallel add/sub
+    if ((op1 & 0x18) == 0 && (op1 & 3)) {  // parallel add/sub: signed (op1 1-3) and unsigned (5-7: UADD8, UQSUB8...)
         c->r[rd] = rt_parallel(c, (BITS(w, 20, 3) << 3) | op2, RR(c, pc, BITS(w, 16, 4)), RR(c, pc, rm));
         return pc + 4;
     }

@@ -20,11 +20,12 @@
 #include "keymap.h"
 
 #define DEFAULT_BINDS {{SDL_SCANCODE_W}, {SDL_SCANCODE_S}, {SDL_SCANCODE_A}, {SDL_SCANCODE_D}, {SDL_SCANCODE_LSHIFT},     \
-    {KEY_MOUSE + SDL_BUTTON_RIGHT}, {SDL_SCANCODE_SPACE}, {KEY_MOUSE + SDL_BUTTON_LEFT}, {SDL_SCANCODE_R},              \
+    {KEY_MOUSE + SDL_BUTTON_RIGHT}, {SDL_SCANCODE_SPACE}, {KEY_MOUSE + SDL_BUTTON_LEFT},                               \
+    {SDL_SCANCODE_R, KEY_MOUSE + SDL_BUTTON_MIDDLE},                                                                   \
     {SDL_SCANCODE_Q}, {SDL_SCANCODE_E}, {SDL_SCANCODE_TAB}, {SDL_SCANCODE_T}, {SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER}, \
     {SDL_SCANCODE_BACKSPACE}, {SDL_SCANCODE_UP}, {SDL_SCANCODE_DOWN}, {SDL_SCANCODE_LEFT}, {SDL_SCANCODE_RIGHT},          \
-    {SDL_SCANCODE_LCTRL, SDL_SCANCODE_RCTRL}, {SDL_SCANCODE_LALT, SDL_SCANCODE_RALT}}
-#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS
+    {SDL_SCANCODE_LCTRL, SDL_SCANCODE_RCTRL}, {SDL_SCANCODE_LALT, SDL_SCANCODE_RALT}, {KEY_WHEEL_UP}, {KEY_WHEEL_DOWN}}
+#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 0, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, FSR_UP_3, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS, THEME_HUNTER, 1, 1
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
@@ -34,6 +35,7 @@ uint32_t g_ui_size[2] = {1280, 720};
 float g_ui_anchor_aspect = 16.0f / 9.0f;
 uint32_t g_fsr_output[2];
 float g_fsr_lod_bias;
+const char *g_fsr4_fallback;
 
 static const char DEFAULT_INI[] =
     "; MHGU Recomp settings. Delete this file to reset to default settings, the file is regenerated.\n"
@@ -171,9 +173,10 @@ static const char DEFAULT_INI[] =
     "MouseSensitivity = 1.0\n"
     "\n"
     "[Keybinds]\n"
-    "; The keys or mouse buttons for each Switch button and for moving (the left stick).\n"
+    "; The keys or mouse buttons for each Switch button, for moving (the left stick) and for turning the item bar\n"
+    "; (ItemLeft / ItemRight: one item per press, in a hunt, without holding L).\n"
     "; Up to two each, separated by a comma, or None.\n"
-    "; Mouse buttons: Mouse Left, Mouse Right, Mouse Middle, Mouse 4, Mouse 5.\n"
+    "; Mouse buttons: Mouse Left, Mouse Right, Mouse Middle, Mouse 4, Mouse 5, Wheel Up, Wheel Down.\n"
     "; Esc, Insert, F1 and F7 to F12 are the recomp's own keys.\n"
     "MoveUp = W\n"
     "MoveDown = S\n"
@@ -183,7 +186,7 @@ static const char DEFAULT_INI[] =
     "A = Mouse Right\n"
     "B = Space\n"
     "X = Mouse Left\n"
-    "Y = R\n"
+    "Y = R, Mouse Middle\n"
     "L = Q\n"
     "R = E\n"
     "ZL = Tab\n"
@@ -196,6 +199,8 @@ static const char DEFAULT_INI[] =
     "DpadRight = Right\n"
     "LeftStickClick = Left Ctrl, Right Ctrl\n"
     "RightStickClick = Left Alt, Right Alt\n"
+    "ItemLeft = Wheel Up\n"
+    "ItemRight = Wheel Down\n"
     "\n"
     "[Multiplayer]\n"
     "; Which port to host/join hubs on (TCP and UDP)\n"
@@ -246,6 +251,16 @@ static const char DEFAULT_INI[] =
     "; Default: 2.0\n"
     "HubHP = 2.0\n"
     "\n"
+    "[Discord]\n"
+    "; Show what you're doing in the game on your Discord profile (Discord must be running on this computer):\n"
+    "; where you are, the quest's monsters and how many hunters are with you\n"
+    "; Default: On\n"
+    "RichPresence = On\n"
+    "\n"
+    "; Show your hunter's name and Hunter Rank there too\n"
+    "; Default: On\n"
+    "ShowHunter = On\n"
+    "\n"
     "[Bonus Content]\n"
     "; If enabled, the free online downloadable content (Event Quests, item packs, Palicoes) are automatically copied from the provided savegame inside the `bonus/` folder into your own savegame.\n"
     "; This only happens if your savegame hasn't received any downloadable content yet.\n"
@@ -277,8 +292,13 @@ static const char DEFAULT_INI[] =
     "; Default: Xbox\n"
     "ButtonIcons = Xbox\n"
     "\n"
+    "; Colours of the settings menu\n"
+    "; Gold, Blue, Hunter\n"
+    "; Default: Hunter\n"
+    "Theme = Hunter\n"
+    "\n"
     "; Size of the settings menu, in percent\n"
-    "; Between 100 and 200\n"
+    "; Between 50 and 200\n"
     "; Default: 100\n"
     "MenuScale = 100\n"
     "\n"
@@ -420,7 +440,7 @@ const ConfigSetting g_settings[] = {
     KEYS("Y", BIND_Y), KEYS("L", BIND_L), KEYS("R", BIND_R), KEYS("ZL", BIND_ZL), KEYS("ZR", BIND_ZR),
     KEYS("Plus", BIND_PLUS), KEYS("Minus", BIND_MINUS), KEYS("DpadUp", BIND_DPAD_UP), KEYS("DpadDown", BIND_DPAD_DOWN),
     KEYS("DpadLeft", BIND_DPAD_LEFT), KEYS("DpadRight", BIND_DPAD_RIGHT), KEYS("LeftStickClick", BIND_LSTICK),
-    KEYS("RightStickClick", BIND_RSTICK),
+    KEYS("RightStickClick", BIND_RSTICK), KEYS("ItemLeft", BIND_ITEM_LEFT), KEYS("ItemRight", BIND_ITEM_RIGHT),
     {"Multiplayer", "Port", SET_INT, F(ldn_port), 0, 1, 65535, NULL, NULL, true, ERR_NET},
     {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, true, ERR_NET},
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},
@@ -432,13 +452,16 @@ const ConfigSetting g_settings[] = {
     {"Monster HP", "4Players|4Player", SET_FACTOR, F(hp.scale[3]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
     ON_OFF("Village Quests", "VillageQuestsInHub", village_in_hub, true),
     {"Village Quests", "HubHP", SET_FACTOR, F(hp.village), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_VILLAGE},
+    ON_OFF("Discord", "RichPresence", discord, false),
+    ON_OFF("Discord", "ShowHunter", discord_hunter, false),
     ON_OFF("Bonus Content", "BonusContent", bonus_content, true),
     {"Audio", "Volume", SET_INT, F(volume), 0, 0, 100, NULL, NULL, false, ERR_MISC},
     ON_OFF("Audio", "MuteInBackground", mute_in_background, false),
     ON_OFF("Application", "ConfirmExit", confirm_exit, false),
     {"Application", "Language", SET_CHOICE, F(language), 0, 0, 0, "English|en,Spanish|es", NULL, false, ERR_LANGUAGE},
     {"Application", "ButtonIcons", SET_CHOICE, F(button_icons), 0, 0, 0, "Xbox,Switch,PlayStation", NULL, false, ERR_ICONS},
-    {"Application", "MenuScale", SET_INT, F(menu_scale), 0, 100, 200, NULL, NULL, false, ERR_SCALE},
+    {"Application", "Theme", SET_CHOICE, F(menu_theme), 0, 0, 0, "Gold,Blue,Hunter", NULL, false, ERR_MISC},
+    {"Application", "MenuScale", SET_INT, F(menu_scale), 0, 50, 200, NULL, NULL, false, ERR_SCALE},
     {"Application", "Updates", SET_CHOICE, F(updates), 0, 0, 0, "Ask,Auto|automatic,Off|never", NULL, false, ERR_UPDATES},
 };
 #undef ON_OFF
@@ -453,12 +476,13 @@ const ConfigSetting *config_bind_setting(int bind) {
 #undef F
 
 // [Keybinds] names: SDL's for a key, but its own for the ones whose name has a ',' (the list's separator) or a
-// ';' / '#' (a comment in the file), and for the mouse buttons
+// ';' / '#' (a comment in the file), and for the mouse buttons and wheel
 static const struct { int code; const char *name; } key_names[] = {
     {SDL_SCANCODE_COMMA, "Comma"}, {SDL_SCANCODE_KP_COMMA, "Keypad Comma"}, {SDL_SCANCODE_SEMICOLON, "Semicolon"},
     {SDL_SCANCODE_KP_HASH, "Keypad Hash"}, {KEY_MOUSE + SDL_BUTTON_LEFT, "Mouse Left"},
     {KEY_MOUSE + SDL_BUTTON_RIGHT, "Mouse Right"}, {KEY_MOUSE + SDL_BUTTON_MIDDLE, "Mouse Middle"},
-    {KEY_MOUSE + SDL_BUTTON_X1, "Mouse 4"}, {KEY_MOUSE + SDL_BUTTON_X2, "Mouse 5"},
+    {KEY_MOUSE + SDL_BUTTON_X1, "Mouse 4"}, {KEY_MOUSE + SDL_BUTTON_X2, "Mouse 5"}, {KEY_WHEEL_UP, "Wheel Up"},
+    {KEY_WHEEL_DOWN, "Wheel Down"},
 };
 const char *config_key_name(int code) {
     for (size_t i = 0; i < sizeof key_names / sizeof *key_names; i++)

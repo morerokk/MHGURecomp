@@ -92,6 +92,21 @@ Fixed on the way (2026-10-20):
   with MHGU_CONTROL "gpuprof" (GPU timestamps per pass): the multisampled passes cost ~3 ms more at 4x, a colour
   resolve ~1.6 ms, the depth / stencil resolve ~9 ms (the driver decompressing it; Vulkan 1.2 render pass resolves
   were as slow, and a sampleable multisampled image loses its compression: passes several times slower).
+  Menus that show 3D models (Character Select, Guild Card, the smithy and item box equipment previews) draw them
+  straight into the finished picture, after the game's FXAA pass, in the same pass as the menu's 2D draws, so they had
+  no anti-aliasing whatever the settings. A full-size colour target that gets depth-writing draws without MSAA past
+  the game's FXAA pass is marked (TexBackend.ms_models, exec.c full_picture), and from the next frame on its models
+  get the player's anti-aliasing (models_aa):
+  - MSAA: the first depth-testing draw (or depth clear) into it copies the picture, and the depth the models test
+    against unless cleared, into every sample of the multisampled companions (ms_expand; without
+    VK_EXT_shader_stencil_export the stencil starts at 0, as vk_ms_resolve drops it), and the rest of the frame's draws
+    into it stay there: the 2D draws after the models shaded per sample (else the seams between their quads show), so
+    a preview that switches between models and 2D costs one copy and one resolve a frame. Needs sampleRateShading.
+  - FXAA: the picture is copied before each run of model draws and after it, and FXAA 3.11 ("fxaa.frag.models", luma
+    from the colour) is drawn over it only where the models changed it and next to that (models_fxaa_end), so the 2D
+    around them stays sharp. Both FXAA modes: the game's own FXAA shader only runs in its pass.
+  - FSR, or anti-aliasing off: none. FSR runs at its start of the HUD, before them, and never sees them.
+  The 3D scene's passes (before the FXAA pass) keep their rules.
 - FXAA (settings FXAA = On / Off): the game's FXAA pass is recognised by its fragment shader's code hash
   (FXAA_FS_HASH, exec.c) and becomes a copy of its input when off.
   FXAAMode = 3_11 draws FXAA 3.11 Quality there instead (exec.c fxaa_311, shaders.c "fxaa.frag": preset 39, no
@@ -744,6 +759,114 @@ loader ran main and sdk only and code patches were skipped (logged as not applie
   instructions. A laptop dual-core is perhaps 2-3x slower a thread: ~1 ms a frame in town, more in quests, on the
   game thread.
 
+## Loading screens (2026-10-31)
+
+Noticed: loading screens take about as long on this PC (Ryzen 7 9800X3D) as on the oldest one (the minimum spec), and
+longer with MH4U Port. Measured on quest 101 (Village, no large monster; MHGU_QUICKHUNT), seconds after Depart on
+Quest, from screenshots every 0.1 s, the logged file reads and a sampling profiler (below):
+- 0 - 0.4: fade to black. 0.4 - 1.9: black, the town area's depart states (aVillage, mode 4, 0x8bd720) waiting for
+  the departure's fade object (0x5f85fc) and the music to stop.
+- 1.9 - 4.2: the quest's card on the loading screen, and nothing loads: state 9 (0x8bdac0) counts area +0xe4 (150, 60 fps
+  frames, less the engine step each update: 2.5 s at any frame rate, on the Switch too) down to 0 before it jumps to
+  the quest's area.
+- 4.2 - 5.4: the loading itself (62 files). 5.5: the quest fades in.
+So 1.2 s of 5.5 is work; the rest is the game's own timing, the same on every PC. (A 2 s wait after the reads seen first
+was the measurement's: screenshots every 0.4 s, each a PNG encoded while the game ran.) The CPU is nearly idle outside
+the reads.
+- Of the loading, the loader thread (main 0xdc74e0) was the work: 80% in zlib's inflate (the archives are zlib streams;
+  the game's zlib is 1.2.8, "1.2.8.f-NINTENDO-SDK-v1"), 72% in inflate_fast (0x1422ce8) alone. Now inflate_fast and
+  adler32 (0x1422774) are host code (runtime/hle/inflate.c: zlib 1.2.8's on the game's structures, whose inflate_state
+  is 8 bytes shorter at the front; modes TYPE 11, BAD 27; no `sane` test, as the game's). The loader thread from start-
+  up to a quest: 9.3 -> 5.4 Gcycles (inflate_fast 7.1 -> 3.2, adler32 0.9 -> 0.45); the quest's reads 1.14 -> 0.86 s
+  here, more on a slower CPU. MHGU_INFLATE=check runs both on every call and compares (the output, z_stream and state):
+  16384 calls and as many adler32s from start-up to the quest, none different. MHGU_INFLATE=game: the game's.
+- MH4U Port: its hook quest_group_fix (module/quest.c, at the quest list loader step, the mod's 0x3b7de8 = main
+  0x5b7de8 here) runs quest_group_rename on every step: every entry of the quest list (~1500) against every monster's
+  12 quest slots, ~1 M instructions a call, in the interpreter (the mod's code). The town's load calls the step ~1000
+  times, on a thread of its own (from main 0x5b7cf8): 21 Gcycles, all of it in the interpreter (MHGU_INTERP_STATS:
+  up to 127 M instructions/s). The town's load (its first read to the town) took 7.4 s with MH4U Port, 2.5 s without:
+  5 s of it the mod's, here; a laptop's CPU several times that. The mod's to change (e.g. its slot IDs' range worked
+  out once, and an entry outside it skipped before the loops); the time is in the mod's own code, which only the
+  interpreter runs (~20 cycles an instruction: faster would take pre-decoding, not a quick change). Quest 101 itself
+  loads as fast with it as without.
+- Not changed: the game's waits. Skipping state 9's 2.5 s (the card shown with nothing loading) would be the biggest
+  cut, but it is the game's design: an option at most, Next steps 13 has the details. The town's load from the title
+  wasn't measured this way.
+- Tools: MHGU_SAMPLE=<file> (runtime/sampler.c, Windows): a sampling profiler, every thread's call stack about every
+  millisecond with the CPU cycles it used; tools/samples.py reads it (timeline / top / wait, game functions as their
+  guest addresses). Sleeping threads are sampled every 16th round, for where they wait.
+
+## Discord Rich Presence (2026-10-31, branch feat/discord-rich-presence)
+
+ini [Discord] RichPresence / ShowHunter (settings menu: Network tab), both live. runtime/net/discord.c talks to the
+Discord app over its local RPC (named pipe `\\.\pipe\discord-ipc-N`; on Linux the discord-ipc-N socket in
+$XDG_RUNTIME_DIR, Flatpak and Snap paths too) as application 1566091085493571724 ("Monster Hunter GU Recomp", owned by
+morerokk): handshake, then SET_ACTIVITY with the latest state at most every 4 s (Discord's rate limit); turning it off
+closes the connection, which clears the profile. No Discord: a try every 15 s. runtime/hle/presence.c reads the game
+once a second from the input polling (game thread): town / quest, map and zone, quest targets, hunter, party; field
+addresses are in its header comment. A town shows "Bherna Village" / "Hub (online)" and "Name, HR 83 - Long Sword";
+a quest "Hunting Great Maccao, Yian Kut-Ku, Malfestio" and "Jurassic Frontier, Area 1", the quest's name and the
+hunter in the images' hover texts, the time since departing; (2 of 4) in a hub (ldn_party: the hub's
+NetworkInfo node count, its session id as the party id) or a multiplayer quest (sQuestSelector join count).
+Texts: monster and quest names from the game's English GMDs (romfs_host_path, so mods' copies count); map names and
+weapon type names are tables in presence.c (the game draws map names as pictures; stage 15 and town type 5 unknown).
+Tested on Windows (2026-10-31, test save, Discord running): town (Wycademy = town type 6), quest 404 (Volvidon, camp
+then Area 1 while walking), quest 521 (all large monsters: the large monster list), both settings toggled in the menu.
+Not tested yet: online hubs and the party size, Linux, the Hub / Pub / other villages' names in game.
+Images are art assets of the Discord application (uploaded in its Developer Portal, used by key): "logo" as
+the large image, a pixel-art icon per weapon type as the small one (presence.c g_weapon_icons; a fan-made sprite
+sheet, used with permission). Next: map pictures as the large image in quests.
+
+## Mouse look on the camera's angles (2026-10-31)
+
+In a hunt the captured mouse turns the camera itself (runtime/hle/mousecam.c): each count is 0.08 degrees x
+[Mouse] MouseSensitivity, at once (no dead zone, no speed curve, no smoothing lag), where the stick emulation it
+replaces had a minimum turn speed. The quest camera (uQuestCamera, DTI 0x184d8b8, 0xb00 bytes; code 0x218000-0x22a400)
+keeps its angles as 16-bit units: +0x9e8 / +0x9ec the pitch / yaw it heads for, +0x9e0 / +0x9e4 the smoothed ones
+(0x225308: stepped toward those by 0x21c3cc), +0x9d8 / +0x9dc the ones the eye is placed by (the smoothed ones, the
+pitch then lifted off the ground, 0x223d80). Its right stick handler 0x2255cc (r0 = camera, r1 = invert bits; called
+by the normal update 0x224e54 with +0x97c, and at 0x22713c with +0x980) reads the player's camera actions 1-4 (up,
+down, left, right: vfunc 0x2e8 of the player at camera +0x85c, bits of player +0x1434) and the stick's tilt (vfunc
+0x238), turns by a speed from the camera's parameters at options byte +0x65 (camera speed), and clamps the pitch to
++-0x3f00; later code clamps it again to -0x2f00..0x2800 (down 66, up 56 degrees, measured). The game only calls it
+while the player may turn the camera, so it is hooked: after it, the counts moved since the last update are added to
+the heading and smoothed angles together. The game's invert option (options byte +0x64: bit 0 up / down, bit 1 left /
+right; copied to camera +0x97c by 0x2220f8, and +0x68 to +0x980) is applied from r1. The game's camera speed is not
+(MouseSensitivity is). Options object: *0x1a8ca48 (+0x63, 0-4, is copied to camera +0x434 too; not identified).
+host_input.c gives the mouse to the camera while the handler ran in the last 200 ms (mousecam_active); otherwise
+(villages, whose camera doesn't turn; other cameras; cutscenes) to the right stick as before.
+Tested 2026-10-31 in quest 101 with the control file's mousemove: 500 counts = 40 degrees left and right, 20 counts
+turn 1.6 degrees, 1 count a second still turns; pitch stops at the game's limits and comes back at once; all four
+invert settings; the in-quest start menu (the camera turns there with the stick too). Not tried by hand with a real
+mouse, nor with a gunner's aim, mounting or the second camera type (+0x980).
+
+## Mouse wheel on the item bar (2026-10-31)
+
+The captured mouse's wheel turns the item bar directly (runtime/hle/itembar.c): up the item to the left, down to the
+right, one item per notch, without holding L; middle click is a second default key for Y (use the item / sheathe;
+existing ini files keep their `Y = R` until changed). The player keeps the selected pouch slot at +0x3298 (u16; 0x28
+the empty "(No Item)" place at the bar's left end, else the pouch slot). Found by diffing the player's memory around
+L+A / L+Y (control file `memsave`), then the writers of +0x3298 in the lifted code: the item bar handler 0x4f7f38
+(r0 = the player, every update from 0x49baf4) checks f_47bcd0 == 1, f_47b918 == 0 and vfunc +0x230(player, 1) == 1,
+then, with the bar open (vfunc +0x25c(player, 1); L held) or for the actions 0x43 / 0x44 (vfunc +0x2e8; no L
+needed), actions 0xa / 0x44 go right and 9 / 0x43 left: +0x3298 = f_4880fc(player, slot, 0 right / 1 left) (through
+0x39bfcc on the pouch: skips empty and unusable slots, stops at the left end) and +0x253c |= 2 (right) / 4 (left).
+The handler is hooked; after it a waiting notch does the same past the same checks (one per update, at most 4
+waiting; dropped when the player may not pick an item or outside a hunt). Note: vtables are in main's image (below
+0x08000000), so a heap-range check on them fails. Tested 2026-10-31 in quest 101 (test save, John Rise) with the
+control file's new `wheel <notches>`: 0x28 -> 0 Potion -> 1 Mega Potion -> 2 3 4 -> 7 (5 and 6 empty, skipped) -> 8
+-> 9 and back, the HUD's item and count following. Tried by hand with a real mouse by the user: works.
+
+Rebindable since: [Keybinds] ItemLeft / ItemRight (BIND_ITEM_LEFT / RIGHT, defaults Wheel Up / Wheel Down) turn the
+bar one item per press of their keys or buttons, or per notch of the wheel. The wheel is a key of its own
+(KEY_WHEEL_UP / DOWN = KEY_MOUSE + 0x10 / 0x11, "Wheel Up" / "Wheel Down"), usable on any keybind: on the others a
+notch is a 70 ms press. The settings menu takes a turn of the wheel when choosing a key (settings_panel_wheel).
+Existing ini files get the two lines when the settings are next saved, and keep their defaults until then. The
+default ini text now has `Y = R, Mouse Middle` (the first commit changed only the built-in default). Tested in quest
+101: defaults, and ItemLeft = Wheel Down / ItemRight = Wheel Up from the ini, through the control file's `wheel`.
+The menu shows the Item bar rows. Not tested: choosing the wheel in the menu (needs a real wheel event), a keyboard
+key on ItemLeft / ItemRight, the wheel on a button keybind.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,
@@ -827,6 +950,21 @@ loader ran main and sdk only and code patches were skipped (logged as not applie
 12. Main Menu without Download / Data Transfer, with a Quit item (on hold, 2026-10-30): the title sequence's state
    machine, the menu cursor, the help line and the bar labels (pictures in HD_title00, no "Quit" among them) are
    mapped; what is left and how: docs/research/title-menu.md.
+13. Option: skip the game's forced 2.5 s wait before a quest loads (on hold, 2026-10-31; see "Loading screens"). What is
+   known: departing from a town calls the town area's depart method 0x8c02a4 (area mode +0xb8 = 4, a quest flag
+   +0xda = 1). Mode 4's handler 0x8bd720 switches on the state byte at area +5 (byte 1 of the word +4): states 1-3
+   start the fade, 4 (0x8bd8e0) waits for the fade object (0x5f85fc: its +0x54 object's +0x60 bit 0) and 0x6dee48
+   (the music), 5-7 one update each, 8 (0x8bda88) sets state 9 when +0xda is set (else mode 6), and state 9
+   (0x8bdac0) is the wait: area +0xe4 (an int, 150 = 0x96 already in state 4) less the engine step (G_SYSTEM
+   0x2326764 +0x68, f32) each update; while > 0 (0x8bdaf0) nothing else; at 0 it reads the stage (sGameControl
+   +0x48 / +0x4a), names the quest's area (0x15eff2c, 0x9aeebc -> area +0xc4) and goes to mode 6 (0x8bda98), and the
+   jump starts the quest's loading (0x8bdfd0 via 0x8bcc64, mode 7). The quest card's loading screen is up from about
+   state 9's start, so the 2.5 s are the card shown with nothing loading (the loader thread idle). Where +0xe4 gets
+   its 150 wasn't found (no store to +0xe4 in 0x8bc000-0x8c1000 but state 9's own): a peek showed it 150 from mode
+   4's start. A fix: at state 9 (an fnhook on 0x8bd720 seeing state 9, or on the countdown's caller), set +0xe4 to
+   0 (or a shorter time) when the option is on: the jump and the loads then start at once. Seen in the Village (the
+   area at 0x13800160 in those runs, aVillage); the Hub (aLobbyBase) presumably shares the class (quickhunt.c), not
+   checked; nor whether anything (sound, the card's own animation) expects the 2.5 s.
 ## Build / run
 
 MSYS2 UCRT64 on PATH (`C:\msys64\ucrt64\bin;C:\msys64\usr\bin`):
@@ -1021,7 +1159,8 @@ G Rank), Chamberlyne > Downloadable Content > Claim Items lists the packs and cl
 Slickaxe x20). Palico downloads not checked. The quest ARCs equal the RomFS files byte for byte, so a donor-free
 version (building the regions from the RomFS) is possible once the flag bits and the pack / Palico records are known.
 
-Controls: see `runtime/host_input.c` (keyboard and mouse: WASD, mouse look (relative mode after a click, Esc releases; the mouse speed smoothed
+Controls: see `runtime/host_input.c` (keyboard and mouse: WASD, mouse look (relative mode after a click, Esc releases; in a
+hunt the camera's angles directly, runtime/hle/mousecam.c; elsewhere the mouse speed smoothed
 over 25 ms as the right stick tilt, offset past the camera's round ~39% stick dead zone; ini [Mouse] MouseSensitivity), clicks = X / A, Space / R = B / Y, Tab / T = ZL / ZR,
 arrows = d-pad, Ctrl / Alt = stick clicks, Enter = Plus; SDL gamepads (all open, the one a button was last pressed on is
 read: a Steam Deck with a controller plugged in has two, and taking the first one SDL listed left the player's pad dead;

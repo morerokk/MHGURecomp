@@ -29,11 +29,15 @@
 #define FSR4_DRIVER_PATCH 0
 #endif
 
+// g_fsr4_fallback (the settings panel shows it on the Upscaler row; settings_locale.h translates it)
+#define NO_FSR4_GPU "This GPU can't run FSR 4, so FSR 3.1 is used."
+#define NO_FSR4_START "FSR 4 could not start, so FSR 3.1 is used. The [fsr4] lines in log.txt say why."
+
 #ifndef _WIN32
 
 bool vk_fsr4_device_exts(const VkExtensionProperties *ep, uint32_t n, const char **ext, uint32_t *n_ext) { (void)ep, (void)n, (void)ext, (void)n_ext; return false; }
 bool vk_fsr4_device_features(VkPhysicalDeviceVulkan11Features *f11, VkPhysicalDeviceVulkan12Features *f12, VkPhysicalDeviceFeatures *f) { (void)f11, (void)f12, (void)f; return false; }
-bool vk_fsr4_init(void) { LOG("[fsr4] FSR 4 needs AMD's Windows driver: FSR 3.1 is used\n"); return false; }
+bool vk_fsr4_init(void) { LOG("[fsr4] FSR 4 needs AMD's Windows driver: FSR 3.1 is used\n"); g_fsr4_fallback = NO_FSR4_START; return false; }
 bool vk_fsr4_ready(void) { return false; }
 const char *vk_fsr4_name(void) { return "FSR 4"; }
 bool vk_fsr4_dispatch(const Fsr4Dispatch *d) { (void)d; return false; }
@@ -106,7 +110,11 @@ bool vk_fsr4_device_exts(const VkExtensionProperties *ep, uint32_t n, const char
     for (int i = 0; i < 4; i++) {
         bool have = false;
         for (uint32_t j = 0; j < n; j++) have |= !strcmp(ep[j].extensionName, want[i]);
-        if (!have) { LOG("[fsr4] the GPU lacks %s: FSR 4 cannot run here, FSR 3.1 will\n", want[i]); return false; }
+        if (!have) {
+            LOG("[fsr4] the GPU lacks %s: FSR 4 cannot run here, FSR 3.1 will\n", want[i]);
+            g_fsr4_fallback = NO_FSR4_GPU;
+            return false;
+        }
     }
     for (int i = 0; i < 4; i++) ext[(*n_ext)++] = want[i];
     extensions_ok = true;
@@ -136,6 +144,7 @@ bool vk_fsr4_device_features(VkPhysicalDeviceVulkan11Features *f11, VkPhysicalDe
             f8.shaderFloat8, f8.shaderFloat8CooperativeMatrix, s2.synchronization2, sg.subgroupSizeControl, sg.computeFullSubgroups,
             h12.shaderFloat16, h12.shaderInt8, h12.bufferDeviceAddress, h12.vulkanMemoryModel);
         extensions_ok = false;  // (the extensions stay enabled: harmless without their features)
+        g_fsr4_fallback = NO_FSR4_GPU;
         return false;
     }
     en_cm.cooperativeMatrix = en_cm.cooperativeMatrixRobustBufferAccess = VK_TRUE;
@@ -413,7 +422,11 @@ bool vk_fsr4_init(void) {
         ok = init_loader();
         if (ok) LOG("[fsr4] route: the player-supplied loader (ffx-api, no patching)\n");
     }
-    if (!ok) { LOG("[fsr4] no FSR 4 route available: FSR 3.1 is used\n"); return false; }
+    if (!ok) {
+        LOG("[fsr4] no FSR 4 route available: FSR 3.1 is used\n");
+        g_fsr4_fallback = NO_FSR4_START;
+        return false;
+    }
     linear_in = getenv("MHGU_FSR4_LINEAR") != NULL;
     loaded = true;
     return true;
@@ -459,6 +472,7 @@ static struct FfxApiResource resource(const Fsr4Image *i, bool uav) {
 static bool fail(const char *why, int rc) {
     LOG("[fsr4] %s (ffx return code %d): FSR 4 is off from here on, FSR 3.1 takes over\n", why, rc);
     failed = true;
+    g_fsr4_fallback = NO_FSR4_START;
     return false;
 }
 

@@ -20,3 +20,8 @@ void camjit_init(void);  // hooks (only with [Upscaler] FSR = On)
 void camjit_set(bool on, uint32_t render_w, uint32_t render_h, uint32_t phases);
 bool camjit_latest(CamRecord *out);              // the newest capture (false: none yet)
 bool camjit_get(uint64_t seq, CamRecord *out);   // capture seq, while it is in the ring (the last 64)
+// Menu cameras (other aspects: the smithy's equipment preview): the ones computed this frame or the last, as their
+// projection's m[0] / m[5] (up to max; returns how many). The renderer gives a camera's viewport (render pixels) once
+// it has seen a draw with it; from then on that camera gets the same jitter as the main one, in its viewport's pixels.
+int camjit_menu_cameras(float (*m05)[2], int max);
+void camjit_menu_viewport(int i, float w, float h);

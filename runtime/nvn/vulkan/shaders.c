@@ -334,18 +334,37 @@ static const char *builtin_src(const char *name, int *stage) {
     }
     // FXAA 3.11 Quality (Timothy Lottes'), preset 39, over the game's FXAA input, which holds its luma in alpha (exec.c
     // fxaa_311). No sub-pixel blur and edge thresholds of 0.063 / 0.0312: edges smoothed, textures left sharp.
-    if (!strcmp(name, "fxaa.frag")) {
+    // "fxaa.frag.models": the same over 3D models menus draw into the finished picture (exec.c models_fxaa_end): luma
+    // from the colour, and only the pixels the models changed (binding 1: the picture before them) and their neighbours.
+    if (!strcmp(name, "fxaa.frag") || !strcmp(name, "fxaa.frag.models")) {
         *stage = STAGE_FRAGMENT;
-        return "#version 450\n"
+        static __thread char buf[6144];
+        snprintf(buf, sizeof buf, "#version 450\n%s%s", name[9] ? "#define MODELS\n" : "",
                "layout(set = 0, binding = 0) uniform sampler2D t;\n"
                "layout(location = 0) out vec4 o;\n"
+               "#ifdef MODELS\n"
+               "layout(set = 0, binding = 1) uniform sampler2D before;\n"
+               "#define LUMA(c) dot((c).rgb, vec3(0.299, 0.587, 0.114))\n"
+               "#else\n"
+               "#define LUMA(c) (c).a\n"
+               "#endif\n"
                "const float STEP[12] = float[](1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 4.0, 8.0);\n"
-               "float luma(vec2 uv) { return textureLod(t, uv, 0.0).a; }\n"
-               "#define AT(x, y) textureLodOffset(t, pos, 0.0, ivec2(x, y)).a\n"
+               "float luma(vec2 uv) { return LUMA(textureLod(t, uv, 0.0)); }\n"
+               "#define AT(x, y) LUMA(textureLodOffset(t, pos, 0.0, ivec2(x, y)))\n"
                "void main() {\n"
+               "#ifdef MODELS\n"
+               "  ivec2 p = ivec2(gl_FragCoord.xy), hi = textureSize(t, 0) - 1;\n"
+               "  bool changed = false;\n"
+               "  for (int y = -1; y <= 1; y++)\n"
+               "    for (int x = -1; x <= 1; x++) {\n"
+               "      ivec2 q = clamp(p + ivec2(x, y), ivec2(0), hi);\n"
+               "      changed = changed || texelFetch(t, q, 0).rgb != texelFetch(before, q, 0).rgb;\n"
+               "    }\n"
+               "  if (!changed) discard;\n"
+               "#endif\n"
                "  vec2 rcp = 1.0 / vec2(textureSize(t, 0)), pos = gl_FragCoord.xy * rcp;\n"
                "  vec4 rgbyM = textureLod(t, pos, 0.0);\n"
-               "  float lumaM = rgbyM.a, lumaN = AT(0, -1), lumaS = AT(0, 1), lumaW = AT(-1, 0), lumaE = AT(1, 0);\n"
+               "  float lumaM = LUMA(rgbyM), lumaN = AT(0, -1), lumaS = AT(0, 1), lumaW = AT(-1, 0), lumaE = AT(1, 0);\n"
                "  float rangeMax = max(max(max(lumaN, lumaW), max(lumaE, lumaS)), lumaM);\n"
                "  float range = rangeMax - min(min(min(lumaN, lumaW), min(lumaE, lumaS)), lumaM);\n"
                "  if (range < max(0.0312, rangeMax * 0.063)) { o = rgbyM; return; }\n"
@@ -377,7 +396,8 @@ static const char *builtin_src(const char *name, int *stage) {
                "  bool goodSpan = ((dstN < dstP ? endN : endP) < 0.0) != (lumaM < lumaHalf);\n"
                "  float offset = (goodSpan ? 0.5 - min(dstN, dstP) / (dstN + dstP) : 0.0) * lengthSign;\n"
                "  o = vec4(textureLod(t, pos + (horzSpan ? vec2(0.0, offset) : vec2(offset, 0.0)), 0.0).rgb, lumaM);\n"
-               "}\n";
+               "}\n");
+        return buf;
     }
     if (!strcmp(name, "resolve.frag.depth") || !strcmp(name, "resolve.frag.depth.s")) {
         *stage = STAGE_FRAGMENT;
@@ -393,6 +413,29 @@ static const char *builtin_src(const char *name, int *stage) {
                    "}\n";
         return "#version 450\n"
                "layout(set = 0, binding = 0) uniform sampler2DMS d;\n"
+               "void main() { gl_FragDepth = texelFetch(d, ivec2(gl_FragCoord.xy), 0).r; }\n";
+    }
+    if (!strcmp(name, "expand.frag")) {  // (MSAA: a picture into every sample of a multisampled image, exec.c ms_expand)
+        *stage = STAGE_FRAGMENT;
+        return "#version 450\n"
+               "layout(set = 0, binding = 0) uniform sampler2D c;\n"
+               "layout(location = 0) out vec4 o;\n"
+               "void main() { o = texelFetch(c, ivec2(gl_FragCoord.xy), 0); }\n";
+    }
+    if (!strcmp(name, "expand.frag.depth") || !strcmp(name, "expand.frag.depth.s")) {  // (the same for depth / stencil)
+        *stage = STAGE_FRAGMENT;
+        if (name[17] == '.')
+            return "#version 450\n"
+                   "#extension GL_ARB_shader_stencil_export : require\n"
+                   "layout(set = 0, binding = 0) uniform sampler2D d;\n"
+                   "layout(set = 0, binding = 1) uniform usampler2D s;\n"
+                   "void main() {\n"
+                   "  ivec2 p = ivec2(gl_FragCoord.xy);\n"
+                   "  gl_FragDepth = texelFetch(d, p, 0).r;\n"
+                   "  gl_FragStencilRefARB = int(texelFetch(s, p, 0).r);\n"
+                   "}\n";
+        return "#version 450\n"
+               "layout(set = 0, binding = 0) uniform sampler2D d;\n"
                "void main() { gl_FragDepth = texelFetch(d, ivec2(gl_FragCoord.xy), 0).r; }\n";
     }
     return NULL;

@@ -267,7 +267,13 @@ static void attr_load(Ctx *c, int dst, uint32_t addr, const char *idx) {
                     sprintf(e, "as_type<uint>(in.v%d[%d] * in.pos.w * as_type<float>(%s))", a, comp, reg(c, c->ipa_mul, mb));
                 } else sprintf(e, "as_type<uint>(in.v%d[%d])", a, comp);
             }
-        } else if (addr == 0x3FC) { c->uses_front_facing = true; strcpy(e, "(front_facing ? 0xFFFFFFFFu : 0u)"); }
+        } else if (addr == 0x3FC) {
+            c->uses_front_facing = true;
+            // (GLSL: the all-ones word from the rscale table, [66].x: Intel's Windows driver for Gen9 (1.3.215)
+            // turns float(int()) of a constant mask into +1 for front faces, lighting them as back faces)
+            if (c->glsl) c->uses_rscale = true, strcpy(e, "(front_facing ? as_type<uint>(rscale[66][0]) : 0u)");
+            else strcpy(e, "(front_facing ? 0xFFFFFFFFu : 0u)");
+        }
         else if (addr == 0x2E0 || addr == 0x2E4) { sprintf(e, "as_type<uint>(point_coord[%d])", (addr >> 2) & 1); }
         else { sprintf(e, "0u /* attr %#x */", addr); }
     } else {
@@ -1840,7 +1846,8 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
     }
     if (c->uses_rscale && stage != STAGE_VERTEX) {
         sp(&s, "layout(std140, set = %d, binding = 18) uniform RScale { vec4 rscale[%d]; };\n", set,
-           key && key->flip_x ? 66 : 65);  // ([65]: mirror mode's render target width)
+           c->uses_front_facing ? 67 : key && key->flip_x ? 66 : 65);  // ([65]: mirror mode's render target width,
+                                                                        // [66].x: all ones, see attr_load)
         info->uses_rscale = true;
     }
     bool tint = stage == STAGE_FRAGMENT && !dbg && (c->omap_target & 0x7) == 0x7 && (!key || key->rt_kind[0] == 0);

@@ -2539,16 +2539,6 @@ HLE_FUNC("ImFontAtlas_GetCustomRect", ig_ImFontAtlas_GetCustomRect) {
     c->r[0] = r_ != 0;
 }
 
-HLE_FUNC("ImFontAtlas_GetGlyphRangesDefault", ig_ImFontAtlas_GetGlyphRangesDefault) {
-    uint32_t a0 = c->r[0];
-    IG_ENTER(c);
-    void *ha0 = m_in(a0, 12);
-    __auto_type r_ = ImFontAtlas_GetGlyphRangesDefault(ha0);
-    m_after(a0);
-    IG_LEAVE(c);
-    c->r[0] = h2g(r_);
-}
-
 HLE_FUNC("ImFontAtlas_ImFontAtlas", ig_ImFontAtlas_ImFontAtlas) {
     IG_ENTER(c);
     __auto_type r_ = ImFontAtlas_ImFontAtlas();
@@ -14763,9 +14753,8 @@ HLE_FUNC("igWindowRectRelToAbs", ig_igWindowRectRelToAbs) {
     c->r[0] = ret_;
 }
 
-// 1445 functions; not provided (20):
+// 1444 functions; not provided (19):
 //   ImDrawList_AddCallback (callback ImDrawCallback)
-//   ImFontGlyphRangesBuilder_BuildRanges (argument ImVector_ImWchar*)
 //   ImGuiSelectionBasicStorage_GetNextSelectedItem (argument void**)
 //   ImGuiStorage_GetVoidPtrRef (returns void**)
 //   ImGuiTextRange_split (argument ImVector_ImGuiTextRange*)
