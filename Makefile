@@ -18,6 +18,11 @@ B        ?= build
 O        ?= obj
 CC       := clang
 CXX      := clang++
+# 64-bit ARM: the game code for any ARMv8 CPU (ARCH: the compiler's target CPU, e.g. x86_64 or aarch64)
+ARCH     := $(firstword $(subst -, ,$(shell $(CC) -dumpmachine)))
+ifeq ($(ARCH),aarch64)
+GENARCH  ?= -march=armv8-a
+endif
 GENARCH  ?= -march=x86-64-v3  # AVX2 + FMA (Haswell or newer)
 GENFLAGS := -O1 -fno-strict-aliasing -ffp-contract=off -fno-math-errno -Wno-return-type -Wno-unused-label \
             -Wno-parentheses-equality -Wno-unused-value -fvisibility=hidden -Iruntime $(GENARCH)
@@ -142,6 +147,11 @@ UPDATER  := $(B)/mhgurecomp-updater
 # (libcurl: opened at run time, updater/http.c; -lm for runtime/platform/linux_glibc.c: SDL_LIBS has it only with
 # the bundled SDL3)
 UPD_LDFLAGS := -fuse-ld=lld $(SDL_LIBS) -lz -ldl -lm $(GLIBC_WRAP_FLAGS)
+endif
+# 64-bit ARM: plain char is unsigned there and signed on x86-64, which the program's C code is written for
+ifeq ($(ARCH),aarch64)
+OSFLAGS  += -fsigned-char
+GENFLAGS += -fsigned-char
 endif
 
 # GAMELIB_ID: what the game code library is compiled against. A library with another id is refused at startup.

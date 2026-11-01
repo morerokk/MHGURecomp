@@ -311,12 +311,20 @@ static void fault_handler(int sig, siginfo_t *si, void *uc) {
     ucontext_t *ctx = (ucontext_t *)uc;
     uint64_t fa = si && si->si_addr ? (uint64_t)(uintptr_t)si->si_addr : 0;
     if ((sig == SIGSEGV || sig == SIGBUS) && lazy_commit(fa)) {  // (a guest page first touched: back it, resume)
+#if defined(__aarch64__)  // (64-bit ARM: whether it was a write isn't read: -1, unknown to forge_guest_fault)
+        if (plat_touch_hook) plat_touch_hook(fa - g_lo, -1);
+#else
         if (plat_touch_hook) plat_touch_hook(fa - g_lo, (ctx->uc_mcontext.gregs[REG_ERR] & 2) != 0);
+#endif
         return;
     }
+#if defined(__aarch64__)  // (64-bit ARM: the return address is in x30)
+    uint64_t pc = ctx->uc_mcontext.pc, lr = ctx->uc_mcontext.regs[30];
+#else
     uint64_t pc = (uint64_t)ctx->uc_mcontext.gregs[REG_RIP];
     uint64_t sp = (uint64_t)ctx->uc_mcontext.gregs[REG_RSP], lr = 0, end = 0;
     if (plat_committed(sp, &end) && end - sp >= 8) lr = *(const uint64_t *)(uintptr_t)sp;
+#endif
     char what[80];
     snprintf(what, sizeof what, "%s (code %d, addr %llx)", sig_name(sig), si ? si->si_code : 0,
              (unsigned long long)fa);
