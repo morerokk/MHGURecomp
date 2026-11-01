@@ -441,7 +441,7 @@ from `textures.c` (`bc_cpu_format`, `upload_bc`). `MHGU_SOFT_BC=1` does that on 
 
 Tested so far by cross-compiling on x86-64 (clang `--target=aarch64-linux-gnu`) and running under qemu-aarch64:
 `tools/test_lift.py`, with its harness built for aarch64, passes for `main` and `sdk`, and the game starts and reaches
-a quest with the null renderer. Not yet on ARM hardware.
+a quest with the null renderer. It has also been played on an ARM handheld, an AYN Odin 3 Ultra running Armada Linux.
 
 From Windows, the Linux build can be made in WSL with Arch Linux (`wsl --install -d archlinux`), straight from the
 Windows checkout, into its own folders so the Windows build is left alone:
