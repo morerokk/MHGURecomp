@@ -10,6 +10,9 @@
 #if defined(_WIN32)
 #define GAMELIB_NAME "mhgugame.dll"
 #define GAMELIB_EXPORT __declspec(dllexport)
+#elif defined(__ANDROID__)
+#define GAMELIB_NAME "libmhgugame.so"  // (in the APK's lib/<abi>/, which only takes lib*.so)
+#define GAMELIB_EXPORT __attribute__((visibility("default")))
 #else
 #define GAMELIB_NAME "mhgugame.so"
 #define GAMELIB_EXPORT __attribute__((visibility("default")))

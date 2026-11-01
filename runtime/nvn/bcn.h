@@ -1,10 +1,13 @@
-// BC1-BC7 decoder, for GPUs without BC texture support (see textures.c bc_cpu_format).
+// BC1-BC5 (S3TC / RGTC) decoder, for GPUs without textureCompressionBC: Android's Adreno and Mali drivers (see
+// docs/research/android.md). MHGU_NO_BC=1 makes a desktop GPU act the same, to test it.
 #pragma once
-#include <stdbool.h>
 #include <stdint.h>
 
-// kind 1-7 = BC1-BC7. Texels: RGBA8 (BC1/2/3/7), R8 (BC4), RG8 (BC5), RGBA16F (BC6H).
-uint32_t bcn_texel_size(int kind);
+// BC1 / BC2 / BC3 -> RGBA8, BC4 -> R8, BC5 -> RG8; U: UNORM, S: SNORM (two's complement bytes).
+enum { BCN_NONE, BCN_BC1, BCN_BC2, BCN_BC3, BCN_BC4U, BCN_BC4S, BCN_BC5U, BCN_BC5S };
 
-// blocks: ceil(width/4) x ceil(height/4) blocks, row-major. out: width x height texels, tightly packed.
-void bcn_decode(int kind, bool snorm, const uint8_t *blocks, uint32_t width, uint32_t height, uint8_t *out);
+uint32_t bcn_texel_size(int kind);  // bytes per decoded texel: 4, 1 (BC4) or 2 (BC5)
+
+// blocks: row-major 4x4 blocks (8 bytes for BC1 / BC4, else 16) covering ceil(width/4) x ceil(height/4).
+// out: width*height decoded texels, tightly packed rows.
+void bcn_decode(int kind, const uint8_t *blocks, uint32_t width, uint32_t height, uint8_t *out);

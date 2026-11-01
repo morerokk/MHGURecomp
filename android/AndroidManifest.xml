@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The APK's manifest (android/apk.mk; aapt2 adds the version, minSdk and targetSdk). SDL's own activity runs the game:
+     it loads libSDL3.so and libmain.so (the runtime) and calls SDL_main. Played with a controller or a keyboard: no
+     touch controls. Based on SDL 3.4's android-project manifest. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.morerokk.mhgurecomp"
+    android:installLocation="auto">
+
+    <uses-feature android:name="android.hardware.vulkan.version" android:version="0x402000" android:required="true" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <uses-feature android:name="android.hardware.type.pc" android:required="false" />
+
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- multiplayer: Local Play over IP and the hub server -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+    <application android:label="MHGU Recomp"
+        android:allowBackup="false"
+        android:hasFragileUserData="true"
+        android:isGame="true"
+        android:appCategory="game"
+        android:extractNativeLibs="false"
+        android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+        android:enableOnBackInvokedCallback="false"
+        android:hardwareAccelerated="true">
+
+        <activity android:name="org.libsdl.app.SDLActivity"
+            android:label="MHGU Recomp"
+            android:screenOrientation="sensorLandscape"
+            android:alwaysRetainTaskState="true"
+            android:launchMode="singleInstance"
+            android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:preferMinimalPostProcessing="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

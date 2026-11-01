@@ -18,7 +18,7 @@
 
 static Config saved, startup;
 static bool have_saved, runtime_ready, runtime_fsr;
-static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in_background, window_focused = {1};
+static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in_background, window_focused = {1}, show_fps;
 static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
                      live_vsync = {1}, live_face, live_menu_confirm, live_background = {1}, live_combo, live_chat_key,
                      live_fxaa_mode, live_smooth, live_discord, live_discord_hunter, live_binds[BINDS][BIND_KEYS];
@@ -68,6 +68,7 @@ void config_store_loaded(const Config *c) {
     SDL_SetAtomicInt(&volume, c->volume);
     SDL_SetAtomicInt(&mute_in_background, c->mute_in_background);
     SDL_SetAtomicInt(&confirm_exit, c->confirm_exit);
+    SDL_SetAtomicInt(&show_fps, c->show_fps);
 }
 void config_runtime_init(const Config *effective) {
     startup = saved; runtime_ready = true; runtime_fsr = effective->fsr != 0;
@@ -111,6 +112,7 @@ float config_audio_gain(void) {
 }
 void config_window_focus(bool focused) { SDL_SetAtomicInt(&window_focused, focused); }
 bool config_confirm_exit(void) { return SDL_GetAtomicInt(&confirm_exit) != 0; }
+bool config_show_fps(void) { return SDL_GetAtomicInt(&show_fps) != 0; }
 bool config_restart_required(const Config *c) {
     if (!runtime_ready) return false;
     if (c->hp.quests < 0 || c->hp.quests > HP_QUESTS_MAX) return true;

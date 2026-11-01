@@ -56,8 +56,12 @@ typedef struct {
     int nwords;
 } Cheat;
 
-static Cheat *cheats;
+#define MAX_CHEATS 4096
+// Each cheat on its own, in a list that only grows: the settings (the game's thread) add cheats while the window loop
+// runs them, so a cheat never moves, and ncheats goes up only once the new one is in place.
+static Cheat *cheats[MAX_CHEATS];
 static int ncheats;
+static int count(void) { return __atomic_load_n(&ncheats, __ATOMIC_ACQUIRE); }
 // Every code word a cheat changed, with its value from before any of them did: two cheats can change the same word,
 // and the second one's "before" would be the first one's value.
 static Original *orig;
@@ -166,31 +170,37 @@ static const char *decode(Cheat *ch, const uint32_t *w, int n) {
 }
 
 // ------------------------------------------------------------------ loading
+// Checking a cheat pasted in the settings (cheats_add): decoded, not kept; the first problem goes in dry_err
+static bool dry;
+static char dry_err[200];
+static int dry_count;
+
 static void add_cheat(const char *file, const char *name, bool master, const uint32_t *w, int n, const char *bad) {
     Cheat ch = {0};
     snprintf(ch.name, sizeof ch.name, "%s", name);
     snprintf(ch.file, sizeof ch.file, "%s", file);
     ch.master = master;
+    ch.on = 1;
     const char *err = bad ? bad : decode(&ch, w, n);
-    if (err) {
-        LOG("[cheats] %s: [%s]: %s, the cheat is left out\n", file, name, err);
+    if (dry) {
+        if (err && !dry_err[0]) snprintf(dry_err, sizeof dry_err, "[%s]: %s", name, err);
+        dry_count++;
         free(ch.ops);
         return;
     }
-    cheats = realloc(cheats, (ncheats + 1) * sizeof(Cheat));
-    cheats[ncheats++] = ch;
+    if (err || ncheats == MAX_CHEATS) {
+        LOG("[cheats] %s: [%s]: %s, the cheat is left out\n", file, name, err ? err : "too many cheats");
+        free(ch.ops);
+        return;
+    }
+    Cheat *c = malloc(sizeof *c);
+    *c = ch;
+    cheats[ncheats] = c;
+    __atomic_store_n(&ncheats, ncheats + 1, __ATOMIC_RELEASE);
 }
 
-static void load_file(const char *path, const char *file) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return;
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char *s = malloc(len + 1);
-    len = (long)fread(s, 1, len, f);
-    s[len] = 0;
-    fclose(f);
+// The cheats in a file's text (s: its own copy). Codes before the first [name]: *stray.
+static void parse_text(char *s, const char *file, bool *stray_out) {
     static uint32_t words[MAX_OPS * 4];
     int n = 0, before = ncheats;
     char name[96] = "";
@@ -220,11 +230,27 @@ static void load_file(const char *path, const char *file) {
         p = e;
     }
     if (open) add_cheat(file, name, master, words, n, bad);
+    *stray_out = stray;
+    if (dry) return;
     if (stray) LOG("[cheats] %s: codes before the first [name] are left out\n", file);
     LOG("[cheats] %s: %d cheat(s)", file, ncheats - before);
-    for (int i = before; i < ncheats; i++) LOG("%s%s%s%s", i == before ? ": " : ", ", cheats[i].master ? "{" : "",
-                                             cheats[i].name, cheats[i].master ? "}" : "");
+    for (int i = before; i < ncheats; i++) LOG("%s%s%s%s", i == before ? ": " : ", ", cheats[i]->master ? "{" : "",
+                                             cheats[i]->name, cheats[i]->master ? "}" : "");
     LOG("\n");
+}
+
+static void load_file(const char *path, const char *file) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *s = malloc(len + 1);
+    len = (long)fread(s, 1, len, f);
+    s[len] = 0;
+    fclose(f);
+    bool stray;
+    parse_text(s, file, &stray);
     free(s);
 }
 
@@ -514,9 +540,9 @@ static void undo(Cheat *ch) {
     for (int i = 0; i < ch->nwords; i++) {
         uint32_t w = ch->words[i];
         bool shared = false;
-        for (int k = 0; k < ncheats && !shared; k++)
-            if (cheats[k].ran)
-                for (int j = 0; j < cheats[k].nwords && !shared; j++) shared = cheats[k].words[j] == w;
+        for (int k = 0, nk = count(); k < nk && !shared; k++)
+            if (cheats[k]->ran)
+                for (int j = 0; j < cheats[k]->nwords && !shared; j++) shared = cheats[k]->words[j] == w;
         if (shared) { kept++; continue; }
         int o = 0;
         while (o < norig && orig[o].addr != w) o++;
@@ -539,18 +565,19 @@ static void undo(Cheat *ch) {
 }
 
 static void run_all(void) {
-    for (int i = 0; i < ncheats; i++) {  // (every cheat's new state first: undo asks which ones keep running)
-        Cheat *ch = &cheats[i];
+    int n = count();  // (cheats the settings add from now on: the next frame)
+    for (int i = 0; i < n; i++) {  // (every cheat's new state first: undo asks which ones keep running)
+        Cheat *ch = cheats[i];
         bool on = ch->master || __atomic_load_n(&ch->on, __ATOMIC_ACQUIRE);
         ch->stopping = !on && ch->ran;
         if (on && !ch->ran && g_present_count) LOG("[cheats] %s: on\n", ch->name);
         ch->ran = on;
     }
-    for (int i = 0; i < ncheats; i++)
-        if (cheats[i].stopping) undo(&cheats[i]);
+    for (int i = 0; i < n; i++)
+        if (cheats[i]->stopping) undo(cheats[i]);
     for (int pass = 0; pass < 2; pass++)  // master codes first
-        for (int i = 0; i < ncheats; i++)
-            if (cheats[i].master == !pass && cheats[i].ran) run(&cheats[i]);
+        for (int i = 0; i < n; i++)
+            if (cheats[i]->master == !pass && cheats[i]->ran) run(cheats[i]);
 }
 
 // ------------------------------------------------------------------ on / off (the settings' Cheats tab)
@@ -568,16 +595,16 @@ static void load_off(void) {
         if (line[0] == '#' || !tab) continue;
         *tab = 0;
         for (int i = 0; i < ncheats; i++)
-            if (!strcmp(cheats[i].file, line) && !strcmp(cheats[i].name, tab + 1)) cheats[i].on = 0;
+            if (!strcmp(cheats[i]->file, line) && !strcmp(cheats[i]->name, tab + 1)) cheats[i]->on = 0;
     }
     fclose(f);
 }
 
-int cheats_count(void) { return ncheats; }
-const char *cheats_name(int i) { return i >= 0 && i < ncheats ? cheats[i].name : ""; }
-const char *cheats_file(int i) { return i >= 0 && i < ncheats ? cheats[i].file : ""; }
-bool cheats_master(int i) { return i >= 0 && i < ncheats && cheats[i].master; }
-bool cheats_on(int i) { return i >= 0 && i < ncheats && (cheats[i].master || __atomic_load_n(&cheats[i].on, __ATOMIC_ACQUIRE)); }
+int cheats_count(void) { return count(); }
+const char *cheats_name(int i) { return i >= 0 && i < count() ? cheats[i]->name : ""; }
+const char *cheats_file(int i) { return i >= 0 && i < count() ? cheats[i]->file : ""; }
+bool cheats_master(int i) { return i >= 0 && i < count() && cheats[i]->master; }
+bool cheats_on(int i) { return i >= 0 && i < count() && (cheats[i]->master || __atomic_load_n(&cheats[i]->on, __ATOMIC_ACQUIRE)); }
 
 bool cheats_set(const bool *on, int n, char *err, size_t errsz) {
     char path[1024], tmp[1040];
@@ -587,15 +614,44 @@ bool cheats_set(const bool *on, int n, char *err, size_t errsz) {
     FILE *f = fopen(tmp, "wb");
     if (!f) { snprintf(err, errsz, "Could not write %s", path); return false; }
     fputs("# Cheats turned off in the settings (the Cheats tab writes this file): <file><tab><cheat name>\n", f);
-    for (int i = 0; i < ncheats && i < n; i++)
-        if (!on[i] && !cheats[i].master) fprintf(f, "%s\t%s\n", cheats[i].file, cheats[i].name);
+    int total = count();
+    for (int i = 0; i < total && i < n; i++)
+        if (!on[i] && !cheats[i]->master) fprintf(f, "%s\t%s\n", cheats[i]->file, cheats[i]->name);
     bool ok = !ferror(f);
     ok = !fclose(f) && ok;
 #ifdef _WIN32
     if (ok) remove(path);  // (Windows' rename won't replace a file; this one is small and rewritten whole)
 #endif
     if (!ok || rename(tmp, path)) { remove(tmp); snprintf(err, errsz, "Could not write %s", path); return false; }
-    for (int i = 0; i < ncheats && i < n; i++) __atomic_store_n(&cheats[i].on, on[i] ? 1 : 0, __ATOMIC_RELEASE);
+    for (int i = 0; i < total && i < n; i++) __atomic_store_n(&cheats[i]->on, on[i] ? 1 : 0, __ATOMIC_RELEASE);
+    return true;
+}
+
+// ------------------------------------------------------------------ adding one (the settings' "Add a cheat")
+#define ADDED_FILE "added.txt"  // (in cheats/: read with the others at the next start)
+
+bool cheats_add(const char *text, char *err, size_t errsz) {
+    char *s = strdup(text);
+    bool stray = false;
+    dry = true, dry_err[0] = 0, dry_count = 0;
+    parse_text(s, ADDED_FILE, &stray);
+    dry = false;
+    free(s);
+    if (dry_err[0]) { snprintf(err, errsz, "%s", dry_err); return false; }
+    if (stray && !dry_count) { snprintf(err, errsz, "No cheat name: the codes need a [Name] line above them"); return false; }
+    if (!dry_count) { snprintf(err, errsz, "No cheat found: paste a [Name] line and its codes"); return false; }
+    if (stray) { snprintf(err, errsz, "Codes before the first [Name] line: give them a name"); return false; }
+    if (count() + dry_count > MAX_CHEATS) { snprintf(err, errsz, "Too many cheats"); return false; }
+    char path[1024];
+    snprintf(path, sizeof path, "%s/" ADDED_FILE, cheats_dir());
+    cheats_make_dir();
+    FILE *f = fopen(path, "ab");
+    bool ok = f && fprintf(f, "\n%s\n", text) >= 0;
+    ok = f && !fclose(f) && ok;
+    if (!ok) { snprintf(err, errsz, "Could not write %s", path); return false; }
+    s = strdup(text);
+    parse_text(s, ADDED_FILE, &stray);  // (on from the next frame: cheats_frame)
+    free(s);
     return true;
 }
 
@@ -619,16 +675,16 @@ void cheats_init(void) {
         load_file(path, names[i]);
         free(names[i]);
     }
-    for (int i = 0; i < ncheats; i++) cheats[i].on = 1;
+    for (int i = 0; i < ncheats; i++) cheats[i]->on = 1;
     load_off();
     for (int i = 0; i < ncheats; i++)
-        if (!cheats[i].master && !cheats[i].on) LOG("[cheats] %s: off (turned off in the settings)\n", cheats[i].name);
+        if (!cheats[i]->master && !cheats[i]->on) LOG("[cheats] %s: off (turned off in the settings)\n", cheats[i]->name);
     if (ncheats) run_all();  // (before the game starts: changes to its code are in place from the start)
 }
 
 void cheats_frame(void) {
     static uint64_t last;
-    if (!ncheats || g_present_count == last) return;
+    if (!count() || g_present_count == last) return;
     last = g_present_count;
     uint64_t b;
     int32_t s[4];

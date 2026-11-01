@@ -21,12 +21,16 @@ bool gamelib_load(char *why, size_t why_size) {
     if (env && *env) {
         snprintf(path, sizeof path, "%s", env);
     } else {
+#ifdef __ANDROID__
+        snprintf(path, sizeof path, "%s", GAMELIB_NAME);  // (by name: the app's own libraries are on its linker's path)
+#else
         char exe[1024];
         if (!plat_exe_path(exe, sizeof exe)) exe[0] = 0;
         char *slash = strrchr(exe, '/'), *bs = strrchr(exe, '\\');
         if (bs > slash) slash = bs;
         if (slash) slash[1] = 0; else exe[0] = 0;
         snprintf(path, sizeof path, "%s%s", exe, GAMELIB_NAME);
+#endif
     }
 #ifdef _WIN32
     HMODULE h = LoadLibraryA(path);

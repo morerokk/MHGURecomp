@@ -1,6 +1,7 @@
 // The cheats loaded from cheats/ (runtime/cheats.c), for the settings' Cheats tab: fixed once cheats_init ran.
 // cheats_set turns them on / off while the game runs (any thread: it takes effect the next frame) and keeps that in
-// cheats/_off.txt. Master codes are always on.
+// cheats/_off.txt. Master codes are always on. cheats_add (the settings' thread) checks a pasted cheat, adds it to
+// cheats/added.txt and runs it from the next frame.
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>
@@ -14,6 +15,7 @@ const char *cheats_file(int i);
 bool cheats_master(int i);
 bool cheats_on(int i);
 bool cheats_set(const bool *on, int n, char *err, size_t errsz);
+bool cheats_add(const char *text, char *err, size_t errsz);
 #ifdef __cplusplus
 }
 #endif
