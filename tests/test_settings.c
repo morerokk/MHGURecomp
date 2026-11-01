@@ -75,6 +75,11 @@ int main(int argc, char **argv) {
     config_live_hp(&live_hp);
     assert(live_hp.scale[2] == 3.5f && config_live_hp_village() == 1.5f && !config_live_village_in_hub());
     assert(!config_restart_key("1Player") && !config_restart_key("HubHP") && !config_restart_key("VillageQuestsInHub"));
+    c.ldn_port = 40123; snprintf(c.ldn_join, sizeof c.ldn_join, "10.0.0.7:40124"); c.sync_small_monsters = 1;
+    assert(config_save(&c, error, sizeof error) && !config_restart_required(&c));  // the next hub / search / zone
+    char join[256]; config_live_ldn_join(join, sizeof join);
+    assert(config_live_ldn_port() == 40123 && !strcmp(join, "10.0.0.7:40124") && config_live_sync_small_monsters());
+    assert(!config_restart_key("Port") && !config_restart_key("Join") && !config_restart_key("SyncSmallMonsters"));
     Config restored=c; restored.hp=initial.hp; // Reconstruct the loaded quest overrides, not compiled defaults.
     restored.hp.quests=2; restored.hp.quest[0].quest=101;
     for(int i=0;i<4;i++) restored.hp.quest[0].scale[i]=0.6f;

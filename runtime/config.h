@@ -177,6 +177,9 @@ float config_live_fsr_reactive(void);   // [Upscaler] Reactive, read by each FSR
 void config_live_hp(HpScale *out);      // [Monster HP] and [Village Quests] HubHP as saved now (hle/hpscale.c)
 float config_live_hp_village(void);     // [Village Quests] HubHP as saved now
 int config_live_village_in_hub(void);   // [Village Quests] VillageQuestsInHub (hle/villagehub.c)
+int config_live_ldn_port(void);         // [Multiplayer] Port: the next hub hosted and the next search (net/ldn.c)
+void config_live_ldn_join(char *join, size_t size);  // [Multiplayer] Join: the next search (net/ldn.c)
+int config_live_sync_small_monsters(void);  // [Multiplayer] SyncSmallMonsters (net/emsync.c)
 int config_live_discord(void);         // [Discord] RichPresence
 int config_live_discord_hunter(void);  // [Discord] ShowHunter
 int config_live_share_urgent(void);    // [Multiplayer] ShareUrgentCredit

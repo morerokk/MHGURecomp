@@ -22,7 +22,7 @@ static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in
 static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
                      live_vsync = {1}, live_face, live_menu_confirm, live_background = {1}, live_combo, live_chat_key,
                      live_fxaa_mode, live_smooth, live_discord, live_discord_hunter, live_share_urgent, live_binds[BINDS][BIND_KEYS],
-                     live_fsr_sharpness, live_fsr_reactive, live_village;
+                     live_fsr_sharpness, live_fsr_reactive, live_village, live_ldn_port, live_sync_zako;
 static void set_float(SDL_AtomicInt *slot, float value) {
     int bits; _Static_assert(sizeof bits == sizeof value, "32-bit float settings");
     memcpy(&bits, &value, sizeof bits); SDL_SetAtomicInt(slot, bits);
@@ -30,8 +30,8 @@ static void set_float(SDL_AtomicInt *slot, float value) {
 static float get_float(SDL_AtomicInt *slot) {
     int bits = SDL_GetAtomicInt(slot); float value; memcpy(&value, &bits, sizeof value); return value;
 }
-static SDL_SpinLock live_ldn_lock;  // [Multiplayer] Server / Key: read by the network threads (runtime/net/ldn.c)
-static char live_ldn_server[sizeof saved.ldn_server], live_ldn_key[sizeof saved.ldn_key];
+static SDL_SpinLock live_ldn_lock;  // [Multiplayer] Server / Key / Join: read by the network threads (runtime/net/ldn.c)
+static char live_ldn_server[sizeof saved.ldn_server], live_ldn_key[sizeof saved.ldn_key], live_ldn_join[sizeof saved.ldn_join];
 static SDL_SpinLock live_hp_lock;  // [Monster HP], HubHP: read when a large monster's HP is set (runtime/hle/hpscale.c)
 static HpScale live_hp;
 // A save updates changed hot fields only. Saving the volume must not silently
@@ -66,12 +66,15 @@ static void publish_live(const Config *c, bool all) {
     for (int i = 0; i < BINDS; i++)
         for (int k = 0; k < BIND_KEYS; k++)
             if (all || c->binds[i][k] != saved.binds[i][k]) SDL_SetAtomicInt(&live_binds[i][k], c->binds[i][k]);
-    if (all || strcmp(c->ldn_server, saved.ldn_server) || strcmp(c->ldn_key, saved.ldn_key)) {
+    if (all || strcmp(c->ldn_server, saved.ldn_server) || strcmp(c->ldn_key, saved.ldn_key) || strcmp(c->ldn_join, saved.ldn_join)) {
         SDL_LockSpinlock(&live_ldn_lock);
         if (all || strcmp(c->ldn_server, saved.ldn_server)) memcpy(live_ldn_server, c->ldn_server, sizeof live_ldn_server);
         if (all || strcmp(c->ldn_key, saved.ldn_key)) memcpy(live_ldn_key, c->ldn_key, sizeof live_ldn_key);
+        if (all || strcmp(c->ldn_join, saved.ldn_join)) memcpy(live_ldn_join, c->ldn_join, sizeof live_ldn_join);
         SDL_UnlockSpinlock(&live_ldn_lock);
     }
+    if (all || c->ldn_port != saved.ldn_port) SDL_SetAtomicInt(&live_ldn_port, c->ldn_port);
+    if (all || c->sync_small_monsters != saved.sync_small_monsters) SDL_SetAtomicInt(&live_sync_zako, c->sync_small_monsters);
 }
 void config_store_loaded(const Config *c) {
     publish_live(c, !have_saved);
@@ -112,6 +115,13 @@ int config_live_smooth_gradients(void) { return SDL_GetAtomicInt(&live_smooth); 
 float config_live_fsr_sharpness(void) { return get_float(&live_fsr_sharpness); }
 float config_live_fsr_reactive(void) { return get_float(&live_fsr_reactive); }
 int config_live_village_in_hub(void) { return SDL_GetAtomicInt(&live_village); }
+int config_live_ldn_port(void) { return SDL_GetAtomicInt(&live_ldn_port); }
+int config_live_sync_small_monsters(void) { return SDL_GetAtomicInt(&live_sync_zako); }
+void config_live_ldn_join(char *join, size_t size) {
+    SDL_LockSpinlock(&live_ldn_lock);
+    SDL_strlcpy(join, live_ldn_join, size);
+    SDL_UnlockSpinlock(&live_ldn_lock);
+}
 void config_live_hp(HpScale *out) {
     SDL_LockSpinlock(&live_hp_lock);
     *out = live_hp;
