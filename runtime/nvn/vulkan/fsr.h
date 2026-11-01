@@ -13,6 +13,7 @@ typedef struct {
     bool depth_write;            // it writes depth
     const uint64_t *vubuf;       // its vertex stage's uniform buffers: (guest address, size) pairs
     int nvubuf;
+    float vp_w, vp_h;            // its viewport's size (the game's pixels: the render size's)
 } FsrDraw;
 
 extern bool g_fsr_on;  // FSR is on and works (set once at start-up: vk_fsr_init)

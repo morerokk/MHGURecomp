@@ -478,6 +478,58 @@ static void guest_free(Cpu *c, uint32_t p) {
     guest_call(c, guest_sym("free"));
 }
 
+// Glyph ranges: ImGui's own list is host memory, so a plugin gets a copy of it in guest memory (the guest's malloc),
+// made at the first call. BuildRanges: the generator leaves it out (its ImVector<ImWchar> out argument, the plugin's:
+// 32-bit Size, Capacity, Data). The ranges are appended to it as ImGui does, its Data grown with the guest's malloc /
+// free (what the plugin's ImVector frees it with: Forge's allocators). A plugin that builds CJK ranges for its font
+// drew nothing with them left empty (the HP overlay of MHGURecomp-mods issue 30).
+HLE_FUNC("ImFontAtlas_GetGlyphRangesDefault", ig_ImFontAtlas_GetGlyphRangesDefault) {
+    static uint32_t copy;
+    uint32_t a0 = c->r[0];
+    IG_ENTER(c);
+    void *ha0 = m_in(a0, T_ImFontAtlas);
+    const ImWchar *r = ImFontAtlas_GetGlyphRangesDefault(ha0);
+    m_after(a0);
+    IG_LEAVE(c);
+    if (!copy && r) {
+        uint32_t n = 1;  // (with the 0 at its end)
+        while (r[n - 1]) n++;
+        if ((copy = guest_alloc(c, n * (uint32_t)sizeof *r))) memcpy(G2H(copy), r, n * sizeof *r);
+    }
+    c->r[0] = copy;
+}
+HLE_FUNC("ImFontGlyphRangesBuilder_BuildRanges", ig_ImFontGlyphRangesBuilder_BuildRanges) {
+    uint32_t a0 = c->r[0], out = c->r[1];
+    ImVector_ImWchar r = {0};
+    IG_ENTER(c);
+    void *ha0 = m_in(a0, T_ImFontGlyphRangesBuilder);
+    if (ha0) ImFontGlyphRangesBuilder_BuildRanges(ha0, &r);
+    m_after(a0);
+    IG_LEAVE(c);
+    if (out && r.Size > 0) {
+        int32_t size = (int32_t)LD32(out), cap = (int32_t)LD32(out + 4);
+        uint32_t data = LD32(out + 8);
+        if (size < 0 || !data) size = 0;
+        if (size + r.Size > cap || !data) {
+            int32_t want = size + r.Size, grown = cap + cap / 2;
+            int32_t ncap = grown > want ? grown : want;
+            uint32_t g = guest_alloc(c, (uint32_t)ncap * (uint32_t)sizeof(ImWchar));
+            if (g) {
+                if (size) memcpy(G2H(g), G2H(data), (size_t)size * sizeof(ImWchar));
+                if (data) guest_free(c, data);
+                data = g, cap = ncap;
+                ST32(out + 4, (uint32_t)cap);
+                ST32(out + 8, data);
+            }
+        }
+        if (data && size + r.Size <= cap) {
+            memcpy((ImWchar *)G2H(data) + size, r.Data, (size_t)r.Size * sizeof(ImWchar));
+            ST32(out, (uint32_t)(size + r.Size));
+        }
+    }
+    igMemFree(r.Data);
+}
+
 static TexPixels *tex_find(const ImTextureData *t) {
     for (int i = 0; i < MAX_TEXPIX; i++)
         if (texpix[i].tex == t) return &texpix[i];

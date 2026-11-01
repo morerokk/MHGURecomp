@@ -229,7 +229,7 @@ static void create_device(void) {
     b->largePoints = h->largePoints;
     b->wideLines = h->wideLines;
     b->imageCubeArray = h->imageCubeArray;
-    b->sampleRateShading = h->sampleRateShading;
+    b->sampleRateShading = g_vk.sample_shading = h->sampleRateShading;
     b->fragmentStoresAndAtomics = h->fragmentStoresAndAtomics;
     b->vertexPipelineStoresAndAtomics = h->vertexPipelineStoresAndAtomics;
     b->robustBufferAccess = h->robustBufferAccess;  // guest shaders index cbufs freely: keep OOB reads harmless

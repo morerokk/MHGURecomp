@@ -25,6 +25,7 @@ Status: fully playable, but there may be some bugs. I've played a dozen hunts wi
 - Cheat codes in the same format as Ryujinx and Atmosphère, in the `cheats` folder (see [Cheats](#cheats))
 - Ingame PC Settings menu overlay (F1 or `Plus`+`Minus` to open, will be replaced with a real settings menu in the future)
 - Working online multiplayer servers, in public or with friends (use "Local Wireless" menu)
+- Discord Rich Presence: your Discord profile shows where you are, the quest's monsters and your party (can be turned off)
 
 ## Requirements
 
@@ -116,24 +117,27 @@ Keyboard and mouse support (not recommended). The default keys:
 | Key | Switch button |
 | --- | --- |
 | W A S D | left stick (hold Left Shift to walk) |
-| Mouse | right stick (camera) |
+| Mouse | camera |
 | Left click / Right click | X / A |
-| Space / R | B / Y |
+| Space / R or middle click | B / Y |
+| Mouse wheel | item bar: up = the item to the left, down = to the right (in a hunt, no need to hold L) |
 | Q / E | L / R |
 | Tab / T | ZL / ZR |
 | Enter / Backspace | Plus / Minus |
 | Arrow keys | d-pad |
 | Ctrl / Alt | left / right stick click |
 
-Change them in Settings (F1), Controls, Keybinds: select a button, then Set key and press a key or click a mouse
-button (away from the menu's buttons), or Add a second key (each takes up to two). They are kept in the ini's
-`[Keybinds]` section (`B = Space`, `Plus = Return, Keypad Enter`, `X = Mouse Left`; key names as the menu shows
-them, `None` for none). A key that does something else too shows red. Escape, Insert, F1 and F7 to F12 are the
-recomp's own and can't be used.
+Change them in Settings (F1), Controls, Keybinds: select a button, then Set key and press a key, click a mouse
+button (away from the menu's buttons) or turn the wheel, or Add a second key (each takes up to two). Item left /
+Item right turn the item bar one item per press (by default the wheel; any key works too). The wheel on any other
+button is a short press of it. They are kept in the ini's `[Keybinds]` section (`B = Space`, `Plus = Return, Keypad
+Enter`, `X = Mouse Left`, `ItemLeft = Wheel Up`; key names as the menu shows them, `None` for none). A key that does
+something else too shows red. Escape, Insert, F1 and F7 to F12 are the recomp's own and can't be used.
 
 Click in the game window to capture the mouse for the camera; Escape lets it go (so does switching to another
-window). `MouseSensitivity` in the ini's `[Mouse]` section sets its speed; the game's own camera options (speed,
-inverted axes) apply to it too.
+window). In a hunt the mouse turns the camera directly, like in a PC game: the same distance always turns it the same
+amount, however slowly you move. `MouseSensitivity` in the ini's `[Mouse]` section sets how far (1 = 0.08 degrees per
+mouse count); the game's inverted camera options apply to it too, its camera speed doesn't.
 
 When the game asks for text (names, chat), the keyboard types: Enter confirms, Escape cancels, Ctrl+V pastes. `/` opens a line of chat anywhere, also in a quest (where the game itself only has shoutouts): type (up to 120 characters), Enter sends it to everyone as a shoutout is sent, split between words into lines of the chat window, Escape cancels. While typing, the mouse drags the box elsewhere (kept in `chat_box.txt`). Change the key in Settings (F1), Controls, Keybinds, Chat key: it shows red when a keybind already uses that key.
 
@@ -178,12 +182,17 @@ anti-aliasing, VSync, controls and volume apply when you save; the settings mark
   original game)
 - `[Village Quests]`: `VillageQuestsInHub` (default On), `HubHP` (default 2.0: Village quests posted in the Hub
   multiply their monsters' HP by this first, then by the `[Monster HP]` factor)
+- `[Discord]`: `RichPresence` (default On: your Discord profile shows where you are, the monsters you're hunting
+  and the map, how many are in your hub or quest; Discord must be running on the same computer), `ShowHunter`
+  (default On: your hunter's name, HR and weapon type too)
 - `[Bonus Content]`: `BonusContent` (default On), see below
 - `[Audio]`: `Volume` (0 to 100: the whole game), `MuteInBackground` (On / Off, default Off: no sound while the
   game's window is in the background)
 - `[Application]`: `ConfirmExit` (ask before the window closes), and the settings menu's `Language` (English /
-  Spanish), `ButtonIcons` (Xbox / Switch / PlayStation) and `MenuScale` (100 to 200 percent), and `Updates` (Ask /
-  Auto / Off: what `mhgurecomp-updater` does, see "Staying up to date")
+  Spanish), `ButtonIcons` (Xbox / Switch / PlayStation), `Theme` (Hunter, the default / Gold / Blue: the settings menu's colours) and
+  `MenuScale` (50 to 200 percent), and `Updates` (Ask / Auto / Off: what `mhgurecomp-updater` does, see "Staying up
+  to date"). With the mouse, drag the top of the settings menu (its tabs) to move it, and the grip at its bottom right
+  corner to size it; Menu Options > Attach menu puts it back in place.
 
 ### Multiplayer
 
@@ -220,7 +229,8 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   modules (`exefs\subsdk1` and so on, as in the
   [MH4U Port](https://github.com/Scrimas/MH4U-port-to-MHGU)) are loaded and run in the interpreter too. The log says
   what was patched and loaded (`[mods]` lines).
-- Forge plugins (`.nro` in `romfs\nativeNX\plugins\`) are loaded. Forge's menu with the plugins' settings opens with
+- Forge plugins (`.nro` in `romfs\nativeNX\plugins\`) are loaded. Forge's own loader (the `exefs\subsdk9` that
+  Forge and mods with Forge plugins include) is not needed and is passed over: the port runs the plugins itself. Forge's menu with the plugins' settings opens with
   Insert (or the key in Forge's own `config.ini`, if a mod includes Forge's files, which can also set `[log] level`);
   use the mouse, keyboard or controller in it. While it is open the game gets no controller input. Window positions
   are kept in `forge_imgui.ini`.
@@ -235,7 +245,7 @@ If you are newer to the game, I very strongly recommend the [Key Quest Markers](
 
 ### Cheats
 
-Put `.txt` files with cheat codes in `cheats\`. Every cheat in them is on from the start. Codes made for Ryujinx or a
+Put `.txt` files with cheat codes in `cheats\`. Every cheat in them is on from the start, unless you turned it off. Codes made for Ryujinx or a
 modded Switch work as they are, as long as they are for version 1.4.0. A file can hold any number of cheats, each
 starting with its name in square brackets:
 
@@ -244,6 +254,11 @@ starting with its name in square brackets:
 04000000 000DFAB4 E1A00080
 ```
 
+- Turn single cheats on and off in the settings menu (F1), on the Cheats tab: it takes effect when you press Save,
+  without a restart, and is remembered in `cheats\_off.txt`. Turning off a cheat that changes the game's code puts
+  the original code back; values a cheat already changed (money, items) stay as they are. Master codes (`{Name}`)
+  are always on. Cheats added to the folder show up after a restart. Online, only use cheats when everyone in the
+  lobby agrees to it.
 - To turn off a file without deleting it, start its name with `_`.
 - Cheats that change the game's code also work: the port runs each changed function in an interpreter. That
   function runs slower, which only matters for functions the game calls very often.

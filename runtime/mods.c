@@ -52,7 +52,7 @@ int mods_romfs_layers(const char **out, int max) {
 }
 
 // ------------------------------------------------------------------ exefs modules
-const char *mods_exefs_file(const char *name, char *path, size_t n) {
+const char *mods_exefs_file(const char *name, char *path, size_t n, bool (*skip)(const char *path, const char *mod)) {
     list_mods();
     const char *found = NULL;
     for (int i = 0; i < g_nmods; i++) {
@@ -61,7 +61,7 @@ const char *mods_exefs_file(const char *name, char *path, size_t n) {
         snprintf(mod, sizeof mod, "%s/%s", mods_dir(), g_names[i]);
         if (!mods_find_dir(mod, "exefs", 3, ex, sizeof ex)) continue;
         snprintf(p, sizeof p, "%s/%s", ex, name);
-        if (stat(p, &st) || !S_ISREG(st.st_mode)) continue;
+        if (stat(p, &st) || !S_ISREG(st.st_mode) || (skip && skip(p, g_names[i]))) continue;
         if (found) LOG("[mods] %s and %s both have exefs/%s: %s's is used\n", found, g_names[i], name, g_names[i]);
         found = g_names[i];
         snprintf(path, n, "%s", p);

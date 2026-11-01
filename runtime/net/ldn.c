@@ -357,6 +357,22 @@ uint32_t ldn_own_ip(void) { return L.own_ip; }
 uint32_t ldn_broadcast_ip(void) { return L.subnet ? L.subnet | 0xFF : 0xFFFFFFFFu; }
 bool ldn_net_up(void) { return L.state == ST_AP_CREATED || L.state == ST_STATION_CONNECTED; }
 bool ldn_hosting(void) { return L.state == ST_AP_CREATED; }
+bool ldn_party(int *n, int *max, char *id, size_t size) {
+    pthread_mutex_lock(&L.mu);
+    bool up = ldn_net_up();
+    if (up) {
+        *n = L.info[NI_NODE_COUNT], *max = L.info[NI_NODE_MAX];
+        Sha256 h;  // (a hash of the session id: Discord shows the party id to others, the network's own id stays here)
+        char hex[65];
+        sha256_init(&h);
+        sha256_update(&h, "mhgu-party", 10);
+        sha256_update(&h, L.info + NI_SESSION_ID, 16);
+        sha256_hex(&h, hex);
+        snprintf(id, size, "%.32s", hex);
+    }
+    pthread_mutex_unlock(&L.mu);
+    return up;
+}
 
 static bool udp_usable(const Link *l) { return l->udp_up && plat_now_ns() - l->udp_rx_ns < UDP_SILENCE_NS; }
 

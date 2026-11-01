@@ -24,7 +24,7 @@ class SettingsLocaleTest(unittest.TestCase):
         self.assertTrue(all(en.strip() and es.strip() for en, es in pairs))
         self.assertNotIn(chr(0xfffd), catalog)
         translations = dict(pairs)
-        self.assertEqual(translations["Miscellaneous"], "Misceláneos")
+        self.assertEqual(translations["Misc"], "Varios")
         self.assertEqual(translations["Hunter"], "Cazador")
         self.assertEqual(translations["Reset this tab"], "Restablecer esta pestaña")
 
@@ -33,7 +33,7 @@ class SettingsLocaleTest(unittest.TestCase):
         # INI keys looked up in the settings table (ini("Mode"), lo("FPS")...) are not shown
         source = re.sub(r'\b(?:ini|cold|lo|hi)\(' + LITERAL + r'\)', '', source)
         unchanged = {"English", "Español", "Xbox", "Switch", "PlayStation",
-                     "FSR", "FSR 3.1", "FSR 4", "MSAA", "FXAA", "Settings##main", "Settings##dropdown",
+                     "FSR", "FSR 3.1", "FSR 4", "MSAA", "FXAA", "Discord", "Settings##main", "Settings##dropdown",
                      "A", "B", "X", "Y", "L", "R", "ZL", "ZR"}  # (the Switch buttons' keybinds)
         visible = {text for text in literals(source) if text and
                    (text[0].isupper() or " " in text) and any(c.isalpha() for c in text)}
