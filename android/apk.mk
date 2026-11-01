@@ -27,7 +27,8 @@ RELEASE_KEY ?= $(or $(call to_unix,$(USERPROFILE)),$(HOME))/.android/mhgurecomp-
 RELEASE_PASS = $(RELEASE_KEY).pass
 # versionCode: the commits so far (grows with every build of a newer commit); versionName: the build's VERSION
 APK_VERSION_CODE := $(shell git rev-list --count HEAD 2>/dev/null || echo 1)
-# (the .bat tools of the SDK need the JDK, found through JAVA_HOME)
+# (the .bat tools of the SDK need the JDK, found through JAVA_HOME; on Linux and macOS they are shell scripts)
+BAT         := $(if $(wildcard $(BUILD_TOOLS)/d8.bat),.bat)
 SDK_ENV     := JAVA_HOME="$(call win_path,$(JDK))" PATH="$(JDK)/bin:$$PATH"
 APK_DEPS     = android/AndroidManifest.xml $(APK_O)/classes.dex $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(SDL_DEPS) \
                android/apk.py extras/pipelines.list $(LICENSE_TXT) $(BONUS)
@@ -51,7 +52,7 @@ rm -rf $(APK_O)/lib && for a in $(2); do mkdir -p $(APK_O)/lib/$$a; \
     for f in $(B)/lib/$$a/*.so; do "$(LLVM)/llvm-strip" --strip-debug -o $(APK_O)/lib/$$a/$$(basename $$f) $$f || exit 1; done; done
 $(PY) android/apk.py $(APK_O)/base.apk $(APK_O)/unaligned.apk $(APK_O)/classes.dex $(APK_O)/lib
 "$(BUILD_TOOLS)/zipalign" -f -P 16 4 $(APK_O)/unaligned.apk $(APK_O)/aligned.apk
-$(SDK_ENV) "$(BUILD_TOOLS)/apksigner.bat" sign $(3) --out $(1) $(APK_O)/aligned.apk
+$(SDK_ENV) "$(BUILD_TOOLS)/apksigner$(BAT)" sign $(3) --out $(1) $(APK_O)/aligned.apk
 @echo "apk: $(1) ($$(du -h $(1) | cut -f1), ABIs: $(2))"
 endef
 
@@ -61,7 +62,7 @@ $(APK_O)/classes.dex: $(SDL3_DIR)/.built
 	rm -rf $(APK_O)/classes $(APK_O)/dex && mkdir -p $(APK_O)/classes $(APK_O)/dex
 	"$(JDK)/bin/javac" -nowarn -Xlint:-options -source 8 -target 8 -encoding UTF-8 -bootclasspath "$(call win_path,$(ANDROID_JAR))" \
 	    -d $(APK_O)/classes $(JAVA_SRC)/*.java
-	$(SDK_ENV) "$(BUILD_TOOLS)/d8.bat" --release --min-api $(API) --lib "$(call win_path,$(ANDROID_JAR))" --output $(APK_O)/dex \
+	$(SDK_ENV) "$(BUILD_TOOLS)/d8$(BAT)" --release --min-api $(API) --lib "$(call win_path,$(ANDROID_JAR))" --output $(APK_O)/dex \
 	    $$(find $(APK_O)/classes -name '*.class')
 	cp $(APK_O)/dex/classes.dex $@
 
