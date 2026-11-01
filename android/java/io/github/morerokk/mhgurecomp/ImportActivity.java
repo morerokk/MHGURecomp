@@ -10,6 +10,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ContentResolver;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
@@ -18,6 +19,7 @@ import android.os.StatFs;
 import android.provider.DocumentsContract;
 import android.provider.DocumentsContract.Document;
 import android.provider.OpenableColumns;
+import android.view.View;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -72,8 +74,8 @@ public class ImportActivity extends Activity {
               + "PC, or from a Switch save manager). Your current save is kept in a save_0.before-import folder.";
         if (closes) text += "\n\nThe app closes when the import is done: start it again to play.";
         dialog().setTitle(mode == GAME ? "Import game files" : "Import save").setMessage(text)
-            .setPositiveButton("Choose", (d, w) -> pick())
-            .setNegativeButton("Cancel", (d, w) -> end(CANCELLED))
+            .setPositiveButton("Choose", on(0))
+            .setNegativeButton("Cancel", on(CANCELLED))
             .show();
     }
 
@@ -95,43 +97,64 @@ public class ImportActivity extends Activity {
     }
 
     @Override
-    protected void onActivityResult(int request, int result, Intent data) {
+    protected void onActivityResult(int request, int result, final Intent data) {
         super.onActivityResult(request, result, data);
         if (request != PICK) return;
         if (result != RESULT_OK || data == null) { end(CANCELLED); return; }
         progress = dialog().setTitle(mode == GAME ? "Import game files" : "Import save").setMessage("Starting...")
             .setNegativeButton("Stop", null).show();
-        progress.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
-            stop = true;
-            show("Stopping...");
-        });
-        new Thread(() -> {
-            String error;
-            try {
-                error = mode == GAME ? importGame(data.getData()) : importSave(data);
-            } catch (Exception e) {
-                error = "The copy failed: " + e.getMessage();
+        progress.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                stop = true;
+                show("Stopping...");
             }
-            String err = error;
-            runOnUiThread(() -> {
-                progress.dismiss();
-                if (stop && err != null) end(CANCELLED);
-                else if (err != null) fail(err);
-                else done(mode == GAME ? "The game files are in." : "The save is in.");
-            });
+        });
+        new Thread(new Runnable() {
+            @Override public void run() {
+                String error;
+                try {
+                    error = mode == GAME ? importGame(data.getData()) : importSave(data);
+                } catch (Exception e) {
+                    error = "The copy failed: " + e.getMessage();
+                }
+                final String err = error;
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        progress.dismiss();
+                        if (stop && err != null) end(CANCELLED);
+                        else if (err != null) fail(err);
+                        else done(mode == GAME ? "The game files are in." : "The save is in.");
+                    }
+                });
+            }
         }, "import").start();
     }
 
-    private void show(String text) { runOnUiThread(() -> { if (progress != null) progress.setMessage(text); }); }
+    private void show(final String text) {
+        runOnUiThread(new Runnable() {
+            @Override public void run() { if (progress != null) progress.setMessage(text); }
+        });
+    }
+
+    // A dialog button: 0 opens the picker, else ends the import so (no lambdas: the SDK's android.jar has no
+    // LambdaMetafactory for javac)
+    private DialogInterface.OnClickListener on(final int how) {
+        return new DialogInterface.OnClickListener() {
+            @Override public void onClick(DialogInterface d, int w) {
+                if (how == 0) pick();
+                else end(how);
+            }
+        };
+    }
 
     private void fail(String text) {
-        dialog().setTitle("Import failed").setMessage(text).setPositiveButton("OK", (d, w) -> end(FAILED)).show();
+        dialog().setTitle("Import failed").setMessage(text).setPositiveButton("OK", on(FAILED)).show();
     }
 
     private void done(String text) {
         if (closes) text += " The app closes now: start it again to play.";
         dialog().setTitle(mode == GAME ? "Import game files" : "Import save").setMessage(text)
-            .setPositiveButton("OK", (d, w) -> end(DONE)).show();
+            .setPositiveButton("OK", on(DONE)).show();
     }
 
     private void end(int how) {
