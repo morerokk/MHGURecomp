@@ -1094,11 +1094,24 @@ static bool pass_msaa;  // (MSAA, below) the pass renders through multisampled i
 static TexBackend *pass_att[9];
 static uint32_t pass_natt;
 // (MSAA) colour target 0 is a picture 3D models are drawn into (ms_expand). Its picture is copied into the samples
-// only for what tests depth (the models, and the depth clears before them): the menu's 2D draws before the first model
-// stay without MSAA; the ones after it go into the samples too, shaded per sample (else the seams between their quads
-// show), so the frame doesn't switch between the two. draw / clear set ms_want_depth before a pass begins;
-// pass_want_depth: what the pass began for
+// only for what tests depth (the models, and the depth clears before them): the menu's 2D draws around them stay
+// without MSAA. draw / clear set ms_want_depth before a pass begins; pass_want_depth: what the pass began for
 static bool pass_models, pass_want_depth, ms_want_depth;
+// Runs of depth-testing draws into such a picture, this frame and the last. A frame that alternates models and 2D would
+// start a pass, a resolve and a copy at each switch: from the frame after one, its 2D draws after the first model stay
+// in the samples, shaded per sample (else the seams between their quads show), which costs 4x or 8x as much as without.
+static uint64_t mr_frame;
+static int mr_runs, mr_runs_last;
+static bool mr_open;
+static void models_run_track(bool depth) {
+    if (mr_frame != g_present_count) {
+        mr_runs_last = mr_frame + 1 == g_present_count ? mr_runs : 0;
+        mr_frame = g_present_count, mr_runs = 0, mr_open = false;
+    }
+    if (depth && !mr_open) mr_runs++;
+    mr_open = depth;
+}
+static bool models_2d_in_samples(void) { return mr_frame == g_present_count && mr_runs && mr_runs_last > 1; }
 
 void vk_end_pass(void) {
     if (!in_pass) return;
@@ -1355,11 +1368,25 @@ static bool full_picture(uint32_t w, uint32_t h) {
 
 // FXAA over such models (MODELS_AA_FXAA): the picture is copied before each run of their depth-testing draws (and
 // depth clears) and again after it, then FXAA 3.11 is drawn into it from the second copy, only where the models
-// changed it and next to that ("fxaa.frag.models"), so the 2D draws around them stay sharp.
+// changed it and next to that ("fxaa.frag.models"), so the 2D draws around them stay sharp. That test reads 18 texels
+// for each pixel it covers, so FXAA covers only what the run's draws could reach (a smithy preview: its panel).
 static void snapshots_invalidate(NvnTexture *t);
 static NvnTexture *mf_tex;        // the picture of the run of models open (NULL none)
 static uint64_t mf_frame;         // the frame it opened in
 static TexBackend mf_before, mf_after;
+static int mf_x0, mf_y0, mf_x1, mf_y1;  // the area the run's draws could reach so far (none: x1 <= x0)
+// (draw) the viewport and scissor this draw was just recorded with
+static void models_fxaa_note(void) {
+    float vy0 = fminf(ss.vp.y, ss.vp.y + ss.vp.height), vy1 = fmaxf(ss.vp.y, ss.vp.y + ss.vp.height);
+    int x0 = (int)fmaxf(floorf(ss.vp.x), (float)ss.sc.offset.x), y0 = (int)fmaxf(floorf(vy0), (float)ss.sc.offset.y);
+    int x1 = (int)fminf(ceilf(ss.vp.x + ss.vp.width), (float)(ss.sc.offset.x + (int)ss.sc.extent.width));
+    int y1 = (int)fminf(ceilf(vy1), (float)(ss.sc.offset.y + (int)ss.sc.extent.height));
+    if (x1 <= x0 || y1 <= y0) return;
+    if (x0 < mf_x0) mf_x0 = x0;
+    if (y0 < mf_y0) mf_y0 = y0;
+    if (x1 > mf_x1) mf_x1 = x1;
+    if (y1 > mf_y1) mf_y1 = y1;
+}
 static bool picture_copy(TexBackend *b, TexBackend *d) {  // d: a copy of b (made as b's size and format)
     VkCommandBuffer cb = vk_cmd();
     if (d->image && (d->width != b->width || d->height != b->height || d->format != b->format)) {
@@ -1388,6 +1415,7 @@ static bool picture_copy(TexBackend *b, TexBackend *d) {  // d: a copy of b (mad
 static void models_fxaa_begin(NvnTexture *t) {
     vk_end_pass();
     st.rt_dirty = true;
+    mf_x0 = mf_y0 = 1 << 30, mf_x1 = mf_y1 = 0;
     if (picture_copy(t->backend, &mf_before)) mf_tex = t, mf_frame = g_present_count;
 }
 static void models_fxaa_end(void) {
@@ -1396,6 +1424,7 @@ static void models_fxaa_end(void) {
     mf_tex = NULL;
     vk_end_pass();
     st.rt_dirty = true;
+    if (mf_x1 <= mf_x0 || mf_y1 <= mf_y0) return;  // (only depth clears: the picture is as it was)
     if (!picture_copy(b, &mf_after)) return;
     static const VkComponentMapping id = {0};
     VkFormat f = b->format;
@@ -1415,7 +1444,10 @@ static void models_fxaa_end(void) {
         {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 1, .descriptorCount = 1,
          .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[1]}};
     vkUpdateDescriptorSets(g_vk.dev, 2, w, 0, NULL);
-    VkRect2D area = {{0, 0}, {b->width, b->height}};
+    // (the run's area and the pixels next to it)
+    int ax0 = mf_x0 > 1 ? mf_x0 - 1 : 0, ay0 = mf_y0 > 1 ? mf_y0 - 1 : 0;
+    int ax1 = mf_x1 + 1 < (int)b->width ? mf_x1 + 1 : (int)b->width, ay1 = mf_y1 + 1 < (int)b->height ? mf_y1 + 1 : (int)b->height;
+    VkRect2D area = {{ax0, ay0}, {(uint32_t)(ax1 - ax0), (uint32_t)(ay1 - ay0)}};
     VkRenderPassBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, .renderPass = rp,
                                 .framebuffer = vk_framebuffer(rp, &dst, 1, b->width, b->height), .renderArea = area};
     vkCmdBeginRenderPass(cb, &bi, VK_SUBPASS_CONTENTS_INLINE);
@@ -1540,7 +1572,8 @@ static void begin_pass(void) {
         vk_ms_resolve(b);
         b->ms_valid = false;
     }
-    if (ms_ok && pass_depth != VK_FORMAT_UNDEFINED && minw == g_render_size[0] && minh == g_render_size[1]) {
+    if (ms_ok && pass_depth != VK_FORMAT_UNDEFINED && minw == g_render_size[0] && minh == g_render_size[1] &&
+        !(pass_models && !pass_want_depth && !models_2d_in_samples())) {  // (2D: not even with samples still valid)
         bool stencil = pass_depth == VK_FORMAT_D24_UNORM_S8_UINT || pass_depth == VK_FORMAT_D32_SFLOAT_S8_UINT;
         uint32_t cleared = leading_clears(minw, minh, stencil);
         bool ok = true, expand[9] = {false};
@@ -1573,7 +1606,7 @@ static void begin_pass(void) {
         }
     }
     for (uint32_t k = 0; k < nviews; k++) {
-        // (pass_models, its 2D draws before the models: they don't use the depth / stencil target, left as it is (a
+        // (pass_models, its 2D draws around the models: they don't use the depth / stencil target, left as it is (a
         // resolve of it is slow) and its multisampled image valid)
         if (!pass_msaa && pass_models && !pass_want_depth && att_index[k] < 0) continue;
         if (!pass_msaa) vk_ms_resolve(att[k]);  // (rendered into directly: up to date first)
@@ -3643,6 +3676,7 @@ static void draw(CmdRec *r, bool indexed) {
 
     ms_want_depth = st.ds[0] && st.rt.depth;  // (MSAA, a picture 3D models are drawn into: pass_models)
     if (in_pass && pass_models && !pass_msaa && ms_want_depth && !pass_want_depth) st.rt_dirty = true;
+    if (in_pass && pass_models && pass_msaa && !ms_want_depth && !models_2d_in_samples()) st.rt_dirty = true;
     models_fxaa_track(ms_want_depth);  // (FXAA: the same, models_fxaa_end)
     if (st.rt_dirty) vk_end_pass();  // (MSAA: the ending pass marks its targets for resolving before they are read)
     ms_resolve_sampled(0, pr->vi);
@@ -3725,7 +3759,8 @@ static void draw(CmdRec *r, bool indexed) {
         TexBackend *c0 = st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->backend : NULL;
         if (c0 && (!pass_msaa || c0->ms_models) && full_picture(pass_w, pass_h)) c0->ms_models = g_present_count;
     }
-    k.sample_shading = pass_msaa && pass_models && !k.depth_test;  // (the menu's 2D draws after the models: pass_models)
+    if (pass_models) models_run_track(k.depth_test);
+    k.sample_shading = pass_msaa && pass_models && !k.depth_test;  // (2D alternating with models: models_2d_in_samples)
     if (k.stencil_test) {
         uint32_t ops = st.ds[5] | st.ds[6] << 8 | st.ds[7] << 16;
         for (int f = 0; f < 2; f++) {
@@ -3945,6 +3980,7 @@ static void draw(CmdRec *r, bool indexed) {
             }
         }
     }
+    if (mf_tex) models_fxaa_note();
     if (!use_index) vkCmdDraw(cb, count, inst, first, base_inst);
     else vkCmdDrawIndexed(cb, icount, inst, 0, base_vertex, base_inst);
     stat_draws++;

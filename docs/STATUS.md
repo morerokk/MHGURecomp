@@ -99,12 +99,16 @@ Fixed on the way (2026-10-20):
   get the player's anti-aliasing (models_aa):
   - MSAA: the first depth-testing draw (or depth clear) into it copies the picture, and the depth the models test
     against unless cleared, into every sample of the multisampled companions (ms_expand; without
-    VK_EXT_shader_stencil_export the stencil starts at 0, as vk_ms_resolve drops it), and the rest of the frame's draws
-    into it stay there: the 2D draws after the models shaded per sample (else the seams between their quads show), so
-    a preview that switches between models and 2D costs one copy and one resolve a frame. Needs sampleRateShading.
+    VK_EXT_shader_stencil_export the stencil starts at 0, as vk_ms_resolve drops it). The 2D draws around the models
+    stay without MSAA. Only a frame that alternates models and 2D keeps its 2D after the first model in the samples,
+    from the frame after one (models_2d_in_samples), shaded per sample (else the seams between their quads show), so
+    it costs one copy and one resolve a frame. Needs sampleRateShading. Measured on a Radeon iGPU, MSAA 4x, FXAA on,
+    1920x1080, Forge Armor: 33 -> 64 FPS without per-sample 2D (the Smithy room behind it: 67).
   - FXAA: the picture is copied before each run of model draws and after it, and FXAA 3.11 ("fxaa.frag.models", luma
     from the colour) is drawn over it only where the models changed it and next to that (models_fxaa_end), so the 2D
-    around them stays sharp. Both FXAA modes: the game's own FXAA shader only runs in its pass.
+    around them stays sharp, and only in the area the run's draws could reach (a preview's panel, 551x590 at 1080p:
+    the test reads 18 texels per pixel; on that iGPU, MSAA off, 78 -> 90 FPS). Both FXAA modes: the game's own FXAA
+    shader only runs in its pass.
   - FSR, or anti-aliasing off: none. FSR runs at its start of the HUD, before them, and never sees them.
   The 3D scene's passes (before the FXAA pass) keep their rules.
 - FXAA (settings FXAA = On / Off): the game's FXAA pass is recognised by its fragment shader's code hash

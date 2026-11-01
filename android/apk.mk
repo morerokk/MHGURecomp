@@ -32,8 +32,10 @@ SDK_ENV     := JAVA_HOME="$(call win_path,$(JDK))" PATH="$(JDK)/bin:$$PATH"
 APK_DEPS     = android/AndroidManifest.xml $(APK_O)/classes.dex $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(SDL_DEPS) \
                android/apk.py extras/pipelines.list $(LICENSE_TXT) $(BONUS)
 DEBUG_SIGN   = --ks "$(call win_path,$(DEBUG_KEY))" --ks-pass pass:android --key-pass pass:android
-# (no --key-pass: the keystore's; apksigner would read a second line of the same file for it)
-RELEASE_SIGN = --ks "$(call win_path,$(RELEASE_KEY))" --ks-pass "file:$(call win_path,$(RELEASE_PASS))"
+# (no --key-pass: the keystore's; apksigner would read a second line of the same file for it. No v4 signature: it only
+# serves adb's incremental install, and would leave an .idsig file beside the APK in dist/)
+RELEASE_SIGN = --ks "$(call win_path,$(RELEASE_KEY))" --ks-pass "file:$(call win_path,$(RELEASE_PASS))" \
+               --v4-signing-enabled false
 DIST_APK     = $(DIST)/Android-MHGURecomp.$(VERSION).apk
 
 # $(call pack_apk,<apk>,<ABIs>,<apksigner's key options>)
