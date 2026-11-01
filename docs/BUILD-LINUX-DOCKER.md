@@ -1,6 +1,6 @@
 # Build both Linux packages
 
-Use one x86-64 container to build the Linux x86-64 and ARM64 packages.
+Use one x86-64 Docker container to build the Linux x86-64 and ARM64 packages.
 The compiler runs on x86-64 for both targets.
 QEMU runs small ARM64 checks, not the compiler.
 These packages target Linux with glibc, not Android.
@@ -9,7 +9,7 @@ These packages target Linux with glibc, not Android.
 
 - An x86-64 Linux host.
 - Git, Bash, `tar`, `flock`, `realpath`, and `sha256sum`.
-- A local Docker engine, or local Podman.
+- A local Docker engine.
 - Your own complete MHGU 1.4.0 dump.
 - Internet access for the first build.
 
@@ -18,7 +18,6 @@ Use the [Linux post-installation guide](https://docs.docker.com/engine/install/l
 or [rootless mode](https://docs.docker.com/engine/security/rootless/) for access without `sudo`.
 The `docker` group grants root-level privileges.
 Do not run the build command with `sudo`.
-For Podman, see [Podman and Fedora](#podman-and-fedora).
 
 Allow 20 GB of free space, excluding your dump, and 8 GB of RAM.
 These are planning margins, not measured minimum requirements.
@@ -162,26 +161,14 @@ Do not start the updater during this first test.
 It still contacts the original repository, not your fork.
 This workflow does not publish a game release.
 
-## Podman and Fedora
+## Docker on Fedora and SELinux
 
-Use this command with local rootless Podman:
-
-```bash
-CONTAINER_ENGINE=podman bash tools/build-linux-release.sh \
-  --game "/absolute/path/to/data" --version 0.12.0 --jobs 2
-```
-
-This example builds the image locally.
-To reuse a published image, first run `podman pull "$IMAGE"`.
-Then add `--image "$IMAGE" --skip-image-build` to the Podman build command.
-
-The script preserves the host user with `--userns=keep-id`.
-With `crun`, rootless Podman also preserves supplementary groups.
+Use the same Docker build commands on Fedora.
 Rootful Docker uses your host UID and GID.
 It also adds your supplementary groups.
 Rootless Docker uses its default user mapping.
-With rootless Docker or Podman without `crun`, use an owner-readable dump.
-Access through supplementary groups alone might not work in those modes.
+Keep the dump readable by your host user.
+Supplementary-group access alone might not work with rootless Docker.
 Do not add `sudo` to the build command.
 
 On SELinux hosts, the work and output mounts use `:Z`.
@@ -205,7 +192,7 @@ Use the exit status and new hash check to identify a successful build.
 Rerun the same command to reuse compatible build dependencies.
 The script generates fresh game C on each release run.
 
-Remote Docker contexts and remote Podman connections are not supported.
+Remote Docker contexts are not supported.
 Bind mounts must refer to files on this host.
 Dump and checkout paths can contain spaces, but not colons or newlines.
 Run one build at a time in a checkout.

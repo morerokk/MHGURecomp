@@ -459,7 +459,7 @@ You need your own complete MHGU 1.4.0 dump.
 
 Actions publishes tools, not playable game packages.
 See [Build both Linux packages](docs/BUILD-LINUX-DOCKER.md)
-for Podman, Fedora, caches, device tests, and the maintainer's Actions/GHCR setup.
+for Docker on Fedora, caches, device tests, and the maintainer's Actions/GHCR setup.
 For native builds or WSL, use the [advanced manual guide](docs/BUILD-LINUX-MANUAL.md).
 
 #### Linux ARM64
