@@ -463,7 +463,7 @@ static bool frame_begin(void) {
     cur_frame.ok = false;
     int w, h;
     SDL_GetWindowSizeInPixels(ui_window(), &w, &h);
-    if (!w || !h) return false;  // minimised
+    if (!w || !h || ui_window_away()) return false;  // minimised (or the window going away: ui.c)
     // All GPU mutations happen here under vk_lock(), after resolving the old
     // scene. Existing attachment caches defer old image destruction safely.
     int msaa = config_live_msaa();

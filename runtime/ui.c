@@ -18,6 +18,12 @@ static char **launch_argv;
 static SDL_AtomicInt requested_action, action_failed;
 void ui_capture_launch_args(int argc, char **argv) { launch_argc = argc; launch_argv = argv; }
 void ui_request_action(bool restart) { SDL_SetAtomicInt(&requested_action, restart ? 2 : 1); }
+void ui_request_import(int what) { SDL_SetAtomicInt(&requested_action, 2 + what); }
+static SDL_AtomicInt away;
+bool ui_window_away(void) { return SDL_GetAtomicInt(&away) != 0; }
+#ifdef __ANDROID__
+bool android_import(int what, bool running);  // (runtime/platform/android.c)
+#endif
 bool ui_action_failed(void) { return SDL_SetAtomicInt(&action_failed, 0) != 0; }
 static bool restart_application(void) {
     char exe[4096], wait[80];
@@ -161,6 +167,14 @@ int ui_run(void) {
             if (restart_application()) exit(0);
             SDL_SetAtomicInt(&action_failed, 1);
         }
+#ifdef __ANDROID__
+        // (on this thread: SDL's own, which Java made. The app closes after an import: the game has the old files open)
+        if (action == 3 || action == 4) {
+            SDL_SetAtomicInt(&away, 1);  // (the picker takes the window's surface away: the renderer draws nothing)
+            if (android_import(action - 2, true)) { LOG("[ui] imported: closing\n"); exit(0); }
+            SDL_SetAtomicInt(&away, 0);
+        }
+#endif
         host_input_update();
         cheats_frame();
     }

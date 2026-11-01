@@ -84,9 +84,13 @@ loops a second as on PC). A phone has neither cost. Measure on a phone.
    (the game's entries, the chat, a Forge plugin's field: textinput.c), not for the settings menu with its own keys.
 4. (done) pipelines.list and bonus/system: in the APK's assets, copied into the app's folder at start (android.c:
    pipelines.list whenever it differs, bonus/system only when missing); exec.c reads pipelines.list from there.
-5. Getting the game files onto a phone: Android/data can't be reached from a phone's own file managers since
-   Android 11, only over USB (MTP) or adb. For players: an in-app import from a folder they pick (Storage Access
-   Framework), or the "All files access" permission and a folder of their choosing.
+5. (done) Getting the game files and saves onto a phone: Android/data can't be reached from a phone's own file
+   managers since Android 11, only over USB (MTP) or adb. The app imports them itself through the Storage Access
+   Framework (android/java: ImportActivity.java, started from runtime/platform/android.c): the game files from a
+   folder the player picks (offered at the start when they are missing or wrong, and in the settings menu), a save's
+   system / system_backup files (settings menu; the old save moved aside). Copied into a .part folder, then moved in.
+   From the settings menu the app closes afterwards (the game has the old files open), and the renderer draws
+   nothing meanwhile (ui_window_away: the picker takes the window's surface, item 6).
 6. Lifecycle: the app paused / resumed (audio, the Vulkan surface going away: swapchain recreated), Android may kill a
    backgrounded app, the back button.
 7. LAN multiplayer: broadcast discovery needs Android's WifiManager.MulticastLock (a Java call). The hub server should

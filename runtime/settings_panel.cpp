@@ -1255,6 +1255,13 @@ std::vector<Row> main_rows() {
         add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
                    [](int v) { c.updates = v; }, ini("Updates"));
         add_bool(r, "bonus", "Bonus content", &c.bonus_content, ini("BonusContent"));
+#ifdef __ANDROID__  // (Android/data can't be written by the player's file managers: the app copies the files in)
+        header(r, "files.header", tr("Files"));
+        action(r, "import.save", tr("Import save"), []() { ui_request_import(2); });
+        r.back().help = tr("Copies a save's system and system_backup files into the app from any folder on this device. Your current save is kept. The app closes afterwards.");
+        action(r, "import.game", tr("Import game files"), []() { ui_request_import(1); });
+        r.back().help = tr("Copies the exefs and romfs folders into the app from any folder on this device, replacing the game files it has. The app closes afterwards.");
+#endif
         break;
     }
     spacer(r, "actions.gap");  // (Save and Reset this tab, and on Menu Options Restart and Exit game, apart)

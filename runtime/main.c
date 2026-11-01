@@ -107,6 +107,50 @@ static void boot(const char *root) {
     kernel_run_main(t, t->handle, 0, init_fn, main_init_fn);
 }
 
+// What is wrong with the game files in data (into msg), or false when they are fine.
+static bool game_files_problem(const char *data, char *msg, size_t size) {
+    char main_path[1200];
+    snprintf(main_path, sizeof main_path, "%s/exefs/main", data);
+    FILE *f = fopen(main_path, "rb");
+    if (!f) {
+        snprintf(msg, size, "The game files were not found. Put your own dump's exefs and romfs folders in "
+                 DATA_FOLDER " (" DATA_SUB("exefs") ", " DATA_SUB("romfs") ").");
+        return true;
+    }
+    // the recompiled code is v1.4.0's: another version's files don't fit it (NSO header +0x40: build id)
+    static const uint8_t want[8] = {0xfb, 0x08, 0xf1, 0xd2, 0x0f, 0xd1, 0x20, 0x4f};
+    uint8_t hdr[0x48] = {0};
+    bool ok = fread(hdr, 1, sizeof hdr, f) == sizeof hdr && !memcmp(hdr, "NSO0", 4) && !memcmp(hdr + 0x40, want, 8);
+    fclose(f);
+    if (!ok) {
+        snprintf(msg, size, "The game files in " DATA_FOLDER " are not version 1.4.0 of Monster Hunter Generations "
+                 "Ultimate (exefs/main, build id FB08F1D20FD1204F). Dump the game with its 1.4.0 "
+                 "update applied (exefs from the update, romfs merged).");
+        return true;
+    }
+    // an incomplete romfs starts, then crashes or quits with the game's own error: players' dumps of the base game
+    // without the update merged (34149 files) or of the update alone (12 files, no shader package) did. 1.4.0
+    // merged has 35531; the margin is for dump tools that leave out a few. MHGU_ROMFS_ANY=1 skips the check.
+    char romfs[1200], shaders[1300];
+    snprintf(romfs, sizeof romfs, "%s/romfs", data);
+    snprintf(shaders, sizeof shaders, "%s/nativeNX/system/app_shader/AppShaderPackage.mfx", romfs);
+    struct stat st;
+    int nfiles = getenv("MHGU_ROMFS_ANY") ? -1 : plat_count_files(romfs);
+    bool have_shaders = stat(shaders, &st) == 0;
+    if (nfiles >= 0 && (nfiles < 35000 || !have_shaders)) {
+        snprintf(msg, size, "The game files in " DATA_SUB("romfs") " are incomplete: %d files, where Monster Hunter "
+                 "Generations Ultimate 1.4.0 has 35531%s. Extract the romfs again with the 1.4.0 update applied (the "
+                 "base game's files with the update's merged over them) and replace " DATA_SUB("romfs") " with it.", nfiles,
+                 !have_shaders ? ", and nativeNX\\system\\app_shader\\AppShaderPackage.mfx is missing" : "");
+        return true;
+    }
+    return false;
+}
+
+#ifdef __ANDROID__
+bool android_offer_import(const char *msg);  // (runtime/platform/android.c)
+#endif
+
 int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         if (!strncmp(argv[i], "--recomp-wait=", 14)) {
@@ -140,45 +184,11 @@ int main(int argc, char **argv) {
         } else {
             fprintf(stderr, "[main] no user data folder: saves go to save\\ beside the executable\n");
         }
-        char main_path[1200];
-        snprintf(main_path, sizeof main_path, "%s/exefs/main", data);
-        FILE *f = fopen(main_path, "rb");
-        if (!f) {
-            const char *msg = "The game files were not found. Put your own dump's exefs and romfs folders in "
-                              DATA_FOLDER " (" DATA_SUB("exefs") ", " DATA_SUB("romfs") ").";
+        for (char msg[900]; game_files_problem(data, msg, sizeof msg);) {
             fprintf(stderr, "%s\n", msg);
-            plat_error_box(msg);
-            return 1;
-        }
-        // the recompiled code is v1.4.0's: another version's files don't fit it (NSO header +0x40: build id)
-        static const uint8_t want[8] = {0xfb, 0x08, 0xf1, 0xd2, 0x0f, 0xd1, 0x20, 0x4f};
-        uint8_t hdr[0x48] = {0};
-        bool ok = fread(hdr, 1, sizeof hdr, f) == sizeof hdr && !memcmp(hdr, "NSO0", 4) && !memcmp(hdr + 0x40, want, 8);
-        fclose(f);
-        if (!ok) {
-            const char *msg = "The game files in " DATA_FOLDER " are not version 1.4.0 of Monster Hunter Generations "
-                              "Ultimate (exefs/main, build id FB08F1D20FD1204F). Dump the game with its 1.4.0 "
-                              "update applied (exefs from the update, romfs merged).";
-            fprintf(stderr, "%s\n", msg);
-            plat_error_box(msg);
-            return 1;
-        }
-        // an incomplete romfs starts, then crashes or quits with the game's own error: players' dumps of the base game
-        // without the update merged (34149 files) or of the update alone (12 files, no shader package) did. 1.4.0
-        // merged has 35531; the margin is for dump tools that leave out a few. MHGU_ROMFS_ANY=1 skips the check.
-        char romfs[1200], shaders[1300];
-        snprintf(romfs, sizeof romfs, "%s/romfs", data);
-        snprintf(shaders, sizeof shaders, "%s/nativeNX/system/app_shader/AppShaderPackage.mfx", romfs);
-        struct stat st;
-        int nfiles = getenv("MHGU_ROMFS_ANY") ? -1 : plat_count_files(romfs);
-        bool have_shaders = stat(shaders, &st) == 0;
-        if (nfiles >= 0 && (nfiles < 35000 || !have_shaders)) {
-            char msg[700];
-            snprintf(msg, sizeof msg, "The game files in " DATA_SUB("romfs") " are incomplete: %d files, where Monster Hunter "
-                     "Generations Ultimate 1.4.0 has 35531%s. Extract the romfs again with the 1.4.0 update applied (the "
-                     "base game's files with the update's merged over them) and replace " DATA_SUB("romfs") " with it.", nfiles,
-                     !have_shaders ? ", and nativeNX\\system\\app_shader\\AppShaderPackage.mfx is missing" : "");
-            fprintf(stderr, "%s\n", msg);
+#ifdef __ANDROID__
+            if (android_offer_import(msg)) continue;  // (copied in from a folder the player picked: check again)
+#endif
             plat_error_box(msg);
             return 1;
         }

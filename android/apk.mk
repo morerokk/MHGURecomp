@@ -17,6 +17,7 @@ ADB         := $(ANDROID_SDK)/platform-tools/adb
 APK         := $(B)/mhgurecomp.apk
 APK_O       := obj-android/apk
 JAVA_SRC    := $(SDL3_DIR)/src/android-project/app/src/main/java/org/libsdl/app
+APP_JAVA    := $(wildcard android/java/io/github/morerokk/mhgurecomp/*.java)  # (the app's own: the import)
 DEBUG_KEY   := $(HOME)/.android/debug.keystore
 # The release key: every release must be signed with the same one, or Android refuses it as an update, and players
 # would have to uninstall first (losing the app's folder: their game files and saves). Made once, by make release-key,
@@ -58,10 +59,10 @@ endef
 
 apk: $(APK)
 
-$(APK_O)/classes.dex: $(SDL3_DIR)/.built
+$(APK_O)/classes.dex: $(SDL3_DIR)/.built $(APP_JAVA)
 	rm -rf $(APK_O)/classes $(APK_O)/dex && mkdir -p $(APK_O)/classes $(APK_O)/dex
 	"$(JDK)/bin/javac" -nowarn -Xlint:-options -source 8 -target 8 -encoding UTF-8 -bootclasspath "$(call win_path,$(ANDROID_JAR))" \
-	    -d $(APK_O)/classes $(JAVA_SRC)/*.java
+	    -d $(APK_O)/classes $(JAVA_SRC)/*.java $(APP_JAVA)
 	$(SDK_ENV) "$(BUILD_TOOLS)/d8$(BAT)" --release --min-api $(API) --lib "$(call win_path,$(ANDROID_JAR))" --output $(APK_O)/dex \
 	    $$(find $(APK_O)/classes -name '*.class')
 	cp $(APK_O)/dex/classes.dex $@
