@@ -8,8 +8,7 @@ library, the updater, the DLLs (Windows), pipelines.list, licenses/, bonus/syste
 the empty data/, mods/ and cheats/ folders, with a note in data/ of what goes there. Nothing else of the build folder:
 not its game files, mods, settings, caches or log. The updater (updater/updater.c) installs the same archive, leaving
 data/, mods/, cheats/ and bonus/ alone. Prints the archive's size and SHA-256: GitHub shows that digest for the upload.
-A Linux build for 64-bit ARM (its mhgurecomp an aarch64 program) is named LinuxArm64-MHGURecomp.<version>.tar.gz
-instead, which only its own updater takes (updater/updater.c ASSET_PREFIXES).
+An aarch64 Linux build is named LinuxArm64-MHGURecomp.<version>.tar.gz; only the aarch64 updater takes it.
 """
 import hashlib
 import io
@@ -52,7 +51,7 @@ def files(build, platform):
 
 
 def elf_machine(path):
-    """A Linux program's CPU (ELF e_machine: 62 x86-64, 183 aarch64), 0 if the file isn't an ELF one."""
+    """ELF e_machine of a file (62 x86-64, 183 aarch64), 0 if it isn't ELF."""
     with open(path, 'rb') as f:
         h = f.read(20)
     return int.from_bytes(h[18:20], 'little') if h[:4] == b'\x7fELF' else 0
@@ -80,7 +79,7 @@ def main():
     # (Linux-: up to 0.11.4 ArchLinux-, when it needed Arch's SDL3 and shaderc; every updater takes both)
     top = ('Windows' if platform == 'windows' else 'Linux') + '-MHGURecomp'
     if platform == 'linux' and elf_machine(os.path.join(build, 'mhgurecomp')) == 183:
-        top = 'LinuxArm64-MHGURecomp'  # (64-bit ARM)
+        top = 'LinuxArm64-MHGURecomp'
     name = f'{top}.{version}' + ('.zip' if platform == 'windows' else '.tar.gz')
     entries = files(build, platform)
     if bonus:

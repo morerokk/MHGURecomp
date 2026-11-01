@@ -117,8 +117,8 @@ typedef struct TexBackend {
     uint32_t pending_w, pending_h, pending_stride;
     uint8_t astc_bw, astc_bh;  // ASTC without GPU support: decoded to RGBA8 on upload (runtime/nvn/astc.c)
     bool astc_srgb;
-    uint8_t bc;      // BC without GPU support: BC1-BC7 = 1-7, decoded on upload (runtime/nvn/bcn.c); 0 none
-    bool bc_snorm;   // (BC4 / BC5 / BC6H signed)
+    uint8_t bc;      // BC decoded on the CPU: 1-7 = BC1-BC7, 0 = no
+    bool bc_snorm;   // signed BC4 / BC5 / BC6H
     struct TexBackend *ms;  // MSAA: the multisampled image this one is rendered through (textures.c vk_tex_ms)
     bool ms_valid;          // ms holds this image's contents (its last write was a pass through ms)
     bool ms_dirty;          // ms is newer than this image: resolved when this one is next read (exec.c vk_ms_resolve)

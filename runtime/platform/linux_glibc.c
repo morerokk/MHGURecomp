@@ -8,7 +8,7 @@
 float glibc_old_sqrtf(float), glibc_old_acosf(float), glibc_old_asinf(float), glibc_old_atan2f(float, float);
 float glibc_old_log10f(float);
 double glibc_old_sinh(double), glibc_old_cosh(double);
-#if defined(__aarch64__)  // (64-bit ARM: its first glibc was 2.17, so its oldest versions are those)
+#if defined(__aarch64__)  // aarch64's oldest versions
 __asm__(".symver glibc_old_sqrtf, sqrtf@GLIBC_2.17");
 __asm__(".symver glibc_old_acosf, acosf@GLIBC_2.17");
 __asm__(".symver glibc_old_asinf, asinf@GLIBC_2.17");

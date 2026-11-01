@@ -9,7 +9,7 @@
 #include <string.h>
 
 #if defined(__aarch64__)
-#define GUEST_BASE 0x1000000000ull   // 64 GB: arm64 kernels with 39-bit addresses give a process only 512 GB
+#define GUEST_BASE 0x1000000000ull   // 64 GB: some arm64 kernels give a process only 512 GB
 #else
 #define GUEST_BASE 0x10000000000ull  // 1 TB: claimed at startup (runtime/main.c)
 #endif

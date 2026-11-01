@@ -38,7 +38,7 @@
 #define GAME_EXE "mhgurecomp"
 #define GAME_LIB "mhgugame.so"
 #if defined(__aarch64__)
-#define ASSET_PREFIXES "LinuxArm64-"  // (64-bit ARM: not "Linux-", the x86-64 build's)
+#define ASSET_PREFIXES "LinuxArm64-"
 #else
 #define ASSET_PREFIXES "Linux-,ArchLinux-"  // (ArchLinux-: up to 0.11.4)
 #endif

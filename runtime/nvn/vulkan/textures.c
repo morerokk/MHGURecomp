@@ -160,14 +160,14 @@ static bool format_supports(VkFormat f, VkFormatFeatureFlags want) {
     return (p.optimalTilingFeatures & want) == want;
 }
 
-// ---- BC textures on GPUs without them (Raspberry Pi's V3DV, some Mali GPUs): the blocks are decoded on the CPU when
-// they are uploaded (runtime/nvn/bcn.c), as ASTC is on desktop GPUs. create_image calls bc_cpu_format, upload_texture
-// calls upload_bc; nothing else of the texture code knows about it. (debug) MHGU_SOFT_BC=1: also on GPUs that have BC.
+// ---- BC textures on GPUs without BC support: decoded on the CPU when uploaded, like ASTC.
+// MHGU_SOFT_BC=1 does this on any GPU, for testing.
 
-// The format a BC texture is made in when the GPU can't sample it (b->bc set: kind 1-7 = BC1-BC7), else f unchanged.
+// The format to create a texture of format f in: if it is BC and the GPU can't sample it, the decoded format.
 static VkFormat bc_cpu_format(VkFormat f, VkFormatFeatureFlags need, TexBackend *b) {
     static int soft = -1;
     if (soft < 0) soft = getenv("MHGU_SOFT_BC") && atoi(getenv("MHGU_SOFT_BC")) > 0;
+    b->bc = 0;
     VkFormat out;
     uint8_t kind;
     bool snorm = false;
@@ -186,12 +186,9 @@ static VkFormat bc_cpu_format(VkFormat f, VkFormatFeatureFlags need, TexBackend 
     case VK_FORMAT_BC6H_SFLOAT_BLOCK: kind = 6, snorm = true, out = VK_FORMAT_R16G16B16A16_SFLOAT; break;
     case VK_FORMAT_BC7_UNORM_BLOCK: kind = 7, out = VK_FORMAT_R8G8B8A8_UNORM; break;
     case VK_FORMAT_BC7_SRGB_BLOCK: kind = 7, out = VK_FORMAT_R8G8B8A8_SRGB; break;
-    default: b->bc = 0; return f;
+    default: return f;
     }
-    if (!soft && format_supports(f, need)) {
-        b->bc = 0;
-        return f;
-    }
+    if (!soft && format_supports(f, need)) return f;
     static bool logged;
     if (!logged) {
         logged = true;
@@ -289,7 +286,7 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     VkFormat vf = mf.vf;
     VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
     b->astc_bw = b->astc_bh = 0;
-    vf = bc_cpu_format(vf, need, b);  // (BC the GPU can't sample: decoded on the CPU, see bc_cpu_format)
+    vf = bc_cpu_format(vf, need, b);
     if (!format_supports(vf, need)) {
         bool astc = vf >= VK_FORMAT_ASTC_4x4_UNORM_BLOCK && vf <= VK_FORMAT_ASTC_12x12_SRGB_BLOCK;
         const FormatInfo *fi = t->layout.fmt;
@@ -522,8 +519,7 @@ static void upload_pending(TexBackend *b) {
 
 static uint64_t full_hash_budget, full_hash_budget_frame;
 
-// upload_texture's copy for a BC texture decoded on the CPU (bc_cpu_format): per layer and level, the blocks into linear rows, decoded (bcn.c), copied
-// into the image (the same steps as its ASTC case)
+// The same steps as upload_texture's ASTC case, decoding BC instead.
 static void upload_bc(NvnTexture *t, TexBackend *b, const uint8_t *mem) {
     const FormatInfo *fi = t->layout.fmt;
     VkCommandBuffer cb = vk_upload_cmd();
@@ -584,7 +580,7 @@ static void upload_texture(NvnTexture *t, TexBackend *b) {
     if (b->uploaded && h != b->data_hash) b->dynamic = true;
     b->data_hash = h;
     b->uploaded = true;
-    if (b->bc) { upload_bc(t, b, mem); return; }  // (BC decoded on the CPU, see bc_cpu_format)
+    if (b->bc) { upload_bc(t, b, mem); return; }
     if (b->format != mf.vf && !b->astc_bw) return;  // unsupported format: nothing sensible to copy
     VkCommandBuffer cb = vk_upload_cmd();
     uint32_t layers = t->layout.layers ? t->layout.layers : 1;

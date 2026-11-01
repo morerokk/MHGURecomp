@@ -232,11 +232,11 @@ def main():
            f'-I{os.path.join(ROOT, "runtime")}', '-o', exe, os.path.join(HERE, 'test_harness.c'),
            os.path.join(work, 'tests.c'), os.path.join(ROOT, 'runtime', 'simd_int.c'),
            os.path.join(ROOT, 'runtime', 'neon.c')] + ([os.path.join(ROOT, 'runtime', 'interp.c')] if args.interp else [])
-    if platform.machine() in ('aarch64', 'arm64'):  # (64-bit ARM: the Makefile's GENARCH / GENFLAGS for it)
+    if platform.machine() in ('aarch64', 'arm64'):  # as the Makefile's GENARCH / GENFLAGS
         cmd[cmd.index('-march=x86-64-v3')] = '-march=armv8-a'
         cmd.append('-fsigned-char')
     if os.name != 'nt':
-        cmd.append('-lm')  # (the tests' sqrtf / sqrt: libm is a library of its own on Linux)
+        cmd.append('-lm')  # sqrtf / sqrt
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode:
         print(r.stderr[:6000], file=sys.stderr)
