@@ -1905,6 +1905,7 @@ void settings_panel(bool *open) {
         s.help_row.clear();
         quest_keys();
         load_mods();
+        cheats_rescan();  // (files added, edited or removed since the last time count from now)
         load_cheats();
     }
     if (request_exit.exchange(false) && s.view != View::Exit)
@@ -2205,7 +2206,7 @@ void settings_panel(bool *open) {
             ImGui::PushStyleColor(ImGuiCol_Text, vec(theme().warn));
             ImGui::TextWrapped("%s", tr("Online: only use cheats when everyone in the lobby agrees to it."));
             ImGui::PopStyleColor();
-            ImGui::TextWrapped("%s", tr("Cheats turn on and off when you press Save, no restart needed. Turning one off undoes its changes to the game's code; values it already changed (money, items) stay. Cheats added with Add a cheat work right away; new cheat files in the folder show up after a restart."));
+            ImGui::TextWrapped("%s", tr("Cheats turn on and off when you press Save, no restart needed. Turning one off undoes its changes to the game's code; values it already changed (money, items) stay. Cheats added with Add a cheat work right away; cheat files added or edited in the folder show up the next time this menu opens."));
         }
         if (std::any_of(rows.begin(), rows.end(), [](const Row &r) { return r.cold; }))  // (the rows with " *")
             ImGui::TextUnformatted(tr("* Restart required"));

@@ -80,6 +80,9 @@ int main(int argc, char **argv) {
     char join[256]; config_live_ldn_join(join, sizeof join);
     assert(config_live_ldn_port() == 40123 && !strcmp(join, "10.0.0.7:40124") && config_live_sync_small_monsters());
     assert(!config_restart_key("Port") && !config_restart_key("Join") && !config_restart_key("SyncSmallMonsters"));
+    c.bonus_content = 0;  // (bonus content at the next open)
+    assert(config_save(&c, error, sizeof error) && !config_restart_required(&c));
+    assert(!config_live_bonus_content() && !config_restart_key("BonusContent"));
     Config restored=c; restored.hp=initial.hp; // Reconstruct the loaded quest overrides, not compiled defaults.
     restored.hp.quests=2; restored.hp.quest[0].quest=101;
     for(int i=0;i<4;i++) restored.hp.quest[0].scale[i]=0.6f;

@@ -34,6 +34,7 @@ extern "C" void ldn_hub_check(const char *, const char *) {}
 // (cheats.c: two cheats, a master code and one that can be turned off)
 static bool cheat_on[2] = {true, true};
 extern "C" int cheats_count(void) { return 2; }
+extern "C" void cheats_rescan(void) {}
 extern "C" const char *cheats_name(int i) { return i ? "Test cheat" : "Master"; }
 extern "C" const char *cheats_file(int i) { (void)i; return "test.txt"; }
 extern "C" bool cheats_master(int i) { return i == 0; }
