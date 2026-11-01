@@ -114,7 +114,13 @@ void ui_init(void) {
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, g_config.background_input ? "1" : "0");
     if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) FATAL("SDL_InitSubSystem: %s\n", SDL_GetError());
     win_w = g_config.width, win_h = g_config.height;
+#ifdef __ANDROID__
+    // (a resizable window may turn any way on Android, whatever the manifest says: landscape only. The window
+    // fills the screen there, so the settings' size does not apply.)
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#else
     fit_desktop(&win_w, &win_h);
+#endif
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #ifndef MHGU_NULL_BACKEND
     flags |= SDL_WINDOW_VULKAN;
