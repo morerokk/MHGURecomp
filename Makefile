@@ -41,7 +41,7 @@ ifneq ($(HOST_ARCH),$(TARGET_ARCH))
 CMAKE_TARGET_FLAGS += -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
     -DCMAKE_C_COMPILER_TARGET=aarch64-linux-gnu -DCMAKE_CXX_COMPILER_TARGET=aarch64-linux-gnu \
     -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld
-FFMPEG_TARGET_FLAGS += --enable-cross-compile --arch=aarch64 --target-os=linux \
+FFMPEG_TARGET_FLAGS += --enable-cross-compile --arch=aarch64 --target-os=linux --host-cc="$(CC)" \
     --ar=llvm-ar --nm=llvm-nm --ranlib=llvm-ranlib --strip=llvm-strip --extra-ldflags=-fuse-ld=lld
 endif
 ifneq ($(SYSROOT),)

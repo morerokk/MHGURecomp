@@ -186,6 +186,27 @@ class InterfaceTests(unittest.TestCase):
 
 
 class ImageTests(unittest.TestCase):
+    def test_ffmpeg_cross_build_selects_native_host_compiler(self):
+        for arch in ("x86_64", "aarch64"):
+            for compiler in ("clang", "clang-18"):
+                with self.subTest(arch=arch, compiler=compiler):
+                    result = subprocess.run(
+                        ["make", "--no-print-directory", "-s",
+                         "--eval=print-ffmpeg-host-flags:;"
+                         '@printf "%s\\n" $(FFMPEG_TARGET_FLAGS)',
+                         "print-ffmpeg-host-flags",
+                         "HOST_ARCH=x86_64", "TARGET_ARCH=" + arch,
+                         "CC=" + compiler],
+                        cwd=ROOT, check=True, capture_output=True, text=True)
+                    flags = result.stdout.splitlines()
+                    if arch == "aarch64":
+                        self.assertIn("--host-cc=" + compiler, flags)
+                        self.assertNotIn("--host-cc=" + compiler +
+                                         " --target=aarch64-linux-gnu", flags)
+                    else:
+                        self.assertFalse(any(
+                            flag.startswith("--host-cc=") for flag in flags))
+
     def test_context_allowlist(self):
         # The allowlist has no glob exceptions. No project tree enters the image.
         patterns = (ROOT / "tools/.dockerignore").read_text().splitlines()
