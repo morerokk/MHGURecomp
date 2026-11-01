@@ -67,7 +67,14 @@ int main(int argc, char **argv) {
     assert(config_save(&c, error, sizeof error));
     assert(fabsf(config_audio_gain() - 0.25f) < 0.001f && !config_confirm_exit());
     assert(config_language() == 1);
-    assert(config_restart_required(&c));
+    assert(!config_restart_required(&c));  // Quest overrides are live (config_live_hp), as are the factors.
+    HpScale live_hp; config_live_hp(&live_hp);
+    assert(live_hp.quests == 1 && live_hp.quest[0].quest == c.hp.quest[0].quest);
+    c.hp.scale[2] = 3.5f; c.hp.village = 1.5f; c.village_in_hub = 0;
+    assert(config_save(&c, error, sizeof error) && !config_restart_required(&c));
+    config_live_hp(&live_hp);
+    assert(live_hp.scale[2] == 3.5f && config_live_hp_village() == 1.5f && !config_live_village_in_hub());
+    assert(!config_restart_key("1Player") && !config_restart_key("HubHP") && !config_restart_key("VillageQuestsInHub"));
     Config restored=c; restored.hp=initial.hp; // Reconstruct the loaded quest overrides, not compiled defaults.
     restored.hp.quests=2; restored.hp.quest[0].quest=101;
     for(int i=0;i<4;i++) restored.hp.quest[0].scale[i]=0.6f;

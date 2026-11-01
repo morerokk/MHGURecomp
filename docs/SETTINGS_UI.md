@@ -66,8 +66,10 @@ No settings operation saves game progress. Reset this section changes only the
 draft and requires a subsequent Save. A write failure preserves draft and file.
 
 Save applies volume, FPS, FOV, FXAA, MSAA, VSync, mouse sensitivity, face mapping,
-background input and confirmation policy without restarting. Render changes
-are consumed at render boundaries. Language, symbols and interface scale preview
+background input and confirmation policy without restarting.
+So do Monster HP's factors and quest overrides and the Village Quests settings (the next large monster's HP, the
+counter's rank or star menu).
+Render changes are consumed at render boundaries. Language, symbols and interface scale preview
 immediately and persist on Save. Cold fields carry an asterisk; the saved status
 indicates a pending restart only when cold settings differ from startup values.
 Raw Auto/Desktop values and unchanged environment overrides are preserved.

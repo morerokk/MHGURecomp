@@ -22,7 +22,7 @@ static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in
 static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
                      live_vsync = {1}, live_face, live_menu_confirm, live_background = {1}, live_combo, live_chat_key,
                      live_fxaa_mode, live_smooth, live_discord, live_discord_hunter, live_share_urgent, live_binds[BINDS][BIND_KEYS],
-                     live_fsr_sharpness, live_fsr_reactive;
+                     live_fsr_sharpness, live_fsr_reactive, live_village;
 static void set_float(SDL_AtomicInt *slot, float value) {
     int bits; _Static_assert(sizeof bits == sizeof value, "32-bit float settings");
     memcpy(&bits, &value, sizeof bits); SDL_SetAtomicInt(slot, bits);
@@ -32,6 +32,8 @@ static float get_float(SDL_AtomicInt *slot) {
 }
 static SDL_SpinLock live_ldn_lock;  // [Multiplayer] Server / Key: read by the network threads (runtime/net/ldn.c)
 static char live_ldn_server[sizeof saved.ldn_server], live_ldn_key[sizeof saved.ldn_key];
+static SDL_SpinLock live_hp_lock;  // [Monster HP], HubHP: read when a large monster's HP is set (runtime/hle/hpscale.c)
+static HpScale live_hp;
 // A save updates changed hot fields only. Saving the volume must not silently
 // remove an unchanged FOV/FPS override supplied by the development environment.
 static void publish_live(const Config *c, bool all) {
@@ -55,6 +57,12 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->share_urgent != saved.share_urgent) SDL_SetAtomicInt(&live_share_urgent, c->share_urgent);
     if (all || c->fsr_sharpness != saved.fsr_sharpness) set_float(&live_fsr_sharpness, c->fsr_sharpness);
     if (all || c->fsr_reactive != saved.fsr_reactive) set_float(&live_fsr_reactive, c->fsr_reactive);
+    if (all || c->village_in_hub != saved.village_in_hub) SDL_SetAtomicInt(&live_village, c->village_in_hub);
+    if (all || memcmp(&c->hp, &saved.hp, sizeof c->hp)) {
+        SDL_LockSpinlock(&live_hp_lock);
+        live_hp = c->hp;
+        SDL_UnlockSpinlock(&live_hp_lock);
+    }
     for (int i = 0; i < BINDS; i++)
         for (int k = 0; k < BIND_KEYS; k++)
             if (all || c->binds[i][k] != saved.binds[i][k]) SDL_SetAtomicInt(&live_binds[i][k], c->binds[i][k]);
@@ -103,6 +111,18 @@ int config_live_fxaa_mode(void) { return SDL_GetAtomicInt(&live_fxaa_mode); }
 int config_live_smooth_gradients(void) { return SDL_GetAtomicInt(&live_smooth); }
 float config_live_fsr_sharpness(void) { return get_float(&live_fsr_sharpness); }
 float config_live_fsr_reactive(void) { return get_float(&live_fsr_reactive); }
+int config_live_village_in_hub(void) { return SDL_GetAtomicInt(&live_village); }
+void config_live_hp(HpScale *out) {
+    SDL_LockSpinlock(&live_hp_lock);
+    *out = live_hp;
+    SDL_UnlockSpinlock(&live_hp_lock);
+}
+float config_live_hp_village(void) {
+    SDL_LockSpinlock(&live_hp_lock);
+    float v = live_hp.village;
+    SDL_UnlockSpinlock(&live_hp_lock);
+    return v;
+}
 int config_live_discord(void) { return SDL_GetAtomicInt(&live_discord); }
 int config_live_discord_hunter(void) { return SDL_GetAtomicInt(&live_discord_hunter); }
 int config_live_share_urgent(void) { return SDL_GetAtomicInt(&live_share_urgent); }
@@ -126,13 +146,11 @@ int config_show_battery(void) { return SDL_GetAtomicInt(&show_battery); }
 bool config_show_fps(void) { return SDL_GetAtomicInt(&show_fps) != 0; }
 bool config_restart_required(const Config *c) {
     if (!runtime_ready) return false;
-    if (c->hp.quests < 0 || c->hp.quests > HP_QUESTS_MAX) return true;
     for (int i = 0; i < g_nsettings; i++) {
         const ConfigSetting *s = &g_settings[i];
         if (s->restart && (!config_valid(s, c) || !config_equal(s, c, &startup))) return true;
     }
-    return c->hp.quests != startup.hp.quests ||
-        memcmp(c->hp.quest, startup.hp.quest, sizeof c->hp.quest[0] * (size_t)c->hp.quests);
+    return false;  // ([Monster HP] Quest<number> overrides: live, config_live_hp)
 }
 
 static bool fail(char *error, size_t size, const char *message) {
