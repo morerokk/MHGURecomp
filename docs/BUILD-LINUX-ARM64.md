@@ -1,7 +1,9 @@
 # Building for Linux ARM64
 
-These instructions accompany the Linux ARM64 patch for MHGU Recomp 0.11.8,
-based on commit `ce7f694805bba62b118cfdf43bb25e619c511403`. Run commands
+These instructions accompany the Linux ARM64 port, now integrated with
+MHGU Recomp 0.12.0. The manual recipe was validated on 0.11.8.
+For the container path, see [Build both Linux packages](BUILD-LINUX-DOCKER.md).
+Run commands
 from the repository root unless a section says otherwise. Use Bash and paths
 without spaces for the checkout, sysroot, build and object directories.
 

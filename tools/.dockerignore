@@ -1,0 +1,8 @@
+**
+!requirements.txt
+!docker/
+!docker/Dockerfile
+!docker/prepare-sysroot.sh
+!docker/normalize-sysroot.py
+!docker/build.sh
+!docker/check-elf.py

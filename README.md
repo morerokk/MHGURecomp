@@ -387,6 +387,20 @@ described above.
 
 ### Linux
 
+To build both Linux release packages on an x86-64 Linux host, use Docker:
+
+```bash
+bash tools/build-linux-release.sh --game "/absolute/path/to/data" \
+  --version 0.12.0 --jobs 2
+```
+
+This produces the x86-64 and ARM64 archives in `dist/`.
+Your dump stays on your host and enters a read-only container mount.
+The tools image does not contain the game.
+See [Build both Linux packages](docs/BUILD-LINUX-DOCKER.md) for requirements,
+Podman, Fedora, caches, and device tests.
+The manual build instructions follow.
+
 The Windows build runs under Proton / Wine. A native Linux build is supported as well: the Makefile picks
 `runtime/platform/linux.c` when `uname -s` isn't Windows and everything else is shared. Tested on Gentoo
 x86_64 with clang under Wayland (NVIDIA). Besides `make`, `git`, `clang`, `lld` and Python 3.10 or newer it
