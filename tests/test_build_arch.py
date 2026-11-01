@@ -14,9 +14,10 @@ def probe(*args):
     names = ("TARGET_ARCH", "TARGET_FLAGS", "CMAKE_TARGET_FLAGS",
              "FFMPEG_TARGET_FLAGS", "GENARCH", "GAMELIB_ID", "B", "O",
              "CC", "CXX", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR",
-             "UPD_LDFLAGS")
+             "UPD_LDFLAGS", "FFMPEG_CC")
     recipe = "probe:\n\t@printf '%s\\n' " + " ".join(
-        f"'{name}=$({name})'" for name in names) + "\n"
+        f"'{name}=$({name})'" for name in names)
+    recipe += " 'GLIBC_CHECK_ENABLED=$(if $(value GLIBC_CHECK),yes,no)'\n"
     return subprocess.run(["make", "-s", "-f", "Makefile", "-f", "-",
                            "probe", *args], input=recipe, cwd=ROOT,
                           capture_output=True, text=True)
@@ -79,6 +80,40 @@ class BuildTests(unittest.TestCase):
         self.assertNotEqual(probe("TARGET_ARCH=mips").returncode, 0)
         self.assertNotEqual(probe("PLATFORM=windows",
                                  "TARGET_ARCH=aarch64").returncode, 0)
+
+    def test_android_configuration_does_not_inherit_desktop_flags(self):
+        # This probes shared variables, not an Android build or an SDK.
+        for host in ("x86_64", "aarch64"):
+            for abi in ("arm64-v8a", "x86_64"):
+                with self.subTest(host=host, abi=abi):
+                    result = probe("PLATFORM=android", f"HOST_ARCH={host}",
+                                   f"ABI={abi}", "SYSROOT=/desktop/sysroot")
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    for name in ("TARGET_FLAGS", "CMAKE_TARGET_FLAGS",
+                                 "FFMPEG_TARGET_FLAGS", "GENARCH",
+                                 "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR"):
+                        self.assertIn(f"{name}=\n", result.stdout)
+                    self.assertNotIn("--target=aarch64-linux-gnu", result.stdout)
+                    self.assertNotIn("/desktop/sysroot", result.stdout)
+
+    def test_glibc_check_is_linux_only(self):
+        for platform in ("linux", "windows", "android"):
+            with self.subTest(platform=platform):
+                result = probe(f"PLATFORM={platform}", "TARGET_ARCH=x86_64")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                expected = "yes" if platform == "linux" else "no"
+                self.assertIn(f"GLIBC_CHECK_ENABLED={expected}\n", result.stdout)
+
+    def test_ffmpeg_compiler_interface_preserves_target_flags(self):
+        result = probe("HOST_ARCH=x86_64", "TARGET_ARCH=aarch64",
+                       "SYSROOT=/desktop/sysroot", "CC=my-clang")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        compiler = next(line for line in result.stdout.splitlines()
+                        if line.startswith("FFMPEG_CC="))
+        self.assertIn("FFMPEG_CC=my-clang --target=aarch64-linux-gnu", compiler)
+        self.assertIn("--sysroot=/desktop/sysroot", compiler)
+        result = probe("FFMPEG_CC=explicit-ffmpeg-cc")
+        self.assertIn("FFMPEG_CC=explicit-ffmpeg-cc\n", result.stdout)
 
     def test_updater_system_sdl_keeps_libm(self):
         # SDL3=system does not add -lm through SDL_LIBS; the updater must.

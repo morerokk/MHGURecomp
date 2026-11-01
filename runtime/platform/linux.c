@@ -34,6 +34,17 @@
 #define MAP_FIXED_NOREPLACE 0x100000
 #endif
 
+// Read the interrupted thread's registers. Write intent can be unknown (-1).
+#if defined(__x86_64__)
+static uint64_t ctx_pc(const ucontext_t *c) { return (uint64_t)c->uc_mcontext.gregs[REG_RIP]; }
+static uint64_t ctx_sp(const ucontext_t *c) { return (uint64_t)c->uc_mcontext.gregs[REG_RSP]; }
+#elif defined(__aarch64__)
+static uint64_t ctx_pc(const ucontext_t *c) { return c->uc_mcontext.pc; }
+// Linux reads the link register below; Android also uses the stack pointer.
+static uint64_t __attribute__((unused)) ctx_sp(const ucontext_t *c) { return c->uc_mcontext.sp; }
+#endif
+static int ctx_write(const ucontext_t *c) { return linux_fault_write(c); }
+
 // ---- guest address space
 static uint64_t g_lo, g_hi;
 #define COMMIT_CHUNK 0x10000ull
@@ -313,14 +324,14 @@ static void fault_handler(int sig, siginfo_t *si, void *uc) {
     uint64_t fa = si && si->si_addr ? (uint64_t)(uintptr_t)si->si_addr : 0;
     if ((sig == SIGSEGV || sig == SIGBUS) && lazy_commit(fa)) {  // (a guest page first touched: back it, resume)
         // Unknown ARM write intent is treated conservatively as a possible write.
-        if (plat_touch_hook) plat_touch_hook(fa - g_lo, linux_fault_write(ctx) != 0);
+        if (plat_touch_hook) plat_touch_hook(fa - g_lo, ctx_write(ctx) != 0);
         return;
     }
+    uint64_t pc = ctx_pc(ctx);
 #if defined(__aarch64__)
-    uint64_t pc = ctx->uc_mcontext.pc, lr = ctx->uc_mcontext.regs[30];
+    uint64_t lr = ctx->uc_mcontext.regs[30];
 #else
-    uint64_t pc = (uint64_t)ctx->uc_mcontext.gregs[REG_RIP];
-    uint64_t sp = (uint64_t)ctx->uc_mcontext.gregs[REG_RSP], lr = 0, end = 0;
+    uint64_t sp = ctx_sp(ctx), lr = 0, end = 0;
     if (plat_committed(sp, &end) && end - sp >= 8) lr = *(const uint64_t *)(uintptr_t)sp;
 #endif
     char what[80];
