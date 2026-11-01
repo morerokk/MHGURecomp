@@ -178,6 +178,11 @@ int main(int argc, char **argv) {
     fsr_saved.volume=37;assert(config_save(&fsr_saved,error,sizeof error));
     assert(config_editable().msaa==8 && config_editable().fxaa==1);
     assert(config_live_msaa()==1 && config_live_fxaa()==0); // Saving cannot undo FSR's AA override.
+    assert(fabsf(config_live_fsr_sharpness()-.65f)<.001f && fabsf(config_live_fsr_reactive()-.35f)<.001f);
+    fsr_saved.fsr_sharpness=.2f;fsr_saved.fsr_reactive=.5f;  // Sharpness and Reactive: live at the Save, no restart
+    assert(config_save(&fsr_saved,error,sizeof error) && !config_restart_required(&fsr_saved));
+    assert(fabsf(config_live_fsr_sharpness()-.2f)<.001f && fabsf(config_live_fsr_reactive()-.5f)<.001f);
+    assert(!config_restart_key("Sharpness") && !config_restart_key("Reactive"));
     bad=fsr_saved;bad.fsr_quality=5;assert(!config_save(&bad,error,sizeof error));
     bad=fsr_saved;bad.fsr_sharpness=NAN;assert(!config_save(&bad,error,sizeof error));
     bad=fsr_saved;bad.fsr_reactive=1.1f;assert(!config_save(&bad,error,sizeof error));

@@ -172,6 +172,8 @@ int config_live_chat_key(void);  // [Controls] ChatKey as an SDL scancode (0: no
 int config_live_bind(int bind, int slot);  // [Keybinds]: one of BIND_*'s keys (Config.binds)
 int config_live_fxaa_mode(void);
 int config_live_smooth_gradients(void);
+float config_live_fsr_sharpness(void);  // [Upscaler] Sharpness, read by each FSR dispatch (nvn/vulkan/fsr.c)
+float config_live_fsr_reactive(void);   // [Upscaler] Reactive, read by each FSR frame (nvn/vulkan/fsr.c)
 int config_live_discord(void);         // [Discord] RichPresence
 int config_live_discord_hunter(void);  // [Discord] ShowHunter
 int config_live_share_urgent(void);    // [Multiplayer] ShareUrgentCredit

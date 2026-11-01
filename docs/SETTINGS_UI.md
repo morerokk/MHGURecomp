@@ -126,7 +126,8 @@ cover the game itself.
  Graphics & Audio exposes all six
 [Upscaler] fields: FSR, quality, sharpness, object motion, reactive mask and
 animated surfaces. They persist without removing INI comments/aliases,
-participate in draft equality, dirty guards and section reset, and are marked
+participate in draft equality, dirty guards and section reset.
+Sharpness and reactive mask apply at Save (each FSR frame reads them, fsr.c run_fsr); the others are marked
 restart-only.
 
 Active FSR keeps live MSAA at 1 and FXAA off, including after saving other

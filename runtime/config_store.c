@@ -21,8 +21,8 @@ static bool have_saved, runtime_ready, runtime_fsr;
 static SDL_AtomicInt volume = {100}, confirm_exit = {1}, language = {0}, mute_in_background, window_focused = {1}, show_fps, menu_chord = {1}, show_battery;
 static SDL_AtomicInt live_fps, live_fov, live_mouse, live_draw = {0x3f800000}, live_fxaa = {1}, live_msaa = {1},
                      live_vsync = {1}, live_face, live_menu_confirm, live_background = {1}, live_combo, live_chat_key,
-                     live_fxaa_mode, live_smooth, live_discord, live_discord_hunter, live_share_urgent,
-                     live_binds[BINDS][BIND_KEYS];
+                     live_fxaa_mode, live_smooth, live_discord, live_discord_hunter, live_share_urgent, live_binds[BINDS][BIND_KEYS],
+                     live_fsr_sharpness, live_fsr_reactive;
 static void set_float(SDL_AtomicInt *slot, float value) {
     int bits; _Static_assert(sizeof bits == sizeof value, "32-bit float settings");
     memcpy(&bits, &value, sizeof bits); SDL_SetAtomicInt(slot, bits);
@@ -53,6 +53,8 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->discord != saved.discord) SDL_SetAtomicInt(&live_discord, c->discord);
     if (all || c->discord_hunter != saved.discord_hunter) SDL_SetAtomicInt(&live_discord_hunter, c->discord_hunter);
     if (all || c->share_urgent != saved.share_urgent) SDL_SetAtomicInt(&live_share_urgent, c->share_urgent);
+    if (all || c->fsr_sharpness != saved.fsr_sharpness) set_float(&live_fsr_sharpness, c->fsr_sharpness);
+    if (all || c->fsr_reactive != saved.fsr_reactive) set_float(&live_fsr_reactive, c->fsr_reactive);
     for (int i = 0; i < BINDS; i++)
         for (int k = 0; k < BIND_KEYS; k++)
             if (all || c->binds[i][k] != saved.binds[i][k]) SDL_SetAtomicInt(&live_binds[i][k], c->binds[i][k]);
@@ -99,6 +101,8 @@ int config_live_combo_window(void) { return SDL_GetAtomicInt(&live_combo); }
 int config_live_chat_key(void) { return SDL_GetAtomicInt(&live_chat_key); }
 int config_live_fxaa_mode(void) { return SDL_GetAtomicInt(&live_fxaa_mode); }
 int config_live_smooth_gradients(void) { return SDL_GetAtomicInt(&live_smooth); }
+float config_live_fsr_sharpness(void) { return get_float(&live_fsr_sharpness); }
+float config_live_fsr_reactive(void) { return get_float(&live_fsr_reactive); }
 int config_live_discord(void) { return SDL_GetAtomicInt(&live_discord); }
 int config_live_discord_hunter(void) { return SDL_GetAtomicInt(&live_discord_hunter); }
 int config_live_share_urgent(void) { return SDL_GetAtomicInt(&live_share_urgent); }
