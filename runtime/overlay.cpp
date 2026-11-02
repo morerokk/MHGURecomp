@@ -517,7 +517,11 @@ static void draw_fps(uint64_t now) {
         ms = n ? (now - t0) / 1e6f / n : 0;
         t0 = now, f0 = frames;
     }
+#ifdef __ANDROID__  // (a phone's battery: the Android tab's setting)
     int battery = config_show_battery();
+#else
+    int battery = BATTERY_OFF;
+#endif
     char charge[32];
     bool have_charge = battery != BATTERY_OFF && battery_text(now, charge, sizeof charge);
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
@@ -563,7 +567,11 @@ void overlay_frame(void *cpu) {
     bool chat = chat_composing(line, sizeof line);
     ImGuiIO &io = ImGui::GetIO();
     g_wants_text = open && io.WantTextInput;  // (as of the last frame; the window side reads it: runtime/textinput.c)
+#ifdef __ANDROID__
     bool fps = config_show_fps() || config_show_battery() == BATTERY_ALONE;
+#else
+    bool fps = config_show_fps();
+#endif
     if (!open && !free_render && !notice && !chat && !fps) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();

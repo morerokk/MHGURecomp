@@ -1062,9 +1062,11 @@ std::vector<Row> main_rows() {
         add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
         header(r, "graphics.header", tr("Graphics"));
         add_bool(r, "show.fps", "FPS counter", &c.show_fps, ini("ShowFPS"));
+#ifdef __ANDROID__
         add_choice(r, "show.battery", "Battery indicator", c.show_battery, {tr("Off"), tr("With FPS counter"), tr("By itself")},
                    [](int v) { c.show_battery = v; }, ini("ShowBattery"));
-        r.back().help = tr("The battery's charge, in the FPS counter's box or in a box of its own (drag it like the FPS counter). Shows nothing on a device without a battery.");
+        r.back().help = tr("The battery's charge, in the FPS counter's box or in a box of its own (drag it like the FPS counter).");
+#endif
         number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, ini("FPS"));
         {  // left / right: one frame per second more or less; Confirm: the common ones
             static const int presets[] = {30, 60, 90, 120, 150, 240};

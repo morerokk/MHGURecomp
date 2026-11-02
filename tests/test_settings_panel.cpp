@@ -171,7 +171,7 @@ int main() {
     io.AddKeyEvent(ImGuiKey_GamepadR1, true);
     idle(35);
     selected("volume");  // (Audio first)
-    down(4);  // (mutebg, show.fps, show.battery, fps)
+    down(3);  // (mutebg, show.fps, fps)
     selected("fps");
     io.AddKeyEvent(ImGuiKey_GamepadR1, false);
     idle();
@@ -188,7 +188,7 @@ int main() {
     confirm();
     assert(config_editable().fps == 91);
     press(ImGuiKey_Home);
-    down(4);
+    down(3);
     selected("fps");
     confirm();
     selected("choice.2");  // (91 is none of them: the one below)
@@ -199,7 +199,7 @@ int main() {
     confirm();
     assert(config_editable().fps == 60);
     press(ImGuiKey_Home);
-    down(4);
+    down(3);
     confirm();
     selected("choice.1");
     back();  // (Back closes the dropdown, nothing changed)
@@ -556,7 +556,7 @@ int main() {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     selected("volume");
-    down(12);  // (mutebg, show.fps, show.battery, fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, smooth, fsr)
+    down(11);  // (mutebg, show.fps, fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, smooth, fsr)
     selected("fsr");
     confirm();
     assert(settings_panel_dirty());

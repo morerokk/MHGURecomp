@@ -125,7 +125,7 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "ShowFPS = Off\n"
     "\n"
-    "; Show the battery's charge (in percent) in the same box as the frame rate, or in a box of its own\n"
+    "; Android only: show the battery's charge (in percent) in the same box as the frame rate, or in a box of its own\n"
     "; Off, WithFPS, ByItself\n"
     "; Default: Off\n"
     "ShowBattery = Off\n"
@@ -319,7 +319,7 @@ static const char DEFAULT_INI[] =
     "Updates = Ask\n"
     "\n"
     "[Android]\n"
-    "; The folder the save is kept in, so syncing software can keep it in step: the one that holds save_0. Empty: the app's own\n"
+    "; Android only. The folder the save is kept in, so syncing software can keep it in step: the one that holds save_0. Empty: the app's own\n"
     "; folder. Set it with Save folder in the settings menu (Android tab): the app needs Android's \"All files access\"\n"
     "; to use a folder outside its own. Takes effect at the next start\n"
     "SaveFolder =\n";
