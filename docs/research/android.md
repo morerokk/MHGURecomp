@@ -84,7 +84,9 @@ loops a second as on PC). A phone has neither cost. Measure on a phone.
    (the game's entries, the chat, a Forge plugin's field: textinput.c), not for the settings menu with its own keys.
 4. (done) pipelines.list and bonus/system: in the APK's assets, copied into the app's folder at start (android.c:
    pipelines.list whenever it differs, bonus/system only when missing); exec.c reads pipelines.list from there.
-5. (done) Getting the game files and saves onto a phone: Android/data can't be reached from a phone's own file
+5. (done) Getting the game files and saves onto a phone and out again (the settings menu's Android tab; Save folder
+   keeps the save in a folder the player picked, for Syncthing: the picker's tree id is turned into a /storage path,
+   which takes MANAGE_EXTERNAL_STORAGE, "All files access"; config.save_dir, ui.c ui_init): Android/data can't be reached from a phone's own file
    managers since Android 11, only over USB (MTP) or adb. The app imports them itself through the Storage Access
    Framework (android/java: ImportActivity.java, started from runtime/platform/android.c): the game files from a
    folder the player picks (offered at the start when they are missing or wrong, and in the settings menu), a save's

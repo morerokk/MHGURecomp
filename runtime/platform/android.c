@@ -85,13 +85,24 @@ void android_error_box(const char *msg) {
 
 // ------------------------------------------------------------------ importing the game files or a save
 // The system's file picker and the copy are Java's (android/java: ImportActivity.java), which has its own dialogs;
-// this waits until it is done. 1: game files (into the data folder), 2: a save (into save/save_0). running: the game
-// has started (the app closes after the import). true when the files were copied in.
+// this waits until it is done. 1: game files (into the data folder), 2: a save (into save/save_0), 3: the save out to a
+// folder, 4: choose the folder to keep the save in (its path: android_take_picked). running: the game has started
+// (the app closes after 1 and 2). true when it was done.
 
 static const char *absolute(const char *dir, char *buf, size_t size) {
     if (dir[0] == '/') return dir;
     snprintf(buf, size, "%s/%s", android_home(), dir);
     return buf;
+}
+
+static char picked_path[1100];
+static SDL_AtomicInt picked_ready;
+
+// The folder chosen by the last import of kind 4, once.
+bool android_take_picked(char *out, size_t size) {
+    if (!SDL_CompareAndSwapAtomicInt(&picked_ready, 1, 0)) return false;
+    snprintf(out, size, "%s", picked_path);
+    return true;
 }
 
 bool android_import(int what, bool running) {
@@ -109,17 +120,29 @@ bool android_import(int what, bool running) {
     jclass c = (jclass)(*env)->CallObjectMethod(env, loader, (*env)->GetMethodID(env, lc, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;"), name);
     jmethodID begin = c ? (*env)->GetStaticMethodID(env, c, "begin", "(Landroid/app/Activity;ILjava/lang/String;Z)V") : NULL;
     jmethodID state = c ? (*env)->GetStaticMethodID(env, c, "state", "()I") : NULL;
+    jmethodID pickedm = c ? (*env)->GetStaticMethodID(env, c, "picked", "()Ljava/lang/String;") : NULL;
     int result = 3;
-    if ((*env)->ExceptionCheck(env) || !begin || !state) {
+    if ((*env)->ExceptionCheck(env) || !begin || !state || !pickedm) {
         (*env)->ExceptionClear(env);
         LOG("[android] the import isn't in this APK\n");
     } else {
-        LOG("[android] importing %s into %s\n", what == 1 ? "the game files" : "a save", folder);
+        LOG("[android] %s: %s\n", what == 1 ? "importing the game files into" : what == 2 ? "importing a save into" :
+            what == 3 ? "exporting the save from" : "choosing the save folder, now", folder);
         jstring dir = (*env)->NewStringUTF(env, folder);
         (*env)->CallStaticVoidMethod(env, c, begin, act, (jint)what, dir, (jboolean)running);
         if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
         else while ((result = (*env)->CallStaticIntMethod(env, c, state)) == 0) SDL_Delay(100);
         (*env)->DeleteLocalRef(env, dir);
+        if (what == 4 && result == 1) {
+            jstring str = (jstring)(*env)->CallStaticObjectMethod(env, c, pickedm);
+            const char *chars = str ? (*env)->GetStringUTFChars(env, str, NULL) : NULL;
+            if (chars && *chars) {
+                snprintf(picked_path, sizeof picked_path, "%s", chars);
+                SDL_SetAtomicInt(&picked_ready, 1);
+            }
+            if (chars) (*env)->ReleaseStringUTFChars(env, str, chars);
+            if (str) (*env)->DeleteLocalRef(env, str);
+        }
         LOG("[android] import %s\n", result == 1 ? "done" : result == 2 ? "cancelled" : "failed");
     }
     (*env)->DeleteLocalRef(env, name);

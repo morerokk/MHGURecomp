@@ -485,9 +485,27 @@ static void draw_chat(const char *line, uint64_t now, float scale) {
     dl->AddText(font, size, ImVec2(p0.x + bar + pad, p0.y + pad), ink, text.c_str(), nullptr, wrap);
 }
 
+// The battery's charge, "87%" ("87% +" while charging); false when there is no battery to tell of (a desktop PC). Asked
+// every few seconds: SDL goes through Java on Android.
+static bool battery_text(uint64_t now, char *out, size_t size) {
+    static uint64_t last;
+    static int percent = -1;
+    static bool charging;
+    if (!last || now - last >= 5000000000ull) {
+        last = now;
+        int secs;
+        SDL_PowerState st = SDL_GetPowerInfo(&secs, &percent);
+        charging = st == SDL_POWERSTATE_CHARGING || st == SDL_POWERSTATE_CHARGED;
+        if (st == SDL_POWERSTATE_NO_BATTERY || st == SDL_POWERSTATE_ERROR) percent = -1;
+    }
+    if (percent < 0) return false;
+    snprintf(out, size, "%d%%%s", percent, charging ? " +" : "");
+    return true;
+}
+
 // The frame rate ([Performance] ShowFPS): frames the game presented, counted over half a second. An ImGui window of
 // its own, so it can be dragged while the settings menu (which gets the mouse) is open; ImGui keeps where it was put in
-// forge_imgui.ini
+// forge_imgui.ini. With ShowBattery = WithFPS the battery's charge is in it; ByItself: a window of its own.
 static void draw_fps(uint64_t now) {
     static uint64_t t0, f0;
     static float fps, ms;
@@ -499,12 +517,26 @@ static void draw_fps(uint64_t now) {
         ms = n ? (now - t0) / 1e6f / n : 0;
         t0 = now, f0 = frames;
     }
-    ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowBgAlpha(0.6f);
+    int battery = config_show_battery();
+    char charge[32];
+    bool have_charge = battery != BATTERY_OFF && battery_text(now, charge, sizeof charge);
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                              ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
-    if (ImGui::Begin("FPS##counter", nullptr, flags)) ImGui::Text("%.0f FPS  %.1f ms", fps, ms);
-    ImGui::End();
+    if (config_show_fps()) {
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.6f);
+        if (ImGui::Begin("FPS##counter", nullptr, flags)) {
+            if (have_charge && battery == BATTERY_WITH_FPS) ImGui::Text("%.0f FPS  %.1f ms  %s", fps, ms, charge);
+            else ImGui::Text("%.0f FPS  %.1f ms", fps, ms);
+        }
+        ImGui::End();
+    }
+    if (have_charge && battery == BATTERY_ALONE) {
+        ImGui::SetNextWindowPos(ImVec2(10, 50), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.6f);
+        if (ImGui::Begin("Battery##counter", nullptr, flags)) ImGui::Text("%s", charge);
+        ImGui::End();
+    }
 }
 
 // ------------------------------------------------------------------ frames (game thread)
@@ -531,7 +563,7 @@ void overlay_frame(void *cpu) {
     bool chat = chat_composing(line, sizeof line);
     ImGuiIO &io = ImGui::GetIO();
     g_wants_text = open && io.WantTextInput;  // (as of the last frame; the window side reads it: runtime/textinput.c)
-    bool fps = config_show_fps();
+    bool fps = config_show_fps() || config_show_battery() == BATTERY_ALONE;
     if (!open && !free_render && !notice && !chat && !fps) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();

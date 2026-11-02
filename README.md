@@ -163,10 +163,23 @@ Everything lives in that `files` folder. Its contents match the PC version's gam
 | Mods, cheats | `mods/`, `cheats/` |
 | Shader cache | `cache/` |
 
-To bring a save over, put its `system` and `system_backup` files anywhere on the device and use **Import save** in
-the settings menu (Menu Options, Files): pick both files, and the app copies them in, keeping your current save in
-`save/save_0.before-import-<date>`. The app closes afterwards; start it again to play. (Over USB you can also put the
-two files in `save/save_0/` yourself.) From the PC version, copy the
+The settings menu has an **Android** tab (the last one) for what the device's file managers can't do in
+`Android/data`:
+
+- **Import save:** pick the `system` and `system_backup` files from anywhere on the device. The app copies them in,
+  keeping your current save in `save/save_0.before-import-<date>`, and closes; start it again to play. (Over USB you
+  can also put the two files in `save/save_0/` yourself.)
+- **Export save:** copies the save's two files out to a folder you pick, as a backup or to move it elsewhere.
+- **Save folder:** keeps the save in a folder you pick (the one that holds `save_0`), so an app like Syncthing can
+  sync it between devices: pick the same folder on each. Android asks you to allow "All files access" for it, since
+  the app reads and writes that folder itself. Press Save and start the app again. Your current save isn't moved: use
+  **Export save** first to put it in the folder. **Use the app's folder** goes back to the default.
+- **Import game files:** the same import as at the first start (see above), for replacing the game files.
+
+The FPS counter has a **Battery indicator** next to it (Graphics & Audio): off, in the FPS counter's box, or in a box of
+its own.
+
+There is no Restart in the menu on Android (the app can't start itself again): use Exit game and open it again. From the PC version, copy the
 contents of `%APPDATA%\MHGURecomp\save\save_0\` (Linux: `~/.local/share/MHGURecomp/save/save_0/`). From a Switch,
 use the same files you'd use on PC. Copy `save/save_0/` back to your PC now and then as a backup.
 

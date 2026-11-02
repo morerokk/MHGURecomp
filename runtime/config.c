@@ -25,7 +25,7 @@
     {SDL_SCANCODE_Q}, {SDL_SCANCODE_E}, {SDL_SCANCODE_TAB}, {SDL_SCANCODE_T}, {SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER}, \
     {SDL_SCANCODE_BACKSPACE}, {SDL_SCANCODE_UP}, {SDL_SCANCODE_DOWN}, {SDL_SCANCODE_LEFT}, {SDL_SCANCODE_RIGHT},          \
     {SDL_SCANCODE_LCTRL, SDL_SCANCODE_RCTRL}, {SDL_SCANCODE_LALT, SDL_SCANCODE_RALT}, {KEY_WHEEL_UP}, {KEY_WHEEL_DOWN}}
-#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 0, 1, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS, THEME_HUNTER, 1, 1, 0
+#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 0, 1, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS, THEME_HUNTER, 1, 1, 0, BATTERY_OFF, ""
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
@@ -124,6 +124,11 @@ static const char DEFAULT_INI[] =
     "; Show the frame rate (FPS) in a small box on the screen. Drag it with the mouse while the settings menu is open\n"
     "; Default: Off\n"
     "ShowFPS = Off\n"
+    "\n"
+    "; Show the battery's charge (in percent) in the same box as the frame rate, or in a box of its own\n"
+    "; Off, WithFPS, ByItself\n"
+    "; Default: Off\n"
+    "ShowBattery = Off\n"
     "\n"
     "; Framerate cap\n"
     "; Between 30 and 240\n"
@@ -311,7 +316,13 @@ static const char DEFAULT_INI[] =
     "; install it without asking, or only start the game. Starting mhgurecomp itself never checks or updates.\n"
     "; Ask, Auto, Off\n"
     "; Default: Ask\n"
-    "Updates = Ask\n";
+    "Updates = Ask\n"
+    "\n"
+    "[Android]\n"
+    "; The folder the save is kept in, for syncing it (Syncthing...): the one that holds save_0. Empty: the app's own\n"
+    "; folder. Set it with Save folder in the settings menu (Android tab): the app needs Android's \"All files access\"\n"
+    "; to use a folder outside its own. Takes effect at the next start\n"
+    "SaveFolder =\n";
 
 void config_path(char *buf, size_t size) {
     const char *e = getenv("MHGU_CONFIG");
@@ -398,6 +409,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_FSR "Invalid FSR quality, sharpness or reactive mask."
 #define ERR_NET "Invalid port or Join address list (no newlines, ';' or '#')."
 #define ERR_SERVER "Invalid hub server or matchmaking key (no newlines, ';' or '#')."
+#define ERR_FOLDER "Invalid save folder (one line, no ';' or '#')."
 #define ERR_HP "HP factors must be 0.05-20."
 #define ERR_VILLAGE "Invalid village HP or quest override count."
 #define ERR_CONFIRM "Invalid menu confirmation policy."
@@ -433,6 +445,7 @@ const ConfigSetting g_settings[] = {
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
     ON_OFF("Performance", "ShowFPS", show_fps, false),
+    {"Performance", "ShowBattery", SET_CHOICE, F(show_battery), 0, 0, 0, "Off,WithFPS,ByItself", NULL, false, ERR_MISC},
     {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, 30, 240, NULL, NULL, false, ERR_MISC},
     ON_OFF("Performance", "VSync", vsync, false),
     ON_OFF("Performance", "ShaderPrewarm", shader_prewarm, true),
@@ -450,6 +463,7 @@ const ConfigSetting g_settings[] = {
     KEYS("DpadLeft", BIND_DPAD_LEFT), KEYS("DpadRight", BIND_DPAD_RIGHT), KEYS("LeftStickClick", BIND_LSTICK),
     KEYS("RightStickClick", BIND_RSTICK), KEYS("ItemLeft", BIND_ITEM_LEFT), KEYS("ItemRight", BIND_ITEM_RIGHT),
     {"Multiplayer", "Port", SET_INT, F(ldn_port), 0, 1, 65535, NULL, NULL, true, ERR_NET},
+    {"Android", "SaveFolder", SET_TEXT, F(save_dir), sizeof g_config.save_dir, 0, 0, NULL, NULL, true, ERR_FOLDER},
     {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, true, ERR_NET},
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},
