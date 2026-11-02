@@ -6,6 +6,8 @@ package io.github.morerokk.mhgurecomp;
 
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -18,12 +20,37 @@ public class MHGUActivity extends SDLActivity {
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         hideBars();
+        hideBarsSoon();
     }
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) hideBars();  // (back from a picker, the notification shade, the keyboard...)
+        if (hasFocus) { hideBars(); hideBarsSoon(); }  // (back from a picker, the notification shade, the keyboard...)
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        hideBars();
+    }
+
+    // Some devices (handhelds with their own Android builds) show the bar again a moment after the window appears, after the
+    // first hide: SDL sets its own flags when it creates the window. So hide once more shortly after the start and each time the
+    // window comes back.
+    private final Handler later = new Handler(Looper.getMainLooper());
+    private final Runnable again = new Runnable() {
+        @Override
+        public void run() {
+            hideBars();
+        }
+    };
+
+    private void hideBarsSoon() {
+        later.removeCallbacks(again);
+        later.postDelayed(again, 300);
+        later.postDelayed(again, 1000);
+        later.postDelayed(again, 3000);
     }
 
     private void hideBars() {
