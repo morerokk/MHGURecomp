@@ -319,7 +319,7 @@ static const char DEFAULT_INI[] =
     "Updates = Ask\n"
     "\n"
     "[Android]\n"
-    "; The folder the save is kept in, for syncing it (Syncthing...): the one that holds save_0. Empty: the app's own\n"
+    "; The folder the save is kept in, so syncing software can keep it in step: the one that holds save_0. Empty: the app's own\n"
     "; folder. Set it with Save folder in the settings menu (Android tab): the app needs Android's \"All files access\"\n"
     "; to use a folder outside its own. Takes effect at the next start\n"
     "SaveFolder =\n";

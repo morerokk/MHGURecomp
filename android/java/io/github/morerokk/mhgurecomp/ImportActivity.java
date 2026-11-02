@@ -1,7 +1,7 @@
 // Copies the game files or a save into the app's folder from a folder or files the player picks (the system's own
 // picker: any folder on the device, an SD card, Downloads...). Android/data can't be written by the player's file
 // managers since Android 11, and files the app made there can't be replaced by them: the app copies them in itself.
-// Also the other way, a save out to a folder (EXPORT), and a folder to keep the save in (FOLDER: a Syncthing folder,
+// Also the other way, a save out to a folder (EXPORT), and a folder to keep the save in (FOLDER: a folder syncing software keeps in step,
 // say; the app then reads and writes the save there itself, which takes Android's "All files access").
 //
 // Started by runtime/platform/android.c (begin), which waits for state() to leave RUNNING. Its own window is see
@@ -89,8 +89,8 @@ public class ImportActivity extends Activity {
             ? "Pick the folder to copy your save's system and system_backup files into (for example in Download). "
               + "Files of those names that are already there are replaced."
             : "Pick the folder the save is kept in from now on: the one that holds (or will hold) save_0, as the PC "
-              + "version's save folder does. Made for syncing the save with an app like Syncthing: point both at the "
-              + "same folder. The app reads and writes it itself, so Android asks you to allow \"All files access\" "
+              + "version's save folder does. Made so syncing software can keep the save the same on your devices: point it at the "
+              + "same folder on each. The app reads and writes it itself, so Android asks you to allow \"All files access\" "
               + "for it. Your current save is not moved: use Export save first if you want it there.";
         if (closes && mode <= SAVE) text += "\n\nThe app closes when the import is done: start it again to play.";
         dialog().setTitle(title()).setMessage(text)

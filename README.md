@@ -170,8 +170,8 @@ The settings menu has an **Android** tab (the last one) for what the device's fi
   keeping your current save in `save/save_0.before-import-<date>`, and closes; start it again to play. (Over USB you
   can also put the two files in `save/save_0/` yourself.)
 - **Export save:** copies the save's two files out to a folder you pick, as a backup or to move it elsewhere.
-- **Save folder:** keeps the save in a folder you pick (the one that holds `save_0`), so an app like Syncthing can
-  sync it between devices: pick the same folder on each. Android asks you to allow "All files access" for it, since
+- **Save folder:** keeps the save in a folder you pick (the one that holds `save_0`), so file syncing software
+  can keep it in step between devices: pick the same folder on each. Android asks you to allow "All files access" for it, since
   the app reads and writes that folder itself. Press Save and start the app again. Your current save isn't moved: use
   **Export save** first to put it in the folder. **Use the app's folder** goes back to the default.
 - **Import game files:** the same import as at the first start (see above), for replacing the game files.
