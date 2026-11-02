@@ -940,6 +940,16 @@ the unwinder's backtrace; umask 007; the startup messages name the Android folde
 VulkanMemoryAllocator 3.4.0's header vendored in third_party/vk_mem_alloc (the Windows build keeps MSYS2's). Windows
 rebuilt and quick-hunted after it: unchanged.
 
+## Vulkan 1.1 path (2026-11-02, branch feat/vulkan-1.1)
+
+The backend now also runs on Vulkan 1.1 devices, which many Android devices are stuck on: `g_vk.api11` (device below
+1.2, or `MHGU_VK11=1`) and `g_vk.fences` (no timeline semaphores). A Vulkan 1.2 device takes neither branch: same features,
+timeline semaphore and SPIR-V as before, and its cache/spirv keys are unchanged. On api11: a fence per submission
+(exec.c), SPIR-V 1.3 in its own cache keys (shaders.c), no 1.2 feature structures (device.c), no FSR 3.1 (fsr.c).
+`MHGU_DATA_DIR=<folder>` puts only the game files elsewhere, e.g. on a USB drive (main.c). Results: R9 270X 53.6 fps
+(1.2) and 53.7 fps (1.1, forced) over 14 minutes of quest 101, same picture; Shield TV Pro 2019 (first real device,
+Vulkan 1.1.178, 3 GB): 41-45 fps at 1080p, 0 of 5518 programs failed. Details: docs/research/android.md "Vulkan 1.1".
+
 ## FSR 4 removed (2026-11-01)
 
 `Upscaler = FSR4` is gone: fsr4.c / fsr4.h, third_party/ffx-api, docs/FSR4-PORT.md, the FSR4_DRIVER_PATCH build option

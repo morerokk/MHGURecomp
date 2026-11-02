@@ -175,6 +175,8 @@ int main(int argc, char **argv) {
             if (s2 > s) s = s2;
             if (s) *s = 0, snprintf(data, sizeof data, "%s/data", exe);
         }
+        // (MHGU_DATA_DIR: the game files elsewhere, e.g. on a USB drive; on Android from env.txt)
+        if (getenv("MHGU_DATA_DIR")) snprintf(data, sizeof data, "%s", getenv("MHGU_DATA_DIR"));
         g_game_dir = data;
         mods_make_dir();
         cheats_make_dir();

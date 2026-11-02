@@ -9,6 +9,11 @@ as on PC (also with BC textures decoded on the CPU, as a phone needs); the intro
 phone, controls by hand, sound, multiplayer, pausing / resuming the app. Released from 0.13.0 on (make dist, below);
 the player's side is README.md "Android".
 
+Status (2026-11-02, branch feat/vulkan-1.1): first real device, an NVIDIA Shield TV Pro 2019 (Tegra X1+, Android 11, 3 GB
+RAM, Vulkan 1.1.178): the arm64 build boots, translates its shaders and quick-hunts into quest 101, drawn correctly,
+41-45 fps in the hunt at 1080p with FXAA. Still not tried by hand: controls, sound, multiplayer, pausing / resuming. See
+"Vulkan 1.1" below.
+
 ## Building and running
 
 Needs the Android SDK (default /c/Android/Sdk, or ANDROID_HOME) with `ndk`, `cmake`, `build-tools`,
@@ -60,10 +65,10 @@ loops a second as on PC). A phone has neither cost. Measure on a phone.
   SDL_main.h on Android). The runtime then loads libmhgugame.so by name (runtime/gamelib.c), which is linked against
   libmain.so for the runtime's functions. Libraries are stored uncompressed and 16 KB aligned
   (extractNativeLibs="false", zipalign -P 16, linked with max-page-size 16384), without their debug info (the build
-  folder keeps them whole). android/AndroidManifest.xml: landscape, controller / keyboard, Vulkan 1.2, network
+  folder keeps them whole). android/AndroidManifest.xml: landscape, controller / keyboard, Vulkan 1.1, network
   permissions for multiplayer. Signed with the SDK's debug key (~/.android/debug.keystore).
 - minSdk 29 (Android 10), targetSdk the newest installed platform (35). What decides whether a phone runs the game is
-  its GPU driver (Vulkan 1.2, timeline semaphores, shaderInt64), not the Android version; nothing in the runtime needs
+  its GPU driver (Vulkan 1.1, shaderInt64), not the Android version; nothing in the runtime needs
   a newer API (execinfo's backtrace() is Android 13+: the unwinder's _Unwind_Backtrace instead).
 - runtime/platform/linux.c serves Android too, with android.c for the app's folder (SDL_GetAndroidExternalStoragePath),
   env.txt and the message box. `umask(007)` at start: Android gives apps 077, and folders the game made (save, mods,
@@ -77,7 +82,8 @@ loops a second as on PC). A phone has neither cost. Measure on a phone.
 
 ## Left to do
 
-1. A real phone (arm64): the fault handler's arm64 path, performance, thermal throttling, a mobile GPU's driver.
+1. A real phone (arm64): performance, thermal throttling, a mobile GPU's driver (Adreno, Mali). The fault handler's
+   arm64 path works (Shield TV, see "Vulkan 1.1").
 2. Shader int64: every translated shader has `#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require`
    (maxwell/translate.c), while device.c only logs a warning without shaderInt64. Not every phone driver has it: there
    every pipeline would fail. Check the target GPUs (gpuinfo.org), or make the translator do without int64.
@@ -129,8 +135,37 @@ the hunt and the village look the same as with the GPU's decode, on PC and in th
 2x (BC4 / BC5) to 8x (BC1) the memory of the compressed ones. If that hurts: transcode to ETC2 (which every phone GPU
 samples), or decode in a compute shader.
 
+## Vulkan 1.1 (2026-11-02)
+
+Many Android devices stay on Vulkan 1.1, so the backend runs there too. Everything hangs on `g_vk.api11` (the device
+is below Vulkan 1.2, or `MHGU_VK11=1`) and `g_vk.fences` (no timeline semaphores: always with api11); on a Vulkan 1.2
+device neither is set and the same Vulkan calls and shaders are made as before.
+
+- Submissions: a fence per submission keeps the numbers (exec.c): a signalled fence also covers everything submitted
+  before it, as a timeline value does.
+- Shaders: SPIR-V 1.3 instead of 1.5, in other files of cache/spirv/. The translated GLSL needs nothing newer.
+- Features: VkPhysicalDevice16BitStorageFeatures for what the Vulkan11 / Vulkan12 structures held; sampler mirror clamp
+  from VK_KHR_sampler_mirror_clamp_to_edge (without it: mirrored repeat). shaderInt8 and scalarBlockLayout aren't asked for.
+- FSR 3.1 stays off (fsr.c says so in the log and the picture is scaled from the smaller 3D size). The other picture
+  settings are unchanged. A PC with both picks a Vulkan 1.2 GPU over a 1.1 one.
+- `MHGU_VK11=1` takes this path on a PC. R9 270X, Windows, quest 101, 14 minutes each: 53.6 fps on the 1.2 path, 53.7
+  on the 1.1 path, the same picture, nothing in the log.
+
+Measured on the Shield TV Pro 2019 (BC textures native, D24S8, 1080p, FXAA, no MSAA): 41-45 fps in quest 101, render
+thread ~1.4 s of every 2 s (~600 MB of guest memory copied in that time, so it is CPU bound there, not GPU). First start:
+the prewarm translated 5518 programs in 138 s, 0 failed, 29-35 fps meanwhile; cache/ 343 MB. Peak resident 1.15 GB (887 MB
+without the prewarm), 620 MB still available to the system, no crash in 9 minutes. `[vk] no page write tracking (-1)` in
+its log: textures are checked by hashing, which may be part of that CPU time.
+
+Android TV notes: the manifest has no LEANBACK_LAUNCHER entry, so the app isn't on the TV's home screen (Settings > Apps,
+or `adb shell am start -n io.github.morerokk.mhgurecomp/.MHGUActivity`). The game files need 12.3 GB, more than a Shield
+has free, and on a USB drive set up as portable storage adb can't create files in the app's own Android/data folder. For
+the test: a folder at the drive's top, `adb shell appops set io.github.morerokk.mhgurecomp MANAGE_EXTERNAL_STORAGE allow`,
+and `MHGU_DATA_DIR=/storage/<volume>/<folder>/data` in env.txt (only the game files move; everything else stays in
+the app's folder). Players have no such way yet.
+
 ## Open questions
 
-- Minimum device: arm64; Android 10+, Vulkan 1.2 with timeline semaphores and shaderInt64; roughly Snapdragon 865 /
+- Minimum device: arm64; Android 10+, Vulkan 1.1 with shaderInt64; a Shield TV (3 GB RAM) runs it; other devices roughly Snapdragon 865 /
   Adreno 650 class or better, 6 GB RAM.
 - Multiplayer works the same over Wi-Fi (Local Play over IP; the internet hubs plan in internet-hubs.md).

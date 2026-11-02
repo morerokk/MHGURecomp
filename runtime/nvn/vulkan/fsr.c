@@ -1845,6 +1845,7 @@ void vk_fsr_init(void) {
     if (!g_config.fsr || !g_fsr_output[0]) return;
     rw = g_render_size[0], rh = g_render_size[1], ow = g_fsr_output[0], oh = g_fsr_output[1];
     logging = getenv("MHGU_FSR_LOG") != NULL;
+    if (g_vk.api11) { LOG("[fsr] FSR 3.1 needs Vulkan 1.2: FSR off, the picture is scaled from %ux%u\n", rw, rh); return; }
     FfxVkPortableDeviceCapabilities caps = {.structSize = sizeof caps};
     if (ffxVkPortableQueryDeviceCapabilities(g_vk.phys, &caps) != FFX_VK_PORTABLE_OK || !caps.fsr3ComputePrerequisites ||
         !g_vk.fsr_storage_wo_format) {
