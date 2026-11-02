@@ -45,7 +45,7 @@ Status: fully playable, but there may be some bugs. I've played a dozen hunts wi
 - Android (experimental, see [Android](#android)). For android, you need:
     - A 64-bit ARM device (this should be the vast majority of devices)
     - Android 10+
-    - Vulkan 1.2 support
+    - Vulkan 1.1 support (FSR needs Vulkan 1.2)
     - A controller, or a virtual controller overlay app
 - The game files for Monster Hunter Generations Ultimate, version 1.4.0. You can extract these from your Switch or Ryujinx with patches pre-applied.
     - (Title ID `0100770008DD8000`, the `main` executable's build ID starts with `FB08F1D20FD1204F`)
@@ -109,8 +109,8 @@ To import your existing saves from the Switch, put the `system` and `system_back
 
 **The Android version is experimental!** You need:
 
-- A phone or tablet with a 64-bit ARM processor, Android 10 or newer, and a GPU driver with Vulkan 1.2. Expect a
-  recent mid-range or high-end device (Snapdragon 865 or better) with 6 GB of RAM or more.
+- A phone or tablet with a 64-bit ARM processor, Android 10 or newer, and a GPU driver with Vulkan 1.1 (FSR needs
+  Vulkan 1.2). Expect a recent mid-range or high-end device (Snapdragon 865 or better) with 6 GB of RAM or more.
 - A controller (Bluetooth or USB). There are no touch controls.
 - About 13 GB of free storage for the game files (26 GB while the app copies them in from another folder).
 

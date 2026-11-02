@@ -1,4 +1,4 @@
-// GLSL -> SPIR-V (shaderc, Vulkan 1.2 environment), descriptor layouts from the SPIR-V itself, built-in shaders.
+// GLSL -> SPIR-V (shaderc, Vulkan 1.2 environment; g_vk.api11: 1.1), descriptor layouts from the SPIR-V itself, built-in shaders.
 // Ported from LAS Recomp's runtime/nvn/vulkan/shaders.c (without its post-processing passes).
 #include <pthread.h>
 #include <shaderc/shaderc.h>
@@ -134,6 +134,7 @@ static void inc_release(void *ud, shaderc_include_result *r) { (void)ud; free(r)
 static uint32_t *glsl_compile(const char *src, size_t srclen, int stage, const char *name, const char *const *defs, int ndefs,
                               VkGlslInclude inc, uint64_t salt, int opt, size_t *nwords) {
     uint64_t h = src_hash(src, srclen, stage);
+    if (g_vk.api11) h ^= 0x11;  // (SPIR-V 1.3: a Vulkan 1.1 device can't use the files made for 1.2, nor the other way)
     if (ndefs || inc) {  // (plain callers keep their old keys)
         h ^= salt * 0x9E3779B97F4A7C15ull + 1 + (uint64_t)opt;
         for (int i = 0; i < ndefs; i++)
@@ -146,7 +147,7 @@ static uint32_t *glsl_compile(const char *src, size_t srclen, int stage, const c
     static __thread shaderc_compiler_t comp;
     if (!comp) comp = shaderc_compiler_initialize();
     shaderc_compile_options_t o = shaderc_compile_options_initialize();
-    shaderc_compile_options_set_target_env(o, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_2);
+    shaderc_compile_options_set_target_env(o, shaderc_target_env_vulkan, g_vk.api11 ? shaderc_env_version_vulkan_1_1 : shaderc_env_version_vulkan_1_2);
     shaderc_compile_options_set_optimization_level(o, ndefs || inc ? opt ? shaderc_optimization_level_size : shaderc_optimization_level_zero
                                                    : getenv("MHGU_VK_OPT") ? shaderc_optimization_level_performance
                                                                            : shaderc_optimization_level_zero);

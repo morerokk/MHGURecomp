@@ -6,7 +6,7 @@
     package="io.github.morerokk.mhgurecomp"
     android:installLocation="auto">
 
-    <uses-feature android:name="android.hardware.vulkan.version" android:version="0x402000" android:required="true" />
+    <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
