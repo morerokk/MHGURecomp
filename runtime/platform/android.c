@@ -224,7 +224,12 @@ bool android_offer_import(const char *msg, char *data, size_t size) {
     };
     const SDL_MessageBoxData box = {SDL_MESSAGEBOX_INFORMATION, NULL, "MHGU Recomp", text, 3, buttons, NULL};
     int pressed = 0;
-    if (!SDL_ShowMessageBox(&box, &pressed)) return false;
+    if (!SDL_ShowMessageBox(&box, &pressed)) {
+        // (the box could not be shown: do not leave the player with the plain error and a closing app, go straight to the
+        // folder picker)
+        LOG("[android] the first-start box could not be shown (%s): opening the folder picker for the game files\n", SDL_GetError());
+        pressed = 1;
+    }
     if (pressed == 1 && android_import(1, false)) {
         snprintf(data, size, "data");
         return true;
