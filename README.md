@@ -313,10 +313,14 @@ If you are newer to the game, I very strongly recommend the [Key Quest Markers](
 
 **[Join the MHGU Mod Community Discord server!](https://discord.gg/mdNPWfKBXf)**
 
-**Good places to get mods:**
+**Places to Get Mods:**
 
-- [The MHGURecomp-Mods repo](https://github.com/Oddity-git/MHGURecomp-mods)
-- [GameBanana](https://gamebanana.com/mods/games/17088)
+- [The MHGURecomp-Mods Repo](https://github.com/Oddity-git/MHGURecomp-mods)
+- [MHGU GameBanana](https://gamebanana.com/mods/games/17088)
+
+**Additional Modding Resources:**
+- [MHGU-Modding Wiki](https://github.com/RTHKKona/MHGU-Modding/wiki)
+- [Fexty's Forge](https://github.com/Fexty12573/forge)
 
 ### Cheats
 
