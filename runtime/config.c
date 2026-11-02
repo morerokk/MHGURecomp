@@ -26,57 +26,71 @@
     {SDL_SCANCODE_BACKSPACE}, {SDL_SCANCODE_UP}, {SDL_SCANCODE_DOWN}, {SDL_SCANCODE_LEFT}, {SDL_SCANCODE_RIGHT},          \
     {SDL_SCANCODE_LCTRL, SDL_SCANCODE_RCTRL}, {SDL_SCANCODE_LALT, SDL_SCANCODE_RALT}, {KEY_WHEEL_UP}, {KEY_WHEEL_DOWN}}
 #define CONFIG_DEFAULT_VALUES                                                                       \
+    /* [Display] */                                                                                 \
     .display_mode = DISPLAY_BORDERLESS,                                                             \
     .width = 1920,                                                                                  \
     .height = 1080,                                                                                 \
     .render_w = 0,                                                                                  \
     .render_h = 0,                                                                                  \
-    .fps = 60,                                                                                      \
-    .vsync = 1,                                                                                     \
-    .msaa = 1,                                                                                      \
-    .fxaa = 1,                                                                                      \
-    .face_buttons = FACE_POSITION,                                                                  \
-    .ldn_port = 39500,                                                                              \
-    .ldn_join = "",                                                                                 \
-    .sync_small_monsters = 1,                                                                       \
-    .bonus_content = 1,                                                                             \
-    .village_in_hub = 1,                                                                            \
-    .share_urgent = 1,                                                                              \
-    .hp = {{1, 1, 1, 1}, 2},                                                                        \
-    .mouse_sensitivity = 1.0f,                                                                      \
     .aspect_ratio = 0.0f,                                                                           \
     .fov = 1.0f,                                                                                    \
     .ui_anchor = UI_CENTER,                                                                         \
-    .background_input = 1,                                                                          \
-    .volume = 100,                                                                                  \
-    .button_icons = 0,                                                                              \
-    .language = 0,                                                                                  \
-    .menu_scale = 100,                                                                              \
-    .menu_confirm = MENU_CONFIRM_ORIGINAL,                                                          \
-    .confirm_exit = 1,                                                                              \
+    /* [Anti-aliasing] */                                                                           \
+    .msaa = 1,                                                                                      \
+    .fxaa = 1,                                                                                      \
+    .fxaa_mode = FXAA_ORIGINAL,                                                                     \
+    /* [Upscaler] */                                                                                \
     .fsr = 0,                                                                                       \
     .fsr_quality = FSR_NATIVE,                                                                      \
     .fsr_sharpness = 0.8f,                                                                          \
     .fsr_objmotion = 1,                                                                             \
     .fsr_reactive = 0.9f,                                                                           \
     .fsr_animsurf = 1,                                                                              \
-    .updates = UPDATES_ASK,                                                                         \
-    .shader_prewarm = 1,                                                                            \
+    /* [Graphics] */                                                                                \
     .draw_distance = 1.0f,                                                                          \
-    .mute_in_background = 0,                                                                        \
+    .smooth_gradients = 0,                                                                          \
+    /* [Performance] */                                                                             \
+    .show_fps = 0,                                                                                  \
+    .show_battery = BATTERY_OFF,                                                                    \
+    .fps = 60,                                                                                      \
+    .vsync = 1,                                                                                     \
+    .shader_prewarm = 1,                                                                            \
+    /* [Controls] */                                                                                \
+    .face_buttons = FACE_POSITION,                                                                  \
+    .menu_confirm = MENU_CONFIRM_ORIGINAL,                                                          \
+    .background_input = 1,                                                                          \
     .combo_window = COMBO_LENIENT,                                                                  \
+    .chat_key = "/",                                                                                \
+    .menu_chord = 1,                                                                                \
+    /* [Mouse] */                                                                                   \
+    .mouse_sensitivity = 1.0f,                                                                      \
+    /* [Keybinds] */                                                                                \
+    .binds = DEFAULT_BINDS,                                                                         \
+    /* [Multiplayer] */                                                                             \
+    .ldn_port = 39500,                                                                              \
+    .ldn_join = "",                                                                                 \
     .ldn_server = "",                                                                               \
     .ldn_key = "",                                                                                  \
-    .chat_key = "/",                                                                                \
-    .fxaa_mode = FXAA_ORIGINAL,                                                                     \
-    .smooth_gradients = 0,                                                                          \
-    .binds = DEFAULT_BINDS,                                                                         \
-    .menu_theme = THEME_HUNTER,                                                                     \
+    .sync_small_monsters = 1,                                                                       \
+    .share_urgent = 1,                                                                              \
+    /* [Monster HP, Village Quests] */                                                              \
+    .hp = {{1, 1, 1, 1}, 2},                                                                        \
+    .village_in_hub = 1,                                                                            \
+    /* [Discord] */                                                                                 \
     .discord = 1,                                                                                   \
     .discord_hunter = 1,                                                                            \
-    .show_fps = 0,                                                                                  \
-    .menu_chord = 1,                                                                                \
-    .show_battery = BATTERY_OFF,                                                                    \
+    /* [Bonus Content] */                                                                           \
+    .bonus_content = 1,                                                                             \
+    /* [Audio] */                                                                                   \
+    .volume = 100,                                                                                  \
+    .mute_in_background = 0,                                                                        \
+    /* [Application] */                                                                             \
+    .confirm_exit = 1,                                                                              \
+    .language = 0,                                                                                  \
+    .button_icons = 0,                                                                              \
+    .menu_theme = THEME_HUNTER,                                                                     \
+    .menu_scale = 100,                                                                              \
+    .updates = UPDATES_ASK,                                                                         \
     .save_location = "",                                                                            \
 
 Config g_config = {CONFIG_DEFAULT_VALUES};
