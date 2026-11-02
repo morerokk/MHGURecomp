@@ -816,7 +816,7 @@ void host_input_update(void) {
 
     // A controller can reach host settings without needing a keyboard.
     static bool settings_chord;
-    bool chord = (b & (B(BTN_PLUS) | B(BTN_MINUS))) == (B(BTN_PLUS) | B(BTN_MINUS));
+    bool chord = config_menu_chord() && (b & (B(BTN_PLUS) | B(BTN_MINUS))) == (B(BTN_PLUS) | B(BTN_MINUS));
     if (chord && !settings_chord && !typing) overlay_toggle_settings();
     if (chord && !typing) settings_chord = true;
     if (settings_chord) {

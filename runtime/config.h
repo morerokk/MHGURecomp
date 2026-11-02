@@ -89,6 +89,7 @@ typedef struct {
     int discord;              // [Discord] RichPresence: what you play, on your Discord profile (runtime/net/discord.c)
     int discord_hunter;       // [Discord] ShowHunter: your hunter's name and HR there too (runtime/hle/presence.c)
     int show_fps;             // [Performance] ShowFPS: the frame rate in a box on the screen (runtime/overlay.cpp)
+    int menu_chord;           // [Controls] MenuChord: Plus + Minus together open the settings menu (runtime/host_input.c)
 } Config;
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
 // Cloud VM; a DuckDNS name, so it can move without a release). "" = no default.
@@ -174,6 +175,7 @@ float config_audio_gain(void);  // atomic, safe on audio threads; 0 while muted 
 void config_window_focus(bool focused);  // the window got / lost the focus (runtime/host_input.c)
 int config_language(void);     // last saved UI language, atomic across host threads
 bool config_confirm_exit(void); // atomic, safe on the host main thread
+bool config_menu_chord(void);   // [Controls] MenuChord as saved, atomic (the input is read on another thread)
 bool config_show_fps(void);     // [Performance] ShowFPS as saved, atomic (the game's thread draws it)
 
 #ifdef __cplusplus

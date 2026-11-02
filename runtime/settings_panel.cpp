@@ -300,6 +300,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(menu_confirm);
     SAME(confirm_exit);
     SAME(show_fps);
+    SAME(menu_chord);
     SAME(updates);
     SAME(hp.village);
     SAME(hp.quests);
@@ -753,6 +754,7 @@ void reset_section() {
     case 2:
         c.face_buttons = f.face_buttons;
         c.background_input = f.background_input;
+        c.menu_chord = f.menu_chord;
         c.combo_window = f.combo_window;
         c.mouse_sensitivity = f.mouse_sensitivity;
         SDL_strlcpy(c.chat_key, f.chat_key, sizeof c.chat_key);
@@ -1127,6 +1129,8 @@ std::vector<Row> main_rows() {
         number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, ini("MouseSensitivity"));
         action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
         r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons, for moving and for the item bar, and the chat key.");
+        add_bool(r, "menu.chord", "Plus + Minus opens this menu", &c.menu_chord, ini("MenuChord"));
+        r.back().help = tr("Pressing Plus and Minus together (Start + Back on a controller) opens this menu. Turn it off to keep that combination for the game or a cheat, for example when you play with a keyboard and mouse. F1 still opens the menu.");
         break;
     case 3:
         number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, ini("Port"));
