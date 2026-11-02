@@ -18,38 +18,52 @@
 
 static Config saved, startup;
 static bool have_saved, runtime_ready, runtime_fsr;
-static SDL_AtomicInt volume = {100};
-static SDL_AtomicInt confirm_exit = {1};
-static SDL_AtomicInt language = {0};
-static SDL_AtomicInt mute_in_background;
 static SDL_AtomicInt window_focused = {1};
+// [Display]
+static SDL_AtomicInt live_fov;
+// [Anti-aliasing]
+static SDL_AtomicInt live_msaa = {1};
+static SDL_AtomicInt live_fxaa = {1};
+static SDL_AtomicInt live_fxaa_mode;
+// [Upscaler]
+static SDL_AtomicInt live_fsr_sharpness;
+static SDL_AtomicInt live_fsr_reactive;
+// [Graphics]
+static SDL_AtomicInt live_draw = {0x3f800000};
+static SDL_AtomicInt live_smooth;
+// [Performance]
 static SDL_AtomicInt show_fps;
-static SDL_AtomicInt menu_chord = {1};
 static SDL_AtomicInt show_battery;
 static SDL_AtomicInt live_fps;
-static SDL_AtomicInt live_fov;
-static SDL_AtomicInt live_mouse;
-static SDL_AtomicInt live_draw = {0x3f800000};
-static SDL_AtomicInt live_fxaa = {1};
-static SDL_AtomicInt live_msaa = {1};
 static SDL_AtomicInt live_vsync = {1};
+// [Controls]
 static SDL_AtomicInt live_face;
 static SDL_AtomicInt live_menu_confirm;
 static SDL_AtomicInt live_background = {1};
 static SDL_AtomicInt live_combo;
 static SDL_AtomicInt live_chat_key;
-static SDL_AtomicInt live_fxaa_mode;
-static SDL_AtomicInt live_smooth;
-static SDL_AtomicInt live_discord;
-static SDL_AtomicInt live_discord_hunter;
-static SDL_AtomicInt live_share_urgent;
+static SDL_AtomicInt menu_chord = {1};
+// [Mouse]
+static SDL_AtomicInt live_mouse;
+// [Keybinds]
 static SDL_AtomicInt live_binds[BINDS][BIND_KEYS];
-static SDL_AtomicInt live_fsr_sharpness;
-static SDL_AtomicInt live_fsr_reactive;
-static SDL_AtomicInt live_village;
+// [Multiplayer]
 static SDL_AtomicInt live_ldn_port;
 static SDL_AtomicInt live_sync_zako;
+static SDL_AtomicInt live_share_urgent;
+// [Monster HP, Village Quests]
+static SDL_AtomicInt live_village;
+// [Discord]
+static SDL_AtomicInt live_discord;
+static SDL_AtomicInt live_discord_hunter;
+// [Bonus Content]
 static SDL_AtomicInt live_bonus;
+// [Audio]
+static SDL_AtomicInt volume = {100};
+static SDL_AtomicInt mute_in_background;
+// [Application]
+static SDL_AtomicInt confirm_exit = {1};
+static SDL_AtomicInt language = {0};
 static void set_float(SDL_AtomicInt *slot, float value) {
     int bits; _Static_assert(sizeof bits == sizeof value, "32-bit float settings");
     memcpy(&bits, &value, sizeof bits); SDL_SetAtomicInt(slot, bits);
