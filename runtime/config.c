@@ -322,7 +322,12 @@ static const char DEFAULT_INI[] =
     "; Android only. The folder the save is kept in, so syncing software can keep it in step: the one that holds save_0. Empty: the app's own\n"
     "; folder. Set it with Save folder in the settings menu (Android tab): the app needs Android's \"All files access\"\n"
     "; to use a folder outside its own. Takes effect at the next start\n"
-    "SaveFolder =\n";
+    "SaveFolder =\n"
+    "\n"
+    "; Android only. The folder holding the game's exefs and romfs folders, used where it is (for example on a USB drive or SD\n"
+    "; card), so they don't have to fit in the app's own folder. Empty: the data folder in the app's own folder. Set it with\n"
+    "; Game files folder in the settings menu (Android tab): the app needs Android's \"All files access\". Takes effect at the next start\n"
+    "GameFolder =\n";
 
 void config_path(char *buf, size_t size) {
     const char *e = getenv("MHGU_CONFIG");
@@ -410,6 +415,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_NET "Invalid port or Join address list (no newlines, ';' or '#')."
 #define ERR_SERVER "Invalid hub server or matchmaking key (no newlines, ';' or '#')."
 #define ERR_FOLDER "Invalid save folder (one line, no ';' or '#')."
+#define ERR_GAME_FOLDER "Invalid game files folder (one line, no ';' or '#')."
 #define ERR_HP "HP factors must be 0.05-20."
 #define ERR_VILLAGE "Invalid village HP or quest override count."
 #define ERR_CONFIRM "Invalid menu confirmation policy."
@@ -464,6 +470,7 @@ const ConfigSetting g_settings[] = {
     KEYS("RightStickClick", BIND_RSTICK), KEYS("ItemLeft", BIND_ITEM_LEFT), KEYS("ItemRight", BIND_ITEM_RIGHT),
     {"Multiplayer", "Port", SET_INT, F(ldn_port), 0, 1, 65535, NULL, NULL, true, ERR_NET},
     {"Android", "SaveFolder", SET_TEXT, F(save_dir), sizeof g_config.save_dir, 0, 0, NULL, NULL, true, ERR_FOLDER},
+    {"Android", "GameFolder", SET_TEXT, F(game_dir), sizeof g_config.game_dir, 0, 0, NULL, NULL, true, ERR_GAME_FOLDER},
     {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, true, ERR_NET},
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},

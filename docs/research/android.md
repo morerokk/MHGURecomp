@@ -157,12 +157,30 @@ the prewarm translated 5518 programs in 138 s, 0 failed, 29-35 fps meanwhile; ca
 without the prewarm), 620 MB still available to the system, no crash in 9 minutes. `[vk] no page write tracking (-1)` in
 its log: textures are checked by hashing, which may be part of that CPU time.
 
-Android TV notes: the manifest has no LEANBACK_LAUNCHER entry, so the app isn't on the TV's home screen (Settings > Apps,
-or `adb shell am start -n io.github.morerokk.mhgurecomp/.MHGUActivity`). The game files need 12.3 GB, more than a Shield
-has free, and on a USB drive set up as portable storage adb can't create files in the app's own Android/data folder. For
-the test: a folder at the drive's top, `adb shell appops set io.github.morerokk.mhgurecomp MANAGE_EXTERNAL_STORAGE allow`,
-and `MHGU_DATA_DIR=/storage/<volume>/<folder>/data` in env.txt (only the game files move; everything else stays in
-the app's folder). Players have no such way yet.
+## Android TV and game files on a drive (2026-11-02, branch feat/android-tv)
+
+- Home screen: a LEANBACK_LAUNCHER category beside LAUNCHER on the one activity, `android.software.leanback` not required
+  (so phones are unaffected), and android:banner = android/res/drawable/banner.xml, a vector drawing of "MHGU" with
+  nothing of the game's (apk.mk: aapt2 compile, then link). Android TV lists it under Installed Games.
+- `[Android] GameFolder` (config.c) is the folder holding exefs/ and romfs/, used in place: a Shield has less room than the
+  12.3 GB they need, and adb can't create files in the app's Android/data folder on a USB drive set up as portable storage.
+  Set from Game files folder in the settings' Android tab, or Use where they are at the first start (android.c
+  android_offer_import; ImportActivity GAME_FOLDER). It takes "All files access". main.c needs the value before the settings
+  load, so android_game_folder reads that one line of the ini. An import clears it, and always copies into the app's own
+  folder. `MHGU_DATA_DIR` (env.txt) still wins, for tests.
+- The picker's document ids: a volume id may be any hex, not only an SD card's 1234-ABCD; an NTFS drive's has 16 digits
+  (this also let Save folder use such a drive).
+- "Don't keep activities" (Developer options; it was on on the Shields tested): Android destroys the game's activity as
+  soon as the picker opens, SDL ends the process when its activity is created a second time, and the choice is lost. The
+  picker now says so instead of opening. The same would happen if Android reclaimed the activity under memory pressure;
+  not seen otherwise, and a real fix means surviving SDL's onDestroy (it sends the game a quit event).
+- In the message box a remote's or controller's select takes the highlighted button; a keyboard's Enter always takes the
+  default button (SDL's).
+- From a USB NTFS drive, a first start took 108 s to the first frame on the Shield, with a black screen.
+
+Tested on the Shield: the banner; a saved GameFolder, the game running from the drive with nothing in env.txt; the settings row;
+the message for a folder that isn't there; the picker opening on the drive, using a remote's keys. Not tested end to end:
+returning from the picker and Android's "All files access" page, which need "Don't keep activities" off.
 
 ## Open questions
 

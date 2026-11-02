@@ -950,6 +950,12 @@ timeline semaphore and SPIR-V as before, and its cache/spirv keys are unchanged.
 (1.2) and 53.7 fps (1.1, forced) over 14 minutes of quest 101, same picture; Shield TV Pro 2019 (first real device,
 Vulkan 1.1.178, 3 GB): 41-45 fps at 1080p, 0 of 5518 programs failed. Details: docs/research/android.md "Vulkan 1.1".
 
+## Android TV and game files on a drive (2026-11-02, branch feat/android-tv)
+
+The app is on an Android TV home screen (LEANBACK_LAUNCHER and a banner; phones unaffected), and `[Android] GameFolder` uses
+the game files where they are, for example on a USB drive: Game files folder in the settings' Android tab, or Use where they are
+at the first start. Details and what is untested: docs/research/android.md "Android TV and game files on a drive".
+
 ## FSR 4 removed (2026-11-01)
 
 `Upscaler = FSR4` is gone: fsr4.c / fsr4.h, third_party/ffx-api, docs/FSR4-PORT.md, the FSR4_DRIVER_PATCH build option

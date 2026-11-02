@@ -312,7 +312,7 @@ bool equal(const Config &a, const Config &b) {
     if (memcmp(a.binds, b.binds, sizeof a.binds))
         return false;
     if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key) ||
-        strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir))
+        strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.game_dir, b.game_dir))
         return false;
     for (int n = 0; n < 4; ++n)
         if (a.hp.scale[n] != b.hp.scale[n])
@@ -790,6 +790,7 @@ void reset_section() {
 #ifdef __ANDROID__
     case ANDROID_PAGE:
         SDL_strlcpy(c.save_dir, f.save_dir, sizeof c.save_dir);
+        SDL_strlcpy(c.game_dir, f.game_dir, sizeof c.game_dir);
         break;
 #endif
     case APP_PAGE:
@@ -1286,12 +1287,18 @@ std::vector<Row> main_rows() {
         action(r, "export.save", tr("Export save"), []() { ui_request_import(3); });
         r.back().help = tr("Copies the save's system and system_backup files out to any folder on this device, as a backup or to move it to another device.");
         header(r, "game.header", tr("Game files and mods"));
+        text(r, "game.folder", "Game files folder", c.game_dir, sizeof c.game_dir, *c.game_dir ? c.game_dir : tr("App folder (default)"),
+             ini("GameFolder"));
+        r.back().activate = []() { ui_request_import(7); };
+        r.back().help = tr("Uses the game files where they are, for example on a USB drive or SD card, so they don't have to fit in the app's own folder. Pick the folder that holds exefs and romfs. Android asks for \"All files access\" so the app can read it. Press Save, then restart the app. Nothing is copied; the drive has to stay connected while you play.");
+        action(r, "game.folder.reset", tr("Use the app's folder"), []() { s.draft.game_dir[0] = 0; }, *c.game_dir != 0);
+        r.back().help = tr("Uses the game files in the app's own folder again (after Save and a restart). The files in the other folder are left where they are.");
         action(r, "import.mod.zip", tr("Import mod (zip)"), []() { ui_request_import(5); });
         r.back().help = tr("Adds a mod from a .zip file anywhere on this device. The app checks the zip's layout and offers to fix it if the game couldn't find the mod's files. Close and reopen the app to load it.");
         action(r, "import.mod.folder", tr("Import mod (folder)"), []() { ui_request_import(6); });
         r.back().help = tr("Adds a mod from a folder anywhere on this device. The app checks the folder's layout and offers to fix it if the game couldn't find the mod's files. Close and reopen the app to load it.");
         action(r, "import.game", tr("Import game files"), []() { ui_request_import(1); });
-        r.back().help = tr("Copies the exefs and romfs folders into the app from any folder on this device, replacing the game files it has. The app closes afterwards.");
+        r.back().help = tr("Copies the exefs and romfs folders into the app from any folder on this device, replacing the game files it has, and uses them from now on. The app closes afterwards.");
         break;
 #endif
     }
@@ -2153,9 +2160,11 @@ void settings_panel(bool *open) {
     if (!equal(before, s.draft) && dirty())
         s.saved_notice = false;
 #ifdef __ANDROID__
-    {  // (the folder Save folder's picker chose: the picker ran on the window's thread)
+    {  // (the folder Save folder's or Game files folder's picker chose: the picker ran on the window's thread)
         char folder[sizeof s.draft.save_dir];
-        if (ui_take_picked_folder(folder, sizeof folder)) SDL_strlcpy(s.draft.save_dir, folder, sizeof s.draft.save_dir);
+        int which = ui_take_picked_folder(folder, sizeof folder);
+        if (which == 4) SDL_strlcpy(s.draft.save_dir, folder, sizeof s.draft.save_dir);
+        if (which == 7) SDL_strlcpy(s.draft.game_dir, folder, sizeof s.draft.game_dir);
     }
 #endif
     if (ui_action_failed())
