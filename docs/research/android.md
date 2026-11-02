@@ -53,7 +53,9 @@ loops a second as on PC). A phone has neither cost. Measure on a phone.
 
 ## How it is put together
 
-- The APK: SDL's own Java activity (org.libsdl.app.SDLActivity, from SDL's android-project, compiled with javac + d8)
+- The APK: SDL's own Java activity (org.libsdl.app.SDLActivity, from SDL's android-project, compiled with javac + d8;
+  the manifest names android/java's MHGUActivity, a subclass that also hides the status and navigation bars the
+  Android 11+ way, as SDL's flags alone left them over the game on some devices)
   loads libSDL3.so and libmain.so (the runtime with shaderc and FFmpeg linked in) and calls SDL_main (main.c includes
   SDL_main.h on Android). The runtime then loads libmhgugame.so by name (runtime/gamelib.c), which is linked against
   libmain.so for the runtime's functions. Libraries are stored uncompressed and 16 KB aligned

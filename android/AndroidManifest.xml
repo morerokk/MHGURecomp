@@ -32,7 +32,7 @@
         android:enableOnBackInvokedCallback="false"
         android:hardwareAccelerated="true">
 
-        <activity android:name="org.libsdl.app.SDLActivity"
+        <activity android:name="io.github.morerokk.mhgurecomp.MHGUActivity"
             android:label="MHGU Recomp"
             android:screenOrientation="sensorLandscape"
             android:alwaysRetainTaskState="true"
