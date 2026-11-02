@@ -109,8 +109,9 @@ To import your existing saves from the Switch, put the `system` and `system_back
 
 **The Android version is experimental!** You need:
 
-- A phone or tablet with a 64-bit ARM processor, Android 10 or newer, and a GPU driver with Vulkan 1.1 (FSR needs
-  Vulkan 1.2). Expect a recent mid-range or high-end device (Snapdragon 865 or better) with 6 GB of RAM or more.
+- A phone, tablet or Android TV device with a 64-bit ARM processor, Android 10 or newer, and a GPU driver with Vulkan
+  1.1 (FSR needs Vulkan 1.2). Expect a recent mid-range or high-end device (Snapdragon 865 or better) with 6 GB of RAM or
+  more; an NVIDIA Shield TV Pro 2019 (3 GB) runs it too, at 41-45 fps in a hunt.
 - A controller (Bluetooth or USB). There are no touch controls.
 - About 13 GB of free storage for the game files (26 GB while the app copies them in from another folder).
 
@@ -121,6 +122,10 @@ To import your existing saves from the Switch, put the `system` and `system_back
    both in one folder. Start **MHGU Recomp**: it says the game files were not found and offers **Import game files**.
    Pick the folder that holds `exefs` and `romfs`, and the app copies them into its own folder (a few minutes). You
    can delete your copy afterwards.
+
+   Not enough room, or the files are on a USB drive or SD card? Choose **Use where they are** instead: nothing is
+   copied, and the game reads them from that folder, so the drive has to stay connected while you play. Android asks you
+   to allow "All files access" for the app. With a large USB drive, the first start can take a couple of minutes.
 3. Or copy them from a PC instead: start the app once (it makes its folder), connect the device to your PC with USB
    and choose **File transfer** on the device. On the PC, open the device's storage, go to `Android\data\io.github.morerokk.mhgurecomp\files\` and copy the game's `exefs` and `romfs` folders
    into the `data` folder there:
@@ -164,7 +169,11 @@ The settings menu has an **Android** tab (the last one) for what the device's fi
   can keep it in step between devices: pick the same folder on each. Android asks you to allow "All files access" for it, since
   the app reads and writes that folder itself. Press Save and start the app again. Your current save isn't moved: use
   **Export save** first to put it in the folder. **Use the app's folder** goes back to the default.
-- **Import game files:** the same import as at the first start (see above), for replacing the game files.
+- **Game files folder:** uses the game files where they are (the **Use where they are** of the first start), for
+  example on a USB drive or SD card. Android asks you to allow "All files access". Press Save and start the app again.
+  **Use the app's folder** goes back to the default.
+- **Import game files:** the same import as at the first start (see above), for replacing the game files. They then
+  replace any Game files folder as well.
 - **Import mod (zip)** and **Import mod (folder):** pick a mod's `.zip` or folder from anywhere on the device, and the
   app puts it in `mods/`. It checks the layout first: the game finds a mod's files in a `romfs`, `exefs` or `nativeNX`
   folder at most three folders down in the mod's folder. If the files are buried deeper (a zip with folders wrapped

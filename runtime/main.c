@@ -149,7 +149,8 @@ static bool game_files_problem(const char *data, char *msg, size_t size) {
 }
 
 #ifdef __ANDROID__
-bool android_offer_import(const char *msg);  // (runtime/platform/android.c)
+bool android_offer_import(const char *msg, char *data, size_t size);  // (runtime/platform/android.c)
+void android_game_folder(char *out, size_t size);
 #endif
 
 int main(int argc, char **argv) {
@@ -175,7 +176,10 @@ int main(int argc, char **argv) {
             if (s2 > s) s = s2;
             if (s) *s = 0, snprintf(data, sizeof data, "%s/data", exe);
         }
-        // (MHGU_DATA_DIR: the game files elsewhere, e.g. on a USB drive; on Android from env.txt)
+#ifdef __ANDROID__
+        android_game_folder(data, sizeof data);  // ([Android] GameFolder: the game files on a USB drive, an SD card...)
+#endif
+        // (MHGU_DATA_DIR: the game files elsewhere, also on a PC; on Android from env.txt)
         if (getenv("MHGU_DATA_DIR")) snprintf(data, sizeof data, "%s", getenv("MHGU_DATA_DIR"));
         g_game_dir = data;
         mods_make_dir();
@@ -190,7 +194,7 @@ int main(int argc, char **argv) {
         for (char msg[900]; game_files_problem(data, msg, sizeof msg);) {
             fprintf(stderr, "%s\n", msg);
 #ifdef __ANDROID__
-            if (android_offer_import(msg)) continue;  // (copied in from a folder the player picked: check again)
+            if (android_offer_import(msg, data, sizeof data)) continue;  // (from a folder the player picked: check again)
 #endif
             plat_error_box(msg);
             return 1;

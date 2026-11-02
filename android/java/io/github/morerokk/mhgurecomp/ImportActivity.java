@@ -2,7 +2,8 @@
 // picker: any folder on the device, an SD card, Downloads...). Android/data can't be written by the player's file
 // managers since Android 11, and files the app made there can't be replaced by them: the app copies them in itself.
 // Also the other way, a save out to a folder (EXPORT), and a folder to keep the save in (FOLDER: a folder syncing software keeps in step,
-// say; the app then reads and writes the save there itself, which takes Android's "All files access").
+// say; the app then reads and writes the save there itself, which takes Android's "All files access"), and a folder to
+// use the game files from where they are (GAME_FOLDER: a USB drive, an SD card; nothing is copied).
 //
 // Started by runtime/platform/android.c (begin), which waits for state() to leave RUNNING. Its own window is see
 // through: only its dialogs show, over the game.
@@ -44,7 +45,7 @@ import java.util.Locale;
 import java.util.Map;
 
 public class ImportActivity extends Activity {
-    public static final int GAME = 1, SAVE = 2, EXPORT = 3, FOLDER = 4, MOD_ZIP = 5, MOD_FOLDER = 6;
+    public static final int GAME = 1, SAVE = 2, EXPORT = 3, FOLDER = 4, MOD_ZIP = 5, MOD_FOLDER = 6, GAME_FOLDER = 7;
     public static final int RUNNING = 0, DONE = 1, CANCELLED = 2, FAILED = 3;
     static final long SAVE_SIZE = 0x4eb8bcL;  // (a save's system file: runtime/services/bonus.c)
     static final int PICK = 1, ALL_FILES = 2;
@@ -52,7 +53,7 @@ public class ImportActivity extends Activity {
     private static volatile int state = CANCELLED;
     private static int mode;
     private static String dest;  // GAME: the data folder (exefs/, romfs/ go in it); SAVE, EXPORT: the save's folder
-    private static volatile String picked = "";  // FOLDER: the path of the folder chosen
+    private static volatile String picked = "";  // FOLDER, GAME_FOLDER: the path of the folder chosen
     private static boolean closes;  // the game is running: the app closes after the import
 
     // From the native side, any thread. what: GAME or SAVE; folder: see dest; running: the game has started.
@@ -69,7 +70,7 @@ public class ImportActivity extends Activity {
 
     private String title() {
         return mode == GAME ? "Import game files" : mode == SAVE ? "Import save" : mode == EXPORT ? "Export save"
-            : mode == FOLDER ? "Save folder" : "Import mod";
+            : mode == FOLDER ? "Save folder" : mode == GAME_FOLDER ? "Game files folder" : "Import mod";
     }
 
     private volatile boolean stop;
@@ -99,6 +100,10 @@ public class ImportActivity extends Activity {
             : mode == MOD_FOLDER
             ? "Pick a mod's folder (for example in Download). The app checks it has the layout the game loads mods "
               + "from, offers to fix it if it doesn't, and copies it into the mods folder. Restart the app afterwards to load it."
+            : mode == GAME_FOLDER
+            ? "Pick the folder that holds your dump's exefs and romfs folders, for example on a USB drive or SD card. Nothing is "
+              + "copied: the game reads them there, so the drive has to stay connected while you play. The app reads the folder "
+              + "itself, so Android asks you to allow \"All files access\" for it."
             : "Pick the folder the save is kept in from now on: the one that holds (or will hold) save_0, as the PC "
               + "version's save folder does. Made so syncing software can keep the save the same on your devices: point it at the "
               + "same folder on each. The app reads and writes it itself, so Android asks you to allow \"All files access\" "
@@ -111,6 +116,13 @@ public class ImportActivity extends Activity {
     }
 
     private void pick() {
+        // (Android would close the game behind the picker, and SDL's activity can't come back from that: the app restarts
+        // and the choice is lost)
+        if (Settings.Global.getInt(getContentResolver(), Settings.Global.ALWAYS_FINISH_ACTIVITIES, 0) != 0) {
+            fail("The developer option \"Don't keep activities\" is on, which closes the app while the file picker is open. Turn "
+                 + "it off in Android's settings (Developer options), then try again.");
+            return;
+        }
         Intent i;
         if (mode == MOD_ZIP) {
             i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -135,12 +147,13 @@ public class ImportActivity extends Activity {
     protected void onActivityResult(int request, int result, final Intent data) {
         super.onActivityResult(request, result, data);
         if (request == ALL_FILES) {  // back from Android's settings page for "All files access"
-            if (allFiles()) finishFolder(); else fail("Without \"All files access\" the app can't use that folder, so the save stays where it was.");
+            if (allFiles()) finishFolder();
+            else fail("Without \"All files access\" the app can't use that folder, so " + (mode == GAME_FOLDER ? "nothing was changed." : "the save stays where it was."));
             return;
         }
         if (request != PICK) return;
         if (result != RESULT_OK || data == null) { end(CANCELLED); return; }
-        if (mode == FOLDER) { folderPicked(data.getData()); return; }
+        if (mode == FOLDER || mode == GAME_FOLDER) { folderPicked(data.getData()); return; }
         if (mode == MOD_ZIP || mode == MOD_FOLDER) { modPicked(data.getData()); return; }
         progress = dialog().setTitle(title()).setMessage("Starting...")
             .setNegativeButton("Stop", null).show();
@@ -660,7 +673,8 @@ public class ImportActivity extends Activity {
     private String folderPath;
 
     // The folder's path as the app can use it, from the picker's document id ("primary:Sync/MHGU" is
-    // /storage/emulated/0/Sync/MHGU; "1234-ABCD:Sync" an SD card's /storage/1234-ABCD/Sync).
+    // /storage/emulated/0/Sync/MHGU; "1234-ABCD:Sync" an SD card's /storage/1234-ABCD/Sync; an NTFS drive's id is longer,
+    // "B21468E01468A8D5:Sync").
     private void folderPicked(Uri tree) {
         String id = DocumentsContract.getTreeDocumentId(tree);
         int colon = id.indexOf(':');
@@ -668,17 +682,20 @@ public class ImportActivity extends Activity {
         String path;
         if (vol.equals("primary")) path = Environment.getExternalStorageDirectory().getPath() + (rel.isEmpty() ? "" : "/" + rel);
         else if (vol.equals("raw")) path = rel;
-        else if (vol.matches("[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}")) path = "/storage/" + vol + (rel.isEmpty() ? "" : "/" + rel);
-        else { fail("That folder can't be used (" + id + "): pick one in the device's storage or on an SD card."); return; }
+        else if (vol.matches("[0-9A-Fa-f]+(-[0-9A-Fa-f]+)*")) path = "/storage/" + vol + (rel.isEmpty() ? "" : "/" + rel);
+        else { fail("That folder can't be used (" + id + "): pick one in the device's storage, on an SD card or on a USB drive."); return; }
         if (path.contains("/Android/data") || path.contains("/Android/obb")) {
             fail("Android doesn't let apps use other apps' Android/data folders: pick another folder."); return;
+        }
+        if (path.length() > 240 || path.matches("(?s).*[;#\\r\\n].*")) {  // (what mhgurecomp.ini can hold: runtime/config.c)
+            fail("The app can't remember that folder (" + path + "): pick one with a shorter name, without ; or #."); return;
         }
         folderPath = path;
         if (Build.VERSION.SDK_INT < 30) { fail("This needs Android 11 or newer."); return; }
         if (allFiles()) { finishFolder(); return; }
         dialog().setTitle(title())
-            .setMessage("To read and write the save in that folder itself, the app needs \"All files access\". The next screen "
-                        + "is Android's own: turn it on for MHGU Recomp, then go back.")
+            .setMessage((mode == GAME_FOLDER ? "To read the game files in that folder itself" : "To read and write the save in that folder itself")
+                        + ", the app needs \"All files access\". The next screen is Android's own: turn it on for MHGU Recomp, then go back.")
             .setPositiveButton("Continue", new DialogInterface.OnClickListener() {
                 @Override public void onClick(DialogInterface d, int w) {
                     try {
@@ -694,8 +711,26 @@ public class ImportActivity extends Activity {
 
     private boolean allFiles() { return Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager(); }
 
+    // The folder that has exefs/main and romfs/: this one or one just inside it (data/, game/...), as an import takes it.
+    private static File gameRoot(File dir) {
+        if (new File(dir, "exefs/main").isFile() && new File(dir, "romfs").isDirectory()) return dir;
+        File[] subs = dir.listFiles();
+        if (subs == null) return null;
+        for (File sub : subs)
+            if (new File(sub, "exefs/main").isFile() && new File(sub, "romfs").isDirectory()) return sub;
+        return null;
+    }
+
     private void finishFolder() {
         File dir = new File(folderPath);
+        if (mode == GAME_FOLDER) {
+            File root = gameRoot(dir);
+            if (root == null) { fail("That folder has no exefs and romfs folders in it. Pick the folder that holds both."); return; }
+            if (root.getPath().length() > 240) { fail("The app can't remember that folder (" + root + "): pick one with a shorter name."); return; }
+            picked = root.getPath();
+            done("The game files in " + root + " will be used." + (closes ? " Press Save in the menu, then restart the app." : ""));
+            return;
+        }
         dir.mkdirs();
         if (!dir.isDirectory() || !dir.canWrite()) {
             fail("The app can't write to " + folderPath + ".");
