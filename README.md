@@ -1,13 +1,15 @@
 # MHGU Recomp
 
 A native PC port of **Monster Hunter Generations Ultimate** (Nintendo Switch, version 1.4.0), made by statically
-recompiling the game's 32-bit ARM code to C and running it on a host runtime: Switch system services and the NVN
+recompiling the game's 32-bit ARM code to C and running it on a host runtime. Switch system services and the NVN
 graphics API are reimplemented on Windows, with Vulkan for rendering.
 
 **No game files are included.** You need your own copy of the game, dumped from your own Switch. This project does
 not explain how to dump it and does not provide game files, keys or links to them.
 
 Status: fully playable, but there may be some bugs. I've played a dozen hunts with no remaining issues. Multiplayer also works.
+
+**[Join the MHGU Mod Community Discord server if you're interested in modding the game!](https://discord.gg/mdNPWfKBXf)**
 
 ## What it adds over the Switch version
 
@@ -21,6 +23,7 @@ Status: fully playable, but there may be some bugs. I've played a dozen hunts wi
 - Optional: monster HP scaling by playercount
 - Fast-forward unskippable cutscenes by pressing A
 - Optional: village quests are playable in multiplayer (press L/R at the quest counter), with appropriately re-scaled monster HP
+- Optional: completing an Urgent Quest in a Hub marks it as completed for all players, not just the person who posted the quest
 - Mod support. The vast majority of mods work by dropping them into the `mods` folder, including Forge mods. (see [Mods](#mods))
 - Cheat codes in the same format as Ryujinx and Atmosphère, in the `cheats` folder (see [Cheats](#cheats))
 - Ingame PC Settings menu overlay (F1 or `Plus`+`Minus` to open)
@@ -306,7 +309,9 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   are kept in `forge_imgui.ini`.
 - You do not need any resolution, FPS cap or connection fix mods. These features are included with this port.
 
-If you are newer to the game, I very strongly recommend the [Key Quest Markers](https://gamebanana.com/mods/727960) mod by PurplefinNeptuna. This marks out the Village and Hub quests you need to complete for the next tier directly in the quest menu, which means you no longer need a wiki to play the damn game.
+If you are newer to the game, I very strongly recommend the [Key Quest Markers](https://gamebanana.com/mods/727960) mod by PurplefinNeptuna. This marks out the Village and Hub quests you need to complete for the next tier directly in the quest menu, which means you no longer need a wiki to play the damn game
+
+**[Join the MHGU Mod Community Discord server!](https://discord.gg/mdNPWfKBXf)**
 
 **Good places to get mods:**
 
