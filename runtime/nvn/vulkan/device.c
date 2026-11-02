@@ -373,12 +373,22 @@ static void create_swapchain(void) {
     uint32_t count = caps.minImageCount + 1 < 3 ? 3 : caps.minImageCount + 1;
     if (caps.maxImageCount && count > caps.maxImageCount) count = caps.maxImageCount;
     if (count > 8) count = 8;
+    // The window image is drawn upright and the system turns it to the screen (a phone's screen is portrait at
+    // heart: in landscape currentTransform is a quarter turn, which would show the upright image squashed).
+    VkSurfaceTransformFlagBitsKHR xf = caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
+                                           ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : caps.currentTransform;
+#ifdef __ANDROID__
+    // (the image then has the window's shape: some drivers give currentExtent in the screen's own portrait shape)
+    if (xf == VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR && (w > h) != (ext.width > ext.height))
+        ext = (VkExtent2D){ext.height, ext.width};
+    LOG("[vk] window %dx%d, screen turned %#x\n", w, h, caps.currentTransform);
+#endif
     VkSwapchainKHR old = g_vk.swapchain;
     VkSwapchainCreateInfoKHR ci = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR, .surface = g_vk.surface, .minImageCount = count,
         .imageFormat = sf.format, .imageColorSpace = sf.colorSpace, .imageExtent = ext, .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE, .preTransform = caps.currentTransform,
+        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE, .preTransform = xf,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, .presentMode = present_mode(), .clipped = VK_TRUE,
         .oldSwapchain = old};
     FullScreenExclusiveInfo fse = {.sType = VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_INFO_EXT,
@@ -453,7 +463,7 @@ static bool frame_begin(void) {
     cur_frame.ok = false;
     int w, h;
     SDL_GetWindowSizeInPixels(ui_window(), &w, &h);
-    if (!w || !h) return false;  // minimised
+    if (!w || !h || ui_window_away()) return false;  // minimised (or the window going away: ui.c)
     // All GPU mutations happen here under vk_lock(), after resolving the old
     // scene. Existing attachment caches defer old image destruction safely.
     int msaa = config_live_msaa();
@@ -535,7 +545,13 @@ static void frame_end(const char *shot_path) {
     VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .waitSemaphoreCount = 1, .pWaitSemaphores = &done_sem[img],
                            .swapchainCount = 1, .pSwapchains = &g_vk.swapchain, .pImageIndices = &img};
     VkResult r = vkQueuePresentKHR(g_vk.queue, &pi);
+    // (Android says SUBOPTIMAL whenever the system turns the image: a new swapchain would be no better. A new
+    // window size is caught in frame_begin.)
+#ifdef __ANDROID__
+    if (r == VK_ERROR_OUT_OF_DATE_KHR) recreate_swapchain();
+#else
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) recreate_swapchain();
+#endif
     cur_frame.ok = false;
     if (shot_path) {  // (the copy is taken here; the PNG is made on a thread of its own: encoding the window's size
                       // stalled the game ~0.8 s on a Retina Mac)

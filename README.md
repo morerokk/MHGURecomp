@@ -122,14 +122,17 @@ need:
 - A phone or tablet with a 64-bit ARM processor, Android 10 or newer, and a GPU driver with Vulkan 1.2. Expect a
   recent mid-range or high-end device (Snapdragon 865 or better) with 6 GB of RAM or more.
 - A controller (Bluetooth or USB). There are no touch controls.
-- About 13 GB of free storage for the game files, and a PC with a USB cable to copy them over.
+- About 13 GB of free storage for the game files (26 GB while the app copies them in from another folder).
 
 1. Download `Android-MHGURecomp.<version>.apk` from the
    [Releases page](https://github.com/morerokk/MHGURecomp/releases) and open it on the device. Android asks you to
    allow installing apps from your browser or file manager the first time.
-2. Start **MHGU Recomp** once. It says the game files were not found. That's expected: it has now made its folder.
-3. Connect the device to your PC with USB and choose **File transfer** on the device. On the PC, open the device's
-   storage, go to `Android\data\io.github.morerokk.mhgurecomp\files\` and copy the game's `exefs` and `romfs` folders
+2. Put the game's `exefs` and `romfs` folders anywhere on the device (for example in `Download`, or on an SD card),
+   both in one folder. Start **MHGU Recomp**: it says the game files were not found and offers **Import game files**.
+   Pick the folder that holds `exefs` and `romfs`, and the app copies them into its own folder (a few minutes). You
+   can delete your copy afterwards.
+3. Or copy them from a PC instead: start the app once (it makes its folder), connect the device to your PC with USB
+   and choose **File transfer** on the device. On the PC, open the device's storage, go to `Android\data\io.github.morerokk.mhgurecomp\files\` and copy the game's `exefs` and `romfs` folders
    into the `data` folder there:
 
    ```
@@ -160,7 +163,10 @@ Everything lives in that `files` folder. Its contents match the PC version's gam
 | Mods, cheats | `mods/`, `cheats/` |
 | Shader cache | `cache/` |
 
-To bring a save over, put its `system` and `system_backup` files in `save/save_0/`. From the PC version, copy the
+To bring a save over, put its `system` and `system_backup` files anywhere on the device and use **Import save** in
+the settings menu (Menu Options, Files): pick both files, and the app copies them in, keeping your current save in
+`save/save_0.before-import-<date>`. The app closes afterwards; start it again to play. (Over USB you can also put the
+two files in `save/save_0/` yourself.) From the PC version, copy the
 contents of `%APPDATA%\MHGURecomp\save\save_0\` (Linux: `~/.local/share/MHGURecomp/save/save_0/`). From a Switch,
 use the same files you'd use on PC. Copy `save/save_0/` back to your PC now and then as a backup.
 

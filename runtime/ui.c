@@ -18,6 +18,12 @@ static char **launch_argv;
 static SDL_AtomicInt requested_action, action_failed;
 void ui_capture_launch_args(int argc, char **argv) { launch_argc = argc; launch_argv = argv; }
 void ui_request_action(bool restart) { SDL_SetAtomicInt(&requested_action, restart ? 2 : 1); }
+void ui_request_import(int what) { SDL_SetAtomicInt(&requested_action, 2 + what); }
+static SDL_AtomicInt away;
+bool ui_window_away(void) { return SDL_GetAtomicInt(&away) != 0; }
+#ifdef __ANDROID__
+bool android_import(int what, bool running);  // (runtime/platform/android.c)
+#endif
 bool ui_action_failed(void) { return SDL_SetAtomicInt(&action_failed, 0) != 0; }
 static bool restart_application(void) {
     char exe[4096], wait[80];
@@ -114,7 +120,13 @@ void ui_init(void) {
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, g_config.background_input ? "1" : "0");
     if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) FATAL("SDL_InitSubSystem: %s\n", SDL_GetError());
     win_w = g_config.width, win_h = g_config.height;
+#ifdef __ANDROID__
+    // (a resizable window may turn any way on Android, whatever the manifest says: landscape only. The window
+    // fills the screen there, so the settings' size does not apply.)
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#else
     fit_desktop(&win_w, &win_h);
+#endif
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #ifndef MHGU_NULL_BACKEND
     flags |= SDL_WINDOW_VULKAN;
@@ -155,6 +167,14 @@ int ui_run(void) {
             if (restart_application()) exit(0);
             SDL_SetAtomicInt(&action_failed, 1);
         }
+#ifdef __ANDROID__
+        // (on this thread: SDL's own, which Java made. The app closes after an import: the game has the old files open)
+        if (action == 3 || action == 4) {
+            SDL_SetAtomicInt(&away, 1);  // (the picker takes the window's surface away: the renderer draws nothing)
+            if (android_import(action - 2, true)) { LOG("[ui] imported: closing\n"); exit(0); }
+            SDL_SetAtomicInt(&away, 0);
+        }
+#endif
         host_input_update();
         cheats_frame();
     }

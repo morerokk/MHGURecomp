@@ -11,6 +11,9 @@
 #include <sys/stat.h>
 
 #include <SDL3/SDL.h>
+#include <jni.h>
+
+#include "rt.h"
 
 const char *android_home(void) {
     static char dir[1024];
@@ -78,4 +81,66 @@ void android_unpack_assets(void) {
 
 void android_error_box(const char *msg) {
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "MHGU Recomp", msg, NULL);
+}
+
+// ------------------------------------------------------------------ importing the game files or a save
+// The system's file picker and the copy are Java's (android/java: ImportActivity.java), which has its own dialogs;
+// this waits until it is done. 1: game files (into the data folder), 2: a save (into save/save_0). running: the game
+// has started (the app closes after the import). true when the files were copied in.
+
+static const char *absolute(const char *dir, char *buf, size_t size) {
+    if (dir[0] == '/') return dir;
+    snprintf(buf, size, "%s/%s", android_home(), dir);
+    return buf;
+}
+
+bool android_import(int what, bool running) {
+    char buf[1100], folder[1200];
+    if (what == 1) snprintf(folder, sizeof folder, "%s", absolute(g_game_dir, buf, sizeof buf));
+    else snprintf(folder, sizeof folder, "%s/save_0", absolute(getenv("MHGU_SAVE_DIR") ? getenv("MHGU_SAVE_DIR") : g_save_dir, buf, sizeof buf));
+    JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+    jobject act = (jobject)SDL_GetAndroidActivity();
+    if (!env || !act) return false;
+    // (through the activity's class loader: a thread the runtime made only sees the system's classes with FindClass)
+    jclass ac = (*env)->GetObjectClass(env, act);
+    jobject loader = (*env)->CallObjectMethod(env, act, (*env)->GetMethodID(env, ac, "getClassLoader", "()Ljava/lang/ClassLoader;"));
+    jclass lc = (*env)->FindClass(env, "java/lang/ClassLoader");
+    jstring name = (*env)->NewStringUTF(env, "io.github.morerokk.mhgurecomp.ImportActivity");
+    jclass c = (jclass)(*env)->CallObjectMethod(env, loader, (*env)->GetMethodID(env, lc, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;"), name);
+    jmethodID begin = c ? (*env)->GetStaticMethodID(env, c, "begin", "(Landroid/app/Activity;ILjava/lang/String;Z)V") : NULL;
+    jmethodID state = c ? (*env)->GetStaticMethodID(env, c, "state", "()I") : NULL;
+    int result = 3;
+    if ((*env)->ExceptionCheck(env) || !begin || !state) {
+        (*env)->ExceptionClear(env);
+        LOG("[android] the import isn't in this APK\n");
+    } else {
+        LOG("[android] importing %s into %s\n", what == 1 ? "the game files" : "a save", folder);
+        jstring dir = (*env)->NewStringUTF(env, folder);
+        (*env)->CallStaticVoidMethod(env, c, begin, act, (jint)what, dir, (jboolean)running);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        else while ((result = (*env)->CallStaticIntMethod(env, c, state)) == 0) SDL_Delay(100);
+        (*env)->DeleteLocalRef(env, dir);
+        LOG("[android] import %s\n", result == 1 ? "done" : result == 2 ? "cancelled" : "failed");
+    }
+    (*env)->DeleteLocalRef(env, name);
+    if (c) (*env)->DeleteLocalRef(env, c);
+    (*env)->DeleteLocalRef(env, lc);
+    if (loader) (*env)->DeleteLocalRef(env, loader);
+    (*env)->DeleteLocalRef(env, ac);
+    (*env)->DeleteLocalRef(env, act);
+    return result == 1;
+}
+
+// At the start, the game files missing or not right (msg): offers to import them. true: imported, check again.
+bool android_offer_import(const char *msg) {
+    char text[1200];
+    snprintf(text, sizeof text, "%s\n\nThe app can copy them in from a folder on this device (for example Download): "
+             "pick the folder that holds the exefs and romfs folders.", msg);
+    const SDL_MessageBoxButtonData buttons[] = {
+        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Quit"},
+        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Import game files"},
+    };
+    const SDL_MessageBoxData box = {SDL_MESSAGEBOX_INFORMATION, NULL, "MHGU Recomp", text, 2, buttons, NULL};
+    int pressed = 0;
+    return SDL_ShowMessageBox(&box, &pressed) && pressed == 1 && android_import(1, false);
 }
