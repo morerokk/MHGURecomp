@@ -142,7 +142,11 @@ const Theme &theme() {
 }
 ImVec4 vec(ImU32 c) { return ImGui::ColorConvertU32ToFloat4(c); }
 // The Mods tab: the mods folder's state (modorder.h), which is saved with the rest of the settings
+#ifdef __ANDROID__
+constexpr int PAGES = 9, MODS_PAGE = 5, CHEATS_PAGE = 6, APP_PAGE = 7, ANDROID_PAGE = 8;  // (Android: the tab for its own settings)
+#else
 constexpr int PAGES = 8, MODS_PAGE = 5, CHEATS_PAGE = 6, APP_PAGE = 7;
+#endif
 struct ScanResult {
     std::vector<std::string> names;  // (the order ModConflict's indexes are in)
     ModScan scan = {};
@@ -300,6 +304,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(menu_confirm);
     SAME(confirm_exit);
     SAME(show_fps);
+    SAME(show_battery);
     SAME(updates);
     SAME(hp.village);
     SAME(hp.quests);
@@ -307,7 +312,7 @@ bool equal(const Config &a, const Config &b) {
     if (memcmp(a.binds, b.binds, sizeof a.binds))
         return false;
     if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key) ||
-        strcmp(a.chat_key, b.chat_key))
+        strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir))
         return false;
     for (int n = 0; n < 4; ++n)
         if (a.hp.scale[n] != b.hp.scale[n])
@@ -739,6 +744,7 @@ void reset_section() {
         c.fsr_reactive = f.fsr_reactive;
         c.fsr_animsurf = f.fsr_animsurf;
         c.show_fps = f.show_fps;
+        c.show_battery = f.show_battery;
         c.fps = f.fps;
         c.vsync = f.vsync;
         c.shader_prewarm = f.shader_prewarm;
@@ -781,6 +787,11 @@ void reset_section() {
         for (int i = 0; i < (int)cheat_tab.draft.size(); ++i)
             cheat_tab.draft[i] = 1;
         break;
+#ifdef __ANDROID__
+    case ANDROID_PAGE:
+        SDL_strlcpy(c.save_dir, f.save_dir, sizeof c.save_dir);
+        break;
+#endif
     case APP_PAGE:
         c.language = f.language;
         c.menu_theme = f.menu_theme;
@@ -1051,6 +1062,11 @@ std::vector<Row> main_rows() {
         add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
         header(r, "graphics.header", tr("Graphics"));
         add_bool(r, "show.fps", "FPS counter", &c.show_fps, ini("ShowFPS"));
+#ifdef __ANDROID__
+        add_choice(r, "show.battery", "Battery indicator", c.show_battery, {tr("Off"), tr("With FPS counter"), tr("By itself")},
+                   [](int v) { c.show_battery = v; }, ini("ShowBattery"));
+        r.back().help = tr("The battery's charge, in the FPS counter's box or in a box of its own (drag it like the FPS counter).");
+#endif
         number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, ini("FPS"));
         {  // left / right: one frame per second more or less; Confirm: the common ones
             static const int presets[] = {30, 60, 90, 120, 150, 240};
@@ -1255,18 +1271,35 @@ std::vector<Row> main_rows() {
         add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
                    [](int v) { c.updates = v; }, ini("Updates"));
         add_bool(r, "bonus", "Bonus content", &c.bonus_content, ini("BonusContent"));
-#ifdef __ANDROID__  // (Android/data can't be written by the player's file managers: the app copies the files in)
-        header(r, "files.header", tr("Files"));
+        break;
+#ifdef __ANDROID__
+    case ANDROID_PAGE:  // (Android/data can't be written by the player's file managers: the app copies files in and out)
+        header(r, "save.header", tr("Save data"));
+        text(r, "save.folder", "Save folder", c.save_dir, sizeof c.save_dir, *c.save_dir ? c.save_dir : tr("App folder (default)"),
+             ini("SaveFolder"));
+        r.back().activate = []() { ui_request_import(4); };
+        r.back().help = tr("Where the save is kept, so syncing software can keep it the same on your devices: pick the same folder on each. The folder holds save_0, like the PC version's save folder. Android asks for \"All files access\" so the app can use a folder outside its own. Press Save, then restart the app. Your current save is not moved: use Export save first to put it there.");
+        action(r, "save.folder.reset", tr("Use the app's folder"), []() { s.draft.save_dir[0] = 0; }, *c.save_dir != 0);
+        r.back().help = tr("Keeps the save in the app's own folder again (after Save and a restart). The save in the other folder is left where it is.");
         action(r, "import.save", tr("Import save"), []() { ui_request_import(2); });
         r.back().help = tr("Copies a save's system and system_backup files into the app from any folder on this device. Your current save is kept. The app closes afterwards.");
+        action(r, "export.save", tr("Export save"), []() { ui_request_import(3); });
+        r.back().help = tr("Copies the save's system and system_backup files out to any folder on this device, as a backup or to move it to another device.");
+        header(r, "game.header", tr("Game files and mods"));
+        action(r, "import.mod.zip", tr("Import mod (zip)"), []() { ui_request_import(5); });
+        r.back().help = tr("Adds a mod from a .zip file anywhere on this device. The app checks the zip's layout and offers to fix it if the game couldn't find the mod's files. Close and reopen the app to load it.");
+        action(r, "import.mod.folder", tr("Import mod (folder)"), []() { ui_request_import(6); });
+        r.back().help = tr("Adds a mod from a folder anywhere on this device. The app checks the folder's layout and offers to fix it if the game couldn't find the mod's files. Close and reopen the app to load it.");
         action(r, "import.game", tr("Import game files"), []() { ui_request_import(1); });
         r.back().help = tr("Copies the exefs and romfs folders into the app from any folder on this device, replacing the game files it has. The app closes afterwards.");
-#endif
         break;
+#endif
     }
     spacer(r, "actions.gap");  // (Save and Reset this tab, and on Menu Options Restart and Exit game, apart)
     if (s.page == APP_PAGE) {
+#ifndef __ANDROID__  // (Android can't start the app again from itself: close it and open it again)
         action(r, "restart", tr("Restart"), []() { push(View::Restart, "dialog.cancel"); });
+#endif
         action(r, "exit", tr("Exit game"), []() { push(View::Exit, "dialog.cancel"); });
     }
     action(r, "save", tr("Save"), []() { s.command = Command::Save; }, dirty());
@@ -1938,7 +1971,11 @@ void settings_panel(bool *open) {
             first_page((s.page + 1) % PAGES);
         if (pressed(ImGuiKey_GamepadL1))
             first_page((s.page + PAGES - 1) % PAGES);
-        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Misc", "Mods", "Cheats", "Menu Options"};
+        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Misc", "Mods", "Cheats", "Menu Options"
+#ifdef __ANDROID__
+                               , "Android"
+#endif
+        };
         float avail = ImGui::GetContentRegionAvail().x;
         float fw = ImGui::GetFontSize();
         ImVec2 scrolling_start = ImGui::GetCursorScreenPos();
@@ -2115,6 +2152,12 @@ void settings_panel(bool *open) {
     }
     if (!equal(before, s.draft) && dirty())
         s.saved_notice = false;
+#ifdef __ANDROID__
+    {  // (the folder Save folder's picker chose: the picker ran on the window's thread)
+        char folder[sizeof s.draft.save_dir];
+        if (ui_take_picked_folder(folder, sizeof folder)) SDL_strlcpy(s.draft.save_dir, folder, sizeof s.draft.save_dir);
+    }
+#endif
     if (ui_action_failed())
         s.error = tr("Restart failed. The game is still running.");
     if (!s.error.empty()) {

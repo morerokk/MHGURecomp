@@ -53,7 +53,9 @@ loops a second as on PC). A phone has neither cost. Measure on a phone.
 
 ## How it is put together
 
-- The APK: SDL's own Java activity (org.libsdl.app.SDLActivity, from SDL's android-project, compiled with javac + d8)
+- The APK: SDL's own Java activity (org.libsdl.app.SDLActivity, from SDL's android-project, compiled with javac + d8;
+  the manifest names android/java's MHGUActivity, a subclass that also hides the status and navigation bars the
+  Android 11+ way, as SDL's flags alone left them over the game on some devices)
   loads libSDL3.so and libmain.so (the runtime with shaderc and FFmpeg linked in) and calls SDL_main (main.c includes
   SDL_main.h on Android). The runtime then loads libmhgugame.so by name (runtime/gamelib.c), which is linked against
   libmain.so for the runtime's functions. Libraries are stored uncompressed and 16 KB aligned
@@ -84,12 +86,16 @@ loops a second as on PC). A phone has neither cost. Measure on a phone.
    (the game's entries, the chat, a Forge plugin's field: textinput.c), not for the settings menu with its own keys.
 4. (done) pipelines.list and bonus/system: in the APK's assets, copied into the app's folder at start (android.c:
    pipelines.list whenever it differs, bonus/system only when missing); exec.c reads pipelines.list from there.
-5. (done) Getting the game files and saves onto a phone: Android/data can't be reached from a phone's own file
+5. (done) Getting the game files and saves onto a phone and out again (the settings menu's Android tab; Save folder
+   keeps the save in a folder the player picked, so file syncing software can keep it in step: the picker's tree id is turned into a /storage path,
+   which takes MANAGE_EXTERNAL_STORAGE, "All files access"; config.save_dir, ui.c ui_init): Android/data can't be reached from a phone's own file
    managers since Android 11, only over USB (MTP) or adb. The app imports them itself through the Storage Access
    Framework (android/java: ImportActivity.java, started from runtime/platform/android.c): the game files from a
    folder the player picks (offered at the start when they are missing or wrong, and in the settings menu), a save's
    system / system_backup files (settings menu; the old save moved aside). Copied into a .part folder, then moved in.
-   From the settings menu the app closes afterwards (the game has the old files open), and the renderer draws
+   Mods come in as a zip or a folder the same way (ImportActivity.plan checks the layout against what
+   mods_find_dir finds: a romfs / exefs / nativeNX folder at most 3 deep; buried ones are moved up, loose
+   .pchtxt / .ips go into exefs/, and the player is asked before either). From the settings menu the app closes afterwards (the game has the old files open), and the renderer draws
    nothing meanwhile (ui_window_away: the picker takes the window's surface, item 6).
 6. Lifecycle: the app paused / resumed (audio, the Vulkan surface going away: swapchain recreated), Android may kill a
    backgrounded app, the back button.

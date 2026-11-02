@@ -23,7 +23,16 @@ static SDL_AtomicInt away;
 bool ui_window_away(void) { return SDL_GetAtomicInt(&away) != 0; }
 #ifdef __ANDROID__
 bool android_import(int what, bool running);  // (runtime/platform/android.c)
+bool android_take_picked(char *out, size_t size);
 #endif
+bool ui_take_picked_folder(char *out, size_t size) {
+#ifdef __ANDROID__
+    return android_take_picked(out, size);
+#else
+    (void)out, (void)size;
+    return false;
+#endif
+}
 bool ui_action_failed(void) { return SDL_SetAtomicInt(&action_failed, 0) != 0; }
 static bool restart_application(void) {
     char exe[4096], wait[80];
@@ -115,6 +124,9 @@ void ui_init(void) {
         SDL_GetCurrentVideoDriver());
 #endif
     config_load();
+#ifdef __ANDROID__
+    if (g_config.save_dir[0]) g_save_dir = g_config.save_dir;  // ([Android] SaveFolder: MHGU_SAVE_DIR still wins, fs.c)
+#endif
     // Initial background input policy. SDL documents this hint as changeable at runtime.
     // Subsequent saved changes are consumed by the host thread in ui_run().
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, g_config.background_input ? "1" : "0");
@@ -169,9 +181,10 @@ int ui_run(void) {
         }
 #ifdef __ANDROID__
         // (on this thread: SDL's own, which Java made. The app closes after an import: the game has the old files open)
-        if (action == 3 || action == 4) {
+        if (action >= 3 && action <= 8) {
             SDL_SetAtomicInt(&away, 1);  // (the picker takes the window's surface away: the renderer draws nothing)
-            if (android_import(action - 2, true)) { LOG("[ui] imported: closing\n"); exit(0); }
+            // (after 1 and 2 the app closes, the game has the old files open; 3 and 4 leave it running)
+            if (android_import(action - 2, true) && action <= 4) { LOG("[ui] imported: closing\n"); exit(0); }
             SDL_SetAtomicInt(&away, 0);
         }
 #endif
