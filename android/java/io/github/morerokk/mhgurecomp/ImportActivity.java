@@ -33,6 +33,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -40,7 +44,7 @@ import java.util.Locale;
 import java.util.Map;
 
 public class ImportActivity extends Activity {
-    public static final int GAME = 1, SAVE = 2, EXPORT = 3, FOLDER = 4;
+    public static final int GAME = 1, SAVE = 2, EXPORT = 3, FOLDER = 4, MOD_ZIP = 5, MOD_FOLDER = 6;
     public static final int RUNNING = 0, DONE = 1, CANCELLED = 2, FAILED = 3;
     static final long SAVE_SIZE = 0x4eb8bcL;  // (a save's system file: runtime/services/bonus.c)
     static final int PICK = 1, ALL_FILES = 2;
@@ -64,7 +68,8 @@ public class ImportActivity extends Activity {
     public static String picked() { return picked; }
 
     private String title() {
-        return mode == GAME ? "Import game files" : mode == SAVE ? "Import save" : mode == EXPORT ? "Export save" : "Save folder";
+        return mode == GAME ? "Import game files" : mode == SAVE ? "Import save" : mode == EXPORT ? "Export save"
+            : mode == FOLDER ? "Save folder" : "Import mod";
     }
 
     private volatile boolean stop;
@@ -88,6 +93,12 @@ public class ImportActivity extends Activity {
             : mode == EXPORT
             ? "Pick the folder to copy your save's system and system_backup files into (for example in Download). "
               + "Files of those names that are already there are replaced."
+            : mode == MOD_ZIP
+            ? "Pick a mod's .zip file (for example in Download). The app checks it has the layout the game loads mods "
+              + "from, offers to fix it if it doesn't, and puts it in the mods folder. Restart the app afterwards to load it."
+            : mode == MOD_FOLDER
+            ? "Pick a mod's folder (for example in Download). The app checks it has the layout the game loads mods "
+              + "from, offers to fix it if it doesn't, and copies it into the mods folder. Restart the app afterwards to load it."
             : "Pick the folder the save is kept in from now on: the one that holds (or will hold) save_0, as the PC "
               + "version's save folder does. Made so syncing software can keep the save the same on your devices: point it at the "
               + "same folder on each. The app reads and writes it itself, so Android asks you to allow \"All files access\" "
@@ -101,7 +112,11 @@ public class ImportActivity extends Activity {
 
     private void pick() {
         Intent i;
-        if (mode != SAVE) {
+        if (mode == MOD_ZIP) {
+            i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("*/*");
+        } else if (mode != SAVE) {
             i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
         } else {
             i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -126,6 +141,7 @@ public class ImportActivity extends Activity {
         if (request != PICK) return;
         if (result != RESULT_OK || data == null) { end(CANCELLED); return; }
         if (mode == FOLDER) { folderPicked(data.getData()); return; }
+        if (mode == MOD_ZIP || mode == MOD_FOLDER) { modPicked(data.getData()); return; }
         progress = dialog().setTitle(title()).setMessage("Starting...")
             .setNegativeButton("Stop", null).show();
         progress.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(new View.OnClickListener() {
@@ -290,6 +306,331 @@ public class ImportActivity extends Activity {
         }
         delete(part);
         return null;
+    }
+
+    // ------------------------------------------------------------------ mods
+    // A mod is a folder in mods/ that has a romfs, exefs or nativeNX folder at most three levels down (runtime/modorder.c
+    // mods_find_dir). Zips and folders found in other shapes are offered a fix: the game files moved up out of folders
+    // wrapped around them, or loose patch files put in an exefs folder.
+    static final String[] MARKERS = {"romfs", "exefs", "nativenx"};
+    static final int MARKER_DEPTH = 3;
+
+    static class Group {
+        String name, root = "", orig = "", fix = "";  // fix: "" fine, "up" (root moved up to the game files), "patches", "none" (unknown)
+        int level;
+        List<String> files = new ArrayList<>();
+    }
+
+    private Uri modSource;
+    private String modSourceName = "mod";
+    private List<String> modPaths = new ArrayList<>();
+    private Map<String, String> modDocs = new HashMap<>();  // (a folder: the paths' document ids)
+
+    private static boolean junk(String p) {
+        String n = p.substring(p.lastIndexOf('/') + 1);
+        return p.startsWith("__MACOSX/") || n.equals(".DS_Store") || n.equalsIgnoreCase("Thumbs.db") || n.equalsIgnoreCase("desktop.ini");
+    }
+
+    private static boolean marker(String seg) {
+        for (String m : MARKERS) if (m.equalsIgnoreCase(seg)) return true;
+        return false;
+    }
+
+    private static boolean patch(String p) {
+        String l = p.toLowerCase(Locale.ROOT);
+        return l.endsWith(".pchtxt") || l.endsWith(".ips");
+    }
+
+    // Where the first game folder (romfs, exefs, nativeNX) is in files, relative to root: the number of folders above it;
+    // -1 when there is none.
+    private static int markerLevel(List<String> files, String root) {
+        int best = -1;
+        for (String f : files) {
+            String[] seg = f.substring(root.length()).split("/");
+            for (int i = 0; i < seg.length - 1; i++)
+                if (marker(seg[i])) { if (best < 0 || i < best) best = i; break; }
+        }
+        return best;
+    }
+
+    private static String safeName(String n) {
+        n = n.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", " ").trim();
+        while (n.startsWith(".") || n.startsWith("_")) n = n.substring(1).trim();
+        return n.length() > 100 ? n.substring(0, 100).trim() : n;
+    }
+
+    static List<Group> plan(List<String> files, String source) {
+        Set<String> tops = new LinkedHashSet<>();
+        boolean rootFiles = false;
+        for (String f : files) {
+            int slash = f.indexOf('/');
+            if (slash < 0) rootFiles = true; else tops.add(f.substring(0, slash));
+        }
+        List<Group> groups = new ArrayList<>();
+        boolean wrapper = !rootFiles && tops.size() == 1 && !marker(tops.iterator().next())
+            && !tops.iterator().next().equalsIgnoreCase("atmosphere");
+        if (wrapper) {  // Mod/romfs/...: the mod's own folder
+            Group g = new Group();
+            g.name = tops.iterator().next();
+            g.root = g.name + "/";
+            groups.add(g);
+        } else if (!rootFiles && tops.size() > 1) {  // several mods in one zip, when each is one
+            boolean each = true;
+            for (String t : tops) {
+                List<String> in = new ArrayList<>();
+                for (String f : files) if (f.startsWith(t + "/")) in.add(f);
+                int lv = markerLevel(in, t + "/");
+                boolean p = false;
+                for (String f : in) if (patch(f)) p = true;
+                if (marker(t) || (lv < 0 && !p)) each = false;
+            }
+            if (each)
+                for (String t : tops) {
+                    Group g = new Group();
+                    g.name = t;
+                    g.root = t + "/";
+                    groups.add(g);
+                }
+        }
+        if (groups.isEmpty()) {
+            Group g = new Group();
+            g.name = source;
+            groups.add(g);
+        }
+        for (Group g : groups) {
+            g.orig = g.root;
+            for (String f : files) if (f.startsWith(g.root)) g.files.add(f);
+            g.level = markerLevel(g.files, g.root);
+            if (g.level >= 0 && g.level <= MARKER_DEPTH) continue;
+            if (g.level > MARKER_DEPTH) {  // buried: the root moves down to the folder holding the game folder
+                String first = null;
+                for (String f : g.files) {
+                    String[] seg = f.substring(g.root.length()).split("/");
+                    if (seg.length - 1 > g.level && marker(seg[g.level])) {
+                        StringBuilder b = new StringBuilder(g.root);
+                        for (int i = 0; i < g.level; i++) b.append(seg[i]).append('/');
+                        first = b.toString();
+                        break;
+                    }
+                }
+                g.fix = "up";
+                g.root = first == null ? g.root : first;
+                g.files.clear();
+                for (String f : files) if (f.startsWith(g.root)) g.files.add(f);
+                continue;
+            }
+            boolean p = false;
+            for (String f : g.files) if (patch(f)) p = true;
+            g.fix = p ? "patches" : "none";
+        }
+        return groups;
+    }
+
+    private void modPicked(final Uri src) {
+        modSource = src;
+        progress = dialog().setTitle(title()).setMessage("Looking at the mod...").setNegativeButton("Stop", null).show();
+        progress.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { stop = true; }
+        });
+        new Thread(new Runnable() {
+            @Override public void run() {
+                String error = null;
+                final List<Group> groups;
+                try {
+                    List<String> files = new ArrayList<>();
+                    if (mode == MOD_ZIP) {
+                        modSourceName = safeName(displayName(src).replaceAll("(?i)\\.zip$", ""));
+                        try (ZipInputStream z = new ZipInputStream(getContentResolver().openInputStream(src))) {
+                            for (ZipEntry e; (e = z.getNextEntry()) != null; ) {
+                                String n = clean(e.getName());
+                                if (!e.isDirectory() && n != null && !junk(n)) files.add(n);
+                            }
+                        }
+                    } else {
+                        String root = DocumentsContract.getTreeDocumentId(src);
+                        modSourceName = safeName(treeName(src, root));
+                        List<Entry> all = new ArrayList<>();
+                        walk(src, root, "", all);
+                        for (Entry e : all) {
+                            String n = clean(e.path);
+                            if (n != null && !junk(n)) { files.add(n); modDocs.put(n, e.id); }
+                        }
+                    }
+                    if (modSourceName.isEmpty()) modSourceName = "mod";
+                    if (files.isEmpty()) error = "There are no files in it.";
+                    groups = error == null ? plan(files, modSourceName) : null;
+                    modPaths = files;
+                } catch (Exception e) {
+                    runOnUiThread(new Runnable() { @Override public void run() { progress.dismiss(); } });
+                    final String m = "Can't read it: " + e.getMessage();
+                    runOnUiThread(new Runnable() { @Override public void run() { fail(m); } });
+                    return;
+                }
+                final String err = error;
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        progress.dismiss();
+                        if (stop) end(CANCELLED);
+                        else if (err != null) fail(err);
+                        else offerFix(groups);
+                    }
+                });
+            }
+        }, "mod-scan").start();
+    }
+
+    private static String clean(String n) {
+        n = n.replace('\\', '/');
+        while (n.startsWith("./") || n.startsWith("/")) n = n.startsWith("/") ? n.substring(1) : n.substring(2);
+        for (String seg : n.split("/")) if (seg.equals("..")) return null;
+        return n.isEmpty() ? null : n;
+    }
+
+    private String displayName(Uri u) {
+        try (Cursor c = getContentResolver().query(u, new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (c != null && c.moveToFirst() && c.getString(0) != null) return c.getString(0);
+        }
+        return "mod";
+    }
+
+    private String treeName(Uri tree, String id) {
+        try (Cursor c = getContentResolver().query(DocumentsContract.buildDocumentUriUsingTree(tree, id),
+                new String[] {Document.COLUMN_DISPLAY_NAME}, null, null, null)) {
+            if (c != null && c.moveToFirst() && c.getString(0) != null) return c.getString(0);
+        }
+        return "mod";
+    }
+
+    // What is wrong with the layout, and the choice to fix it.
+    private void offerFix(final List<Group> groups) {
+        StringBuilder what = new StringBuilder();
+        boolean up = false, patches = false, none = false;
+        for (Group g : groups) {
+            if (g.fix.equals("up")) { up = true; what.append("\n- ").append(g.name).append(": its game files are ").append(g.level).append(" folders deep inside it; the app looks ").append(MARKER_DEPTH).append(" deep at most."); }
+            if (g.fix.equals("patches")) { patches = true; what.append("\n- ").append(g.name).append(": its patch files (.pchtxt / .ips) are not in an exefs folder, where the app looks for them."); }
+            if (g.fix.equals("none")) { none = true; what.append("\n- ").append(g.name).append(": it has no romfs, exefs or nativeNX folder, where a mod's game files go."); }
+        }
+        if (!up && !patches && !none) { confirmReplace(groups, false); return; }
+        if (none && !up && !patches) {
+            dialog().setTitle(title()).setMessage("This doesn't look like a Monster Hunter Generations Ultimate mod:" + what
+                + "\n\nImport it anyway?")
+                .setPositiveButton("Import anyway", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) { confirmReplace(groups, false); }
+                })
+                .setNegativeButton("Cancel", on(CANCELLED)).show();
+            return;
+        }
+        dialog().setTitle(title()).setMessage("This mod isn't laid out the way the app loads mods from:" + what
+            + "\n\nFix it while importing? The files are copied as they are, only to other places"
+            + (none ? ", and the parts that aren't recognised are imported as they are." : "."))
+            .setPositiveButton("Fix and import", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface d, int w) { confirmReplace(groups, true); }
+            })
+            .setNeutralButton("Import as is", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface d, int w) { confirmReplace(groups, false); }
+            })
+            .setNegativeButton("Cancel", on(CANCELLED)).show();
+    }
+
+    private void confirmReplace(final List<Group> groups, final boolean fix) {
+        for (Group g : groups) {  // (as is: the layout of the source, under the name of the zip or folder)
+            if (!fix) { g.fix = ""; g.root = g.orig; }
+        }
+        StringBuilder have = new StringBuilder();
+        for (Group g : groups) if (new File(dest, safeName(g.name)).exists()) have.append(have.length() > 0 ? ", " : "").append(safeName(g.name));
+        if (have.length() == 0) { installMods(groups); return; }
+        dialog().setTitle(title()).setMessage(have + " is already in the mods folder. Replace it? (Its settings files go too.)")
+            .setPositiveButton("Replace", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface d, int w) { installMods(groups); }
+            })
+            .setNegativeButton("Cancel", on(CANCELLED)).show();
+    }
+
+    // Where a file of the source goes inside its mod's folder; null when it is not part of the group.
+    private static String target(Group g, String path) {
+        if (!path.startsWith(g.root)) return null;
+        String rel = path.substring(g.root.length());
+        if (g.fix.equals("patches") && patch(rel)) {
+            boolean inExefs = false;
+            for (String seg : rel.split("/")) if (seg.equalsIgnoreCase("exefs")) inExefs = true;
+            if (!inExefs) return "exefs/" + rel.substring(rel.lastIndexOf('/') + 1);
+        }
+        return rel.isEmpty() ? null : rel;
+    }
+
+    private void installMods(final List<Group> groups) {
+        progress = dialog().setTitle(title()).setMessage("Starting...").setNegativeButton("Stop", null).show();
+        progress.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { stop = true; show("Stopping..."); }
+        });
+        new Thread(new Runnable() {
+            @Override public void run() {
+                String error = null;
+                File mods = new File(dest), part = new File(mods, ".import.part");
+                try {
+                    delete(part);
+                    part.mkdirs();
+                    int n = 0, total = modPaths.size();
+                    byte[] buf = new byte[1 << 16];
+                    if (mode == MOD_ZIP) {
+                        try (ZipInputStream z = new ZipInputStream(getContentResolver().openInputStream(modSource))) {
+                            for (ZipEntry e; (e = z.getNextEntry()) != null; ) {
+                                if (stop) throw new IOException("stopped");
+                                String path = clean(e.getName());
+                                if (e.isDirectory() || path == null || junk(path)) continue;
+                                for (Group g : groups) {
+                                    String t = target(g, path);
+                                    if (t == null) continue;
+                                    copy(z, new File(new File(part, safeName(g.name)), t), buf);
+                                    if (++n % 50 == 0) show("Copying: " + n + " of " + total + " files");
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        for (String path : modPaths) {
+                            if (stop) throw new IOException("stopped");
+                            for (Group g : groups) {
+                                String t = target(g, path);
+                                if (t == null) continue;
+                                try (InputStream in = getContentResolver().openInputStream(DocumentsContract.buildDocumentUriUsingTree(modSource, modDocs.get(path)))) {
+                                    copy(in, new File(new File(part, safeName(g.name)), t), buf);
+                                }
+                                if (++n % 50 == 0) show("Copying: " + n + " of " + total + " files");
+                                break;
+                            }
+                        }
+                    }
+                    for (Group g : groups) {
+                        File from = new File(part, safeName(g.name)), to = new File(mods, safeName(g.name));
+                        if (!from.isDirectory()) continue;
+                        delete(to);
+                        if (!from.renameTo(to)) throw new IOException("can't move the mod into " + mods);
+                    }
+                } catch (Exception e) {
+                    String m = String.valueOf(e.getMessage());
+                    error = stop ? "stopped" : m.contains("ENOSPC") || m.contains("No space") ? "Not enough free space." : "The copy failed: " + m;
+                } finally {
+                    delete(part);
+                }
+                final String err = error;
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        progress.dismiss();
+                        if (stop && err != null) end(CANCELLED);
+                        else if (err != null) fail(err);
+                        else done("The mod is in the mods folder. Close the app and open it again to load it (turn it on in the Mods tab if it isn't).");
+                    }
+                });
+            }
+        }, "mod-copy").start();
+    }
+
+    private static void copy(InputStream in, File to, byte[] buf) throws IOException {
+        to.getParentFile().mkdirs();
+        try (OutputStream out = new FileOutputStream(to)) {
+            for (int r; (r = in.read(buf)) > 0; ) out.write(buf, 0, r);
+        }
     }
 
     // ------------------------------------------------------------------ save out, and the save's folder

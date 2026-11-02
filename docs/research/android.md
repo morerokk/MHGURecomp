@@ -91,7 +91,9 @@ loops a second as on PC). A phone has neither cost. Measure on a phone.
    Framework (android/java: ImportActivity.java, started from runtime/platform/android.c): the game files from a
    folder the player picks (offered at the start when they are missing or wrong, and in the settings menu), a save's
    system / system_backup files (settings menu; the old save moved aside). Copied into a .part folder, then moved in.
-   From the settings menu the app closes afterwards (the game has the old files open), and the renderer draws
+   Mods come in as a zip or a folder the same way (ImportActivity.plan checks the layout against what
+   mods_find_dir finds: a romfs / exefs / nativeNX folder at most 3 deep; buried ones are moved up, loose
+   .pchtxt / .ips go into exefs/, and the player is asked before either). From the settings menu the app closes afterwards (the game has the old files open), and the renderer draws
    nothing meanwhile (ui_window_away: the picker takes the window's surface, item 6).
 6. Lifecycle: the app paused / resumed (audio, the Vulkan surface going away: swapchain recreated), Android may kill a
    backgrounded app, the back button.

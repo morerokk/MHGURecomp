@@ -13,6 +13,7 @@
 #include <SDL3/SDL.h>
 #include <jni.h>
 
+#include "modorder.h"
 #include "rt.h"
 
 const char *android_home(void) {
@@ -86,7 +87,7 @@ void android_error_box(const char *msg) {
 // ------------------------------------------------------------------ importing the game files or a save
 // The system's file picker and the copy are Java's (android/java: ImportActivity.java), which has its own dialogs;
 // this waits until it is done. 1: game files (into the data folder), 2: a save (into save/save_0), 3: the save out to a
-// folder, 4: choose the folder to keep the save in (its path: android_take_picked). running: the game has started
+// folder, 5 / 6: a mod (zip / folder) into the mods folder, 4: choose the folder to keep the save in (its path: android_take_picked). running: the game has started
 // (the app closes after 1 and 2). true when it was done.
 
 static const char *absolute(const char *dir, char *buf, size_t size) {
@@ -108,6 +109,7 @@ bool android_take_picked(char *out, size_t size) {
 bool android_import(int what, bool running) {
     char buf[1100], folder[1200];
     if (what == 1) snprintf(folder, sizeof folder, "%s", absolute(g_game_dir, buf, sizeof buf));
+    else if (what == 5 || what == 6) snprintf(folder, sizeof folder, "%s", absolute(mods_dir(), buf, sizeof buf));
     else snprintf(folder, sizeof folder, "%s/save_0", absolute(getenv("MHGU_SAVE_DIR") ? getenv("MHGU_SAVE_DIR") : g_save_dir, buf, sizeof buf));
     JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
     jobject act = (jobject)SDL_GetAndroidActivity();

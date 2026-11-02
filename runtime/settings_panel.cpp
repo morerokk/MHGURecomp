@@ -1285,7 +1285,11 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Copies a save's system and system_backup files into the app from any folder on this device. Your current save is kept. The app closes afterwards.");
         action(r, "export.save", tr("Export save"), []() { ui_request_import(3); });
         r.back().help = tr("Copies the save's system and system_backup files out to any folder on this device, as a backup or to move it to another device.");
-        header(r, "game.header", tr("Game files"));
+        header(r, "game.header", tr("Game files and mods"));
+        action(r, "import.mod.zip", tr("Import mod (zip)"), []() { ui_request_import(5); });
+        r.back().help = tr("Adds a mod from a .zip file anywhere on this device. The app checks the zip's layout and offers to fix it if the game couldn't find the mod's files. Close and reopen the app to load it.");
+        action(r, "import.mod.folder", tr("Import mod (folder)"), []() { ui_request_import(6); });
+        r.back().help = tr("Adds a mod from a folder anywhere on this device. The app checks the folder's layout and offers to fix it if the game couldn't find the mod's files. Close and reopen the app to load it.");
         action(r, "import.game", tr("Import game files"), []() { ui_request_import(1); });
         r.back().help = tr("Copies the exefs and romfs folders into the app from any folder on this device, replacing the game files it has. The app closes afterwards.");
         break;

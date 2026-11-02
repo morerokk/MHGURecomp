@@ -175,6 +175,12 @@ The settings menu has an **Android** tab (the last one) for what the device's fi
   the app reads and writes that folder itself. Press Save and start the app again. Your current save isn't moved: use
   **Export save** first to put it in the folder. **Use the app's folder** goes back to the default.
 - **Import game files:** the same import as at the first start (see above), for replacing the game files.
+- **Import mod (zip)** and **Import mod (folder):** pick a mod's `.zip` or folder from anywhere on the device, and the
+  app puts it in `mods/`. It checks the layout first: the game finds a mod's files in a `romfs`, `exefs` or `nativeNX`
+  folder at most three folders down in the mod's folder. If the files are buried deeper (a zip with folders wrapped
+  around the mod), or the patch files (`.pchtxt`, `.ips`) aren't in an `exefs` folder, it says so and offers to fix it
+  while importing (the files are only moved, never changed). A zip with none of those folders is flagged as not
+  looking like a mod, and you can still import it. Close and reopen the app to load the mod.
 
 The FPS counter has a **Battery indicator** next to it (Graphics & Audio): off, in the FPS counter's box, or in a box of
 its own.
