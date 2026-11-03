@@ -312,7 +312,7 @@ bool equal(const Config &a, const Config &b) {
     if (memcmp(a.binds, b.binds, sizeof a.binds))
         return false;
     if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key) ||
-        strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.game_dir, b.game_dir))
+        strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.save_location, b.save_location) || strcmp(a.game_dir, b.game_dir))
         return false;
     for (int n = 0; n < 4; ++n)
         if (a.hp.scale[n] != b.hp.scale[n])
@@ -798,6 +798,7 @@ void reset_section() {
         c.menu_theme = f.menu_theme;
         c.menu_scale = f.menu_scale;
         c.menu_confirm = f.menu_confirm;
+        SDL_strlcpy(c.save_location, f.save_location, sizeof c.save_location);
         c.button_icons = f.button_icons;
         c.confirm_exit = f.confirm_exit;
         c.updates = f.updates;
@@ -1272,6 +1273,17 @@ std::vector<Row> main_rows() {
         add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
                    [](int v) { c.updates = v; }, ini("Updates"));
         add_bool(r, "bonus", "Bonus content", &c.bonus_content, ini("BonusContent"));
+#ifndef __ANDROID__  // (Android: its own tab's Save folder)
+        header(r, "save.header", tr("Save data"));
+        text(r, "save.location", "Save folder", c.save_location, sizeof c.save_location,
+             *c.save_location ? c.save_location : tr("Default folder"), ini("SaveLocation"));
+        r.back().help = tr("Where the save is kept (the folder that holds save_0), for example on another drive or in a folder you sync. Type a path, or use Choose folder. Press Save, then restart the game. Your current save is not moved: copy the save_0 folder there first.");
+        action(r, "save.location.pick", tr("Choose folder"), []() { ui_request_import(4); });
+        r.back().help = tr("Opens your system's folder picker to choose the save folder.");
+        action(r, "save.location.reset", tr("Use the default folder"), []() { s.draft.save_location[0] = 0; },
+               *c.save_location != 0);
+        r.back().help = tr("Keeps the save in the default folder again (%APPDATA%\\MHGURecomp\\save on Windows, ~/.local/share/MHGURecomp/save on Linux) after Save and a restart. The save in the other folder is left where it is.");
+#endif
         break;
 #ifdef __ANDROID__
     case ANDROID_PAGE:  // (Android/data can't be written by the player's file managers: the app copies files in and out)
@@ -2159,14 +2171,19 @@ void settings_panel(bool *open) {
     }
     if (!equal(before, s.draft) && dirty())
         s.saved_notice = false;
-#ifdef __ANDROID__
     {  // (the folder Save folder's or Game files folder's picker chose: the picker ran on the window's thread)
         char folder[sizeof s.draft.save_dir];
         int which = ui_take_picked_folder(folder, sizeof folder);
+#ifdef __ANDROID__
         if (which == 4) SDL_strlcpy(s.draft.save_dir, folder, sizeof s.draft.save_dir);
         if (which == 7) SDL_strlcpy(s.draft.game_dir, folder, sizeof s.draft.game_dir);
-    }
+#else
+        Config temp = s.draft;  // (a folder whose path the settings file can't hold, with ';' or '#', is not taken)
+        if (which == 4 && SDL_strlcpy(temp.save_location, folder, sizeof temp.save_location) < sizeof temp.save_location &&
+            config_validate(&temp, nullptr, 0))
+            s.draft = temp;
 #endif
+    }
     if (ui_action_failed())
         s.error = tr("Restart failed. The game is still running.");
     if (!s.error.empty()) {

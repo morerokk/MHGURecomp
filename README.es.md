@@ -115,7 +115,7 @@ Las versiones nuevas pueden salir bastante a menudo. Para actualizar automática
 | Qué | Dónde |
 | --- | --- |
 | Ajustes | `mhgurecomp.ini` (puedes borrarlo sin problema si quieres restablecer los ajustes) |
-| Partida guardada | `%APPDATA%\MHGURecomp\save\` (Linux: `~/.local/share/MHGURecomp/save/`) |
+| Partida guardada | `%APPDATA%\MHGURecomp\save\` (Linux: `~/.local/share/MHGURecomp/save/`), o la carpeta elegida como Carpeta de la partida en el menú de ajustes (pestaña Opciones del menú, `SaveLocation` en `mhgurecomp.ini`) |
 | Registro | `log.txt`; adjúntalo cuando abras un issue |
 | Capturas de pantalla | `shots\` (pulsa F12) |
 | Mods | `mods\`, una carpeta por mod (ver más abajo) |
