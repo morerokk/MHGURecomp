@@ -29,26 +29,25 @@
 
 A native PC port of **Monster Hunter Generations Ultimate** (Nintendo Switch, version 1.4.0), made by statically
 recompiling the game's 32-bit ARM code to C and running it on a host runtime. Switch system services and the NVN
-graphics API are reimplemented on Windows, Linux and Android, with Vulkan for rendering. It is not an emulator.
+graphics API are reimplemented on Windows, Linux and Android, with Vulkan for rendering.
 
 > **No game files are included.** You need your own copy of the game, dumped from your own Switch. This project does
 > not explain how to dump it and does not provide game files, keys or links to them.
 
-**Status: fully playable**, solo and in multiplayer. There may still be bugs: please
-[open an issue](https://github.com/morerokk/MHGURecomp/issues/new/choose) with your `log.txt` if you hit one.
+**Status: fully playable**, singleplayer and multiplayer. There will probably be some bugs here and there, please [open an issue](https://github.com/morerokk/MHGURecomp/issues/new/choose) with your `log.txt` if you run into one.
 
 ## What it adds over the Switch version
 
 | Area | What you get |
 | --- | --- |
 | **Graphics** | Resolution, render resolution (supersampling), MSAA, FXAA, FSR 3.1 upscaling, VSync, longer draw distance |
-| **Screens** | Any widescreen aspect ratio (16:10, 16:9 and anything wider), with the HUD centred or spread to the edges |
-| **Frame rate** | A cap anywhere from 30 to 240 fps, with fixes for the speed bugs emulators have at high frame rates |
-| **Controls** | Almost every controller (through SDL), and keyboard and mouse with rebindable keys |
-| **Multiplayer** | Online hubs through a hosted server, public or with a matchmaking key for friends ("Local Wireless" menu); LAN and direct IP too |
-| **Multiplayer options** | Small monsters synced between players, monster HP scaled by player count, Village quests in the Hub, Urgent quest credit for everyone |
+| **Screens** | Any widescreen aspect ratio (16:10, 16:9 or anything wider), with HUD adjustment options for ultrawide |
+| **Frame rate** | Framerates anywhere between 30-240 fps, with fixes for bugs that GU normally has on emulators at high frame rates |
+| **Controls** | Almost any controller is supported (SDL), as well as keyboard+mouse |
+| **Multiplayer** | Online play through the "Local Wireless" feature. Comes preloaded with an online server, but you can also host your own or directly connect to friends by forwarding port 39500. |
+| **Multiplayer options** | Small monsters are synced between players, monster HP optionally scaled by player count, Village quests playable in Multiplayer Hubs, Urgent Quest credit for everyone |
 | **Quality of life** | Fast-forward unskippable cutscenes with A, an in-game PC settings menu (F1 or `Plus`+`Minus`), Discord Rich Presence |
-| **Mods and cheats** | Drop-in `mods` folder with load order and conflict checks, Forge plugins included ([Mods](#mods)); Ryujinx / Atmosphère cheat files ([Cheats](#cheats)) |
+| **Mods and cheats** | Drop-in `mods` folder with load order and conflict checks. Natively supports Forge plugins ([Mods](#mods)), and Ryujinx / Atmosphère cheat files ([Cheats](#cheats)) |
 
 ## Requirements
 
@@ -70,9 +69,9 @@ graphics API are reimplemented on Windows, Linux and Android, with Vulkan for re
 
 [Download the latest prebuilt release from the Releases page. Make sure you download the right ZIP file for your desired platform.](https://github.com/morerokk/MHGURecomp/releases)
 
-You need the `exefs` and `romfs` folders from Monster Hunter Generations Ultimate 1.4.0. If you are coming from Ryujinx, you can right-click the game (make sure the 1.4.0 title update is applied), and Extract the game files with the patches pre-applied.
+You need the `exefs` and `romfs` folders from Monster Hunter Generations Ultimate 1.4.0. If you are coming from Ryujinx, you can right-click the game (make sure the 1.4.0 title update is applied), and Extract the game files with the patches pre-applied. Similar functionality also exists in Yuzu, or you can use other tools to extract the game files.
 
-You may be able to extract the files with another tool, just make sure that you extract both the base game files and the 1.4.0 title update. The title update's `exefs` and `romfs` files should be copied on top of the base game's. Make sure the first subfolder is called `nativeNX` (not `NativeNX`) and that the names keep their capital letters.
+You may be able to extract the files with another tool, just make sure that you extract both the base game files and the 1.4.0 title update. The title update's `exefs` and `romfs` files should be copied on top of the base game's.
 
 1. Extract the release zip anywhere, for example `C:\Games\MHGURecomp\`.
 2. Put the game's `exefs` and `romfs` folders in the `data` subfolder. It should look like this:
@@ -330,10 +329,9 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   the one later in load order wins, and the log says so ("changes ..., which an earlier mod changed too"). Mods load in
   alphabetical order. To choose the order, make `mods\load_order.txt` with one mod folder name per line: then only
   the mods listed load, in that order. The merged archives are kept in `cache\arcmerge\`.
-- A mod's `.arc` does not need the whole archive: one that holds only the changed entries goes over the game's, so a
-  mod doesn't have to ship the rest of the game's files. Entries match the game's by their internal name and type, and
+- Partial `.arc` files supported (so `.arc` files that only contain a single entry to replace also work). Entries match the game's by their internal name and type, and
   the archive's version must be the game's (17). An archive that holds none of the game's entries still replaces it
-  whole. Partial archives work in this port only: on a Switch or an emulator they replace the whole file.
+  entirely.
 - The **Mods** tab of the settings menu does this without editing files: it lists the mod folders, turns each on or
   off, moves them up or down, and writes `mods\load_order.txt` when Save is pressed (restart to apply; mods you add
   later load too, after the listed ones, until you turn them off; a mod turned off keeps its place in the order). It also compares the mods and lists the ones that change the same game files (and which of
