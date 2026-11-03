@@ -677,6 +677,8 @@ static bool lobby_server(char *out) {
 
 // A request's header. The room is a hash of the matchmaking key (key NULL: ini Key; spaces around it ignored): hubs
 // are listed only for players whose key matches, all of them without one. The server never sees the key itself.
+// Android without a key: the room of the key "public-phone", so a phone's public hubs are among phones only and no key
+// reaches the PCs' public room (all zero): phones play with PCs only by sharing a key.
 static bool lobby_header(uint8_t *h, const char *key) {
     static const char salt[] = "MHGURecomp matchmaking key:";
     char live[sizeof g_config.ldn_key];
@@ -689,6 +691,9 @@ static bool lobby_header(uint8_t *h, const char *key) {
     while (*k == ' ') k++;
     size_t n = strlen(k);
     while (n && k[n - 1] == ' ') n--;
+#ifdef __ANDROID__
+    if (!n) k = "public-phone", n = strlen(k);
+#endif
     if (!n) return false;
     Sha256 s;
     char hex[65];

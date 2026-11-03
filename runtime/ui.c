@@ -10,6 +10,7 @@
 #include "config.h"
 #include "app_actions.h"
 #include "overlay.h"
+#include "hle/chat.h"
 #include "mods.h"
 #include "rt.h"
 
@@ -24,6 +25,22 @@ static char **launch_argv;
 static SDL_AtomicInt requested_action, action_failed;
 void ui_capture_launch_args(int argc, char **argv) { launch_argc = argc; launch_argv = argv; }
 void ui_request_action(bool restart) { SDL_SetAtomicInt(&requested_action, restart ? 2 : 1); }
+void ui_request_import(int what) { SDL_SetAtomicInt(&requested_action, 2 + what); }
+static SDL_AtomicInt away;
+bool ui_window_away(void) { return SDL_GetAtomicInt(&away) != 0; }
+#ifdef __ANDROID__
+bool android_import(int what, bool running);  // (runtime/platform/android.c)
+int android_take_picked(char *out, size_t size);
+void android_config_loaded(void);
+#endif
+int ui_take_picked_folder(char *out, size_t size) {
+#ifdef __ANDROID__
+    return android_take_picked(out, size);
+#else
+    (void)out, (void)size;
+    return 0;
+#endif
+}
 bool ui_action_failed(void) { return SDL_SetAtomicInt(&action_failed, 0) != 0; }
 static bool restart_application(void) {
     char exe[4096], wait[80];
@@ -95,7 +112,8 @@ static void fit_picture(void) {
 }
 
 // Full screen as the settings say (exclusive: the monitor mode closest to Resolution; else borderless desktop), or
-// windowed. The cursor only shows in a window.
+// windowed. The cursor only shows in a window, or over a menu or the chat box (they show it only as they open, so it
+// stays shown when full screen comes while one is open: F11, Alt+Enter).
 static void set_fullscreen(bool on) {
     bool was = SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN;
     if (on && !was) SDL_GetWindowSize(window, &win_w, &win_h);
@@ -121,7 +139,7 @@ static void set_fullscreen(bool on) {
         fit_picture();
         SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     }
-    if (on) SDL_HideCursor(); else SDL_ShowCursor();
+    if (on && !overlay_menu_open() && !chat_active()) SDL_HideCursor(); else SDL_ShowCursor();
 }
 
 void ui_init(void) {
@@ -136,12 +154,22 @@ void ui_init(void) {
         SDL_GetCurrentVideoDriver());
 #endif
     config_load();
+#ifdef __ANDROID__
+    if (g_config.save_dir[0]) g_save_dir = g_config.save_dir;  // ([Android] SaveFolder: MHGU_SAVE_DIR still wins, fs.c)
+    android_config_loaded();
+#endif
     // Initial background input policy. SDL documents this hint as changeable at runtime.
     // Subsequent saved changes are consumed by the host thread in ui_run().
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, g_config.background_input ? "1" : "0");
     if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) FATAL("SDL_InitSubSystem: %s\n", SDL_GetError());
     win_w = g_config.width, win_h = g_config.height;
+#ifdef __ANDROID__
+    // (a resizable window may turn any way on Android, whatever the manifest says: landscape only. The window
+    // fills the screen there, so the settings' size does not apply.)
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#else
     fit_desktop(&win_w, &win_h);
+#endif
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #ifndef MHGU_NULL_BACKEND
     flags |= SDL_WINDOW_VULKAN;
@@ -202,6 +230,15 @@ int ui_run(void) {
 #endif
             SDL_SetAtomicInt(&action_failed, 1);
         }
+#ifdef __ANDROID__
+        // (on this thread: SDL's own, which Java made. The app closes after an import: the game has the old files open)
+        if (action >= 3 && action <= 9) {
+            SDL_SetAtomicInt(&away, 1);  // (the picker takes the window's surface away: the renderer draws nothing)
+            // (after 1 and 2 the app closes, the game has the old files open; the others leave it running)
+            if (android_import(action - 2, true) && action <= 4) { LOG("[ui] imported: closing\n"); exit(0); }
+            SDL_SetAtomicInt(&away, 0);
+        }
+#endif
         host_input_update();
         cheats_frame();
     }

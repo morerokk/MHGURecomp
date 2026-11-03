@@ -7,7 +7,6 @@
 /app/
 /release/
 /third_party/macos-deps/
-/third_party/vk_mem_alloc/
 *.dylib
 /run/
 /game/
@@ -35,3 +34,5 @@ __pycache__/
 # the hub server built in place (server/README.md)
 server/mhgurecomp-hubserver
 server/mhgurecomp-hubserver.exe
+/build-android/
+/obj-android/

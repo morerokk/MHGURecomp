@@ -1,4 +1,4 @@
-// Vulkan 1.2 backend for the NVN layer. Baseline: what an AMD GCN card with a 2020 driver offers (see
+// Vulkan 1.2 backend for the NVN layer (with a path for Vulkan 1.1 devices: g_vk.api11). Baseline: what an AMD GCN card with a 2020 driver offers (see
 // docs/STATUS.md): no dynamic rendering, no synchronization2, no extended dynamic state, no push descriptors.
 // Files: device.c (instance, device, swapchain, presentation), textures.c (images, change-detected uploads from
 // guest memory, views, samplers), shaders.c (GLSL -> SPIR-V, reflection, built-in shaders), exec.c (command lists:
@@ -8,7 +8,8 @@
 // passes, copies and dispatches. Render passes are VkRenderPass objects (cached by attachment formats; LOAD / STORE,
 // GENERAL in and out) with framebuffers cached by their views. Pipelines bake all state but viewport, scissor, depth
 // bias, blend constants and stencil masks / reference. Submissions are numbered; a timeline semaphore signals each
-// number, which is what NVN fences (renderer_fence_seq / renderer_wait_seq) wait for.
+// number, which is what NVN fences (renderer_fence_seq / renderer_wait_seq) wait for. Without timeline semaphores a
+// fence per submission keeps the same numbers (g_vk.fences, exec.c).
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
@@ -35,8 +36,16 @@ typedef struct {
     VkPhysicalDeviceProperties props;
     VkPipelineCache pcache;
     VkSemaphore timeline;      // value = last completed submission number
+    // (from the driver: Android 10 and 11's libvulkan.so has no Vulkan 1.2 functions, whatever the driver supports, and
+    // importing one stops the game from starting)
+    PFN_vkGetSemaphoreCounterValue get_semaphore_counter;
+    PFN_vkWaitSemaphores wait_semaphores;
+    bool api11;                // a device below Vulkan 1.2 (or MHGU_VK11=1): no 1.2 structures, SPIR-V 1.3, no FSR
+    bool fences;               // no timeline semaphores (always with api11): exec.c numbers submissions with fences
+    bool no_mirror_clamp;      // api11 without VK_KHR_sampler_mirror_clamp_to_edge: textures.c mirrors and repeats
     VkCommandPool pool;        // render thread only
     bool divisor, demote, custom_border, depth_clamp, stencil_export, sample_shading;
+    bool bc;                   // textureCompressionBC (MHGU_NO_BC=1: off, as phone GPUs report; textures.c decodes BC)
     volatile uint32_t msaa;    // samples for the 3D scene's passes (settings MSAA, as far as the GPU allows): 1 = off
     uint32_t msaa_counts;      // the sample counts MSAA can use (bits 2, 4, 8)
     bool fsr_fp16, fsr_storage_wo_format;  // FSR (fsr.c): shaderFloat16 / shaderStorageImageWriteWithoutFormat enabled
@@ -118,6 +127,7 @@ typedef struct TexBackend {
     uint32_t pending_w, pending_h, pending_stride;
     uint8_t astc_bw, astc_bh;  // ASTC without GPU support: decoded to RGBA8 on upload (runtime/nvn/astc.c)
     bool astc_srgb;
+    uint8_t bcn;               // BC without GPU support (BCN_*): decoded on upload (runtime/nvn/bcn.c)
     struct TexBackend *ms;  // MSAA: the multisampled image this one is rendered through (textures.c vk_tex_ms)
     bool ms_valid;          // ms holds this image's contents (its last write was a pass through ms)
     bool ms_dirty;          // ms is newer than this image: resolved when this one is next read (exec.c vk_ms_resolve)
@@ -129,6 +139,11 @@ typedef struct TexBackend {
 
 bool vk_wide_rt_on(void);  // (textures.c) RGBA8 render targets as RGBA16 UNORM ([Graphics] SmoothGradients)
 void vk_rt_widen(NvnTexture *t, bool wide);  // (exec.c begin_pass, outside a render pass)
+// Images of a compressed format the GPU lacks (ASTC on desktop, BC on phones) hold decoded texels: blocks
+// (row-major, w x h texels' worth) -> w*h texels of vk_tex_texel_size bytes, tightly packed.
+static inline bool vk_tex_decoded(const TexBackend *b) { return b->astc_bw || b->bcn; }
+uint32_t vk_tex_texel_size(const TexBackend *b);
+void vk_tex_decode(const TexBackend *b, const uint8_t *blocks, uint32_t w, uint32_t h, uint8_t *out);
 
 TexBackend *vk_tex(NvnTexture *t, bool for_render);  // backend image (uploads CPU contents unless for_render)
 VkFormat vk_format(uint32_t nvn_format);

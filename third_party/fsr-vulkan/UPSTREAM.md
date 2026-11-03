@@ -40,6 +40,8 @@ Nine vendored files have narrow Linux/compute-only or correctness changes:
 - `ffx_fsr3upscaler.cpp` and `ffx_frameinterpolation.cpp`: use `std::fabs`
   when generating Lanczos weights; on Clang the upstream unqualified
   `abs(float)` binds to integer `abs` and changes the LUT values.
+- `ffx_fsr3upscaler_reproject.h`: the FP16 history sample uses `PreviousFrameUpscaleSize()` instead of `UpscaleSize()`, as in
+  FSR 3.1.6 (SDK 2.4.0, the only shader difference to 1.1.4 apart from copyright years; it matters when the upscale size changes).
 - `ffx_fsr3upscaler_callbacks_glsl.h`: declares the luma-history storage image
   as `rgba16f`, matching the host scheduler's `R16G16B16A16_FLOAT` resource.
   Upstream declares `rgba8`, which Vulkan validation rejects and which makes

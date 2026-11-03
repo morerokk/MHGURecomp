@@ -29,6 +29,7 @@ int main(int argc, char **argv) {
     fputs("; Keep this comment\r\n[Display]\r\nMode = Borderless Window\r\nResolution = Desktop\r\nRenderResolution = Auto\r\n"
           "AspectRatio = 21:9\r\nFOV = 1.1 ; camera comment\r\n"
           "[Performance]\r\nFPS = 60\r\nFrameRate = 60\r\n[Monster HP]\r\nQuest101 = 0.6\r\nQuest102 = 1, 2, 3, 4\r\n"
+          "[Upscaler]\r\nUpscaler = FSR4\r\n"  // (from when FSR 4 existed: ignored, and kept like any unknown line)
           "[Future section]\r\nFutureOption = preserve-me", f);
     fclose(f);
     set_env("MHGU_CONFIG", path);
@@ -56,6 +57,11 @@ int main(int argc, char **argv) {
     assert(config_live_msaa()==4 && !config_live_vsync() && !config_live_fxaa());
     assert(config_live_face_buttons()==FACE_LABEL && !config_live_background_input());
     assert(config_live_mouse_sensitivity()==2.5f && camera_fovy(0.5f,g_render_aspect)<camera_before);
+    assert(camera_fovy(0.5f,g_render_aspect*1.002f)<camera_before && camera_fovy(0.5f,g_render_aspect*1.1f)==0.5f); // (pixel rounding)
+    float aspect_was=g_render_aspect; uint32_t size_was[2]={g_render_size[0],g_render_size[1]};
+    g_render_aspect=3.57778f, g_render_size[0]=426, g_render_size[1]=118; // (FSR Ultra Performance at 1280x720: 0.9% off)
+    assert(camera_fovy(0.5f,426.0f/118.0f)!=0.5f && camera_fovy(0.5f,3.3f)==0.5f);
+    g_render_aspect=aspect_was, g_render_size[0]=size_was[0], g_render_size[1]=size_was[1];
     assert(g_config.fps==60 && g_config.fxaa==1 && g_config.face_buttons==FACE_POSITION); // Boot snapshot is immutable.
     c.hp.quest[0] = c.hp.quest[1]; c.hp.quests = 1;
     assert(config_save(&c, error, sizeof error));
@@ -151,12 +157,13 @@ int main(int argc, char **argv) {
     assert(menu_confirm_position(MENU_CONFIRM_SOUTH,1,0,1)==1);
     Config fsr_config=config_editable();
     assert(config_defaults().sync_small_monsters==0);
+    assert(config_defaults().share_urgent==1);
     assert(config_defaults().shader_prewarm==1);
     assert(config_defaults().draw_distance==1.0f);
     assert(config_defaults().mute_in_background==0);
     assert(config_defaults().combo_window==COMBO_LENIENT);
     assert(config_defaults().fxaa_mode==FXAA_ORIGINAL);
-    fsr_config.fsr=1;fsr_config.fsr_upscaler=FSR_UP_4;fsr_config.fsr_quality=FSR_BALANCED;
+    fsr_config.fsr=1;fsr_config.fsr_quality=FSR_BALANCED;
     fsr_config.fsr_sharpness=.65f;fsr_config.fsr_objmotion=0;fsr_config.fsr_reactive=.35f;fsr_config.fsr_animsurf=0;
     fsr_config.msaa=8;fsr_config.fxaa=1;
     assert(config_save(&fsr_config,error,sizeof error));assert(config_restart_required(&fsr_config));
@@ -164,7 +171,7 @@ int main(int argc, char **argv) {
     assert(strstr(text, "Sharpness = 0.65\r\n") && strstr(text, "Reactive = 0.35\r\n") && strstr(text, "Upscaler = FSR4\r\n"));
     free(text);
     g_config=initial;config_load();Config fsr_saved=config_editable();
-    assert(fsr_saved.fsr && fsr_saved.fsr_upscaler==FSR_UP_4 && fsr_saved.fsr_quality==FSR_BALANCED);
+    assert(fsr_saved.fsr && fsr_saved.fsr_quality==FSR_BALANCED);
     assert(fabsf(fsr_saved.fsr_sharpness-.65f)<.001f && fabsf(fsr_saved.fsr_reactive-.35f)<.001f);
     assert(!fsr_saved.fsr_objmotion && !fsr_saved.fsr_animsurf);
     assert(config_live_msaa()==1 && config_live_fxaa()==0);
@@ -172,7 +179,6 @@ int main(int argc, char **argv) {
     assert(config_editable().msaa==8 && config_editable().fxaa==1);
     assert(config_live_msaa()==1 && config_live_fxaa()==0); // Saving cannot undo FSR's AA override.
     bad=fsr_saved;bad.fsr_quality=5;assert(!config_save(&bad,error,sizeof error));
-    bad=fsr_saved;bad.fsr_upscaler=2;assert(!config_save(&bad,error,sizeof error));
     bad=fsr_saved;bad.fsr_sharpness=NAN;assert(!config_save(&bad,error,sizeof error));
     bad=fsr_saved;bad.fsr_reactive=1.1f;assert(!config_save(&bad,error,sizeof error));
     bad=fsr_saved;bad.fsr_objmotion=2;assert(!config_save(&bad,error,sizeof error));

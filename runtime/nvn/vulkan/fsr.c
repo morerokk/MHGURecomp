@@ -50,7 +50,6 @@
 #include "../../camera_jitter.h"
 #include "../../kernel.h"
 #include "fsr.h"
-#include "fsr4.h"
 #include "shaders.h"
 
 bool g_fsr_on;
@@ -1140,7 +1139,7 @@ static uint32_t menu_2d_scene, menu_models, menu_models_late, menu_cams, menu_ca
 static NvnTexture *shot_taken;  // (quest rewards, see the top) the game's screenshot buffer, drawn into since the HUD
 static uint64_t last_dispatch_ns, frame_id;
 // per-second log (MHGU_FSR_LOG)
-static uint32_t n_fsr4, n_fsr, n_scaled, n_none, n_match, n_nomatch, n_reset, lag_hist[4], n_objv_frames, n_react_frames;
+static uint32_t n_fsr, n_scaled, n_none, n_match, n_nomatch, n_reset, lag_hist[4], n_objv_frames, n_react_frames;
 static uint64_t log_t0;
 static char why_last[96];
 
@@ -1499,11 +1498,8 @@ static void scale_to_stand(NvnTexture *h, NvnTexture *hs) {
 }
 
 // prep + FSR: H -> H'. false: not done (H' untouched).
-static bool use_fsr4;  // [Upscaler] Upscaler = FSR4 and the driver's FSR 4 started (fsr4.c); false after it fails: FSR 3.1
-
 static bool run_fsr(NvnTexture *h, NvnTexture *hs, NvnTexture *depth, NvnTexture *mask, const CamRecord *cam) {
-    if (use_fsr4 && !vk_fsr4_ready()) use_fsr4 = false;  // (it failed: fsr4.c logged why)
-    if (!use_fsr4 && !ctx_make()) return false;
+    if (!ctx_make()) return false;
     TexBackend *hb = vk_tex(h, true), *db = vk_tex(depth, true), *ob = hs->backend;
     if (hb->width != rw || hb->height != rh || db->width != rw || db->height != rh) {
         static int nlog;
@@ -1588,27 +1584,6 @@ static bool run_fsr(NvnTexture *h, NvnTexture *hs, NvnTexture *depth, NvnTexture
     if (dt < 1.0f) dt = 1.0f;
     if (dt > 100.0f) dt = 100.0f;
     last_dispatch_ns = now;
-    bool reset_in = reset;
-    if (use_fsr4) {  // FSR 4: the same inputs, recorded by the driver's provider
-        float n = cam->near, f = cam->far;
-        if (!(n > 0.0f) || !(f > n)) n = 8.0f, f = 50000.0f;
-        Fsr4Dispatch d4 = {.cb = cb, .color = {hb->image, hb->format, hb->width, hb->height},
-                           .depth = {img_depth.image, img_depth.format, img_depth.width, img_depth.height},
-                           .motion = {img_mvf.image, img_mvf.format, img_mvf.width, img_mvf.height},
-                           .output = {ob->image, ob->format, ob->width, ob->height},
-                           .jitter = {cam->jitter[0], cam->jitter[1]}, .render = {rw, rh}, .out = {ow, oh}, .frame_ms = dt,
-                           .cam_near = n, .cam_far = f, .fovy = cam->fovy > 0.05f && cam->fovy < 3.0f ? cam->fovy : 1.0f,
-                           .view_to_meters = 0.01f, .sharpness = g_config.fsr_sharpness, .sharpen = g_config.fsr_sharpness > 0.0f,
-                           .reset = reset};
-        if (react) d4.reactive = (Fsr4Image){img_react.image, img_react.format, img_react.width, img_react.height};
-        if (vk_fsr4_dispatch(&d4)) {
-            n_fsr4++;
-            goto dispatched;
-        }
-        use_fsr4 = false;  // failed (logged): FSR 3.1 for this frame, with a fresh history
-        reset = true;
-        if (!ctx_make()) return false;
-    }
     FfxVkPortableUpscaleDispatchInfo di = {.structSize = sizeof di, .commandBuffer = cb};
     di.color = ffx_image(hb, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                                  VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
@@ -1652,11 +1627,10 @@ static bool run_fsr(NvnTexture *h, NvnTexture *hs, NvnTexture *depth, NvnTexture
         if (nlog++ < 20) LOG("[fsr] dispatch failed: %d\n", r);
         return false;
     }
-dispatched:
     vk_full_barrier(cb);
     if (anim) anim_bypass(cb, hb, ob, cam->jitter);  // (animated surfaces: the current input there)
     prev_store(cb, hb);
-    if (reset || reset_in) n_reset++;
+    if (reset) n_reset++;
     prev_cam = *cam;
     prev_fsr_present = g_present_count;
     return true;
@@ -1815,8 +1789,6 @@ NvnTexture *vk_fsr_present(NvnTexture *t) {
             "more %u), not %u | object motion %u frames, reactive %u | last HUD start: %s\n",
             n_fsr, n_scaled, n_none, n_reset, n_match, lag_hist[0], lag_hist[1], lag_hist[2], lag_hist[3], n_nomatch,
             n_objv_frames, n_react_frames, why_last);
-        LOG("[fsr] 1s: upscaler %s, FSR 4 frames %u\n", use_fsr4 ? vk_fsr4_name() : "FSR 3.1", n_fsr4);
-        n_fsr4 = 0;
         if (g_fsr_objvel && n_fsr) {
             uint32_t nstatic = 0;
             for (int i = 0; i < STAT_TAB; i++) nstatic += stat_tab[i].key && stat_tab[i].until > cap_frame;
@@ -1873,6 +1845,7 @@ void vk_fsr_init(void) {
     if (!g_config.fsr || !g_fsr_output[0]) return;
     rw = g_render_size[0], rh = g_render_size[1], ow = g_fsr_output[0], oh = g_fsr_output[1];
     logging = getenv("MHGU_FSR_LOG") != NULL;
+    if (g_vk.api11) { LOG("[fsr] FSR 3.1 needs Vulkan 1.2: FSR off, the picture is scaled from %ux%u\n", rw, rh); return; }
     FfxVkPortableDeviceCapabilities caps = {.structSize = sizeof caps};
     if (ffxVkPortableQueryDeviceCapabilities(g_vk.phys, &caps) != FFX_VK_PORTABLE_OK || !caps.fsr3ComputePrerequisites ||
         !g_vk.fsr_storage_wo_format) {
@@ -1891,11 +1864,6 @@ void vk_fsr_init(void) {
     if (!prep_init()) { LOG("[fsr] the prep shader could not be built: FSR off\n"); g_fsr_objvel = false; return; }
     g_fsr_on = true;
     camjit_set(false, rw, rh, 8);
-    if (g_config.fsr_upscaler == FSR_UP_4) {
-        use_fsr4 = vk_fsr4_init();
-        LOG("[fsr] Upscaler = FSR4: %s\n", use_fsr4 ? vk_fsr4_name() : "not available, FSR 3.1 is used");
-    }
-    LOG("[fsr] on (%s): %ux%u -> %ux%u, sharpness %.2f, fp16 %d, object motion %s, reactive %.2f\n",
-        use_fsr4 ? vk_fsr4_name() : "FSR 3.1", rw, rh, ow, oh, g_config.fsr_sharpness, g_vk.fsr_fp16, g_fsr_objvel ? "on" : "off",
-        g_config.fsr_reactive);
+    LOG("[fsr] on (FSR 3.1): %ux%u -> %ux%u, sharpness %.2f, fp16 %d, object motion %s, reactive %.2f\n",
+        rw, rh, ow, oh, g_config.fsr_sharpness, g_vk.fsr_fp16, g_fsr_objvel ? "on" : "off", g_config.fsr_reactive);
 }

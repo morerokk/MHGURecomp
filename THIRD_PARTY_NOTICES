@@ -8,9 +8,8 @@ below.
 - cimgui (third_party/cimgui): MIT License.
 - Dear ImGui (third_party/cimgui/imgui): MIT License.
 - AMD FidelityFX SDK 1.1.4 (third_party/fsr-vulkan/upstream/ffx-1.1.4): the FSR 3.1 upscaler's host code, Vulkan
-  backend and shaders, and the ffx-api headers (third_party/ffx-api). MIT License, Copyright (C) 2024 Advanced Micro
-  Devices, Inc.; the licence files are kept beside the code (third_party/fsr-vulkan/upstream/ffx-1.1.4/sdk/LICENSE.txt,
-  third_party/ffx-api/LICENSE.txt) and reproduced below.
+  backend and shaders. MIT License, Copyright (C) 2024 Advanced Micro Devices, Inc.; the licence file is kept beside
+  the code (third_party/fsr-vulkan/upstream/ffx-1.1.4/sdk/LICENSE.txt) and reproduced below.
 - FSR-Vulkan (third_party/fsr-vulkan: the portable C wrapper and build glue around the SDK;
   github.com/FireBurn/FSR-Vulkan): MIT License, see third_party/fsr-vulkan/LICENSE.txt, NOTICE.md and UPSTREAM.md
   (the files changed against AMD's originals are listed there).
@@ -22,8 +21,7 @@ below.
 Libraries the program uses that are not part of this repository (SDL3, shaderc, the Vulkan loader, and on Windows
 the GCC runtime linked in) keep their own licenses. The Windows build collects those of everything it ships or links
 in into build/licenses (README.txt there lists each with its version and source); the Vulkan loader is the GPU
-driver's and is not shipped. Likewise the optional FSR 4 mode loads amdvkffx64.dll from the user's own AMD
-graphics driver at run time; nothing of AMD's driver is included or shipped here.
+driver's and is not shipped.
 
 
 ================================================================================

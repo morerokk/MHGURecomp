@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app's picture on an Android TV home screen (AndroidManifest.xml android:banner): "MHGU" in plain shapes, nothing of
+     the game's. 16:9, as Android TV asks. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp" android:height="180dp"
+    android:viewportWidth="320" android:viewportHeight="180">
+    <path android:fillColor="#1F2A24" android:pathData="M0,0h320v180h-320z" />
+    <path android:fillColor="#C9A227" android:pathData="M45,136h230v6h-230z" />
+    <path android:fillColor="#F2EFE6"
+        android:pathData="M45,52h12l16,26l16,-26h12v72h-12v-50l-16,26l-16,-26v50h-12z
+                          M111,52h12v30h24v-30h12v72h-12v-30h-24v30h-12z
+                          M169,52h48v12h-36v48h24v-18h-12v-12h24v42h-48z
+                          M227,52h12v60h24v-60h12v72h-48z" />
+</vector>

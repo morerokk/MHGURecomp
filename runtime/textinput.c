@@ -135,9 +135,20 @@ bool textinput_event(const SDL_Event *e) {
 
 void textinput_update(void) {
     bool want = textinput_active() || overlay_menu_open();  // (Forge's menu takes typed text too)
-    if (want == g_window_on) return;
     SDL_Window *w = ui_window();
     if (!w) return;
+#ifdef __ANDROID__
+    // The on-screen keyboard covers half the screen: it comes up only for a real text box (the game's entries, the chat,
+    // a Forge plugin's field). The settings menu has its own on-screen keys, and a physical keyboard still types in it.
+    static bool screen_keyboard = true;
+    bool screen = textinput_active() || overlay_wants_text();
+    if (screen != screen_keyboard) {
+        if (g_window_on) SDL_StopTextInput(w), g_window_on = false;  // (before the hint changes: a shown keyboard hides)
+        SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, screen ? "auto" : "0");
+        screen_keyboard = screen;
+    }
+#endif
+    if (want == g_window_on) return;
     if (want) SDL_StartTextInput(w);
     else SDL_StopTextInput(w);
     g_window_on = want;
