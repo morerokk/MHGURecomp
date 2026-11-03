@@ -25,6 +25,7 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <application android:label="MHGU Recomp"
+        android:icon="@mipmap/ic_launcher"
         android:banner="@drawable/banner"
         android:allowBackup="false"
         android:hasFragileUserData="true"
