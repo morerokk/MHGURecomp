@@ -18,7 +18,7 @@ APK         := $(B)/mhgurecomp.apk
 APK_O       := obj-android/apk
 JAVA_SRC    := $(SDL3_DIR)/src/android-project/app/src/main/java/org/libsdl/app
 APP_JAVA    := $(wildcard android/java/io/github/morerokk/mhgurecomp/*.java)  # (the app's own: the import)
-APP_RES     := $(wildcard android/res/*/*)  # (the Android TV home screen's banner)
+APP_RES     := $(wildcard android/res/*/*)  # (the Android TV home screen's banner, the icon's Share log shortcut)
 DEBUG_KEY   := $(HOME)/.android/debug.keystore
 # The release key: every release must be signed with the same one, or Android refuses it as an update, and players
 # would have to uninstall first (losing the app's folder: their game files and saves). Made once, by make release-key,
