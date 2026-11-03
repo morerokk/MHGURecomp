@@ -185,6 +185,28 @@ bool plat_user_dir(char *buf, size_t size) {
     return len > 0 && !lossy;
 }
 
+bool plat_use_folder(const char *utf8, char *buf, size_t size) {
+    wchar_t dir[MAX_PATH];
+    if (!*utf8 || !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1, dir, MAX_PATH)) return false;
+    for (wchar_t *p = dir; *p; p++) if (*p == L'/') *p = L'\\';
+    for (wchar_t *p = dir; (p = wcschr(p + 1, L'\\'));) {  // (each missing folder on the way, then the folder itself)
+        *p = 0;
+        CreateDirectoryW(dir, NULL);
+        *p = L'\\';
+    }
+    CreateDirectoryW(dir, NULL);
+    DWORD attr = GetFileAttributesW(dir);
+    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) return false;
+    BOOL lossy = FALSE;
+    int len = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, dir, -1, buf, (int)size, NULL, &lossy);
+    if (len > 0 && !lossy) return true;
+    wchar_t shrt[MAX_PATH];
+    DWORD m = GetShortPathNameW(dir, shrt, MAX_PATH);
+    if (!m || m >= MAX_PATH) return false;
+    len = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, shrt, -1, buf, (int)size, NULL, &lossy);
+    return len > 0 && !lossy;
+}
+
 static int count_files(const char *dir, int depth) {
     char pat[MAX_PATH * 2];
     if (depth > 32 || snprintf(pat, sizeof pat, "%s\\*", dir) >= (int)sizeof pat) return 0;

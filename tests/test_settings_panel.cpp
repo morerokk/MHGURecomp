@@ -20,6 +20,15 @@ static int requested;
 extern "C" const char *g_game_dir = "obj/settings-test/game";  // (modorder.c compares archives with the game's)
 extern "C" void ui_request_action(bool restart) { requested = restart ? 2 : 1; }
 extern "C" bool ui_action_failed(void) { return false; }
+static int import_requested;
+static const char *picked_folder;  // (what the folder picker "chose": ui_take_picked_folder hands it out once)
+extern "C" void ui_request_import(int what) { import_requested = what; }
+extern "C" int ui_take_picked_folder(char *out, size_t size) {
+    if (!picked_folder) return 0;
+    SDL_strlcpy(out, picked_folder, size);
+    picked_folder = nullptr;
+    return 4;
+}
 extern "C" int ldn_hub_status(const char *, const char *, int *, int *) { return 0; }
 extern "C" void ldn_hub_check(const char *, const char *) {}
 // (cheats.c: two cheats, a master code and one that can be turned off)
@@ -490,7 +499,37 @@ int main() {
     assert(config_live_menu_confirm() == MENU_CONFIRM_ORIGINAL);
     press(ImGuiKey_Home);
     selected("language");
-    down(9);  // (theme, scale, detach, menu.confirm, icons, confirm.exit, updates, bonus, restart)
+    // Save folder (PC): Choose folder opens the system's picker, whose folder lands in the draft; Save keeps it
+    down(8);  // (theme, scale, detach, menu.confirm, icons, confirm.exit, updates, bonus)
+    selected("bonus");
+    down();
+    selected("save.location");
+    down();
+    selected("save.location.pick");
+    confirm();
+    assert(import_requested == 4);
+    picked_folder = "/games/MHGU saves";
+    idle();
+    picked_folder = "/bad;folder";  // (the settings file can't hold it: not taken)
+    idle();
+    down();
+    selected("save.location.reset");  // (enabled now: a folder is set)
+    press(ImGuiKey_End);
+    press(ImGuiKey_GamepadDpadUp);
+    selected("save");
+    confirm();
+    assert(!strcmp(config_editable().save_location, "/games/MHGU saves"));
+    { Config saved = config_editable(); assert(config_restart_required(&saved)); }
+    press(ImGuiKey_Home);
+    down(11);
+    selected("save.location.reset");
+    confirm();
+    press(ImGuiKey_End);
+    press(ImGuiKey_GamepadDpadUp);
+    confirm();
+    assert(!config_editable().save_location[0]);
+    press(ImGuiKey_Home);
+    down(11);  // (Use the default folder: disabled again, skipped)
     selected("restart");
     confirm();
     selected("dialog.cancel");

@@ -26,12 +26,25 @@ bool android_import(int what, bool running);  // (runtime/platform/android.c)
 int android_take_picked(char *out, size_t size);
 void android_config_loaded(void);
 #endif
+#ifndef __ANDROID__
+// PC: the system's folder picker (SDL_ShowOpenFolderDialog), for request 4. SDL may call back on another thread.
+static char picked_path[1100];
+static SDL_AtomicInt picked_ready;
+static void folder_picked(void *what, const char *const *list, int filter) {
+    (void)filter;
+    if (!list) { LOG("[ui] folder picker: %s\n", SDL_GetError()); return; }
+    if (!list[0]) return;  // (cancelled)
+    SDL_strlcpy(picked_path, list[0], sizeof picked_path);
+    SDL_SetAtomicInt(&picked_ready, (int)(intptr_t)what);
+}
+#endif
 int ui_take_picked_folder(char *out, size_t size) {
 #ifdef __ANDROID__
     return android_take_picked(out, size);
 #else
-    (void)out, (void)size;
-    return 0;
+    int what = SDL_SetAtomicInt(&picked_ready, 0);
+    if (what) SDL_strlcpy(out, picked_path, size);
+    return what;
 #endif
 }
 bool ui_action_failed(void) { return SDL_SetAtomicInt(&action_failed, 0) != 0; }
@@ -232,6 +245,16 @@ void ui_init(void) {
 #ifdef __ANDROID__
     if (g_config.save_dir[0]) g_save_dir = g_config.save_dir;  // ([Android] SaveFolder: MHGU_SAVE_DIR still wins, fs.c)
     android_config_loaded();
+#else
+    if (g_config.save_location[0]) {  // ([Application] SaveLocation: MHGU_SAVE_DIR still wins, fs.c)
+        static char save[1100];
+        if (plat_use_folder(g_config.save_location, save, sizeof save)) {
+            g_save_dir = save;
+            LOG("[ui] save folder (SaveLocation): %s\n", save);
+        } else
+            LOG("[ui] SaveLocation \"%s\" can't be used (made or opened): the save stays in %s\n", g_config.save_location,
+                g_save_dir);
+    }
 #endif
     // Initial background input policy. SDL documents this hint as changeable at runtime.
     // Subsequent saved changes are consumed by the host thread in ui_run().
@@ -294,6 +317,10 @@ int ui_run(void) {
             if (android_import(action - 2, true) && action <= 4) { LOG("[ui] imported: closing\n"); exit(0); }
             SDL_SetAtomicInt(&away, 0);
         }
+#else
+        if (action == 6)  // (request 4: the save's folder. SDL wants its dialogs started on this thread)
+            SDL_ShowOpenFolderDialog(folder_picked, (void *)(intptr_t)4, window,
+                                     g_config.save_location[0] ? g_config.save_location : NULL, false);
 #endif
         host_input_update();
         cheats_frame();
