@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- (the shortcut's labels must be string resources: res/xml/shortcuts.xml) -->
+<resources>
+    <string name="share_log">Share log</string>
+    <string name="share_log_long">Share the last log</string>
+</resources>

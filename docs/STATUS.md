@@ -940,6 +940,22 @@ the unwinder's backtrace; umask 007; the startup messages name the Android folde
 VulkanMemoryAllocator 3.4.0's header vendored in third_party/vk_mem_alloc (the Windows build keeps MSYS2's). Windows
 rebuilt and quick-hunted after it: unchanged.
 
+## Vulkan 1.1 path (2026-11-02, branch feat/vulkan-1.1)
+
+The backend now also runs on Vulkan 1.1 devices, which many Android devices are stuck on: `g_vk.api11` (device below
+1.2, or `MHGU_VK11=1`) and `g_vk.fences` (no timeline semaphores). A Vulkan 1.2 device takes neither branch: same features,
+timeline semaphore and SPIR-V as before, and its cache/spirv keys are unchanged. On api11: a fence per submission
+(exec.c), SPIR-V 1.3 in its own cache keys (shaders.c), no 1.2 feature structures (device.c), no FSR 3.1 (fsr.c).
+`MHGU_DATA_DIR=<folder>` puts only the game files elsewhere, e.g. on a USB drive (main.c). Results: R9 270X 53.6 fps
+(1.2) and 53.7 fps (1.1, forced) over 14 minutes of quest 101, same picture; Shield TV Pro 2019 (first real device,
+Vulkan 1.1.178, 3 GB): 41-45 fps at 1080p, 0 of 5518 programs failed. Details: docs/research/android.md "Vulkan 1.1".
+
+## Android TV and game files on a drive (2026-11-02, branch feat/android-tv)
+
+The app is on an Android TV home screen (LEANBACK_LAUNCHER and a banner; phones unaffected), and `[Android] GameFolder` uses
+the game files where they are, for example on a USB drive: Game files folder in the settings' Android tab, or Use where they are
+at the first start. Details and what is untested: docs/research/android.md "Android TV and game files on a drive".
+
 ## FSR 4 removed (2026-11-01)
 
 `Upscaler = FSR4` is gone: fsr4.c / fsr4.h, third_party/ffx-api, docs/FSR4-PORT.md, the FSR4_DRIVER_PATCH build option
@@ -1085,6 +1101,15 @@ mods are covered by the port itself: 4K-2K = ini resolution (gen.py PATCHES at t
 frame rate, Connecting-Error-Fix = nifm HLE'd as no internet. A code mod someone needs can become a gen.py PATCHES
 entry (or a build option that reads .pchtxt at `make gen`). Order: folder names, or mods\load_order.txt; '_' prefix
 skips a folder. Log lines: "[mods] <mod>: romfs <path>", "[romfs] mod <path>: <n> files".
+
+Partial archives (arcmerge.c arc_partial, 2026-11-03): a mod's .arc that lacks some of the game's entries, but has at
+least one of them, is merged over the game's even when it's the first mod to touch that archive; a full one still
+replaces the file, and so does one with none of the game's entries (an unrelated or emptied archive). A mod that left
+out entries on purpose now gets them back. So mods needn't ship the rest of the game's data; the load order doesn't
+matter for this. Checked with quest 101: 85 partial arcs (9 MB, in place of 237 MB) plus a second partial mod over one
+of them reached the hunt, the same 88 arcs read as without mods, a weapon texture changed on screen. Merged arcs are
+full size in cache/arcmerge, and old ones aren't removed. A start with the merges cached reads only the entry tables,
+unless a second mod changes the same arc (then all three files are read again, to report overlaps).
 
 Forge plugins (runtime/forge.c, interp.c; 2026-10-21): Forge (github.com/Fexty12573/forge) is a loader for code mods:
 its own module (exefs subsdk9) loads .nro plugins from the RomFS folder nativeNX/plugins/ and gives them hooks,

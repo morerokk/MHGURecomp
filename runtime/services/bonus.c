@@ -47,7 +47,9 @@ static const char *bonus_path(void) {
     }
     snprintf(path, sizeof path, "bonus/system");
     if (!access(path, F_OK)) return path;
-    snprintf(path, sizeof path, "%s/../bonus/system", g_save_dir);
+    // (the player's folder, not g_save_dir/..: SaveLocation can put the save anywhere)
+    char user[1100];
+    if (plat_user_dir(user, sizeof user)) snprintf(path, sizeof path, "%s/bonus/system", user);
     return path;
 }
 

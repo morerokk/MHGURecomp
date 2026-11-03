@@ -7,6 +7,7 @@
 //   MHGU_SHOT_AT=<frame>[,<frame>...]   save the window image at those presented frames as shots/frame_N.png
 //   MHGU_FPS=1             frames per second in the log every 2 s
 //   MHGU_NO_BC=1           act as if the GPU had no BC textures, as phone GPUs (they are decoded on the CPU then)
+//   MHGU_VK11=1            take the path for Vulkan 1.1 devices on any device (g_vk.api11), to test it on a PC
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <math.h>
@@ -102,7 +103,7 @@ static void create_instance(void) {
         validate = false;
         r = vkCreateInstance(&ci, NULL, &g_vk.inst);
     }
-    if (r != VK_SUCCESS) FATAL("vkCreateInstance: %d (is a Vulkan 1.2 driver installed?)\n", r);
+    if (r != VK_SUCCESS) FATAL("vkCreateInstance: %d (is a Vulkan 1.1 driver installed?)\n", r);
     if (validate) {
         PFN_vkCreateDebugUtilsMessengerEXT f =
             (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(g_vk.inst, "vkCreateDebugUtilsMessengerEXT");
@@ -120,11 +121,13 @@ static bool has_ext(VkExtensionProperties *e, uint32_t n, const char *name) {
     return false;
 }
 
-// Discrete GPU first (MHGU_GPU=<index> picks one); needs Vulkan 1.2 and a queue that can draw, compute and present.
+// Discrete GPU first (MHGU_GPU=<index> picks one), every Vulkan 1.2 device before any 1.1 one, a GPU's own
+// driver before Windows' D3D12 one; needs a queue that can
+// draw, compute and present.
 // The device can't run the game: the player sees why, not "the details are in log.txt" (which a phone can't easily open)
-static void no_vulkan_1_2(const char *why) {
-    LOG("[vk] %s (Vulkan 1.2 required)\n", why);
-    plat_error_box("This device's GPU driver does not support Vulkan 1.2, which the game needs. A system or GPU driver "
+static void no_vulkan(const char *why) {
+    LOG("[vk] %s (Vulkan 1.1 required)\n", why);
+    plat_error_box("This device's GPU driver does not support Vulkan 1.1, which the game needs. A system or GPU driver "
                    "update may help.");
     exit(1);
 }
@@ -135,21 +138,27 @@ static void pick_device(void) {
     if (!n) FATAL("no Vulkan device\n");
     VkPhysicalDevice *pd = calloc(n, sizeof *pd);
     vkEnumeratePhysicalDevices(g_vk.inst, &n, pd);
-    int want = getenv("MHGU_GPU") ? atoi(getenv("MHGU_GPU")) : -1, best = -1, best_score = -1;
+    int want = getenv("MHGU_GPU") ? atoi(getenv("MHGU_GPU")) : -1, best = -1, best_score = -100;
     for (uint32_t i = 0; i < n; i++) {
         VkPhysicalDeviceProperties p;
         vkGetPhysicalDeviceProperties(pd[i], &p);
         LOG("[vk] gpu %u: %s (api %u.%u.%u)\n", i, p.deviceName, VK_API_VERSION_MAJOR(p.apiVersion),
             VK_API_VERSION_MINOR(p.apiVersion), VK_API_VERSION_PATCH(p.apiVersion));
-        if (p.apiVersion < VK_API_VERSION_1_2) continue;
+        if (p.apiVersion < VK_API_VERSION_1_1) continue;
         int score = p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 : p.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
+        if (p.apiVersion < VK_API_VERSION_1_2) score -= 3;
+        // Windows' "OpenCL, OpenGL, and Vulkan Compatibility Pack" (Mesa's Dozen) lists each GPU a second time, as
+        // "Microsoft Direct3D12 (...)": Vulkan run over D3D12, and listed first. It crashes inside D3D12Core.dll when
+        // a quest loads, so the GPU's own driver goes first whenever there is one.
+        if (!strncmp(p.deviceName, "Microsoft Direct3D12", 20)) score -= 4;
         if ((int)i == want) score = 100;
         if (score > best_score) { best_score = score; best = (int)i; }
     }
-    if (best < 0) no_vulkan_1_2("no Vulkan 1.2 device");
+    if (best < 0) no_vulkan("no Vulkan 1.1 device");
     g_vk.phys = pd[best];
     free(pd);
     vkGetPhysicalDeviceProperties(g_vk.phys, &g_vk.props);
+    g_vk.api11 = g_vk.props.apiVersion < VK_API_VERSION_1_2 || (getenv("MHGU_VK11") && atoi(getenv("MHGU_VK11")));
     uint32_t nq = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(g_vk.phys, &nq, NULL);
     VkQueueFamilyProperties *qp = calloc(nq, sizeof *qp);
@@ -181,6 +190,10 @@ static void create_device(void) {
     if (g_vk.stencil_export) ext[n_ext++] = VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME;
     no_exclusive = surface_caps2 && has_ext(ep, ne, "VK_EXT_full_screen_exclusive") && !getenv("MHGU_VK_EXCLUSIVE");
     if (no_exclusive) ext[n_ext++] = "VK_EXT_full_screen_exclusive";
+    if (g_vk.api11) {  // (Vulkan 1.2 has it as the feature samplerMirrorClampToEdge)
+        g_vk.no_mirror_clamp = !has_ext(ep, ne, VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME);
+        if (!g_vk.no_mirror_clamp) ext[n_ext++] = VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME;
+    }
     free(ep);
 
     // optional features: whatever the GPU has of what the backend can use
@@ -190,9 +203,13 @@ static void create_device(void) {
     VkPhysicalDeviceVulkan12Features f12_have = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
                                                  .pNext = g_vk.custom_border ? (void *)&cbc_have : g_vk.divisor ? (void *)&div_have : NULL};
     VkPhysicalDeviceVulkan11Features f11_have = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &f12_have};
-    VkPhysicalDeviceFeatures2 have = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &f11_have};
+    // (a Vulkan 1.1 device doesn't know the Vulkan11 / Vulkan12 structures: f12_have stays all off there)
+    VkPhysicalDevice16BitStorageFeatures s16_have = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES,
+                                                     .pNext = f12_have.pNext};
+    VkPhysicalDeviceFeatures2 have = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                                      .pNext = g_vk.api11 ? (void *)&s16_have : (void *)&f11_have};
     vkGetPhysicalDeviceFeatures2(g_vk.phys, &have);
-    if (!f12_have.timelineSemaphore) no_vulkan_1_2("the GPU driver has no timeline semaphores");
+    g_vk.fences = !f12_have.timelineSemaphore;
     g_vk.divisor = g_vk.divisor && div_have.vertexAttributeInstanceRateDivisor;
     g_vk.custom_border = g_vk.custom_border && cbc_have.customBorderColors && cbc_have.customBorderColorWithoutFormat;
 
@@ -202,7 +219,7 @@ static void create_device(void) {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT, .customBorderColors = VK_TRUE,
         .customBorderColorWithoutFormat = VK_TRUE, .pNext = g_vk.divisor ? &div : NULL};
     VkPhysicalDeviceVulkan12Features f12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-                                            .timelineSemaphore = VK_TRUE, .shaderInt8 = f12_have.shaderInt8,
+                                            .timelineSemaphore = f12_have.timelineSemaphore, .shaderInt8 = f12_have.shaderInt8,
                                             .samplerMirrorClampToEdge = f12_have.samplerMirrorClampToEdge,
                                             .uniformAndStorageBuffer8BitAccess = f12_have.uniformAndStorageBuffer8BitAccess,
                                             .storageBuffer8BitAccess = f12_have.storageBuffer8BitAccess,
@@ -210,7 +227,10 @@ static void create_device(void) {
                                             .pNext = g_vk.custom_border ? (void *)&cbc : g_vk.divisor ? (void *)&div : NULL};
     VkPhysicalDeviceVulkan11Features f11 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
                                             .storageBuffer16BitAccess = f11_have.storageBuffer16BitAccess, .pNext = &f12};
-    VkPhysicalDeviceFeatures2 f = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &f11};
+    VkPhysicalDevice16BitStorageFeatures s16 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES,
+                                                .storageBuffer16BitAccess = s16_have.storageBuffer16BitAccess, .pNext = f12.pNext};
+    VkPhysicalDeviceFeatures2 f = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                                   .pNext = g_vk.api11 ? (void *)&s16 : (void *)&f11};
     VkPhysicalDeviceFeatures *b = &f.features, *h = &have.features;
     b->independentBlend = h->independentBlend;
     b->dualSrcBlend = h->dualSrcBlend;
@@ -232,7 +252,7 @@ static void create_device(void) {
     b->robustBufferAccess = h->robustBufferAccess;  // guest shaders index cbufs freely: keep OOB reads harmless
     b->shaderClipDistance = h->shaderClipDistance;
     b->multiViewport = h->multiViewport;
-    if (g_config.fsr) {  // FSR: its shaders write images declared without a format, and have 16-bit float variants
+    if (g_config.fsr && !g_vk.api11) {  // FSR: its shaders write images declared without a format, and have 16-bit float variants
         b->shaderStorageImageWriteWithoutFormat = g_vk.fsr_storage_wo_format = h->shaderStorageImageWriteWithoutFormat;
         b->shaderStorageImageReadWithoutFormat = h->shaderStorageImageReadWithoutFormat;
         f12.shaderFloat16 = b->shaderInt16 = g_vk.fsr_fp16 = f12_have.shaderFloat16 && h->shaderInt16;  // (both, or neither)
@@ -244,9 +264,13 @@ static void create_device(void) {
     VkDeviceCreateInfo di = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &f, .queueCreateInfoCount = 1,
                              .pQueueCreateInfos = &qi, .enabledExtensionCount = n_ext, .ppEnabledExtensionNames = ext};
     VK_CHECK(vkCreateDevice(g_vk.phys, &di, NULL, &g_vk.dev));
-    g_vk.get_semaphore_counter = (PFN_vkGetSemaphoreCounterValue)vkGetDeviceProcAddr(g_vk.dev, "vkGetSemaphoreCounterValue");
-    g_vk.wait_semaphores = (PFN_vkWaitSemaphores)vkGetDeviceProcAddr(g_vk.dev, "vkWaitSemaphores");
-    if (!g_vk.get_semaphore_counter || !g_vk.wait_semaphores) no_vulkan_1_2("the GPU driver has no vkWaitSemaphores");
+    if (!g_vk.fences) {
+        g_vk.get_semaphore_counter = (PFN_vkGetSemaphoreCounterValue)vkGetDeviceProcAddr(g_vk.dev, "vkGetSemaphoreCounterValue");
+        g_vk.wait_semaphores = (PFN_vkWaitSemaphores)vkGetDeviceProcAddr(g_vk.dev, "vkWaitSemaphores");
+        g_vk.fences = !g_vk.get_semaphore_counter || !g_vk.wait_semaphores;
+    }
+    if (g_vk.api11 || g_vk.fences)
+        LOG("[vk] Vulkan 1.1 path: api11 %d, fences %d, no mirror clamp %d\n", g_vk.api11, g_vk.fences, g_vk.no_mirror_clamp);
     vkGetDeviceQueue(g_vk.dev, g_vk.qfam, 0, &g_vk.queue);
     LOG("[vk] features: divisor %d, custom border %d, BC %d, ASTC %d, exclusive full screen off %d\n", g_vk.divisor,
         g_vk.custom_border, g_vk.bc, h->textureCompressionASTC_LDR, no_exclusive);
@@ -264,13 +288,13 @@ static void create_device(void) {
     if (g_vk.msaa != (uint32_t)g_config.msaa) LOG("[vk] MSAA %dx not supported: %ux\n", g_config.msaa, g_vk.msaa);
 
     VmaAllocatorCreateInfo ai = {.physicalDevice = g_vk.phys, .device = g_vk.dev, .instance = g_vk.inst,
-                                 .vulkanApiVersion = VK_API_VERSION_1_2};
+                                 .vulkanApiVersion = g_vk.api11 ? VK_API_VERSION_1_1 : VK_API_VERSION_1_2};
     VK_CHECK(vmaCreateAllocator(&ai, &g_vk.vma));
 
     VkSemaphoreTypeCreateInfo st = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
                                     .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = 0};
     VkSemaphoreCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &st};
-    VK_CHECK(vkCreateSemaphore(g_vk.dev, &si, NULL, &g_vk.timeline));
+    if (!g_vk.fences) VK_CHECK(vkCreateSemaphore(g_vk.dev, &si, NULL, &g_vk.timeline));
     VkCommandPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                                   .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = g_vk.qfam};
     VK_CHECK(vkCreateCommandPool(g_vk.dev, &pi, NULL, &g_vk.pool));

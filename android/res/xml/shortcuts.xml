@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app icon's long-press menu (AndroidManifest.xml): Share log, which sends log.txt to another app (LogActivity)
+     without starting the game, for when it crashes before its menu can be reached. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="share_log"
+        android:enabled="true"
+        android:shortcutShortLabel="@string/share_log"
+        android:shortcutLongLabel="@string/share_log_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="io.github.morerokk.mhgurecomp"
+            android:targetClass="io.github.morerokk.mhgurecomp.LogActivity" />
+    </shortcut>
+</shortcuts>

@@ -90,11 +90,17 @@ typedef struct {
     int discord_hunter;       // [Discord] ShowHunter: your hunter's name and HR there too (runtime/hle/presence.c)
     int show_fps;             // [Performance] ShowFPS: the frame rate in a box on the screen (runtime/overlay.cpp)
     int menu_chord;           // [Controls] MenuChord: Plus + Minus together open the settings menu (runtime/host_input.c)
+    int show_battery;         // [Performance] ShowBattery: BATTERY_*, the battery's charge beside the frame rate or alone
+    char save_location[256];  // [Application] SaveLocation (PC): the folder holding the save (save_0/), "" the default
+                              // (%APPDATA%\MHGURecomp\save, ~/.local/share/MHGURecomp/save: main.c)
+    char save_dir[256];       // [Android] SaveFolder: the folder holding the save (save_0/), "" the app's own (fs.c)
+    char game_dir[256];       // [Android] GameFolder: the folder holding exefs/ and romfs/, "" the app's own (main.c)
 } Config;
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
 // Cloud VM; a DuckDNS name, so it can move without a release). "" = no default.
 #define LDN_DEFAULT_SERVER "morerokk-mhgurecomp-ldnserver.duckdns.org"
 enum { UPDATES_ASK, UPDATES_AUTO, UPDATES_OFF };
+enum { BATTERY_OFF, BATTERY_WITH_FPS, BATTERY_ALONE };
 enum { THEME_GOLD, THEME_BLUE, THEME_HUNTER };  // [Application] Theme
 enum { UI_CENTER = 1, UI_21_9, UI_32_9, UI_EDGES };  // the middle 16:9, 21:9, 32:9, the picture's sides
 enum { FSR_NATIVE, FSR_QUALITY, FSR_BALANCED, FSR_PERFORMANCE, FSR_ULTRA_PERFORMANCE };  // output / render: 1, 1.5, 1.7, 2, 3
@@ -176,6 +182,7 @@ void config_window_focus(bool focused);  // the window got / lost the focus (run
 int config_language(void);     // last saved UI language, atomic across host threads
 bool config_confirm_exit(void); // atomic, safe on the host main thread
 bool config_menu_chord(void);   // [Controls] MenuChord as saved, atomic (the input is read on another thread)
+int config_show_battery(void);  // [Performance] ShowBattery as saved, atomic
 bool config_show_fps(void);     // [Performance] ShowFPS as saved, atomic (the game's thread draws it)
 
 #ifdef __cplusplus

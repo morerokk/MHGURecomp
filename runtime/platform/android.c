@@ -4,15 +4,20 @@
 // the game's exefs / romfs in its data/ there, and the settings, saves, caches, mods, cheats and log.txt go beside
 // them, as in the PC build's game folder. Android gives no app an environment to start with, so the debug variables
 // (MHGU_QUICKHUNT, MHGU_NO_BC...) come from env.txt in that folder: one NAME=value per line, # for comments.
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <SDL3/SDL.h>
 #include <jni.h>
 
+#include "config.h"
+#include "modorder.h"
 #include "rt.h"
 
 const char *android_home(void) {
@@ -79,14 +84,72 @@ void android_unpack_assets(void) {
     unpack("bonus/system", false);
 }
 
+// The game stopped on an error (plat_fatal_notice): at the next start the app offers to share this run's log
+// (android/java: MHGUActivity's offerCrashLog). Only open/close: this can run in a fault handler.
+void android_mark_crash(void) {
+    int fd = open(android_path("last-run-crashed"), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0) close(fd);
+}
+
 void android_error_box(const char *msg) {
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "MHGU Recomp", msg, NULL);
 }
 
+// ------------------------------------------------------------------ [Android] GameFolder
+// The game files can stay in a folder of the player's (a USB drive, an SD card: main.c). main.c needs it before the
+// settings can load (config_load wants the window system up), so this reads that one line of the ini.
+void android_game_folder(char *out, size_t size) {
+    char path[1100];
+    config_path(path, sizeof path);
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    char line[1400];
+    while (fgets(line, sizeof line, f)) {
+        char *s = line;
+        while (*s == ' ' || *s == '\t') s++;
+        if (strncasecmp(s, "GameFolder", 10)) continue;
+        s += 10;
+        while (*s == ' ' || *s == '\t') s++;
+        if (*s++ != '=') continue;
+        while (*s == ' ' || *s == '\t') s++;
+        s[strcspn(s, ";#\r\n")] = 0;
+        for (char *e = s + strlen(s); e > s && (e[-1] == ' ' || e[-1] == '\t'); ) *--e = 0;
+        if (*s) snprintf(out, size, "%s", s);
+        break;
+    }
+    fclose(f);
+}
+
+// A new value from outside the settings menu (chosen at the first start, or undone by an import): saved at once, or when
+// the settings have loaded (ui.c).
+static char pending_folder[sizeof g_config.game_dir];
+static bool pending, config_ready;
+
+static void store_game_folder(void) {
+    Config c = config_editable();
+    char error[200];
+    snprintf(c.game_dir, sizeof c.game_dir, "%s", pending_folder);
+    if (!config_save(&c, error, sizeof error)) LOG("[android] game files folder not saved: %s\n", error);
+    pending = false;
+}
+
+static void set_game_folder(const char *folder) {
+    snprintf(pending_folder, sizeof pending_folder, "%s", folder);
+    pending = true;
+    if (config_ready) store_game_folder();
+}
+
+void android_config_loaded(void) {
+    config_ready = true;
+    if (pending) store_game_folder();
+}
+
 // ------------------------------------------------------------------ importing the game files or a save
 // The system's file picker and the copy are Java's (android/java: ImportActivity.java), which has its own dialogs;
-// this waits until it is done. 1: game files (into the data folder), 2: a save (into save/save_0). running: the game
-// has started (the app closes after the import). true when the files were copied in.
+// this waits until it is done. 1: game files (into the data folder), 2: a save (into save/save_0), 3: the save out to a
+// folder, 5 / 6: a mod (zip / folder) into the mods folder, 4 / 7: choose the folder to keep the save in / the folder
+// holding the game files (its path: android_take_picked). running: the game has started (the app closes after 1 and 2).
+// true when it was done.
 
 static const char *absolute(const char *dir, char *buf, size_t size) {
     if (dir[0] == '/') return dir;
@@ -94,9 +157,20 @@ static const char *absolute(const char *dir, char *buf, size_t size) {
     return buf;
 }
 
+static char picked_path[1100];
+static SDL_AtomicInt picked_ready;  // the kind of import (4 or 7) that chose picked_path
+
+// The folder chosen by the last import of kind 4 or 7, once: which kind it was (0: none).
+int android_take_picked(char *out, size_t size) {
+    int what = SDL_SetAtomicInt(&picked_ready, 0);
+    if (what) snprintf(out, size, "%s", picked_path);
+    return what;
+}
+
 bool android_import(int what, bool running) {
     char buf[1100], folder[1200];
-    if (what == 1) snprintf(folder, sizeof folder, "%s", absolute(g_game_dir, buf, sizeof buf));
+    if (what == 1) snprintf(folder, sizeof folder, "%s", android_path("data"));  // (always the app's own: see below)
+    else if (what == 5 || what == 6) snprintf(folder, sizeof folder, "%s", absolute(mods_dir(), buf, sizeof buf));
     else snprintf(folder, sizeof folder, "%s/save_0", absolute(getenv("MHGU_SAVE_DIR") ? getenv("MHGU_SAVE_DIR") : g_save_dir, buf, sizeof buf));
     JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
     jobject act = (jobject)SDL_GetAndroidActivity();
@@ -109,18 +183,31 @@ bool android_import(int what, bool running) {
     jclass c = (jclass)(*env)->CallObjectMethod(env, loader, (*env)->GetMethodID(env, lc, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;"), name);
     jmethodID begin = c ? (*env)->GetStaticMethodID(env, c, "begin", "(Landroid/app/Activity;ILjava/lang/String;Z)V") : NULL;
     jmethodID state = c ? (*env)->GetStaticMethodID(env, c, "state", "()I") : NULL;
+    jmethodID pickedm = c ? (*env)->GetStaticMethodID(env, c, "picked", "()Ljava/lang/String;") : NULL;
     int result = 3;
-    if ((*env)->ExceptionCheck(env) || !begin || !state) {
+    if ((*env)->ExceptionCheck(env) || !begin || !state || !pickedm) {
         (*env)->ExceptionClear(env);
         LOG("[android] the import isn't in this APK\n");
     } else {
-        LOG("[android] importing %s into %s\n", what == 1 ? "the game files" : "a save", folder);
+        LOG("[android] %s: %s\n", what == 1 ? "importing the game files into" : what == 2 ? "importing a save into" :
+            what == 3 ? "exporting the save from" : what == 7 ? "choosing the game files' folder, now" : "choosing the save folder, now", folder);
         jstring dir = (*env)->NewStringUTF(env, folder);
         (*env)->CallStaticVoidMethod(env, c, begin, act, (jint)what, dir, (jboolean)running);
         if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
         else while ((result = (*env)->CallStaticIntMethod(env, c, state)) == 0) SDL_Delay(100);
         (*env)->DeleteLocalRef(env, dir);
+        if ((what == 4 || what == 7) && result == 1) {
+            jstring str = (jstring)(*env)->CallStaticObjectMethod(env, c, pickedm);
+            const char *chars = str ? (*env)->GetStringUTFChars(env, str, NULL) : NULL;
+            if (chars && *chars) {
+                snprintf(picked_path, sizeof picked_path, "%s", chars);
+                SDL_SetAtomicInt(&picked_ready, what);
+            }
+            if (chars) (*env)->ReleaseStringUTFChars(env, str, chars);
+            if (str) (*env)->DeleteLocalRef(env, str);
+        }
         LOG("[android] import %s\n", result == 1 ? "done" : result == 2 ? "cancelled" : "failed");
+        if (what == 1 && result == 1) set_game_folder("");  // (the player just put the game files in the app's folder)
     }
     (*env)->DeleteLocalRef(env, name);
     if (c) (*env)->DeleteLocalRef(env, c);
@@ -131,16 +218,33 @@ bool android_import(int what, bool running) {
     return result == 1;
 }
 
-// At the start, the game files missing or not right (msg): offers to import them. true: imported, check again.
-bool android_offer_import(const char *msg) {
-    char text[1200];
-    snprintf(text, sizeof text, "%s\n\nThe app can copy them in from a folder on this device (for example Download): "
-             "pick the folder that holds the exefs and romfs folders.", msg);
+// At the start, the game files missing or not right in data (msg): offers to import them or to use them where they are,
+// and data then says where they are. true: done, check again.
+bool android_offer_import(const char *msg, char *data, size_t size) {
+    char text[2600], where[1300] = "";
+    if (strcmp(data, "data")) snprintf(where, sizeof where, "\n\nThe app looked in %s. If it's on a drive, is the drive connected?", data);
+    snprintf(text, sizeof text, "%s%s\n\nPick the folder that holds the exefs and romfs folders. The app can copy them into its own "
+             "folder (13 GB of free space, 26 GB while copying), or use them where they are, for example on a USB drive or SD card.",
+             msg, where);
     const SDL_MessageBoxButtonData buttons[] = {
         {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Quit"},
+        {0, 2, "Use where they are"},
         {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Import game files"},
     };
-    const SDL_MessageBoxData box = {SDL_MESSAGEBOX_INFORMATION, NULL, "MHGU Recomp", text, 2, buttons, NULL};
+    const SDL_MessageBoxData box = {SDL_MESSAGEBOX_INFORMATION, NULL, "MHGU Recomp", text, 3, buttons, NULL};
     int pressed = 0;
-    return SDL_ShowMessageBox(&box, &pressed) && pressed == 1 && android_import(1, false);
+    if (!SDL_ShowMessageBox(&box, &pressed)) return false;
+    if (pressed == 1 && android_import(1, false)) {
+        snprintf(data, size, "data");
+        return true;
+    }
+    if (pressed == 2 && android_import(7, false)) {
+        char folder[sizeof pending_folder];
+        if (!android_take_picked(folder, sizeof folder)) return false;
+        snprintf(data, size, "%s", folder);
+        set_game_folder(folder);
+        return true;
+    }
+    // (cancelled in the picker: ask again rather than leave)
+    return pressed == 1 || pressed == 2;
 }

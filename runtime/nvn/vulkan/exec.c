@@ -13,6 +13,7 @@
 //                         [Performance] ShaderPrewarm = Off does the same)
 #include <math.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,7 +62,62 @@ static pthread_mutex_t seq_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool in_pass;
 static void ss_forget(void);
 
+// Without timeline semaphores (g_vk.fences: Vulkan 1.1 devices): a fence per submission stands in for the timeline's
+// value. A fence that signals also covers everything submitted before it, so the numbers mean the same. The ring is much
+// larger than the SUBS submissions that can be in flight, so the submission a fence last served is long finished when
+// it comes round again. fence_lock guards all of this; a thread in vkWaitForFences keeps its fence from being reset.
+#define SEQ_FENCES 64
+static struct { VkFence fence; int waiters; } seq_fence[SEQ_FENCES];
+static uint64_t fence_done, fence_last;  // last submission known finished, last one submitted with its fence
+static pthread_mutex_t fence_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static VkFence seq_fence_take(uint64_t seq) {
+    int i = (int)(seq % SEQ_FENCES);
+    pthread_mutex_lock(&fence_lock);
+    while (seq_fence[i].waiters) {  // (finished long ago: they are on their way out of vkWaitForFences)
+        pthread_mutex_unlock(&fence_lock);
+        sched_yield();
+        pthread_mutex_lock(&fence_lock);
+    }
+    if (!seq_fence[i].fence) {
+        VkFenceCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        VK_CHECK(vkCreateFence(g_vk.dev, &fi, NULL, &seq_fence[i].fence));
+    } else {
+        VK_CHECK(vkResetFences(g_vk.dev, 1, &seq_fence[i].fence));
+    }
+    if (seq > SEQ_FENCES && fence_done < seq - SEQ_FENCES) fence_done = seq - SEQ_FENCES;  // (its fence is this one now)
+    VkFence f = seq_fence[i].fence;
+    pthread_mutex_unlock(&fence_lock);
+    return f;
+}
+
+static uint64_t fence_completed(void) {
+    pthread_mutex_lock(&fence_lock);
+    while (fence_done < fence_last && vkGetFenceStatus(g_vk.dev, seq_fence[(fence_done + 1) % SEQ_FENCES].fence) == VK_SUCCESS)
+        fence_done++;
+    uint64_t v = fence_done;
+    pthread_mutex_unlock(&fence_lock);
+    return v;
+}
+
+static VkResult fence_wait(uint64_t seq, uint64_t timeout) {
+    pthread_mutex_lock(&fence_lock);
+    if (seq > fence_last) seq = fence_last;  // not submitted yet (other thread): everything submitted so far
+    if (seq <= fence_done) { pthread_mutex_unlock(&fence_lock); return VK_SUCCESS; }
+    int i = (int)(seq % SEQ_FENCES);
+    VkFence f = seq_fence[i].fence;
+    seq_fence[i].waiters++;
+    pthread_mutex_unlock(&fence_lock);
+    VkResult r = vkWaitForFences(g_vk.dev, 1, &f, VK_TRUE, timeout);
+    pthread_mutex_lock(&fence_lock);
+    seq_fence[i].waiters--;
+    if (r == VK_SUCCESS && fence_done < seq) fence_done = seq;
+    pthread_mutex_unlock(&fence_lock);
+    return r;
+}
+
 uint64_t vk_completed_seq(void) {
+    if (g_vk.fences) return fence_completed();
     uint64_t v = 0;
     g_vk.get_semaphore_counter(g_vk.dev, g_vk.timeline, &v);
     return v;
@@ -70,6 +126,13 @@ uint64_t vk_completed_seq(void) {
 void vk_wait_seq(uint64_t seq) {
     if (!seq || vk_exiting()) return;  // (exit in progress: never reach the driver from a late guest thread)
     uint64_t t0_ = plat_now_ns();
+    if (g_vk.fences) {
+        VkResult fr = fence_wait(seq, 10ull * 1000000000ull);
+        stat_wait_ns += plat_now_ns() - t0_;
+        if (fr == VK_TIMEOUT) LOG("[vk] GPU did not finish submission %llu within 10 s (device lost?)\n", (unsigned long long)seq);
+        else if (fr != VK_SUCCESS) FATAL("vkWaitForFences: %d (device lost)\n", fr);
+        return;
+    }
     VkSemaphoreWaitInfo wi = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &g_vk.timeline,
                               .pValues = &seq};
     VkResult r = g_vk.wait_semaphores(g_vk.dev, &wi, 10ull * 1000000000ull);
@@ -155,7 +218,19 @@ void vk_submit_extra(VkSemaphore wait, VkSemaphore signal) {
     VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .pNext = &ts, .waitSemaphoreCount = wait ? 1 : 0,
                        .pWaitSemaphores = &wait, .pWaitDstStageMask = &wait_stage, .commandBufferCount = n,
                        .pCommandBuffers = cbs, .signalSemaphoreCount = signal ? 2 : 1, .pSignalSemaphores = sig};
-    VK_CHECK(vkQueueSubmit(g_vk.queue, 1, &si, VK_NULL_HANDLE));
+    VkFence fence = VK_NULL_HANDLE;
+    if (g_vk.fences) {
+        fence = seq_fence_take(submit_seq + 1);
+        si.pNext = NULL;
+        si.signalSemaphoreCount = signal ? 1 : 0;
+        si.pSignalSemaphores = &signal;
+    }
+    VK_CHECK(vkQueueSubmit(g_vk.queue, 1, &si, fence));
+    if (g_vk.fences) {
+        pthread_mutex_lock(&fence_lock);
+        fence_last = submit_seq + 1;
+        pthread_mutex_unlock(&fence_lock);
+    }
     pthread_mutex_lock(&seq_lock);
     submit_seq++;
     pthread_mutex_unlock(&seq_lock);

@@ -124,6 +124,11 @@ GAMELIB_LDFLAGS := -shared -fuse-ld=lld -static-libgcc $(O)/mhgurecomp.dll.a
 UPDATER  := $(B)/mhgurecomp-updater.exe
 # (a window program; zlib linked in, WinHTTP is Windows')
 UPD_LDFLAGS := -fuse-ld=lld -mwindows $(SDL_LIBS) -lwinhttp -Wl,-Bstatic -lz -Wl,-Bdynamic -static-libgcc
+# the executables' icons (extras/icon/mhgurecomp.rc, mhgurecomp-updater.rc); llvm-windres comes with MSYS2's llvm-tools,
+# which not every setup has: binutils' windres makes them too
+WINDRES  ?= $(if $(shell command -v llvm-windres 2>/dev/null),llvm-windres,windres)
+ICON_RES := $(O)/icon.res.o
+UPD_ICON_RES := $(O)/updater-icon.res.o
 else ifeq ($(PLATFORM),android)
 include android/android.mk
 else
@@ -165,7 +170,7 @@ SHADER_ID := $(shell cat $(SHADER_SRCS) | tr -d '\r' | sha256sum | cut -c1-16)
 VERSION ?= $(shell git describe --tags 2>/dev/null || echo unknown)
 
 RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(RT_CXX) $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(IMGUI_OBJ) \
-           $(O)/updater/sha256.o
+           $(O)/updater/sha256.o $(ICON_RES)
 # (updater/sha256.c: runtime/net/ldn.c hashes the matchmaking key with it)
 # Dear ImGui with cimgui's C API (third_party/cimgui: Forge plugins' ImGui, runtime/forge_imgui.c, overlay.cpp)
 IMGUI    := third_party/cimgui
@@ -239,6 +244,7 @@ $(O)/rt/nvn/vulkan/exec.o: $(O)/shader.id
 $(O)/rt/nvn/vulkan/exec.o: RTFLAGS += -DSHADER_ID='"$(SHADER_ID)"'
 $(O)/version.id: FORCE
 	@mkdir -p $(O); [ "$$(cat $@ 2>/dev/null)" = '$(VERSION)' ] || echo '$(VERSION)' > $@
+$(O)/rt/ui.o: extras/icon/mhgurecomp-128.png
 $(O)/rt/main.o: $(O)/version.id
 $(O)/rt/main.o: RTFLAGS += -DMHGU_VERSION='"$(VERSION)"'
 
@@ -287,6 +293,14 @@ $(O)/updater/%.o: updater/%.c updater/updater.h $(O)/version.id
 	$(CC) -O2 -g -Wall $(OSFLAGS) $(LIB_INC) -DMHGU_VERSION='"$(VERSION)"' -c $< -o $@
 # (SDL3 / shaderc: their headers before anything is compiled, their archives in LDFLAGS / UPD_LDFLAGS)
 $(RT_OBJ) $(UPD_OBJ): $(LIB_STAMPS)
+$(ICON_RES): extras/icon/mhgurecomp.rc extras/icon/mhgurecomp.ico
+	@mkdir -p $(dir $@)
+	$(WINDRES) -I extras/icon -O coff -o $@ $<
+$(UPD_ICON_RES): extras/icon/mhgurecomp-updater.rc extras/icon/mhgurecomp-updater.ico
+	@mkdir -p $(dir $@)
+	$(WINDRES) -I extras/icon -O coff -o $@ $<
+$(O)/updater/updater.o: extras/icon/mhgurecomp-updater-128.png
+UPD_OBJ  += $(UPD_ICON_RES)
 $(UPDATER): $(UPD_OBJ)
 	@mkdir -p $(dir $@)
 	$(CC) -o $@ $^ $(UPD_LDFLAGS)

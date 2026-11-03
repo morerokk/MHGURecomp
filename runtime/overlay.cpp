@@ -485,9 +485,27 @@ static void draw_chat(const char *line, uint64_t now, float scale) {
     dl->AddText(font, size, ImVec2(p0.x + bar + pad, p0.y + pad), ink, text.c_str(), nullptr, wrap);
 }
 
+// The battery's charge, "87%" ("87% +" while charging); false when there is no battery to tell of (a desktop PC). Asked
+// every few seconds: SDL goes through Java on Android.
+static bool battery_text(uint64_t now, char *out, size_t size) {
+    static uint64_t last;
+    static int percent = -1;
+    static bool charging;
+    if (!last || now - last >= 5000000000ull) {
+        last = now;
+        int secs;
+        SDL_PowerState st = SDL_GetPowerInfo(&secs, &percent);
+        charging = st == SDL_POWERSTATE_CHARGING || st == SDL_POWERSTATE_CHARGED;
+        if (st == SDL_POWERSTATE_NO_BATTERY || st == SDL_POWERSTATE_ERROR) percent = -1;
+    }
+    if (percent < 0) return false;
+    snprintf(out, size, "%d%%%s", percent, charging ? " +" : "");
+    return true;
+}
+
 // The frame rate ([Performance] ShowFPS): frames the game presented, counted over half a second. An ImGui window of
 // its own, so it can be dragged while the settings menu (which gets the mouse) is open; ImGui keeps where it was put in
-// forge_imgui.ini
+// forge_imgui.ini. With ShowBattery = WithFPS the battery's charge is in it; ByItself: a window of its own.
 static void draw_fps(uint64_t now) {
     static uint64_t t0, f0;
     static float fps, ms;
@@ -499,12 +517,30 @@ static void draw_fps(uint64_t now) {
         ms = n ? (now - t0) / 1e6f / n : 0;
         t0 = now, f0 = frames;
     }
-    ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowBgAlpha(0.6f);
+#ifdef __ANDROID__  // (a phone's battery: the Android tab's setting)
+    int battery = config_show_battery();
+#else
+    int battery = BATTERY_OFF;
+#endif
+    char charge[32];
+    bool have_charge = battery != BATTERY_OFF && battery_text(now, charge, sizeof charge);
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                              ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
-    if (ImGui::Begin("FPS##counter", nullptr, flags)) ImGui::Text("%.0f FPS  %.1f ms", fps, ms);
-    ImGui::End();
+    if (config_show_fps()) {
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.6f);
+        if (ImGui::Begin("FPS##counter", nullptr, flags)) {
+            if (have_charge && battery == BATTERY_WITH_FPS) ImGui::Text("%.0f FPS  %.1f ms  %s", fps, ms, charge);
+            else ImGui::Text("%.0f FPS  %.1f ms", fps, ms);
+        }
+        ImGui::End();
+    }
+    if (have_charge && battery == BATTERY_ALONE) {
+        ImGui::SetNextWindowPos(ImVec2(10, 50), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.6f);
+        if (ImGui::Begin("Battery##counter", nullptr, flags)) ImGui::Text("%s", charge);
+        ImGui::End();
+    }
 }
 
 // ------------------------------------------------------------------ frames (game thread)
@@ -521,6 +557,31 @@ static void snap_clear(void) {
     g_snap.Valid = false;
 }
 
+// A texture ImGui wants made whose descriptor set could not be had (VK_ERROR_OUT_OF_POOL_MEMORY: the backend's pool
+// full). The backend still made its image, gave it a null set and marked it ready, and the next draw naming it
+// asserts ("ImDrawCmd is referring to ImTextureData that wasn't uploaded"). Undo it and ask again next frame, by
+// when textures ImGui let go of (an outgrown font atlas: freed after ImageCount frames) have freed their sets.
+// VkOverlayTex: the backend's ImGui_ImplVulkan_Texture (imgui_impl_vulkan.cpp, internal to it), field for field.
+#ifndef MHGU_NULL_BACKEND
+struct VkOverlayTex { VkDeviceMemory memory; VkImage image; VkImageView view; VkDescriptorSet set; };
+static VkDevice g_dev;
+static bool tex_create_failed(ImTextureData *tex) {
+    VkOverlayTex *bt = (VkOverlayTex *)tex->BackendUserData;
+    if (!bt || bt->set != VK_NULL_HANDLE) return false;
+    static int logged;
+    if (logged++ < 8) LOG("[forge] ImGui texture %dx%d: no descriptor set free, again next frame\n", tex->Width, tex->Height);
+    vkDestroyImageView(g_dev, bt->view, nullptr);
+    vkDestroyImage(g_dev, bt->image, nullptr);
+    vkFreeMemory(g_dev, bt->memory, nullptr);
+    IM_FREE(bt);
+    tex->BackendUserData = nullptr;
+    tex->SetStatus(ImTextureStatus_WantCreate);
+    return true;
+}
+#else
+static bool tex_create_failed(ImTextureData *) { return false; }
+#endif
+
 void overlay_frame(void *cpu) {
     if (!g_ready) return;
     if (!g_settings_open) { bool closed = false; settings_panel(&closed); }
@@ -531,7 +592,11 @@ void overlay_frame(void *cpu) {
     bool chat = chat_composing(line, sizeof line);
     ImGuiIO &io = ImGui::GetIO();
     g_wants_text = open && io.WantTextInput;  // (as of the last frame; the window side reads it: runtime/textinput.c)
+#ifdef __ANDROID__
+    bool fps = config_show_fps() || config_show_battery() == BATTERY_ALONE;
+#else
     bool fps = config_show_fps();
+#endif
     if (!open && !free_render && !notice && !chat && !fps) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
@@ -601,15 +666,19 @@ void overlay_frame(void *cpu) {
     ImGui::Render();
 
     ImDrawData *dd = ImGui::GetDrawData();
+    bool tex_failed = false;
     if (dd->Textures)  // (texture uploads: on this thread, between the render thread's submissions)
         for (ImTextureData *tex : *dd->Textures)
             if (tex->Status != ImTextureStatus_OK) {
+                bool create = tex->Status == ImTextureStatus_WantCreate;
                 vk_lock();
                 ImGui_ImplVulkan_UpdateTexture(tex);
+                if (create && tex->TexID == ImTextureID_Invalid) tex_failed |= tex_create_failed(tex);
                 vk_unlock();
             }
     std::lock_guard<std::mutex> l(g_snap_lock);
     snap_clear();
+    if (tex_failed) return;  // (nothing drawn this frame: a draw naming a texture with no descriptor set is an assert)
     for (ImDrawList *list : dd->CmdLists) g_snap.CmdLists.push_back(list->CloneOutput());
     g_snap.CmdListsCount = dd->CmdListsCount;
     g_snap.TotalIdxCount = dd->TotalIdxCount;
@@ -645,7 +714,9 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
         info.QueueFamily = t->qfam;
         info.Queue = t->queue;
         info.PipelineCache = t->cache;
-        info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE * 2;
+        // One set per ImGui texture: the font atlases (a new texture each time one grows or is repacked, the old one freed
+        // ImageCount frames later; damage numbers at many sizes do that over and over) and the plugins' own. 16 ran out.
+        info.DescriptorPoolSize = 1024;
         info.MinImageCount = 2;
         info.ImageCount = 8;  // (vertex buffers in turn: more than the frames ever in flight)
         info.PipelineInfoMain.RenderPass = t->pass;
@@ -658,6 +729,7 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
             return;
         }
         g_pass = t->pass;
+        g_dev = t->dev;
         g_ready = true;
     }
     std::lock_guard<std::mutex> l(g_snap_lock);

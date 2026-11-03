@@ -23,7 +23,30 @@ static SDL_AtomicInt away;
 bool ui_window_away(void) { return SDL_GetAtomicInt(&away) != 0; }
 #ifdef __ANDROID__
 bool android_import(int what, bool running);  // (runtime/platform/android.c)
+int android_take_picked(char *out, size_t size);
+void android_config_loaded(void);
 #endif
+#ifndef __ANDROID__
+// PC: the system's folder picker (SDL_ShowOpenFolderDialog), for request 4. SDL may call back on another thread.
+static char picked_path[1100];
+static SDL_AtomicInt picked_ready;
+static void folder_picked(void *what, const char *const *list, int filter) {
+    (void)filter;
+    if (!list) { LOG("[ui] folder picker: %s\n", SDL_GetError()); return; }
+    if (!list[0]) return;  // (cancelled)
+    SDL_strlcpy(picked_path, list[0], sizeof picked_path);
+    SDL_SetAtomicInt(&picked_ready, (int)(intptr_t)what);
+}
+#endif
+int ui_take_picked_folder(char *out, size_t size) {
+#ifdef __ANDROID__
+    return android_take_picked(out, size);
+#else
+    int what = SDL_SetAtomicInt(&picked_ready, 0);
+    if (what) SDL_strlcpy(out, picked_path, size);
+    return what;
+#endif
+}
 bool ui_action_failed(void) { return SDL_SetAtomicInt(&action_failed, 0) != 0; }
 static bool restart_application(void) {
     char exe[4096], wait[80];
@@ -103,6 +126,110 @@ static void set_fullscreen(bool on) {
     if (on && !overlay_menu_open() && !chat_active()) SDL_HideCursor(); else SDL_ShowCursor();
 }
 
+// The window's icon. Windows takes it from the exe (extras/icon/mhgurecomp.rc) and Android from the launcher icon, so only
+// Linux sets one: extras/icon/mhgurecomp-128.png, built into the program (the path is relative to the repo, where make runs).
+#if !defined(_WIN32) && !defined(__ANDROID__)
+__asm__(".pushsection .rodata\n.globl mhgu_icon_png\nmhgu_icon_png:\n.incbin \"extras/icon/mhgurecomp-128.png\"\n"
+        ".globl mhgu_icon_png_end\nmhgu_icon_png_end:\n.popsection");
+extern const unsigned char mhgu_icon_png[], mhgu_icon_png_end[];
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include "platform.h"
+
+// A Linux executable can't carry an icon for the file manager, so the desktop finds the game through a launcher:
+// $XDG_DATA_HOME/applications/mhgurecomp.desktop (~/.local/share/applications) and the icon beside it in
+// icons/hicolor/128x128/apps/mhgurecomp.png, and a copy as "MHGU Recomp.desktop" in the game's folder. Written at each
+// start when missing or out of date (the folder moved), so the app menu starts this copy: mhgurecomp-updater when it is
+// beside the game (it starts the game, and with Updates = Off only that), else the game. A launcher without the
+// X-MHGURecomp line is the player's own and left alone. The windows' app id is the launcher's name (SDL: the
+// executable's name; the updater sets it), so the taskbar shows the icon too.
+static bool write_if_changed(const char *path, const void *data, size_t size) {
+    FILE *f = fopen(path, "rb");
+    if (f) {
+        char old[8192];
+        size_t n = fread(old, 1, sizeof old, f);
+        fclose(f);
+        if (n == size && !memcmp(old, data, size)) return true;
+    }
+    char tmp[PATH_MAX + 8];
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    if (!(f = fopen(tmp, "wb"))) return false;
+    bool ok = fwrite(data, 1, size, f) == size;
+    if (fclose(f) != 0) ok = false;
+    if (ok && rename(tmp, path) != 0) ok = false;
+    if (!ok) unlink(tmp);
+    return ok;
+}
+
+static void mkdirs(char *path) {  // (each folder of path, which is a folder)
+    for (char *p = path + 1; *p; ++p)
+        if (*p == '/') { *p = 0; mkdir(path, 0755); *p = '/'; }
+    mkdir(path, 0755);
+}
+
+static void install_launcher(void) {
+    if (getenv("MHGU_HIDDEN") || getenv("MHGU_NO_LAUNCHER")) return;
+    char exe[PATH_MAX], data[PATH_MAX], dir[PATH_MAX + 64], path[PATH_MAX + 96];
+    if (!plat_exe_path(exe, sizeof exe)) return;
+    if (strpbrk(exe, "\"`$\\%\n\r")) { LOG("[ui] no app menu launcher: the game's path has a \" ` $ \\ or %% in it\n"); return; }
+    const char *xdg = getenv("XDG_DATA_HOME"), *home = getenv("HOME");
+    if (xdg && *xdg == '/') snprintf(data, sizeof data, "%s", xdg);
+    else if (home && *home == '/') snprintf(data, sizeof data, "%s/.local/share", home);
+    else return;
+    char *slash = strrchr(exe, '/');
+    char run[PATH_MAX + 32];
+    snprintf(run, sizeof run, "%.*s/mhgurecomp-updater", (int)(slash - exe), exe);
+    if (access(run, X_OK) != 0) snprintf(run, sizeof run, "%s", exe);
+
+    snprintf(path, sizeof path, "%s/applications/mhgurecomp.desktop", data);
+    FILE *f = fopen(path, "rb");
+    if (f) {
+        char old[8192];
+        size_t n = fread(old, 1, sizeof old - 1, f);
+        fclose(f);
+        old[n] = 0;
+        if (!strstr(old, "\nX-MHGURecomp=true\n")) return;
+    }
+    snprintf(dir, sizeof dir, "%s/icons/hicolor/128x128/apps", data);
+    mkdirs(dir);
+    snprintf(path, sizeof path, "%s/mhgurecomp.png", dir);
+    if (!write_if_changed(path, mhgu_icon_png, (size_t)(mhgu_icon_png_end - mhgu_icon_png))) {
+        LOG("[ui] no app menu launcher: can't write %s\n", path);
+        return;
+    }
+    // (Icon: the file's full path, which every desktop finds; a theme name only works where the icon cache has caught up,
+    // and a copy dragged to Plasma's desktop showed a "?")
+    char entry[4 * PATH_MAX + 512];
+    int n = snprintf(entry, sizeof entry,
+                     "[Desktop Entry]\nType=Application\nName=MHGU Recomp\nComment=Monster Hunter Generations Ultimate, "
+                     "recompiled\nExec=\"%s\"\nPath=%.*s\nIcon=%s\nTerminal=false\nCategories=Game;\n"
+                     "StartupWMClass=mhgurecomp\nX-MHGURecomp=true\n",
+                     run, (int)(slash - exe), exe, path);
+    if (n <= 0 || (size_t)n >= sizeof entry) return;
+    snprintf(dir, sizeof dir, "%s/applications", data);
+    mkdirs(dir);
+    snprintf(path, sizeof path, "%s/mhgurecomp.desktop", dir);
+    if (!write_if_changed(path, entry, (size_t)n)) LOG("[ui] no app menu launcher: can't write %s\n", path);
+    // The same launcher beside the game, so the folder has something to click with the icon (file managers start an
+    // executable .desktop file; a read-only folder just goes without)
+    snprintf(path, sizeof path, "%.*s/MHGU Recomp.desktop", (int)(slash - exe), exe);
+    if (write_if_changed(path, entry, (size_t)n)) chmod(path, 0755);
+}
+
+static void set_window_icon(void) {
+    install_launcher();
+    SDL_Surface *s = SDL_LoadPNG_IO(SDL_IOFromConstMem(mhgu_icon_png, (size_t)(mhgu_icon_png_end - mhgu_icon_png)), true);
+    if (!s) { LOG("[ui] window icon: %s\n", SDL_GetError()); return; }
+    SDL_SetWindowIcon(window, s);
+    SDL_DestroySurface(s);
+}
+#else
+static void set_window_icon(void) {}
+#endif
+
 void ui_init(void) {
     if (!SDL_Init(SDL_INIT_VIDEO)) FATAL("SDL_Init: %s\n", SDL_GetError());
     int sdl = SDL_GetVersion();
@@ -115,6 +242,20 @@ void ui_init(void) {
         SDL_GetCurrentVideoDriver());
 #endif
     config_load();
+#ifdef __ANDROID__
+    if (g_config.save_dir[0]) g_save_dir = g_config.save_dir;  // ([Android] SaveFolder: MHGU_SAVE_DIR still wins, fs.c)
+    android_config_loaded();
+#else
+    if (g_config.save_location[0]) {  // ([Application] SaveLocation: MHGU_SAVE_DIR still wins, fs.c)
+        static char save[1100];
+        if (plat_use_folder(g_config.save_location, save, sizeof save)) {
+            g_save_dir = save;
+            LOG("[ui] save folder (SaveLocation): %s\n", save);
+        } else
+            LOG("[ui] SaveLocation \"%s\" can't be used (made or opened): the save stays in %s\n", g_config.save_location,
+                g_save_dir);
+    }
+#endif
     // Initial background input policy. SDL documents this hint as changeable at runtime.
     // Subsequent saved changes are consumed by the host thread in ui_run().
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, g_config.background_input ? "1" : "0");
@@ -134,6 +275,7 @@ void ui_init(void) {
     if (getenv("MHGU_HIDDEN")) flags |= SDL_WINDOW_HIDDEN;
     window = SDL_CreateWindow("Monster Hunter Generations Ultimate", win_w, win_h, flags);
     if (!window) FATAL("SDL_CreateWindow: %s\n", SDL_GetError());
+    set_window_icon();
     if (g_config.display_mode != DISPLAY_WINDOWED) set_fullscreen(true);
 }
 
@@ -169,11 +311,16 @@ int ui_run(void) {
         }
 #ifdef __ANDROID__
         // (on this thread: SDL's own, which Java made. The app closes after an import: the game has the old files open)
-        if (action == 3 || action == 4) {
+        if (action >= 3 && action <= 9) {
             SDL_SetAtomicInt(&away, 1);  // (the picker takes the window's surface away: the renderer draws nothing)
-            if (android_import(action - 2, true)) { LOG("[ui] imported: closing\n"); exit(0); }
+            // (after 1 and 2 the app closes, the game has the old files open; the others leave it running)
+            if (android_import(action - 2, true) && action <= 4) { LOG("[ui] imported: closing\n"); exit(0); }
             SDL_SetAtomicInt(&away, 0);
         }
+#else
+        if (action == 6)  // (request 4: the save's folder. SDL wants its dialogs started on this thread)
+            SDL_ShowOpenFolderDialog(folder_picked, (void *)(intptr_t)4, window,
+                                     g_config.save_location[0] ? g_config.save_location : NULL, false);
 #endif
         host_input_update();
         cheats_frame();

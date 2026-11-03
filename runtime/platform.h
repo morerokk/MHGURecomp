@@ -52,6 +52,9 @@ bool plat_user_dir(char *buf, size_t size);
 // The files in a folder and its subfolders, 0 if it can't be read (main.c: whether the player's romfs is complete;
 // the system's own listing, not a stat per file: ~80 ms for the game's 35531 on Windows).
 int plat_count_files(const char *dir);
+// A folder the player named (UTF-8, as the settings file has it), created if missing, as a path the runtime's file
+// functions can open: Windows' narrow ones take the ANSI code page, so one it can't spell becomes its 8.3 short form.
+bool plat_use_folder(const char *utf8, char *buf, size_t size);
 void plat_error_box(const char *msg);
 void plat_fatal_notice(void);
 

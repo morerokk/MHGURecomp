@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <strings.h>
 
 #include "camera_jitter.h"
 #include "gamelib.h"
@@ -108,6 +110,37 @@ static void boot(const char *root) {
     kernel_run_main(t, t->handle, 0, init_fn, main_init_fn);
 }
 
+// base/rel as it is spelled on disk, into found (rel's own spelling where it matches): 0 rel is there with those exact
+// capitals, 1 it is there with other capitals (found: how; Windows' stat finds it either way, the game would not), -1
+// not there. first_any: the first part in any case (romfs.c uses the top folder whatever its spelling).
+static int spelled_on_disk(const char *base, const char *rel, bool first_any, char *found, size_t size) {
+    char dir[1600], part[256];
+    snprintf(dir, sizeof dir, "%s", base);
+    found[0] = 0;
+    int result = 0;
+    for (const char *p = rel; *p;) {
+        size_t n = strcspn(p, "/");
+        snprintf(part, sizeof part, "%.*s", (int)n, p);
+        DIR *d = opendir(dir);
+        if (!d) return -1;
+        char hit[256] = "";
+        for (struct dirent *e; (e = readdir(d));) {
+            if (!strcmp(e->d_name, part)) { snprintf(hit, sizeof hit, "%s", e->d_name); break; }
+            if (!hit[0] && !strcasecmp(e->d_name, part)) snprintf(hit, sizeof hit, "%s", e->d_name);
+        }
+        closedir(d);
+        if (!hit[0]) return -1;
+        if (strcmp(hit, part) && !(first_any && p == rel)) result = 1;
+        size_t len = strlen(found);
+        snprintf(found + len, size - len, "%s%s", len ? "/" : "", hit);
+        len = strlen(dir);
+        snprintf(dir + len, sizeof dir - len, "/%s", hit);
+        p += n;
+        if (*p == '/') p++;
+    }
+    return result;
+}
+
 // What is wrong with the game files in data (into msg), or false when they are fine.
 static bool game_files_problem(const char *data, char *msg, size_t size) {
     char main_path[1200];
@@ -132,12 +165,24 @@ static bool game_files_problem(const char *data, char *msg, size_t size) {
     // an incomplete romfs starts, then crashes or quits with the game's own error: players' dumps of the base game
     // without the update merged (34149 files) or of the update alone (12 files, no shader package) did. 1.4.0
     // merged has 35531; the margin is for dump tools that leave out a few. MHGU_ROMFS_ANY=1 skips the check.
-    char romfs[1200], shaders[1300];
+    char romfs[1200];
     snprintf(romfs, sizeof romfs, "%s/romfs", data);
-    snprintf(shaders, sizeof shaders, "%s/nativeNX/system/app_shader/AppShaderPackage.mfx", romfs);
-    struct stat st;
     int nfiles = getenv("MHGU_ROMFS_ANY") ? -1 : plat_count_files(romfs);
-    bool have_shaders = stat(shaders, &st) == 0;
+    // (spelled out, not stat: Linux's would miss a NativeNX folder, which romfs.c takes as nativeNX)
+    char spelled[600];
+    int case_check = spelled_on_disk(romfs, "nativeNX/system/app_shader/AppShaderPackage.mfx", true, spelled, sizeof spelled);
+    bool have_shaders = case_check >= 0;
+    // Names with other capitals than the game's (a dump tool that writes them all in small letters): on Windows they
+    // pass the count, then the game can't find its first file and quits with "Shader compile failed" (#136)
+    if (case_check == 1) {
+        const char sep = DATA_SUB("")[4];  // (the folder separator the messages use: \\ or /)
+        for (char *p = spelled; *p; p++) if (*p == '/') *p = sep;
+        snprintf(msg, size, "The game files in " DATA_SUB("romfs") " have names with the wrong capital letters, so the "
+                 "game can't find them: for example %s, which should be nativeNX%csystem%capp_shader%cAppShaderPackage.mfx. "
+                 "Extract the romfs again with a tool that keeps the names as they are, and replace " DATA_SUB("romfs")
+                 " with it.", spelled, sep, sep, sep);
+        return true;
+    }
     if (nfiles >= 0 && (nfiles < 35000 || !have_shaders)) {
         snprintf(msg, size, "The game files in " DATA_SUB("romfs") " are incomplete: %d files, where Monster Hunter "
                  "Generations Ultimate 1.4.0 has 35531%s. Extract the romfs again with the 1.4.0 update applied (the "
@@ -149,7 +194,8 @@ static bool game_files_problem(const char *data, char *msg, size_t size) {
 }
 
 #ifdef __ANDROID__
-bool android_offer_import(const char *msg);  // (runtime/platform/android.c)
+bool android_offer_import(const char *msg, char *data, size_t size);  // (runtime/platform/android.c)
+void android_game_folder(char *out, size_t size);
 #endif
 
 int main(int argc, char **argv) {
@@ -175,6 +221,11 @@ int main(int argc, char **argv) {
             if (s2 > s) s = s2;
             if (s) *s = 0, snprintf(data, sizeof data, "%s/data", exe);
         }
+#ifdef __ANDROID__
+        android_game_folder(data, sizeof data);  // ([Android] GameFolder: the game files on a USB drive, an SD card...)
+#endif
+        // (MHGU_DATA_DIR: the game files elsewhere, also on a PC; on Android from env.txt)
+        if (getenv("MHGU_DATA_DIR")) snprintf(data, sizeof data, "%s", getenv("MHGU_DATA_DIR"));
         g_game_dir = data;
         mods_make_dir();
         cheats_make_dir();
@@ -188,7 +239,7 @@ int main(int argc, char **argv) {
         for (char msg[900]; game_files_problem(data, msg, sizeof msg);) {
             fprintf(stderr, "%s\n", msg);
 #ifdef __ANDROID__
-            if (android_offer_import(msg)) continue;  // (copied in from a folder the player picked: check again)
+            if (android_offer_import(msg, data, sizeof data)) continue;  // (from a folder the player picked: check again)
 #endif
             plat_error_box(msg);
             return 1;
