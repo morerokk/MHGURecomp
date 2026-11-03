@@ -112,6 +112,36 @@ static uint32_t nso_size(const char *path) {
     return ok && size < 0x10000000u ? (uint32_t)size : 0;
 }
 
+// A mod's subsdk that is Forge's own module (its module name, at the start of rodata: u32 0, u32 length, the name):
+// Forge's loader, which mods with Forge plugins bring along (on the console it loads the plugins). The port runs the
+// plugins itself (runtime/forge.c), as before mods' subsdks were loaded: it is passed over.
+static bool forge_module(const char *path, const char *mod) {
+    size_t len;
+    uint8_t *raw = read_file(path, &len);
+    bool forge = false;
+    if (raw && len >= 0x100 && !memcmp(raw, "NSO0", 4)) {
+        uint32_t flags, file_off, size, csize;
+        memcpy(&flags, raw + 0xC, 4), memcpy(&file_off, raw + 0x20, 4), memcpy(&size, raw + 0x28, 4);
+        memcpy(&csize, raw + 0x64, 4);
+        uint8_t *ro = size >= 0x10 && size < 0x10000000u ? malloc(size) : NULL;
+        bool ok = ro && (uint64_t)file_off + csize <= len;
+        if (ok && (flags & 2)) ok = lz4_decompress(raw + file_off, csize, ro, size) == size;
+        else if (ok) ok = csize >= size && (memcpy(ro, raw + file_off, size), true);
+        uint32_t n = 0;
+        if (ok) memcpy(&n, ro + 4, 4);
+        if (ok && n >= 5 && n <= size - 8) {
+            char name[64];
+            snprintf(name, sizeof name, "%.*s", (int)n, (const char *)ro + 8);
+            forge = !strcasecmp(name, "mhguForge");
+        }
+        free(ro);
+    }
+    free(raw);
+    if (forge) LOG("[mods] %s: exefs/%s is Forge's own module: not loaded (the port runs Forge plugins itself)\n", mod,
+                   strrchr(path, '/') ? strrchr(path, '/') + 1 : path);
+    return forge;
+}
+
 static void load_nso(Module *m, const char *path, uint32_t base) {
     size_t len;
     uint8_t *raw = read_file(path, &len);
@@ -341,7 +371,7 @@ void loader_load(const char *exefs) {
     for (int k = 0; k < 10; k++) {
         char name[16];
         snprintf(name, sizeof name, "subsdk%d", k);
-        const char *mod = mods_exefs_file(name, path, sizeof path);
+        const char *mod = mods_exefs_file(name, path, sizeof path, forge_module);
         if (!mod) {
             snprintf(path, sizeof path, "%s/%s", exefs, name);
             expected += nso_size(path);

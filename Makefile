@@ -5,6 +5,7 @@
 #   make -j4                                        build build/mhgurecomp(.exe) and the game code library, with its
 #                                                   DLLs and the game files (build/data): start build/mhgurecomp.exe
 # build/ holds only the game folder (what a player copies); the compiler's files go to obj/.
+#   make PLATFORM=android ABI=arm64-v8a|x86_64      the Android APK instead (android/android.mk): build-android/
 UNAME := $(shell uname -s)
 ifneq ($(filter MINGW% MSYS% CYGWIN% Windows_NT,$(UNAME) $(OS)),)
 PLATFORM := windows
@@ -13,17 +14,20 @@ PLATFORM := darwin
 else
 PLATFORM := linux
 endif
+ANDROID  := $(filter android,$(PLATFORM))
+ABI      ?= arm64-v8a
 
 GAME     ?= ../mhgu/game
 GEN      ?= generated
-B        ?= build
-O        ?= obj
+B        ?= $(if $(ANDROID),build-android,build)
+O        ?= $(if $(ANDROID),obj-android/$(ABI),obj)
 CC       := clang
 CXX      := clang++
 ifeq ($(PLATFORM)-$(shell uname -m),darwin-arm64)
 GENARCH  ?= -mcpu=apple-m1    # Apple Silicon
 else
-GENARCH  ?= -march=x86-64-v3  # AVX2 + FMA (Haswell or newer)
+# AVX2 + FMA (Haswell or newer); Android: the ABI's baseline (arm64-v8a: ARMv8.0, x86_64: SSE4.2)
+GENARCH  ?= $(if $(ANDROID),,-march=x86-64-v3)
 endif
 GENFLAGS := -O1 -fno-strict-aliasing -ffp-contract=off -fno-math-errno -Wno-return-type -Wno-unused-label \
             -Wno-parentheses-equality -Wno-unused-value -fvisibility=hidden -Iruntime $(GENARCH)
@@ -32,7 +36,7 @@ GEN_SRC  := $(wildcard $(GEN)/main/*.c) $(wildcard $(GEN)/sdk/*.c)
 GEN_OBJ  := $(patsubst $(GEN)/%.c,$(O)/gen/%.o,$(GEN_SRC)) $(O)/gen/tools/gamelib_entry.o
 RT_SRC   := $(wildcard runtime/*.c) $(wildcard runtime/hle/*.c) $(wildcard runtime/services/*.c) $(wildcard runtime/net/*.c) \
             runtime/nvn/objects.c runtime/nvn/cmdbuf.c runtime/nvn/nvn_args.c runtime/nvn/tegra.c runtime/nvn/formats.c \
-            runtime/nvn/backend_null.c runtime/nvn/astc.c runtime/nvn/maxwell/translate.c $(wildcard runtime/nvn/vulkan/*.c) \
+            runtime/nvn/backend_null.c runtime/nvn/astc.c runtime/nvn/bcn.c runtime/nvn/maxwell/translate.c $(wildcard runtime/nvn/vulkan/*.c) \
             runtime/platform/$(PLATFORM).c
 # (simd_int.c / neon.c, helpers of the recompiled code, live in the executable: the game code library imports them,
 # and runtime/interp.c uses them too)
@@ -59,6 +63,7 @@ FFMPEG_CONF   := --disable-everything --disable-programs --disable-doc --disable
                  --enable-parser=h264,aac --enable-decoder=h264,aac
 # (nasm: FFmpeg's assembly for x86; without it the plain C versions, fast enough for 960x540 movies)
 FFMPEG_CONF   += $(if $(shell command -v nasm 2>/dev/null),,--disable-x86asm)
+FFMPEG_CC      = $(CC)
 ifeq ($(FFMPEG),system)
 AV_LIBS  := -lavformat -lavcodec -lavutil
 AV_DEPS  :=
@@ -156,6 +161,8 @@ GAMELIB  := $(B)/mhgugame.dylib
 GAMELIB_LDFLAGS := -bundle -bundle_loader $(EXE) $(MINFLAG)
 # (make test-settings / test-settings-panel: SDL from $(DEPS))
 TEST_LDFLAGS := -L$(DEPS)/lib -Wl,-rpath,$(abspath $(DEPS)/lib)
+else ifeq ($(PLATFORM),android)
+include android/android.mk
 else
 EXE      := $(B)/mhgurecomp
 OSFLAGS  :=
@@ -176,8 +183,9 @@ LDFLAGS  += $(GLIBC_WRAP_FLAGS)
 GAMELIB  := $(B)/mhgugame.so
 GAMELIB_LDFLAGS := -shared -fuse-ld=lld
 UPDATER  := $(B)/mhgurecomp-updater
-# (libcurl: opened at run time, updater/http.c)
-UPD_LDFLAGS := -fuse-ld=lld $(SDL_LIBS) -lz -ldl $(GLIBC_WRAP_FLAGS)
+# (libcurl: opened at run time, updater/http.c; -lm for runtime/platform/linux_glibc.c: SDL_LIBS has it only with
+# the bundled SDL3)
+UPD_LDFLAGS := -fuse-ld=lld $(SDL_LIBS) -lz -ldl -lm $(GLIBC_WRAP_FLAGS)
 endif
 
 # GAMELIB_ID: what the game code library is compiled against. A library with another id is refused at startup.
@@ -223,17 +231,8 @@ FFX_GPU  := $(FFX)/include/FidelityFX/gpu
 FFX_PASS := $(FFX)/src/backends/vk/shaders/fsr3upscaler
 $(O)/fsr/src/ffx_fsr3_glsl.c.o: FSRFLAGS += -DFFX_GPU_DIR='"$(FFX_GPU)"' -DFFX_PASS_DIR='"$(FFX_PASS)"'
 $(O)/fsr/src/ffx_fsr3_glsl.c.o: $(wildcard $(FFX_GPU)/*.h $(FFX_GPU)/*/*.h $(FFX_PASS)/*.glsl)
-RTFLAGS  += -I$(FSR)/include -Ithird_party/ffx-api
-# FSR4_DRIVER_PATCH=1 (opt-in): FSR 4 can use the AMD driver's own amdvkffx64.dll directly, which needs one in-memory patch of
-# that DLL's GetModuleHandleW import (runtime/nvn/vulkan/fsr4.c, docs/FSR4-PORT.md). The default, FSR4_DRIVER_PATCH=0, leaves
-# all of that code out: nothing of AMD's is touched, and FSR 4 is only used through a loader DLL the player supplies (else FSR 3.1).
-FSR4_DRIVER_PATCH ?= 0
+RTFLAGS  += -I$(FSR)/include
 .DEFAULT_GOAL := all
-FSR4_STAMP := $(O)/fsr4_patch_$(FSR4_DRIVER_PATCH).stamp
-$(FSR4_STAMP):
-	@mkdir -p $(O) && rm -f $(O)/fsr4_patch_*.stamp && touch $@
-$(O)/rt/nvn/vulkan/fsr4.o: $(FSR4_STAMP)
-$(O)/rt/nvn/vulkan/fsr4.o: RTFLAGS += -DFSR4_DRIVER_PATCH=$(FSR4_DRIVER_PATCH)
 # NULL_GPU=1: no renderer (runtime/nvn/backend_null.c: the game runs, nothing is drawn)
 ifeq ($(NULL_GPU),1)
 RTFLAGS  += -DMHGU_NULL_BACKEND
@@ -243,7 +242,8 @@ else
 RT_CXX   := $(O)/rt/nvn/vulkan/vma.o $(FSR_OBJ)
 endif
 
-all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) data licenses pipelist
+all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) \
+     $(if $(ANDROID),apk,data licenses pipelist)
 
 # Host-only INI/settings regression test: no game dump or generated code required.
 .PHONY: test-settings
@@ -371,7 +371,7 @@ $(eval $(call FETCH,third_party/shaderc/SPIRV-Headers-$(SPIRV_VER).tar.gz,https:
 $(FFMPEG_DIR)/.built: $(FFMPEG_TAR)
 	rm -rf $(FFMPEG_DIR) && mkdir -p $(FFMPEG_DIR)/src
 	tar -xJf $< -C $(FFMPEG_DIR)/src --strip-components=1
-	cd $(FFMPEG_DIR)/src && ./configure --prefix="$(abspath $(FFMPEG_DIR))" --cc=$(CC) $(FFMPEG_CONF) > ../configure.log \
+	cd $(FFMPEG_DIR)/src && ./configure --prefix="$(abspath $(FFMPEG_DIR))" --cc=$(FFMPEG_CC) $(FFMPEG_CONF) > ../configure.log \
 	    || { tail -20 ../configure.log; exit 1; }
 	$(MAKE) -C $(FFMPEG_DIR)/src install > $(FFMPEG_DIR)/build.log || { tail -30 $(FFMPEG_DIR)/build.log; exit 1; }
 	touch $@
@@ -424,8 +424,9 @@ $(B)/pipelines.list: extras/pipelines.list
 	@mkdir -p $(dir $@)
 	cp $< $@
 
-licenses: $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt) \
-          $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt)
+LICENSE_TXT = $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt) \
+              $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt)
+licenses: $(LICENSE_TXT)
 $(B)/licenses/%.txt: %
 	@mkdir -p $(dir $@)
 	cp $< $@
@@ -439,7 +440,7 @@ $(B)/licenses/FFmpeg.txt: $(FFMPEG_DIR)/.built
 
 $(B)/licenses/SDL3.txt: $(SDL3_DIR)/.built
 	@mkdir -p $(dir $@)
-	@{ echo "This program contains SDL $(SDL3_VER), linked statically, under the zlib license (below). Its source code is"; \
+	@{ echo "This program contains SDL $(SDL3_VER), $(if $(ANDROID),as libSDL3.so,linked statically), under the zlib license (below). Its source code is"; \
 	   echo "https://github.com/libsdl-org/SDL/releases/download/release-$(SDL3_VER)/SDL3-$(SDL3_VER).tar.gz."; \
 	   echo; cat $(SDL3_DIR)/src/LICENSE.txt; } > $@
 $(B)/licenses/shaderc.txt: $(SHADERC_DIR)/.built
@@ -530,14 +531,25 @@ clean:  # (keeps $(B)/data, and the settings, caches and saves wherever the game
 # Windows-MHGURecomp.<version>.zip or Linux-MHGURecomp.<version>.tar.gz (permissions kept), holding the programs,
 # the game code, the DLLs, licenses/, BONUS (the donor save for bonus/system, when given) and the empty folders the
 # player fills; never the game files, mods, settings or caches of $(B). It prints each archive's size and SHA-256.
+# On Windows, with the Android SDK installed (android/android.mk), it then makes the Android one too (android/apk.mk):
+# Android-MHGURecomp.<version>.apk, arm64 only, signed with the release key. ANDROID_DIST= leaves it out.
 DIST  ?= dist
 BONUS ?= $(wildcard $(B)/bonus/system)
+ANDROID_DIST ?= $(if $(filter windows,$(PLATFORM)),$(wildcard $(if $(ANDROID_HOME),$(shell cygpath -u '$(ANDROID_HOME)'),/c/Android/Sdk)/ndk/*))
+CHECK_VERSION = @echo '$(VERSION)' | grep -Eq '^[0-9]+(\.[0-9]+)*$$' || \
+	{ echo "dist: '$(VERSION)' is not a release version: make dist VERSION=<the release's tag, e.g. 0.10.4>"; exit 1; }
+ifndef ANDROID
 dist: all
-	@echo '$(VERSION)' | grep -Eq '^[0-9]+(\.[0-9]+)*$$' || \
-	  { echo "dist: '$(VERSION)' is not a release version: make dist VERSION=<the release's tag, e.g. 0.10.4>"; exit 1; }
+	$(CHECK_VERSION)
 	$(PY) tools/dist.py $(B) $(DIST) $(PLATFORM) $(VERSION) $(if $(BONUS),--bonus "$(BONUS)")
+	$(if $(ANDROID_DIST),$(MAKE) PLATFORM=android ABI=arm64-v8a dist $(if $(BONUS),BONUS="$(abspath $(BONUS))"),@echo "dist: no Android SDK: no APK")
+endif
 
 .PHONY: all app macos-deps release gen test-lift runtime-objs clean bundle data licenses pipelist dist FORCE
+
+ifeq ($(PLATFORM),android)
+include android/apk.mk
+endif
 
 # Exercise real ImGui navigation without a game dump or graphics device.
 .PHONY: test-settings-panel

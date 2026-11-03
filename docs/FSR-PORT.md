@@ -245,7 +245,7 @@ better than native + FXAA. Quality and below pay off on slower GPUs or very high
 - Not tested in game: UltraPerformance, the hunter creation and equipment preview screens (the character select
   was), a large monster in a fight (only herbivores in quest 101's area 2), multiplayer, Alt+Enter / borderless on
   another monitor size.
-- FSR 4: see docs/FSR4-PORT.md (`Upscaler = FSR4`, native Vulkan through the driver); block matching / animated surfaces / HUD layer: see above.
+- Block matching / animated surfaces / HUD layer: see above. FSR 4 was removed on 2026-11-01 (docs/STATUS.md).
 
 ## Test commands (Git Bash; the game must not be running while building)
 
@@ -271,24 +271,25 @@ Without MHGU_QUICKHUNT, pressing A every 1.5 s for ~20 s reaches the village.
 
 ## Quality presets side by side
 
-The same still scene (quest 101, RX 9070 XT, 1920x1080 window with a 21:9 picture, so 1920x822) at every `FSRQuality` preset, FSR 3.1 on the left and FSR 4 on the right (the picture is in the pull request, not in the repository). Each tile is labelled with the resolution the 3D picture is rendered at; the HUD is always drawn at the output resolution. Real captures, nothing edited apart from cropping the black bars and scaling to fit. Frame time on that card (whole-frame GPU ms, FSR 3.1 / FSR 4): NativeAA 1.98 / 2.06, Quality 1.27 / 1.56, Balanced 1.16 / 1.47, Performance 1.04 / 1.37, UltraPerformance 0.87 / 1.23.
+The same still scene (quest 101, RX 9070 XT, 1920x1080 window with a 21:9 picture, so 1920x822) at every `FSRQuality` preset (the picture is in the pull request, not in the repository). Each tile is labelled with the resolution the 3D picture is rendered at; the HUD is always drawn at the output resolution. Real captures, nothing edited apart from cropping the black bars and scaling to fit. Frame time on that card (whole-frame GPU ms): NativeAA 1.98, Quality 1.27, Balanced 1.16, Performance 1.04, UltraPerformance 0.87.
 
 ## Comparison images
 
 Captures from the test runs, shown in the pull request and not stored in the repository (quest 101, RX 9070 XT, 1920x1080 window, crops of 4-frame captures; nothing edited).
 Panel labels in images 1-5: `nat_fxaa` = native 1080p with FXAA (no FSR), `f3q` = FSR 3.1 Quality (1280x720 -> 1080p),
-`f4q` = FSR 4 Quality, `f4naa` = FSR 4 NativeAA, `ss4k` = 4K supersampled reference. Within one image the hunter or the
+`ss4k` = 4K supersampled reference. Within one image the hunter or the
 animated parts can be in a slightly different pose per panel (the panels are different runs); compare edges and texture, not poses.
+(The images also have FSR 4 panels, `f4q` and `f4naa`, from before it was removed.)
 
-What can be seen across the set (my reading; one scene, one GPU; the numbers are in the measurements above and in `FSR4-PORT.md`):
+What can be seen across the set (my reading; one scene, one GPU; the numbers are in the measurements above):
 - Native + FXAA has stair-stepped geometry edges (chest strap and rim, cloth edge, sword); every FSR variant has smooth edges.
-- FSR 3.1 Quality and FSR 4 Quality rebuild texture detail from 720p input to about native level, a little softer than native + FXAA on some
-  textures; FSR 4 Quality is a little softer than FSR 3.1 Quality (sharpness metrics 0.87-0.94 vs 0.87-1.01).
-- FSR 4 NativeAA is the closest to the 4K reference in sharpness; FSR 3.1 NativeAA (images 6-8) is visibly sharper than its Quality mode (sharpness 0.8 vs 0.3 there).
+- FSR 3.1 Quality rebuilds texture detail from 720p input to about native level, a little softer than native + FXAA on some
+  textures.
+- FSR 3.1 NativeAA (images 6-8) is visibly sharper than its Quality mode (sharpness 0.8 vs 0.3 there).
 - In the pan crops (4, 5), no ghost trails are visible behind the hunter or on the ground in any FSR panel.
 - A thin green outline on the headband is present in native and all FSR panels (a game texture/outline feature, not FSR).
 
-1. Chest and structure, static: native+FXAA, FSR 3.1 Quality, FSR 4 Quality / FSR 4 NativeAA, 4K reference.
+1. Chest and structure, static: native+FXAA, FSR 3.1 Quality, 4K reference.
 
 2. Ground texture, static.
 
@@ -312,6 +313,5 @@ The next three are FSR 3.1 only, on a 2560x1440 screen: the old setup (native 19
 Nothing in the preparation is specific to FSR: the jittered main camera (`runtime/hle/camera_jitter.c`), per-pixel motion vectors from the
 camera and from moving objects, the scene depth, the reactive and animated-surface masks, the HUD split (the HUD is drawn after the upscale at
 output size), the texture LOD bias and the output-size handling (`runtime/nvn/vulkan/fsr.c`, `textures.c`) are what any temporal upscaler
-needs. The upscaler itself is called from one place: `run_fsr` in `fsr.c` prepares the inputs and then records either the FSR 3.1 dispatch
-or `vk_fsr4_dispatch` (`fsr4.c`, which takes all of them in one `Fsr4Dispatch` struct). A DLSS backend (NVIDIA, via NGX or Streamline on
+needs. The upscaler itself is called from one place: `run_fsr` in `fsr.c` prepares the inputs and then records the FSR 3.1 dispatch. A DLSS backend (NVIDIA, via NGX or Streamline on
 Vulkan) could be added the same way by someone with an NVIDIA RTX card. The author has no such card, so it is neither implemented nor tested.

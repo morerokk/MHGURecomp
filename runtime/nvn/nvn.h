@@ -61,7 +61,10 @@ typedef struct NvnTexture {
     void *backend;  // renderer-side texture
     uint64_t debug_id;
     char label[64];
+    bool screenshot;  // a buffer of the game's sScreenShot (made while g_nvn_making_screenshot was set)
 } NvnTexture;
+// Set by runtime/hle/camera_jitter.c on the thread making the game's screenshot buffers, while it does
+extern _Thread_local bool g_nvn_making_screenshot;
 
 typedef struct {
     uint32_t min_filter, mag_filter, wrap[3], compare_mode, compare_func, reduction;

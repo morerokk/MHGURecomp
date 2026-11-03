@@ -27,11 +27,14 @@ static void ImGui_ImplVulkan_NewFrame() {}
 static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #endif
 
+#include "config.h"
 #include "forge.h"
 #include "menu_confirm.h"
 #include "overlay.h"
 #include "hle/chat.h"
 #include "settings_panel.h"
+
+extern "C" volatile uint64_t g_present_count;  // (runtime/rt.h: frames the game presented)
 
 #define LOG(...) fprintf(stderr, __VA_ARGS__)
 
@@ -41,7 +44,7 @@ void vk_unlock(void);
 SDL_Window *ui_window(void);
 }
 
-static std::atomic<bool> g_enabled, g_ready, g_open;
+static std::atomic<bool> g_enabled, g_ready, g_open, g_wants_text;
 static std::atomic<bool> g_forge_frames;  // forge.c's frame hook builds the frames (else overlay_tick)
 static std::mutex g_status_lock;
 static char g_status[160];
@@ -165,6 +168,9 @@ bool overlay_event(const SDL_Event *e) {
     if (!g_enabled) return false;
     if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && settings_panel_key((int)e->key.scancode)) return true;
     if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN && settings_panel_mouse(e->button.button)) return true;
+    if (e->type == SDL_EVENT_MOUSE_WHEEL &&
+        settings_panel_wheel(e->wheel.integer_y * (e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1)))
+        return true;
     if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && e->key.scancode == SDL_SCANCODE_F1) {
         overlay_toggle_settings();
         return true;
@@ -223,6 +229,7 @@ void overlay_pad(const OverlayPad *p) {
 
 bool overlay_enabled(void) { return g_enabled; }
 bool overlay_menu_open(void) { return g_open; }
+bool overlay_wants_text(void) { return g_wants_text; }
 
 static void apply_input(ImGuiIO &io) {
     std::vector<Ev> evs;
@@ -497,10 +504,83 @@ static void draw_chat(const char *line, uint64_t now, float scale) {
     chat_set_box((p0.x - vp->WorkPos.x) / vp->WorkSize.x, (p0.y - vp->WorkPos.y) / vp->WorkSize.y,
                  (p1.x - vp->WorkPos.x) / vp->WorkSize.x, (p1.y - vp->WorkPos.y) / vp->WorkSize.y);
     ImDrawList *dl = ImGui::GetForegroundDrawList();
-    dl->AddRectFilled(p0, p1, IM_COL32(6, 10, 17, 235), 6 * scale);
-    dl->AddRectFilled(p0, ImVec2(p0.x + bar, p1.y), IM_COL32(111, 216, 255, 255), 6 * scale, ImDrawFlags_RoundCornersLeft);
-    dl->AddText(font, size, ImVec2(p0.x + bar + pad, p0.y + pad), IM_COL32(244, 247, 252, 255), text.c_str(), nullptr,
-                wrap);
+    // In the settings menu's colours ([Application] Theme, runtime/settings_panel.cpp theme()): Blue and Gold a panel
+    // with a bar at its left, Hunter the game's window with a red and green rule along its top and bottom
+    int theme = settings_panel_theme();
+    if (theme == THEME_HUNTER) {
+        float line = 2 * scale;
+        dl->AddRectFilled(p0, p1, IM_COL32(50, 25, 24, 236));
+        dl->AddRect(p0, p1, IM_COL32(0, 0, 0, 255), 0, 0, 2 * scale);
+        dl->AddRectFilled(p0, ImVec2(p1.x, p0.y + line), IM_COL32(176, 34, 30, 255));
+        dl->AddRectFilled(ImVec2(p0.x, p0.y + line), ImVec2(p1.x, p0.y + line * 1.7f), IM_COL32(80, 142, 54, 255));
+        dl->AddRectFilled(ImVec2(p0.x, p1.y - line * 1.7f), ImVec2(p1.x, p1.y - line), IM_COL32(80, 142, 54, 255));
+        dl->AddRectFilled(ImVec2(p0.x, p1.y - line), p1, IM_COL32(176, 34, 30, 255));
+    } else {
+        bool gold = theme == THEME_GOLD;
+        dl->AddRectFilled(p0, p1, gold ? IM_COL32(34, 25, 19, 240) : IM_COL32(6, 10, 17, 235), 6 * scale);
+        dl->AddRectFilled(p0, ImVec2(p0.x + bar, p1.y), gold ? IM_COL32(213, 162, 79, 255) : IM_COL32(111, 216, 255, 255),
+                          6 * scale, ImDrawFlags_RoundCornersLeft);
+    }
+    ImU32 ink = theme == THEME_GOLD ? IM_COL32(242, 216, 170, 255) : IM_COL32(244, 247, 252, 255);
+    dl->AddText(font, size, ImVec2(p0.x + bar + pad, p0.y + pad), ink, text.c_str(), nullptr, wrap);
+}
+
+// The battery's charge, "87%" ("87% +" while charging); false when there is no battery to tell of (a desktop PC). Asked
+// every few seconds: SDL goes through Java on Android.
+static bool battery_text(uint64_t now, char *out, size_t size) {
+    static uint64_t last;
+    static int percent = -1;
+    static bool charging;
+    if (!last || now - last >= 5000000000ull) {
+        last = now;
+        int secs;
+        SDL_PowerState st = SDL_GetPowerInfo(&secs, &percent);
+        charging = st == SDL_POWERSTATE_CHARGING || st == SDL_POWERSTATE_CHARGED;
+        if (st == SDL_POWERSTATE_NO_BATTERY || st == SDL_POWERSTATE_ERROR) percent = -1;
+    }
+    if (percent < 0) return false;
+    snprintf(out, size, "%d%%%s", percent, charging ? " +" : "");
+    return true;
+}
+
+// The frame rate ([Performance] ShowFPS): frames the game presented, counted over half a second. An ImGui window of
+// its own, so it can be dragged while the settings menu (which gets the mouse) is open; ImGui keeps where it was put in
+// forge_imgui.ini. With ShowBattery = WithFPS the battery's charge is in it; ByItself: a window of its own.
+static void draw_fps(uint64_t now) {
+    static uint64_t t0, f0;
+    static float fps, ms;
+    uint64_t frames = g_present_count;
+    if (!t0 || frames < f0) t0 = now, f0 = frames;
+    if (now - t0 >= 500000000ull) {
+        uint64_t n = frames - f0;
+        fps = n * 1e9f / (float)(now - t0);
+        ms = n ? (now - t0) / 1e6f / n : 0;
+        t0 = now, f0 = frames;
+    }
+#ifdef __ANDROID__  // (a phone's battery: the Android tab's setting)
+    int battery = config_show_battery();
+#else
+    int battery = BATTERY_OFF;
+#endif
+    char charge[32];
+    bool have_charge = battery != BATTERY_OFF && battery_text(now, charge, sizeof charge);
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                             ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+    if (config_show_fps()) {
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.6f);
+        if (ImGui::Begin("FPS##counter", nullptr, flags)) {
+            if (have_charge && battery == BATTERY_WITH_FPS) ImGui::Text("%.0f FPS  %.1f ms  %s", fps, ms, charge);
+            else ImGui::Text("%.0f FPS  %.1f ms", fps, ms);
+        }
+        ImGui::End();
+    }
+    if (have_charge && battery == BATTERY_ALONE) {
+        ImGui::SetNextWindowPos(ImVec2(10, 50), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.6f);
+        if (ImGui::Begin("Battery##counter", nullptr, flags)) ImGui::Text("%s", charge);
+        ImGui::End();
+    }
 }
 
 // ------------------------------------------------------------------ frames (game thread)
@@ -527,7 +607,13 @@ void overlay_frame(void *cpu) {
     char line[256];
     bool chat = chat_composing(line, sizeof line);
     ImGuiIO &io = ImGui::GetIO();
-    if (!open && !free_render && !status && !notice && !chat) {  // (nothing to draw)
+    g_wants_text = open && io.WantTextInput;  // (as of the last frame; the window side reads it: runtime/textinput.c)
+#ifdef __ANDROID__
+    bool fps = config_show_fps() || config_show_battery() == BATTERY_ALONE;
+#else
+    bool fps = config_show_fps();
+#endif
+    if (!open && !free_render && !status && !notice && !chat && !fps) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
         apply_input(io);  // (keep the queue short)
@@ -593,6 +679,7 @@ void overlay_frame(void *cpu) {
     if (status) draw_status(scale);
     if (notice) draw_notice(now, scale);
     if (chat) draw_chat(line, now, scale);
+    if (fps) draw_fps(now);
     ImGui::Render();
 
     ImDrawData *dd = ImGui::GetDrawData();

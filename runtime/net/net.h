@@ -5,6 +5,7 @@
 // host n = 1), so the game sees the network it expects.
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -33,6 +34,9 @@ typedef struct {
 // ldn.c
 bool ldn_net_up(void);           // a network exists (hosting with it created, or joined)
 bool ldn_hosting(void);          // we host it
+// The hub's players and their maximum, and an id for it (a hash of its session id: the same in every player's
+// game); false: no hub.
+bool ldn_party(int *n, int *max, char *id, size_t size);
 uint32_t ldn_own_ip(void);        // 0 without a network
 uint32_t ldn_broadcast_ip(void);
 void ldn_send(const VPacket *p, const void *data, uint32_t len);  // from a local socket: into the network

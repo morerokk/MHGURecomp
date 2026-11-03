@@ -3,7 +3,7 @@
 Minus + Plus (Back/Select + Start) or F1 opens a single panel inside the game.
 Insert still opens Forge. Options, Save and Reset share one scrolling flow, in that order.
 Back appears only as a guide beneath the options. Discard is available only
-in the unsaved-changes confirmation when leaving the menu. App also contains Restart and Exit. The panel is attached on
+in the unsaved-changes confirmation when leaving the menu. Menu Options also contains Restart and Exit. The panel is attached on
 every opening; detach allows dragging, and Move menu works with the controller.
 
 Shoulder glyphs bracket the tab labels at the top. The tab header stays pinned
@@ -18,7 +18,7 @@ fully clear of the guide.
 ## Navigation and editing
 
 L/R cycles seven tabs once per press and selects their first field. The tabs are
-Display, Graphics & Audio, Controls, Network, Miscellaneous, Mods and App. Miscellaneous
+Display, Graphics & Audio, Controls, Network, Misc, Mods and Menu Options. Misc
 contains the monster-HP multipliers (under a "Monster HP Scaling" title: a header row,
 skipped by navigation) and quest-specific overrides. D-pad or
 left stick moves between rows; left/right adjusts the selected value. Confirm
@@ -77,7 +77,7 @@ as the player wrote it ("21:9", "Borderless Window"). Every setting is one row o
 writing and checking the file, and the asterisks and number ranges here, all come from it. A new setting is a row
 there, a line in the default file text (`DEFAULT_INI`) and a row in this menu.
 
-App offers English/Spanish and interface scale 100–200% (`MenuScale` under
+Menu Options offers English/Spanish and interface scale 50–200% (`MenuScale` under
 `[Application]`). The root scales with font/DPI, is bounded by the viewport and
 keeps its top position when conditional fields appear. Tabs wrap to two rows
 when needed. Labels wrap; long values truncate without horizontal scrolling.
@@ -123,12 +123,11 @@ cover the game itself.
 
 ## FSR settings
 
- Graphics & Audio exposes all seven
-[Upscaler] fields: FSR, provider (FSR 3.1 / FSR 4), quality, sharpness, object
-motion, reactive mask and animated surfaces. They persist without removing INI
-comments/aliases, participate in draft equality, dirty guards and section reset,
-and are marked restart-only. FSR 4 retains upstream's provider/fallback rules;
-selecting it does not install a driver or loader.
+ Graphics & Audio exposes all six
+[Upscaler] fields: FSR, quality, sharpness, object motion, reactive mask and
+animated surfaces. They persist without removing INI comments/aliases,
+participate in draft equality, dirty guards and section reset, and are marked
+restart-only.
 
 Active FSR keeps live MSAA at 1 and FXAA off, including after saving other
 settings or staging FSR Off for the next boot. The editor shows the AA rows as disabled "Off (FSR)" while FSR owns them,

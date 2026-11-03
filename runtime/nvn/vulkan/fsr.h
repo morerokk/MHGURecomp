@@ -13,6 +13,7 @@ typedef struct {
     bool depth_write;            // it writes depth
     const uint64_t *vubuf;       // its vertex stage's uniform buffers: (guest address, size) pairs
     int nvubuf;
+    float vp_w, vp_h;            // its viewport's size (the game's pixels: the render size's)
 } FsrDraw;
 
 extern bool g_fsr_on;  // FSR is on and works (set once at start-up: vk_fsr_init)
@@ -24,6 +25,7 @@ void vk_fsr_draw(const FsrDraw *d);        // exec.c draw(): may run FSR (the st
 // depth target of a pass whose colour targets have stand-ins.
 NvnTexture *vk_fsr_map(NvnTexture *t, bool depth);
 NvnTexture *vk_fsr_present(NvnTexture *t);  // device.c backend_present: the texture to show (its stand-in)
+bool vk_fsr_input(NvnTexture *t);  // t is the full-screen image FSR upscales (kept RGBA8: textures.c vk_rt_widen)
 
 // ---- object motion ([Upscaler] ObjectMotion): a scene draw is drawn a second time through a variant of its vertex
 // shader that stores each vertex's clip position (gl_Position) in a buffer, indexed by gl_VertexIndex; the next frame's
