@@ -128,10 +128,11 @@ extern const unsigned char mhgu_icon_png[], mhgu_icon_png_end[];
 
 // A Linux executable can't carry an icon for the file manager, so the desktop finds the game through a launcher:
 // $XDG_DATA_HOME/applications/mhgurecomp.desktop (~/.local/share/applications) and the icon beside it in
-// icons/hicolor/128x128/apps/mhgurecomp.png. Written at each start when missing or out of date (the folder moved), so the
-// app menu starts this copy: mhgurecomp-updater when it is beside the game (it starts the game, and with Updates = Off
-// only that), else the game. A launcher without the X-MHGURecomp line is the player's own and left alone. The windows'
-// app id is the launcher's name (SDL: the executable's name; the updater sets it), so the taskbar shows the icon too.
+// icons/hicolor/128x128/apps/mhgurecomp.png, and a copy as "MHGU Recomp.desktop" in the game's folder. Written at each
+// start when missing or out of date (the folder moved), so the app menu starts this copy: mhgurecomp-updater when it is
+// beside the game (it starts the game, and with Updates = Off only that), else the game. A launcher without the
+// X-MHGURecomp line is the player's own and left alone. The windows' app id is the launcher's name (SDL: the
+// executable's name; the updater sets it), so the taskbar shows the icon too.
 static bool write_if_changed(const char *path, const void *data, size_t size) {
     FILE *f = fopen(path, "rb");
     if (f) {
@@ -197,6 +198,10 @@ static void install_launcher(void) {
     mkdirs(dir);
     snprintf(path, sizeof path, "%s/mhgurecomp.desktop", dir);
     if (!write_if_changed(path, entry, (size_t)n)) LOG("[ui] no app menu launcher: can't write %s\n", path);
+    // The same launcher beside the game, so the folder has something to click with the icon (file managers start an
+    // executable .desktop file; a read-only folder just goes without)
+    snprintf(path, sizeof path, "%.*s/MHGU Recomp.desktop", (int)(slash - exe), exe);
+    if (write_if_changed(path, entry, (size_t)n)) chmod(path, 0755);
 }
 
 static void set_window_icon(void) {
