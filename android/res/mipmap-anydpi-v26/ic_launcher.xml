@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon (AndroidManifest.xml): the GU diamonds on the logo's dark ground. An adaptive icon, so the
+     launcher masks it to its own shape; the art sits in the middle 72 of the 108 dp, the part every mask keeps. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

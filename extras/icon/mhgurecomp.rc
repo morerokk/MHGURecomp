@@ -1,0 +1,3 @@
+// The executables' icon on Windows (Makefile: windres, linked into mhgurecomp.exe and mhgurecomp-updater.exe). SDL takes
+// the window's icon from the exe's first one. mhgurecomp.ico: 16 to 256 px, the small sizes drawn plainer.
+1 ICON "mhgurecomp.ico"

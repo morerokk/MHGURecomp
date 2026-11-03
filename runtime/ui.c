@@ -113,6 +113,23 @@ static void set_fullscreen(bool on) {
     if (on && !overlay_menu_open() && !chat_active()) SDL_HideCursor(); else SDL_ShowCursor();
 }
 
+// The window's icon. Windows takes it from the exe (extras/icon/mhgurecomp.rc) and Android from the launcher icon, so only
+// Linux sets one: extras/icon/mhgurecomp-128.png, built into the program (the path is relative to the repo, where make runs).
+#if !defined(_WIN32) && !defined(__ANDROID__)
+__asm__(".pushsection .rodata\n.globl mhgu_icon_png\nmhgu_icon_png:\n.incbin \"extras/icon/mhgurecomp-128.png\"\n"
+        ".globl mhgu_icon_png_end\nmhgu_icon_png_end:\n.popsection");
+extern const unsigned char mhgu_icon_png[], mhgu_icon_png_end[];
+
+static void set_window_icon(void) {
+    SDL_Surface *s = SDL_LoadPNG_IO(SDL_IOFromConstMem(mhgu_icon_png, (size_t)(mhgu_icon_png_end - mhgu_icon_png)), true);
+    if (!s) { LOG("[ui] window icon: %s\n", SDL_GetError()); return; }
+    SDL_SetWindowIcon(window, s);
+    SDL_DestroySurface(s);
+}
+#else
+static void set_window_icon(void) {}
+#endif
+
 void ui_init(void) {
     if (!SDL_Init(SDL_INIT_VIDEO)) FATAL("SDL_Init: %s\n", SDL_GetError());
     int sdl = SDL_GetVersion();
@@ -148,6 +165,7 @@ void ui_init(void) {
     if (getenv("MHGU_HIDDEN")) flags |= SDL_WINDOW_HIDDEN;
     window = SDL_CreateWindow("Monster Hunter Generations Ultimate", win_w, win_h, flags);
     if (!window) FATAL("SDL_CreateWindow: %s\n", SDL_GetError());
+    set_window_icon();
     if (g_config.display_mode != DISPLAY_WINDOWED) set_fullscreen(true);
 }
 
