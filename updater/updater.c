@@ -612,6 +612,10 @@ static void set_window_icon(SDL_Window *win) { (void)win; }
 static bool run_window(SDL_Thread *th) {
     SDL_Window *win = NULL;
     SDL_Renderer *rd = NULL;
+#ifndef _WIN32
+    // (the game's app id, so the window goes with the game's app menu launcher: runtime/ui.c, install_launcher)
+    SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_IDENTIFIER_STRING, "mhgurecomp");
+#endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD) &&
         SDL_CreateWindowAndRenderer("MHGU Recomp updater", W, H, SDL_WINDOW_HIDDEN, &win, &rd)) {
         SDL_SetRenderVSync(rd, 1);

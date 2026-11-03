@@ -119,8 +119,88 @@ static void set_fullscreen(bool on) {
 __asm__(".pushsection .rodata\n.globl mhgu_icon_png\nmhgu_icon_png:\n.incbin \"extras/icon/mhgurecomp-128.png\"\n"
         ".globl mhgu_icon_png_end\nmhgu_icon_png_end:\n.popsection");
 extern const unsigned char mhgu_icon_png[], mhgu_icon_png_end[];
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include "platform.h"
+
+// A Linux executable can't carry an icon for the file manager, so the desktop finds the game through a launcher:
+// $XDG_DATA_HOME/applications/mhgurecomp.desktop (~/.local/share/applications) and the icon beside it in
+// icons/hicolor/128x128/apps/mhgurecomp.png. Written at each start when missing or out of date (the folder moved), so the
+// app menu starts this copy: mhgurecomp-updater when it is beside the game (it starts the game, and with Updates = Off
+// only that), else the game. A launcher without the X-MHGURecomp line is the player's own and left alone. The windows'
+// app id is the launcher's name (SDL: the executable's name; the updater sets it), so the taskbar shows the icon too.
+static bool write_if_changed(const char *path, const void *data, size_t size) {
+    FILE *f = fopen(path, "rb");
+    if (f) {
+        char old[8192];
+        size_t n = fread(old, 1, sizeof old, f);
+        fclose(f);
+        if (n == size && !memcmp(old, data, size)) return true;
+    }
+    char tmp[PATH_MAX + 8];
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    if (!(f = fopen(tmp, "wb"))) return false;
+    bool ok = fwrite(data, 1, size, f) == size;
+    if (fclose(f) != 0) ok = false;
+    if (ok && rename(tmp, path) != 0) ok = false;
+    if (!ok) unlink(tmp);
+    return ok;
+}
+
+static void mkdirs(char *path) {  // (each folder of path, which is a folder)
+    for (char *p = path + 1; *p; ++p)
+        if (*p == '/') { *p = 0; mkdir(path, 0755); *p = '/'; }
+    mkdir(path, 0755);
+}
+
+static void install_launcher(void) {
+    if (getenv("MHGU_HIDDEN") || getenv("MHGU_NO_LAUNCHER")) return;
+    char exe[PATH_MAX], data[PATH_MAX], dir[PATH_MAX + 64], path[PATH_MAX + 96];
+    if (!plat_exe_path(exe, sizeof exe)) return;
+    if (strpbrk(exe, "\"`$\\%\n\r")) { LOG("[ui] no app menu launcher: the game's path has a \" ` $ \\ or %% in it\n"); return; }
+    const char *xdg = getenv("XDG_DATA_HOME"), *home = getenv("HOME");
+    if (xdg && *xdg == '/') snprintf(data, sizeof data, "%s", xdg);
+    else if (home && *home == '/') snprintf(data, sizeof data, "%s/.local/share", home);
+    else return;
+    char *slash = strrchr(exe, '/');
+    char run[PATH_MAX + 32];
+    snprintf(run, sizeof run, "%.*s/mhgurecomp-updater", (int)(slash - exe), exe);
+    if (access(run, X_OK) != 0) snprintf(run, sizeof run, "%s", exe);
+
+    snprintf(path, sizeof path, "%s/applications/mhgurecomp.desktop", data);
+    FILE *f = fopen(path, "rb");
+    if (f) {
+        char old[8192];
+        size_t n = fread(old, 1, sizeof old - 1, f);
+        fclose(f);
+        old[n] = 0;
+        if (!strstr(old, "\nX-MHGURecomp=true\n")) return;
+    }
+    snprintf(dir, sizeof dir, "%s/icons/hicolor/128x128/apps", data);
+    mkdirs(dir);
+    snprintf(path, sizeof path, "%s/mhgurecomp.png", dir);
+    if (!write_if_changed(path, mhgu_icon_png, (size_t)(mhgu_icon_png_end - mhgu_icon_png))) {
+        LOG("[ui] no app menu launcher: can't write %s\n", path);
+        return;
+    }
+    char entry[3 * PATH_MAX + 512];
+    int n = snprintf(entry, sizeof entry,
+                     "[Desktop Entry]\nType=Application\nName=MHGU Recomp\nComment=Monster Hunter Generations Ultimate, "
+                     "recompiled\nExec=\"%s\"\nPath=%.*s\nIcon=mhgurecomp\nTerminal=false\nCategories=Game;\n"
+                     "StartupWMClass=mhgurecomp\nX-MHGURecomp=true\n",
+                     run, (int)(slash - exe), exe);
+    if (n <= 0 || (size_t)n >= sizeof entry) return;
+    snprintf(dir, sizeof dir, "%s/applications", data);
+    mkdirs(dir);
+    snprintf(path, sizeof path, "%s/mhgurecomp.desktop", dir);
+    if (!write_if_changed(path, entry, (size_t)n)) LOG("[ui] no app menu launcher: can't write %s\n", path);
+}
 
 static void set_window_icon(void) {
+    install_launcher();
     SDL_Surface *s = SDL_LoadPNG_IO(SDL_IOFromConstMem(mhgu_icon_png, (size_t)(mhgu_icon_png_end - mhgu_icon_png)), true);
     if (!s) { LOG("[ui] window icon: %s\n", SDL_GetError()); return; }
     SDL_SetWindowIcon(window, s);
