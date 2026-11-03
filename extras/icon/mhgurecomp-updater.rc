@@ -1,0 +1,3 @@
+// The updater's icon on Windows (Makefile: windres, linked into mhgurecomp-updater.exe): the game's with a download
+// arrow in the corner, so the two are easy to tell apart. SDL takes the window's icon from the exe's first one.
+1 ICON "mhgurecomp-updater.ico"

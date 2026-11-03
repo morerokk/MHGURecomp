@@ -96,7 +96,7 @@ Releases may come out pretty often. To update automatically, start `mhgurecomp-u
 | What | Where |
 | --- | --- |
 | Settings | `mhgurecomp.ini` (safe to delete if you need to reset your settings) |
-| Save data | `%APPDATA%\MHGURecomp\save\` |
+| Save data | `%APPDATA%\MHGURecomp\save\`, or the folder set as Save folder in the settings menu (Menu Options tab, `SaveLocation` in `mhgurecomp.ini`) |
 | Log | `log.txt`, please attach this file when opening an issue |
 | Screenshots | `shots\` (press F12) |
 | Mods | `mods\` one folder per mod (see below) |

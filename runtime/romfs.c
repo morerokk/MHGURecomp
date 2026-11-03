@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -189,6 +190,15 @@ static char *rel_path(File *f) {
 bool romfs_open(const char *base_dir, const char *const *overlays, int noverlays) {
     Dir *root = scan(base_dir, "", 0);
     if (!root) { LOG("[romfs] cannot read %s\n", base_dir); return false; }
+    // The game looks its files up by their exact names, and some dump tools (yuzu's) spell the top folder NativeNX:
+    // the image calls it nativeNX whatever its spelling on disk (issue #147; main.c's game_files_problem catches
+    // wrong capitals further in)
+    for (int i = 0; i < root->ndirs; i++)
+        if (!strcasecmp(root->dirs[i]->name, "nativeNX") && strcmp(root->dirs[i]->name, "nativeNX")) {
+            LOG("[romfs] the game files' %s folder is used as nativeNX\n", root->dirs[i]->name);
+            free(root->dirs[i]->name);
+            root->dirs[i]->name = strdup("nativeNX");
+        }
     for (int i = 0; i < noverlays; i++) {
         Dir *o = scan(overlays[i], "", 0);
         if (!o) continue;
