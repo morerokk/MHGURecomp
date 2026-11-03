@@ -121,7 +121,8 @@ static bool has_ext(VkExtensionProperties *e, uint32_t n, const char *name) {
     return false;
 }
 
-// Discrete GPU first (MHGU_GPU=<index> picks one), every Vulkan 1.2 device before any 1.1 one; needs a queue that can
+// Discrete GPU first (MHGU_GPU=<index> picks one), every Vulkan 1.2 device before any 1.1 one, a GPU's own
+// driver before Windows' D3D12 one; needs a queue that can
 // draw, compute and present.
 // The device can't run the game: the player sees why, not "the details are in log.txt" (which a phone can't easily open)
 static void no_vulkan(const char *why) {
@@ -146,6 +147,10 @@ static void pick_device(void) {
         if (p.apiVersion < VK_API_VERSION_1_1) continue;
         int score = p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 : p.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
         if (p.apiVersion < VK_API_VERSION_1_2) score -= 3;
+        // Windows' "OpenCL, OpenGL, and Vulkan Compatibility Pack" (Mesa's Dozen) lists each GPU a second time, as
+        // "Microsoft Direct3D12 (...)": Vulkan run over D3D12, and listed first. It crashes inside D3D12Core.dll when
+        // a quest loads, so the GPU's own driver goes first whenever there is one.
+        if (!strncmp(p.deviceName, "Microsoft Direct3D12", 20)) score -= 4;
         if ((int)i == want) score = 100;
         if (score > best_score) { best_score = score; best = (int)i; }
     }
