@@ -1,7 +1,8 @@
 // (debug) MHGU_EMTRACE=1: logs every large monster action of the loaded zone with how long it lasted, in real time and
 // in game updates, for comparing a monster's moves at different frame rates. MHGU_EMTRACE=2 also logs the monster's
 // position every update. MHGU_CONTROL's "emact <group> <index> [mode]" starts that action on the zone's first large
-// monster (as its AI does: f_276154).
+// monster (as its AI does: f_276154). MHGU_EMTRACE_ZAKO=1 logs small monsters: every new action and, twice a second,
+// each one's distance to the hunter and current targets.
 // Hooked: the engine's frame function (0xda5824: the limiter, which also measures the frame step), after it runs.
 #include <math.h>
 #include <stdlib.h>
@@ -16,7 +17,7 @@
 #define EN_ACTION     0x73e0u     // enemy: the current action (group, index, ...)
 #define MAX_EN        10
 
-static int g_level;
+static int g_level, g_zako;
 static struct { uint32_t en, act; uint64_t start_ns; uint32_t updates; float x0, y0, z0, rise, dist; } g_seen[MAX_EN];
 static volatile int g_req;  // emact request from the control file
 static uint32_t g_req_group, g_req_index, g_req_mode;
@@ -43,11 +44,88 @@ static bool large(uint32_t en) {
     return id != 0xffff && id < 10000;
 }
 
+static bool zako(uint32_t en) {
+    uint32_t info = LD32(en + EN_INFO);
+    if (!info) return false;
+    uint32_t id = LD16(info + 0x1b6);
+    return id != 0xffff && id >= 10000;
+}
+
+// The hunter's distance from a monster (sPlayer +0x1c: the 4 player slots, position at +0x40).
+static float slot0_dist(uint32_t info) {
+    uint32_t spl = LD32(0x1a85b58u), p = spl ? LD32(spl + 0x1c) : 0;
+    if (!p) return -1;
+    float dx = LDF(p + 0x40) - LDF(info + 0x40), dz = LDF(p + 0x48) - LDF(info + 0x48);
+    return sqrtf(dx * dx + dz * dz);
+}
+
+// The attention rates (f_2bb828: how much a target's score rises per update), last value per monster.
+#define FN_HATE_RATE 0x2bb828u
+static struct { uint32_t en; int pl, ot; } g_rate[32];
+
+static void hate_rate(Cpu *c) {
+    uint32_t en = c->r[0], mode = LD32(c->r[13]);
+    fnhook_call_original(c, FN_HATE_RATE);
+    int s = 0;
+    while (s < 32 && g_rate[s].en && g_rate[s].en != en) s++;
+    if (s == 32) return;
+    g_rate[s].en = en;
+    if (mode == 1) g_rate[s].pl = (int)c->r[0];
+    else if (mode == 2) g_rate[s].ot = (int)c->r[0];
+}
+
+// A species' attention tables (monster +0x75ec -> +0x88: player table, Palico table; each: distance limits, rates, bonuses).
+static void hate_tables(uint32_t en) {
+    static uint32_t seen[16];
+    uint32_t vt = LD32(en);
+    int s = 0;
+    while (s < 16 && seen[s] && seen[s] != vt) s++;
+    if (s == 16 || seen[s]) return;
+    uint32_t par = LD32(en + 0x75ec), sb = par ? LD32(par + 0x88) : 0;
+    if (!sb) return;
+    seen[s] = vt;
+    LOG("[ems] tables vt %08x: at %08x, zone list %08x\n", vt, sb, LD32(en + 0x75f0));
+    for (int t = 0; t < 2; t++) {
+        uint32_t tb = LD32(sb + 4u * (uint32_t)t);
+        if (!tb) { LOG("[ems]   %s: none (defaults)\n", t ? "palico" : "player"); continue; }
+        uint32_t lim = LD32(tb), rate = LD32(tb + 4), bon = LD32(tb + 8);
+        LOG("[ems]   %s: limits %.0f %.0f %.0f %.0f\n", t ? "palico" : "player", lim ? LDF(lim) : -1, lim ? LDF(lim + 4) : -1,
+            lim ? LDF(lim + 8) : -1, lim ? LDF(lim + 12) : -1);
+        if (rate)
+            LOG("[ems]   rates %d %d %d %d %d %d %d %d\n", (int)LD32(rate), (int)LD32(rate + 4), (int)LD32(rate + 8),
+                (int)LD32(rate + 12), (int)LD32(rate + 16), (int)LD32(rate + 20), (int)LD32(rate + 24), (int)LD32(rate + 28));
+        if (bon)
+            LOG("[ems]   bonuses %d %d %d %d %d %d %d %d %d\n", (int)LD32(bon), (int)LD32(bon + 4), (int)LD32(bon + 8),
+                (int)LD32(bon + 12), (int)LD32(bon + 16), (int)LD32(bon + 20), (int)LD32(bon + 24), (int)LD32(bon + 28),
+                (int)LD32(bon + 32));
+    }
+}
+
+static void zako_log(uint32_t sen, uint64_t now) {
+    static uint64_t last;
+    if (now - last < 500000000ull) return;
+    last = now;
+    for (int k = 0; k < MAX_EN; k++) {
+        uint32_t en = LD32(sen + 0x1c + 4u * (uint32_t)k);
+        if (!en || !zako(en)) continue;
+        uint32_t info = LD32(en + EN_INFO);
+        hate_tables(en);
+        for (int s = 0; s < 32; s++)
+            if (g_rate[s].en == en) LOG("[ems] %08x rate pl %d ot %d\n", en, g_rate[s].pl, g_rate[s].ot);
+        LOG("[ems] %08x vt %08x id %u act %08x flags %02x d %.0f t1 %u/%u/%u/%u t2 %u/%u/%u/%u at %.0f,%.0f hate min %d pl %d ot %d %d mask %02x %02x step %.3f\n", en, LD32(en),
+            LD16(info + 0x1b6), LD32(en + EN_ACTION), LD8(en + 0x1408), slot0_dist(info), LD8(info + 0x230), LD8(info + 0x232),
+            LD8(info + 0x234), LD8(info + 0x236), LD8(info + 0x231), LD8(info + 0x233), LD8(info + 0x235), LD8(info + 0x237),
+            LDF(info + 0x1d0), LDF(info + 0x1d8), (int)LD32(info + 0x250), (int)LD32(info + 0x254), (int)LD32(info + 0x264),
+            (int)LD32(info + 0x268), LD8(info + 0x24d), LD8(info + 0x24f), LDF(en + 0x1c));
+    }
+}
+
 static void frame(Cpu *c) {
     fnhook_call_original(c, FN_FRAME);
     uint32_t sen = LD32(G_SENEMY), sys = LD32(G_SYSTEM);
     if (!sen) return;
     uint64_t now = plat_now_ns();
+    if (g_zako) zako_log(sen, now);
     float step = sys ? LDF(sys + 0x68) : 0;
     for (int k = 0; k < MAX_EN; k++) {
         uint32_t en = LD32(sen + 0x1c + 4u * (uint32_t)k);
@@ -132,13 +210,18 @@ static void set_action(Cpu *c) {
     if (large(c->r[0]))
         LOG("[em] %08x set action %u:%u mode %u (was %08x) lr %08x\n", c->r[0], c->r[1] & 0xff, c->r[2] & 0xff, c->r[3],
             LD32(c->r[0] + EN_ACTION), c->r[14]);
+    else if (g_zako && zako(c->r[0]))
+        LOG("[ems] %08x set action %u:%u mode %u (was %08x) d %.0f lr %08x\n", c->r[0], c->r[1] & 0xff, c->r[2] & 0xff, c->r[3],
+            LD32(c->r[0] + EN_ACTION), slot0_dist(LD32(c->r[0] + EN_INFO)), c->r[14]);
     fnhook_call_original(c, FN_SET_ACTION);
 }
 
 void emtrace_init(void) {
     const char *e = getenv("MHGU_EMTRACE");
-    if (!e || !*e || !(g_level = atoi(e))) return;
+    g_zako = getenv("MHGU_EMTRACE_ZAKO") != NULL;
+    if ((!e || !*e || !(g_level = atoi(e))) && !g_zako) return;
     fnhook_set(FN_FRAME, hle_register("emtrace:frame", frame));
     fnhook_set(FN_SET_ACTION, hle_register("emtrace:set_action", set_action));
+    if (g_zako) fnhook_set(FN_HATE_RATE, hle_register("emtrace:hate_rate", hate_rate));
     LOG("[em] tracing large monster actions (level %d)\n", g_level);
 }

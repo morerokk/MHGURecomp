@@ -76,6 +76,7 @@ static void boot(const char *root) {
     villagehub_init();  // (Village quests at the Hub / Pub counter: runtime/hle/villagehub.c)
     urgentcredit_init();  // (Urgent quests count for all who clear them: runtime/hle/urgentcredit.c)
     mashrate_init();  // (mashing out of a stun at high frame rates: runtime/hle/mashrate.c)
+    hatestep_init();  // (monsters' attention scores at high frame rates: runtime/hle/hatestep.c)
     inflate_init();  // (zlib's inflate_fast as host code, for loading: runtime/hle/inflate.c)
     movelog_init();  // (debug, MHGU_LOG_MOVES: runtime/hle/movelog.c)
     quickhunt_init();  // (debug, MHGU_QUICKHUNT: runtime/hle/quickhunt.c)

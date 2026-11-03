@@ -2,8 +2,8 @@
 
 Small monsters ("zako") are synced between the players in a zone like large monsters are: positions, movement and
 actions. The original game syncs only their HP / deaths; each player's game runs their AI itself, so everyone sees
-them elsewhere. Implemented in runtime/net/emsync.c, on by default: ini `[Multiplayer] SyncSmallMonsters = On`
-(env `MHGU_SYNC_ZAKO=0/1`). Addresses below are runtime addresses (image offset + 0x200000: what
+them elsewhere. Implemented in runtime/net/emsync.c, off by default since 2026-10-27: ini `[Multiplayer]
+SyncSmallMonsters = On` (env `MHGU_SYNC_ZAKO=0/1`). Addresses below are runtime addresses (image offset + 0x200000: what
 `tools/disasm.py`, `fntrace` and thread dumps use). `tools/retool.py` (strings / xref / callers / dti / vtslot)
 finds all of this again.
 
@@ -61,7 +61,23 @@ player's slot: `*(0x1a8ca48) + 0x30`. Area 0 = base camp, 255 = not in a quest.
 - Not tested: combat (hits by a follower, deaths, carving), aggressive small monsters (Jaggi...), 3-4 players,
   two PCs.
 
+## Open problems (2026-11-03)
+
+- Players in some zones disconnect with sync on, e.g. Volcanic Hollow zone 7: the others leave at once, the player who
+  stays sees them exit. Not reproduced yet. Not species-specific network code: 93 of the 94 vtables with the base action
+  send share the same send and receive slots (+0x42c..+0x464), the other differs only at +0x464.
+- "Small monsters stop attacking": in solo, Maccao preferring Palicoes comes from their score table (docs/STATUS.md,
+  "Monsters' attention scores"), not from sync. Whether sync adds to it (reported "looks at the player, then stops") is
+  not tested.
+- Herds: sEnemy (0x1a51fe0, class sEnemyMure) +0x25c0 holds 10 herds of 0x50 bytes: +0 type, +1 id, +2 the herd's master
+  slot, +0xf target type (0 hunter, 1 Palico, 2 enemy, 0xff none), +0x10 target slot, +0x14 zone, +0x18 leader. Members
+  copy the herd's target (a monster's own target type is one higher: 1 hunter, 2 Palico, 3 enemy). emsync.c doesn't touch
+  herds, so their own master and netMureEm* messages run alongside it.
+
 ## Debug tools made for this
+
+- `MHGU_EMTRACE_ZAKO=1`: small monsters' new actions, and twice a second their distance, targets, attention scores and
+  rates, plus each species' score tables (runtime/hle/emtrace.c).
 
 - Control file (MHGU_CONTROL): `peek <hex addr> [words]`, `poke <hex addr> <hex word>`,
   `memsave <hex addr> <hex bytes> <file>`, `fntrace <lo> <hi> [n]` (log calls of guest functions in [lo, hi)),

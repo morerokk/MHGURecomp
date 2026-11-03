@@ -429,6 +429,20 @@ timers run on the step, not per update). Quest 305 (two Great Maccao plus small 
 311 at 30 fps, 270 and 313 at 120 fps (the Maccao 70-87 each in every run): noise, nothing rising with the frame
 rate. Not measured: what happens inside an action (turning toward a target, collision, hit cooldowns per update).
 
+Monsters' attention scores and the frame rate (2026-11-03): fixed. Each monster keeps a score per hunter, Palico and enemy
+(status block +0x254, +0x264, +0x274) and the target pickers (0x2c5b14) take the highest. Every update 0x2bbf98 does
+`score += (int)(rate * step)` with a small rate from the species' table (0x2bb828; monster +0x75ec -> +0x88), tuned for
+the step of 2.0 at 30 fps. Above that the cast loses the rate: at 240 fps (step 0.25) -3..3 add nothing, so closeness
+stops earning attention and raised scores stay. Measured at 240 fps, change per half second (30 x rate at 30 fps): rate 4
+120, rate 5 120 (should be 150). Fix (runtime/hle/hatestep.c): the monster's time is cut into 30 fps updates and 0x2bbf98
+runs once for each with the step 2.0. Checked: rates 3 / 4 / 5 give 90 / 120 / 150 at 60 and at 240 fps; a hunt played by
+the user at 240 fps felt normal. MHGU_NO_HATESTEP=1 turns it off (for comparing). The update ran on one thread in the 600
+calls traced, so hatestep.c's table needs no lock. Not measured: large monsters (same code).
+This is not why Maccao prefer Palicoes: Maccao's table (limits 1000 2000 3000 5000, rates 5 3 1 -2 -2, then -5 for a flag
+that was set in these tests, set by 0x2b73c8) nets at most 0 for a hunter who only stands near, measured at 30 fps too, while the
+default Palico table climbs. Without Palicoes they attack the hunter, score 0. Most likely the original game's behaviour
+(game data, not compared with the original yet).
+
 Monster jumps and the frame rate (2026-10-27): fixed. Reported: Volvidon's body press (it leaps at the hunter and
 lands on its back) far too fast, faster the higher the frame rate. Some actions move the monster with the velocity and
 acceleration in its status block (*(monster + 0x1428) = monster + 0x1440: +0x40 position, +0x10 velocity, +0x20
@@ -1312,8 +1326,8 @@ runtime/hle/quickhunt.c has how the game departs; `MHGU_QUICKHUNT=town` stops in
 attach an SDL virtual controller; `vpad <n> <button> <0|1>` presses its button), `MHGU_LOG_MOVES=1` (the player's actions and command table
 changes, runtime/hle/movelog.c), `MHGU_EMTRACE=1/2/3` (large monster actions with their real-time length, height and
 distance; 2: the position every update; 3: the monster object saved on 4 updates once a forced action is 200 up;
-MHGU_CONTROL's `emact <group> <index>` starts an action, `emsweep <group> <first> <last>` each in turn:
-runtime/hle/emtrace.c), MHGU_CONTROL's `fntrace lo hi n r0lo r0hi` (only calls with r0 in that range: one object's
+MHGU_CONTROL's `emact <group> <index>` starts an action, `emsweep <group> <first> <last>` each in turn;
+`MHGU_EMTRACE_ZAKO=1`: small monsters' actions, targets, attention scores and rates: runtime/hle/emtrace.c), MHGU_CONTROL's `fntrace lo hi n r0lo r0hi` (only calls with r0 in that range: one object's
 methods) and `interpwatch <addr> <file of function entries>` (runs those functions and all game code they call in the
 interpreter, logging every instruction that changes the word at addr),
 `MHGU_SHOT_AT=<frames>`, `MHGU_FPS=1`, `MHGU_VK_STATS=1`, `MHGU_VK_VALIDATION=1`, `MHGU_SYNC_SHADERS=1`, `MHGU_PIPE_WAIT_MS=n`, `MHGU_SKIP_LOG=1`, `MHGU_NO_PREWARM=1`,
