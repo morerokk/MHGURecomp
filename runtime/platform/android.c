@@ -4,12 +4,14 @@
 // the game's exefs / romfs in its data/ there, and the settings, saves, caches, mods, cheats and log.txt go beside
 // them, as in the PC build's game folder. Android gives no app an environment to start with, so the debug variables
 // (MHGU_QUICKHUNT, MHGU_NO_BC...) come from env.txt in that folder: one NAME=value per line, # for comments.
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <SDL3/SDL.h>
 #include <jni.h>
@@ -80,6 +82,13 @@ void android_unpack_assets(void) {
     mkdir(android_path("bonus"), 0777);
     unpack("pipelines.list", true);
     unpack("bonus/system", false);
+}
+
+// The game stopped on an error (plat_fatal_notice): at the next start the app offers to share this run's log
+// (android/java: MHGUActivity's offerCrashLog). Only open/close: this can run in a fault handler.
+void android_mark_crash(void) {
+    int fd = open(android_path("last-run-crashed"), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0) close(fd);
 }
 
 void android_error_box(const char *msg) {

@@ -48,7 +48,23 @@
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+            <!-- a long press on the app icon: Share log (res/xml/shortcuts.xml) -->
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
+        <!-- log.txt out to another app (android/java: LogActivity.java): after a crash, or from the Share log shortcut. A
+             process of its own, so its dialog outlives the game crashing again behind it. Exported: the launcher starts
+             it from the shortcut (all it can do is offer the log to share). -->
+        <activity android:name="io.github.morerokk.mhgurecomp.LogActivity"
+            android:process=":log"
+            android:taskAffinity="io.github.morerokk.mhgurecomp.log"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:exported="true" />
+        <provider android:name="io.github.morerokk.mhgurecomp.LogProvider"
+            android:authorities="io.github.morerokk.mhgurecomp.logs"
+            android:process=":log"
+            android:exported="false"
+            android:grantUriPermissions="true" />
         <!-- the game files / save import (android/java: ImportActivity.java): see through, its dialogs over the game -->
         <activity android:name="io.github.morerokk.mhgurecomp.ImportActivity"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"

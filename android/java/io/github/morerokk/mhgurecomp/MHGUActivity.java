@@ -2,8 +2,10 @@
 // system UI flags it set before Android 11, which newer Android versions (the app targets 15) don't always follow, so
 // the bars stayed over the game on some devices. A swipe from the edge still shows them for a moment (and they hide
 // again by themselves).
+// It also asks to share the log after a crash (LogActivity), before the game starts and writes a new one.
 package io.github.morerokk.mhgurecomp;
 
+import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -13,14 +15,41 @@ import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+
 import org.libsdl.app.SDLActivity;
 
 public class MHGUActivity extends SDLActivity {
     @Override
     protected void onCreate(Bundle saved) {
+        if (saved == null) offerCrashLog();  // (before SDL starts the game, which starts log.txt over)
         super.onCreate(saved);
         hideBars();
         hideBarsSoon();
+    }
+
+    // The last run stopped on an error (runtime/platform/android.c left the marker): keep its log as crash-log.txt and
+    // ask whether to share it. (A crash that comes back right away leaves a new marker for the next start.)
+    private void offerCrashLog() {
+        File dir = getExternalFilesDir(null);
+        if (dir == null) return;
+        File marker = new File(dir, "last-run-crashed");
+        if (!marker.exists()) return;
+        marker.delete();
+        File log = new File(dir, LogProvider.LOG), kept = new File(dir, LogProvider.CRASH_LOG);
+        if (!log.isFile()) return;
+        try (InputStream in = new FileInputStream(log); OutputStream out = new FileOutputStream(kept)) {
+            byte[] buf = new byte[65536];
+            for (int n; (n = in.read(buf)) > 0;) out.write(buf, 0, n);
+        } catch (IOException e) {
+            return;
+        }
+        startActivity(new Intent(this, LogActivity.class).putExtra(LogActivity.CRASH, true));
     }
 
     @Override

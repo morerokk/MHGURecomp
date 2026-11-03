@@ -38,6 +38,7 @@ const char *android_home(void);  // runtime/platform/android.c
 void android_load_env(void);
 void android_unpack_assets(void);
 void android_error_box(const char *msg);
+void android_mark_crash(void);   // (the next start offers to share the log)
 // (bionic has execinfo's backtrace() only from Android 13 on: the unwinder's)
 #include <unwind.h>
 typedef struct { void **bt; int n, max; } Unwound;
@@ -326,6 +327,9 @@ void plat_error_box(const char *msg) {
 }
 
 void plat_fatal_notice(void) {
+#ifdef __ANDROID__
+    android_mark_crash();
+#endif
     if (g_own_log)
         plat_error_box("The game stopped because of an error. The details are in log.txt, next to mhgurecomp.");
 }
