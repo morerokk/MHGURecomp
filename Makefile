@@ -124,9 +124,10 @@ GAMELIB_LDFLAGS := -shared -fuse-ld=lld -static-libgcc $(O)/mhgurecomp.dll.a
 UPDATER  := $(B)/mhgurecomp-updater.exe
 # (a window program; zlib linked in, WinHTTP is Windows')
 UPD_LDFLAGS := -fuse-ld=lld -mwindows $(SDL_LIBS) -lwinhttp -Wl,-Bstatic -lz -Wl,-Bdynamic -static-libgcc
-# the icon of both executables (extras/icon/mhgurecomp.rc); llvm-windres comes with MSYS2's clang
+# the executables' icons (extras/icon/mhgurecomp.rc, mhgurecomp-updater.rc); llvm-windres comes with MSYS2's clang
 WINDRES  ?= llvm-windres
 ICON_RES := $(O)/icon.res.o
+UPD_ICON_RES := $(O)/updater-icon.res.o
 else ifeq ($(PLATFORM),android)
 include android/android.mk
 else
@@ -294,7 +295,11 @@ $(RT_OBJ) $(UPD_OBJ): $(LIB_STAMPS)
 $(ICON_RES): extras/icon/mhgurecomp.rc extras/icon/mhgurecomp.ico
 	@mkdir -p $(dir $@)
 	$(WINDRES) -I extras/icon -O coff -o $@ $<
-UPD_OBJ  += $(ICON_RES)
+$(UPD_ICON_RES): extras/icon/mhgurecomp-updater.rc extras/icon/mhgurecomp-updater.ico
+	@mkdir -p $(dir $@)
+	$(WINDRES) -I extras/icon -O coff -o $@ $<
+$(O)/updater/updater.o: extras/icon/mhgurecomp-updater-128.png
+UPD_OBJ  += $(UPD_ICON_RES)
 $(UPDATER): $(UPD_OBJ)
 	@mkdir -p $(dir $@)
 	$(CC) -o $@ $^ $(UPD_LDFLAGS)
