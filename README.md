@@ -1,34 +1,53 @@
+<p align="center"><img src="docs/images/logo.svg" alt="GU Recomp" width="440"></p>
+
+<p align="center">
+  <a href="https://github.com/morerokk/MHGURecomp/releases/latest"><img src="https://img.shields.io/github/v/release/morerokk/MHGURecomp?style=flat-square&label=release&labelColor=1d1e22&color=c58a2e" alt="Latest release"></a>
+  <a href="https://github.com/morerokk/MHGURecomp/releases"><img src="https://img.shields.io/github/downloads/morerokk/MHGURecomp/total?style=flat-square&label=downloads&labelColor=1d1e22&color=c58a2e" alt="Downloads of all releases"></a>
+  <a href="#requirements"><img src="https://img.shields.io/badge/platforms-Windows%20%C2%B7%20Linux%20%C2%B7%20Android-c58a2e?style=flat-square&labelColor=1d1e22" alt="Platforms: Windows, Linux and Android"></a>
+  <a href="#requirements"><img src="https://img.shields.io/badge/game-MHGU%201.4.0-b3221c?style=flat-square&labelColor=1d1e22" alt="Game version: Monster Hunter Generations Ultimate 1.4.0"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/morerokk/MHGURecomp?style=flat-square&labelColor=1d1e22&color=c58a2e" alt="License: MIT"></a>
+  <a href="https://github.com/morerokk/MHGURecomp/stargazers"><img src="https://img.shields.io/github/stars/morerokk/MHGURecomp?style=flat-square&label=stars&labelColor=1d1e22&color=c58a2e" alt="GitHub stars"></a>
+</p>
+
+<p align="center">
+  <a href="https://discord.gg/mdNPWfKBXf"><img src="https://img.shields.io/badge/Discord-MHGU%20Mod%20Community-5865f2?style=flat-square&logo=discord&logoColor=white&labelColor=1d1e22" alt="Join the MHGU Mod Community Discord"></a>
+  <a href="https://github.com/Oddity-git/MHGURecomp-mods"><img src="https://img.shields.io/badge/mods-tested%20mod%20list-2ea44f?style=flat-square&logo=github&labelColor=1d1e22" alt="Mods tested with MHGU Recomp"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/morerokk/MHGURecomp/releases/latest"><b>Download</b></a> ·
+  <a href="#installation">Install</a> ·
+  <a href="#android">Android</a> ·
+  <a href="#controls">Controls</a> ·
+  <a href="#settings">Settings</a> ·
+  <a href="#mods">Mods</a> ·
+  <a href="#building-from-source">Build from source</a>
+</p>
+
 # MHGU Recomp
 
 A native PC port of **Monster Hunter Generations Ultimate** (Nintendo Switch, version 1.4.0), made by statically
 recompiling the game's 32-bit ARM code to C and running it on a host runtime. Switch system services and the NVN
-graphics API are reimplemented on Windows, with Vulkan for rendering.
+graphics API are reimplemented on Windows, Linux and Android, with Vulkan for rendering. It is not an emulator.
 
-**No game files are included.** You need your own copy of the game, dumped from your own Switch. This project does
-not explain how to dump it and does not provide game files, keys or links to them.
+> **No game files are included.** You need your own copy of the game, dumped from your own Switch. This project does
+> not explain how to dump it and does not provide game files, keys or links to them.
 
-Status: fully playable, but there may be some bugs. I've played a dozen hunts with no remaining issues. Multiplayer also works.
-
-**[Join the MHGU Mod Community Discord server if you're interested in modding the game!](https://discord.gg/mdNPWfKBXf)**
+**Status: fully playable**, solo and in multiplayer. There may still be bugs: please
+[open an issue](https://github.com/morerokk/MHGURecomp/issues/new/choose) with your `log.txt` if you hit one.
 
 ## What it adds over the Switch version
 
-- Graphics settings (resolution, MSAA, FXAA, Supersampling, VSync)
-- Any widescreen aspect ratio (16:10, 16:9 and and anything wider than that)
-- Frame rate cap anywhere between 30-240 fps
-    - Bugfixes for speed-related issues that emulators normally have when using higher FPS mods/codes
-- Supports almost every controller under the sun
-- Experimental KB+M controls
-- Optional: small monsters are properly synced between players in multiplayer
-- Optional: monster HP scaling by playercount
-- Fast-forward unskippable cutscenes by pressing A
-- Optional: village quests are playable in multiplayer (press L/R at the quest counter), with appropriately re-scaled monster HP
-- Optional: completing an Urgent Quest in a Hub marks it as completed for all players, not just the person who posted the quest
-- Mod support. The vast majority of mods work by dropping them into the `mods` folder, including Forge mods. (see [Mods](#mods))
-- Cheat codes in the same format as Ryujinx and Atmosphère, in the `cheats` folder (see [Cheats](#cheats))
-- Ingame PC Settings menu overlay (F1 or `Plus`+`Minus` to open)
-- Working online multiplayer servers, in public or with friends (use "Local Wireless" menu)
-- Discord Rich Presence (optional)
+| Area | What you get |
+| --- | --- |
+| **Graphics** | Resolution, render resolution (supersampling), MSAA, FXAA, FSR 3.1 upscaling, VSync, longer draw distance |
+| **Screens** | Any widescreen aspect ratio (16:10, 16:9 and anything wider), with the HUD centred or spread to the edges |
+| **Frame rate** | A cap anywhere from 30 to 240 fps, with fixes for the speed bugs emulators have at high frame rates |
+| **Controls** | Almost every controller (through SDL), and keyboard and mouse with rebindable keys |
+| **Multiplayer** | Online hubs through a hosted server, public or with a matchmaking key for friends ("Local Wireless" menu); LAN and direct IP too |
+| **Multiplayer options** | Small monsters synced between players, monster HP scaled by player count, Village quests in the Hub, Urgent quest credit for everyone |
+| **Quality of life** | Fast-forward unskippable cutscenes with A, an in-game PC settings menu (F1 or `Plus`+`Minus`), Discord Rich Presence |
+| **Mods and cheats** | Drop-in `mods` folder with load order and conflict checks, Forge plugins included ([Mods](#mods)); Ryujinx / Atmosphère cheat files ([Cheats](#cheats)) |
 
 ## Requirements
 
@@ -42,11 +61,7 @@ Status: fully playable, but there may be some bugs. I've played a dozen hunts wi
 - CPU: Any CPU from 2014 or newer (needs AVX2 support)
 - GPU: Any GPU from 2016 or newer (needs Vulkan 1.2 support), and at least 1GB of VRAM
 - RAM: 4GB
-- Android (experimental, see [Android](#android)). For android, you need:
-    - A 64-bit ARM device (this should be the vast majority of devices)
-    - Android 10+
-    - Vulkan 1.1 support (FSR needs Vulkan 1.2)
-    - A controller, or a virtual controller overlay app
+- Android (experimental): a 64-bit ARM device with Android 10+, Vulkan 1.1 and a controller. See [Android](#android).
 - The game files for Monster Hunter Generations Ultimate, version 1.4.0. You can extract these from your Switch or Ryujinx with patches pre-applied.
     - (Title ID `0100770008DD8000`, the `main` executable's build ID starts with `FB08F1D20FD1204F`)
 
@@ -56,7 +71,7 @@ Status: fully playable, but there may be some bugs. I've played a dozen hunts wi
 
 You need the `exefs` and `romfs` folders from Monster Hunter Generations Ultimate 1.4.0. If you are coming from Ryujinx, you can right-click the game (make sure the 1.4.0 title update is applied), and Extract the game files with the patches pre-applied.
 
-You may be able to extract the files with another tool, just make sure that you extract both the base game files and the 1.4.0 title update. The title update's `exefs` and `romfs` files should be copied on top of the base game's. Make sure the first subfolder is called `nativeNX` (not `NativeNX`)
+You may be able to extract the files with another tool, just make sure that you extract both the base game files and the 1.4.0 title update. The title update's `exefs` and `romfs` files should be copied on top of the base game's. Make sure the first subfolder is called `nativeNX` (not `NativeNX`) and that the names keep their capital letters.
 
 1. Extract the release zip anywhere, for example `C:\Games\MHGURecomp\`.
 2. Put the game's `exefs` and `romfs` folders in the `data` subfolder. It should look like this:
@@ -96,14 +111,14 @@ Releases may come out pretty often. To update automatically, start `mhgurecomp-u
 | What | Where |
 | --- | --- |
 | Settings | `mhgurecomp.ini` (safe to delete if you need to reset your settings) |
-| Save data | `%APPDATA%\MHGURecomp\save\` |
+| Save data | `%APPDATA%\MHGURecomp\save\` (Linux: `~/.local/share/MHGURecomp/save/`) |
 | Log | `log.txt`, please attach this file when opening an issue |
 | Screenshots | `shots\` (press F12) |
 | Mods | `mods\` one folder per mod (see below) |
 | Cheats | `cheats\` `.txt` files with cheat codes (see below) |
 | Shader cache | `cache\` |
 
-To import your existing saves from the Switch, put the `system` and `system_backup` files in `%APPDATA%\MHGURecomp\save\save_0\`.
+To import your existing saves from the Switch, put the `system` and `system_backup` files in `%APPDATA%\MHGURecomp\save\save_0\` (Linux: `~/.local/share/MHGURecomp/save/save_0/`).
 
 ### Android
 
@@ -231,7 +246,12 @@ Other useful keybinds:
 
 You can open the settings menu with F1 on keyboard, or `Plus`+`Minus` (`Start`+`Select`) on controller.
 
-Details: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md). In short:
+Every setting is also in `mhgurecomp.ini`, with a comment above each one that explains it. Details:
+[docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
+
+<details>
+<summary><b>All settings, by section of <code>mhgurecomp.ini</code></b></summary>
+
 
 - `[Display]`: `Mode` (Borderless / Fullscreen / Windowed), `Resolution`, `RenderResolution` (the 3D resolution),
   `AspectRatio` (Auto follows the window: 16:10 and anything wider fill it, narrower gets 16:10 with bars), `FOV`
@@ -277,7 +297,9 @@ Details: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md). In short:
   to date"). With the mouse, drag the top of the settings menu (its tabs) to move it, and the grip at its bottom right
   corner to size it; Menu Options > Attach menu puts it back in place.
 
-### Multiplayer
+</details>
+
+## Multiplayer
 
 Over LAN or a VLAN, this should work out of the box. You can automatically see other hubs that are on the same network as you.
 
@@ -291,13 +313,13 @@ You can also play multiplayer without an LDN server if you want to play with you
 
 Choose the "Local Wireless" multiplayer options, as this port pretends to be a local nearby Switch with a wireless connection. The online options are unavailable and are unnecessary.
 
-### Bonus content
+## Bonus content
 
 By default, the `bonus` subfolder in releases contains a savegame with all the free online content (event quests, item packs, palicoes), which will be copied into your savegame when the game starts the 2nd time.
 
 If you don't want this, set `BonusContent = Off` or don't provide a savegame in the `bonus` subfolder. You can also provide your own savegame instead if you want. Note that this port will not attempt to copy bonus content if such bonus content already exists.
 
-### Mods
+## Mods
 
 To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall said mod. Mods are layered over the game at startup.
 - romfs mods (files that replace or add game data) are found inside the mod's folder, including the
@@ -323,18 +345,16 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   are kept in `forge_imgui.ini`.
 - You do not need any resolution, FPS cap or connection fix mods. These features are included with this port.
 
-**[Join the MHGU Mod Community Discord server!](https://discord.gg/mdNPWfKBXf)**
-
-**Places to Get Mods:**
+**Places to get mods:**
 
 - [The MHGURecomp-Mods Repo](https://github.com/Oddity-git/MHGURecomp-mods)
 - [MHGU GameBanana](https://gamebanana.com/mods/games/17088)
 
-**Additional Modding Resources:**
+**Modding resources:**
 - [MHGU-Modding Wiki](https://github.com/RTHKKona/MHGU-Modding/wiki)
 - [Fexty's Forge](https://github.com/Fexty12573/forge)
 
-### Cheats
+## Cheats
 
 You can configure cheats in the F1 menu. You can also manually configure them by putting .txt files in the `cheats/` subfolder.
 
@@ -348,7 +368,7 @@ starting with its name in square brackets:
 
 - Turn single cheats on and off in the settings menu (F1), on the Cheats tab. It takes effect immediately when you press Save.
 - To turn off a file without deleting it, start its name with `_`.
-- Cheats that change the game's code also work, but for each one used, you may experience *very* slight performance loss. For the vast majority of cheat codes, this won't matter/
+- Cheats that change the game's code also work, but for each one used, you may experience *very* slight performance loss. For the vast majority of cheat codes, this won't matter.
 - `log.txt` lists the cheats it loaded, and any it couldn't read.
 - There are some example cheats listed in `extras\cheats\`. [For more, check out the Cheat Codes page on the MHGU Modding Wiki.](https://github.com/RTHKKona/MHGU-Modding/wiki/Cheat-Codes)
     - The Valor Sheathe cheat in this repo does nothing unless you have MHGU Rebalanced installed.
@@ -385,7 +405,7 @@ The build recompiles the game code from your own copy of the game. Nothing in th
 ### 2. Recompile and build
 
 From the UCRT64 shell, in the repository folder, with your game files in a folder holding `exefs\` and `romfs\` (as
-under "Installing a release"):
+under [Installation](#installation)):
 
 ```bash
 make gen GAME=/c/path/to/game      # translate the game code to C in generated/ (~300 MB)
@@ -430,6 +450,9 @@ distribution package would; that build then only runs with that FFmpeg version.
 
 ### Making a release
 
+<details>
+<summary>For maintainers: building and publishing a release</summary>
+
 `make dist VERSION=<the release's tag>` builds everything with that version and packs it for GitHub:
 
 ```bash
@@ -472,11 +495,12 @@ release makes that offer, so keep those sources at hand for three years (the MSY
 The exe creates the `mods` and `cheats` folders and the ini on first start. Players then add their own `data\` as
 described above.
 
+</details>
+
 ### Linux
 
-The Windows build runs under Proton / Wine. A native Linux build is supported as well: the Makefile picks
-`runtime/platform/linux.c` when `uname -s` isn't Windows and everything else is shared. Tested on Gentoo
-x86_64 with clang under Wayland (NVIDIA). Besides `make`, `git`, `clang`, `lld` and Python 3.10 or newer it
+Releases include a native Linux build (the Windows build also runs under Proton / Wine). The Makefile picks
+`runtime/platform/linux.c` when `uname -s` isn't Windows and everything else is shared. Besides `make`, `git`, `clang`, `lld` and Python 3.10 or newer it
 needs:
 
 - the Vulkan loader and headers, plus `curl` and optionally `nasm` for building FFmpeg (see "FFmpeg" above; no
@@ -537,7 +561,11 @@ buttons), and screenshots come out black there.
 | `runtime/` | the host side: CPU state, kernel and threads, Switch services (`services/`, `hle/`), networking (`net/`), the NVN graphics API on Vulkan (`nvn/`), settings, input, mods |
 | `updater/` | `mhgurecomp-updater`: installs the latest GitHub release over the game folder, then starts the game |
 | `docs/` | `STATUS.md`: progress, design notes, reverse-engineering findings, debug options |
-| `extras/` | `cheats/`: cheat files players can copy into their `cheats` folder |
+| `android/` | the Android app: manifest, Java activities and the APK build (`apk.mk`) |
+| `server/` | the hub (LDN) server for online multiplayer, see [server/README.md](server/README.md) |
+| `tests/` | host-only tests (settings, settings menu, translations) that need no game files |
+| `third_party/` | pinned sources of the libraries built in (SDL3, shaderc, FFmpeg, ImGui, FSR) |
+| `extras/` | `cheats/`: cheat files players can copy into their `cheats` folder; `pipelines.list` |
 
 ## License
 
