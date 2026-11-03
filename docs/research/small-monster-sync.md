@@ -2,8 +2,8 @@
 
 Small monsters ("zako") are synced between the players in a zone like large monsters are: positions, movement and
 actions. The original game syncs only their HP / deaths; each player's game runs their AI itself, so everyone sees
-them elsewhere. Implemented in runtime/net/emsync.c, off by default since 2026-10-27: ini `[Multiplayer]
-SyncSmallMonsters = On` (env `MHGU_SYNC_ZAKO=0/1`). Addresses below are runtime addresses (image offset + 0x200000: what
+them elsewhere. Implemented in runtime/net/emsync.c, on by default: ini `[Multiplayer] SyncSmallMonsters = On`
+(env `MHGU_SYNC_ZAKO=0/1`). Addresses below are runtime addresses (image offset + 0x200000: what
 `tools/disasm.py`, `fntrace` and thread dumps use). `tools/retool.py` (strings / xref / callers / dti / vtslot)
 finds all of this again.
 

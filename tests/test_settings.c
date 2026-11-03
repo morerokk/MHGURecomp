@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
     assert(menu_confirm_position(MENU_CONFIRM_SOUTH,1,0,0)==0);
     assert(menu_confirm_position(MENU_CONFIRM_SOUTH,1,0,1)==1);
     Config fsr_config=config_editable();
-    assert(config_defaults().sync_small_monsters==0);
+    assert(config_defaults().sync_small_monsters==1);
     assert(config_defaults().share_urgent==1);
     assert(config_defaults().shader_prewarm==1);
     assert(config_defaults().draw_distance==1.0f);
