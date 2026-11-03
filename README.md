@@ -64,6 +64,8 @@ graphics API are reimplemented on Windows, Linux and Android, with Vulkan for re
 - Android (experimental): a 64-bit ARM device with Android 10+, Vulkan 1.1 and a controller. See [Android](#android).
 - The game files for Monster Hunter Generations Ultimate, version 1.4.0. You can extract these from your Switch or Ryujinx with patches pre-applied.
     - (Title ID `0100770008DD8000`, the `main` executable's build ID starts with `FB08F1D20FD1204F`)
+ 
+**For Mac OSX support, please check out mhvuze's fork! https://github.com/mhvuze/MHGURecomp/releases**
 
 ## Installation
 
