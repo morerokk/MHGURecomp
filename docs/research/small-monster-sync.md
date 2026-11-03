@@ -63,9 +63,17 @@ player's slot: `*(0x1a8ca48) + 0x30`. Area 0 = base camp, 255 = not in a quest.
 
 ## Open problems (2026-11-03)
 
-- Players in some zones disconnect with sync on, e.g. Volcanic Hollow zone 7: the others leave at once, the player who
-  stays sees them exit. Not reproduced yet. Not species-specific network code: 93 of the 94 vtables with the base action
-  send share the same send and receive slots (+0x42c..+0x464), the other differs only at +0x464.
+- Fixed: players dropped in some zones with sync on, e.g. Volcanic Hollow zone 7. uEms100 (Volcanic Hollow zones 2, 3, 7
+  of Harvest Tour: Volcano) never gets past its first action: `act` stays 0, no target, and it doesn't move. It starts
+  0:0 again every update, twice (from 0x2752d4 and 0x2755a8): about 120 starts a second per monster at 60 fps, 4x that at
+  240 fps. Harmless in the original game; with flag 8 each start would send a netEmAction. Reproduced with two instances
+  (windowed, [Multiplayer] Server = Off, hub -> Low 3 star Harvest Tour: Volcano, zone 1 -> 2 -> 3 -> 7): the host left
+  zone 3 for zone 7, the joiner became master of zone 3, and it left the hub after 576 more starts; before that the other
+  hunter was seen jumping back. emsync_tick now leaves a monster whose action word is 0 as the game made it. Checked:
+  the same route stayed connected, over 40 s with both hunters in zone 7 (host master; ~10000 uEms100 starts);
+  uEms100 at the same place on both games, uEms006 still synced (8 and 222 units apart, sampled once while moving). Not
+  checked: that the starts were what went over the network (no packet count; the disconnect going away is the evidence),
+  240 fps, 3-4 players, two PCs. A monster stuck looping a later action wouldn't be caught.
 - "Small monsters stop attacking": in solo, Maccao preferring Palicoes comes from their score table (docs/STATUS.md,
   "Monsters' attention scores"), not from sync. Whether sync adds to it (reported "looks at the player, then stops") is
   not tested.

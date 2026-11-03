@@ -20,6 +20,7 @@
 #define EN_INFO       0x1428u     // enemy: status block pointer
 #define INFO_FLAGS    0x1a8u      // u32: 8 = master (sends), 0x80 = simulated locally (small monsters)
 #define INFO_ID       0x1b6u      // u16: network id (0xffff none; small monsters 10000+)
+#define EN_ACTION     0x73e0u     // enemy: the current action and the last one (0: its first action, 0:0, and none before)
 #define PL_AREA       0x1054u     // player: current area (zone) number, u8 0..12 (setter: uPlayer vtable +0xa4)
 #define F_MASTER      0x8u
 #define F_LOCAL       0x80u
@@ -140,6 +141,9 @@ void emsync_tick(void) {
     for (int k = 0; k < 10; k++) {
         uint32_t en = LD32(sen + 0x1c + 4u * (uint32_t)k), info;
         if (!is_zako(en, &info)) continue;
+        // A monster that never leaves its first action stays as the game made it: uEms100 (Volcanic Hollow zones 2, 3, 7)
+        // starts 0:0 again every update, and as a master's it would send each one (hundreds a second: players drop).
+        if (LD32(en + EN_ACTION) == 0) { set_flags(info, F_LOCAL, F_MASTER); continue; }
         if (state == 1) set_flags(info, F_MASTER | F_LOCAL, 0);
         else if (state == 2) set_flags(info, 0, F_MASTER | F_LOCAL);
         else set_flags(info, F_LOCAL, F_MASTER);

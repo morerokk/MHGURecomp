@@ -271,6 +271,8 @@ mechanism: flag 8 sends netEmAction, the others replay it); ini [Multiplayer] Sy
 players report synced small monsters that stop attacking them; not investigated yet).
 Tested with two instances: positions agree within centimetres, hand-over when the master leaves works. Combat,
 3-4 players and two PCs not tested yet. Research, data layout and test details: docs/research/small-monster-sync.md.
+Fixed 2026-11-03: players dropping in some zones (Volcanic Hollow zone 7): uEms100 restarts its first action every update,
+and a master's copy would send each restart. Such a monster is now left out of the sync.
 
 ## Text entry (2026-10-21)
 
