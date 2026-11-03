@@ -187,12 +187,14 @@ static void install_launcher(void) {
         LOG("[ui] no app menu launcher: can't write %s\n", path);
         return;
     }
-    char entry[3 * PATH_MAX + 512];
+    // (Icon: the file's full path, which every desktop finds; a theme name only works where the icon cache has caught up,
+    // and a copy dragged to Plasma's desktop showed a "?")
+    char entry[4 * PATH_MAX + 512];
     int n = snprintf(entry, sizeof entry,
                      "[Desktop Entry]\nType=Application\nName=MHGU Recomp\nComment=Monster Hunter Generations Ultimate, "
-                     "recompiled\nExec=\"%s\"\nPath=%.*s\nIcon=mhgurecomp\nTerminal=false\nCategories=Game;\n"
+                     "recompiled\nExec=\"%s\"\nPath=%.*s\nIcon=%s\nTerminal=false\nCategories=Game;\n"
                      "StartupWMClass=mhgurecomp\nX-MHGURecomp=true\n",
-                     run, (int)(slash - exe), exe);
+                     run, (int)(slash - exe), exe, path);
     if (n <= 0 || (size_t)n >= sizeof entry) return;
     snprintf(dir, sizeof dir, "%s/applications", data);
     mkdirs(dir);
