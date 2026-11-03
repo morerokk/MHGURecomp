@@ -307,6 +307,10 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   the one later in load order wins, and the log says so ("changes ..., which an earlier mod changed too"). Mods load in
   alphabetical order. To choose the order, make `mods\load_order.txt` with one mod folder name per line: then only
   the mods listed load, in that order. The merged archives are kept in `cache\arcmerge\`.
+- A mod's `.arc` does not need the whole archive: one that holds only the changed entries goes over the game's, so a
+  mod doesn't have to ship the rest of the game's files. Entries match the game's by their internal name and type, and
+  the archive's version must be the game's (17). An archive that holds none of the game's entries still replaces it
+  whole. Partial archives work in this port only: on a Switch or an emulator they replace the whole file.
 - The **Mods** tab of the settings menu does this without editing files: it lists the mod folders, turns each on or
   off, moves them up or down, and writes `mods\load_order.txt` when Save is pressed (restart to apply; mods you add
   later load too, after the listed ones, until you turn them off; a mod turned off keeps its place in the order). It also compares the mods and lists the ones that change the same game files (and which of

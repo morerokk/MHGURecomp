@@ -92,10 +92,12 @@ static int merge(Dir *dst, Dir *src) {
             File *d = dst->files[k];
             size_t nl = strlen(f->name);
             char merged[1200];
-            if (d->orig && nl > 4 && !strcasecmp(f->name + nl - 4, ".arc") &&
-                arc_merge(d->orig, d->path, f->path, merged, sizeof merged)) {  // (two mods' archives: both's changes)
+            // (two mods' archives: both's changes. One with only some of the game's entries: those over the rest)
+            if (nl > 4 && !strcasecmp(f->name + nl - 4, ".arc") && (d->orig || arc_partial(d->path, f->path)) &&
+                arc_merge(d->orig ? d->orig : d->path, d->path, f->path, merged, sizeof merged)) {
                 struct stat st;
                 if (!stat(merged, &st)) {
+                    if (!d->orig) d->orig = strdup(d->path);
                     free(d->path);
                     d->path = strdup(merged);
                     d->size = (uint64_t)st.st_size;
