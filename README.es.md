@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/images/logo.svg" alt="GU Recomp" width="440"></p>
+<p align="center"><img src="docs/images/logo.webp" alt="GU Recomp" width="481"></p>
 
 <p align="center"><a href="README.md">English</a> · <b>Español</b></p>
 
