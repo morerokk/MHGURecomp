@@ -159,6 +159,7 @@ static struct {
     hsock listen_s, disc_s;
     pthread_t host_th;
     bool hosting;
+    int port;  // [Multiplayer] Port as it was when this hub started (a Save changes the next hub's, not this one's)
     Link nodes[MAX_NODES];  // [0] unused (the host itself)
     // station
     Link up;
@@ -647,7 +648,7 @@ static void *host_thread(void *arg) {
                 uint8_t reply[8 + NETINFO_SIZE];
                 memcpy(reply, PROTO_MAGIC, 4);
                 wr16(reply + 4, PROTO_VERSION);
-                wr16(reply + 6, (uint16_t)g_config.ldn_port);
+                wr16(reply + 6, (uint16_t)L.port);
                 pthread_mutex_lock(&L.mu);
                 memcpy(reply + 8, L.info, NETINFO_SIZE);
                 pthread_mutex_unlock(&L.mu);
@@ -770,7 +771,9 @@ static void hub_report(int what, const char *srv, int state, int ms, int hubs) {
     char line[LOBBY_NAME + 128];
     snprintf(line, sizeof line, settings_text(lang, title), srv);
     const char *text = state == HUB_ONLINE ? UI_TEXT("Your hub is listed online again.") : next[what];
-    if (what == NOTE_SEARCH && g_config.ldn_join[0]) text = UI_TEXT("Only hubs on your local network and Join addresses are shown.");
+    char join[sizeof g_config.ldn_join];
+    config_live_ldn_join(join, sizeof join);
+    if (what == NOTE_SEARCH && join[0]) text = UI_TEXT("Only hubs on your local network and Join addresses are shown.");
     overlay_notice(line, settings_text(lang, text));
 }
 
@@ -1030,9 +1033,10 @@ static uint32_t lobby_join(const struct sockaddr_in *addr, uint64_t hub, hsock *
 
 static bool host_start(void) {
     hnet_init();
+    int port = config_live_ldn_port();
     struct sockaddr_in a = {0};
     a.sin_family = AF_INET;
-    a.sin_port = htons((uint16_t)g_config.ldn_port);
+    a.sin_port = htons((uint16_t)port);
     a.sin_addr.s_addr = htonl(INADDR_ANY);
     hsock ls = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     bool bound = ls != BADSOCK && !bind(ls, (struct sockaddr *)&a, sizeof a);
@@ -1044,7 +1048,7 @@ static bool host_start(void) {
         any_port = bound = !bind(ls, (struct sockaddr *)&a, sizeof a);
     }
     if (!bound || listen(ls, 8)) {
-        LOG("[ldn] can't listen on TCP port %d (in use by another program?): nobody can join this hub\n", g_config.ldn_port);
+        LOG("[ldn] can't listen on TCP port %d (in use by another program?): nobody can join this hub\n", port);
         if (ls != BADSOCK) hclose(ls);
         return false;
     }
@@ -1052,13 +1056,13 @@ static bool host_start(void) {
     if (ds != BADSOCK && bind(ds, (struct sockaddr *)&a, sizeof a)) {
         a.sin_port = 0;  // (for the hub server's relay; LAN search needs the port)
         if (!online || bind(ds, (struct sockaddr *)&a, sizeof a)) { hclose(ds); ds = BADSOCK; }
-        if (!any_port) LOG("[ldn] UDP port %d is in use: no LAN search (only Join addresses)\n", g_config.ldn_port);
+        if (!any_port) LOG("[ldn] UDP port %d is in use: no LAN search (only Join addresses)\n", port);
     }
-    L.listen_s = ls, L.disc_s = ds, L.hosting = true;
+    L.listen_s = ls, L.disc_s = ds, L.hosting = true, L.port = port;
     pthread_create(&L.host_th, NULL, host_thread, NULL);
-    if (any_port) LOG("[ldn] port %d is in use: hosting only through the hub server\n", g_config.ldn_port);
+    if (any_port) LOG("[ldn] port %d is in use: hosting only through the hub server\n", port);
     else LOG("[ldn] hosting: players join this computer's address, port %d (TCP, and UDP for LAN search and game packets)\n",
-             g_config.ldn_port);
+             port);
     lobby_host_start();
     return true;
 }
@@ -1173,9 +1177,10 @@ static void station_leave(void) {  // (caller: not holding L.mu)
 static int scan_addresses(struct sockaddr_in *out, int max) {
     int n = 0;
     char list[sizeof g_config.ldn_join];
-    snprintf(list, sizeof list, "%s", g_config.ldn_join);
+    config_live_ldn_join(list, sizeof list);  // (as saved now: a Save in the settings menu counts from the next search)
+    int port = config_live_ldn_port();
     for (char *t = strtok(list, ", ;"); t && n < max; t = strtok(NULL, ", ;")) {
-        if (resolve_host(t, g_config.ldn_port, &out[n])) n++;
+        if (resolve_host(t, port, &out[n])) n++;
         else LOG("[ldn] Join address \"%s\" not found\n", t);
     }
     return n;
@@ -1211,7 +1216,7 @@ static int discover(uint8_t (*infos)[NETINFO_SIZE], struct sockaddr_in *addrs, i
     wr16(probe + 6, 0);
     struct sockaddr_in to = {0};
     to.sin_family = AF_INET;
-    to.sin_port = htons((uint16_t)g_config.ldn_port);
+    to.sin_port = htons((uint16_t)config_live_ldn_port());
     to.sin_addr.s_addr = htonl(INADDR_BROADCAST);
     sendto(u, (const char *)probe, sizeof probe, 0, (struct sockaddr *)&to, sizeof to);
     to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -1250,8 +1255,10 @@ HLE_FUNC("_ZN2nn3ldn10InitializeEv", ldn_initialize) { NTRACE();
         L.mac[0] = (uint8_t)((L.mac[0] & 0xFC) | 0x02);  // locally administered, unicast
     }
     pthread_mutex_unlock(&L.mu);
-    ONCE("[ldn] local play over IP: host port %d, join %s (state event %x)\n", g_config.ldn_port,
-         g_config.ldn_join[0] ? g_config.ldn_join : "(LAN search only)", L.ev_r);
+    char join[sizeof g_config.ldn_join];
+    config_live_ldn_join(join, sizeof join);  // (as saved now, like the hosting and the search)
+    ONCE("[ldn] local play over IP: host port %d, join %s (state event %x)\n", config_live_ldn_port(),
+         join[0] ? join : "(LAN search only)", L.ev_r);
     RET(0);
 }
 

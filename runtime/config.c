@@ -211,7 +211,7 @@ static const char DEFAULT_INI[] =
     "ItemRight = Wheel Down\n"
     "\n"
     "[Multiplayer]\n"
-    "; Which port to host/join hubs on (TCP and UDP)\n"
+    "; Which port to host/join hubs on (TCP and UDP). A change counts from the next hub you host or search for\n"
     "; Default: 39500\n"
     "Port = 39500\n"
     "\n"
@@ -277,7 +277,8 @@ static const char DEFAULT_INI[] =
     "\n"
     "[Bonus Content]\n"
     "; If enabled, the free online downloadable content (Event Quests, item packs, Palicoes) are automatically copied from the provided savegame inside the `bonus/` folder into your own savegame.\n"
-    "; This only happens if your savegame hasn't received any downloadable content yet.\n"
+    "; This only happens if your savegame hasn't received any downloadable content yet. A change counts the next time\n"
+    "; the game opens the save file.\n"
     "; Default: On\n"
     "BonusContent = On\n"
     "\n"
@@ -453,9 +454,9 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Upscaler", "FSR", fsr, true),
     {"Upscaler", "FSRQuality", SET_CHOICE, F(fsr_quality), 0, 0, 0,
      "NativeAA|native|aa,Quality,Balanced,Performance,UltraPerformance|ultraperf", NULL, true, ERR_FSR},
-    {"Upscaler", "Sharpness", SET_FLOAT, F(fsr_sharpness), 0, 0.0f, 1.0f, NULL, NULL, true, ERR_FSR},
+    {"Upscaler", "Sharpness", SET_FLOAT, F(fsr_sharpness), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_FSR},
     ON_OFF("Upscaler", "ObjectMotion", fsr_objmotion, true),
-    {"Upscaler", "Reactive", SET_FLOAT, F(fsr_reactive), 0, 0.0f, 1.0f, NULL, NULL, true, ERR_FSR},
+    {"Upscaler", "Reactive", SET_FLOAT, F(fsr_reactive), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_FSR},
     ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
@@ -478,23 +479,23 @@ const ConfigSetting g_settings[] = {
     KEYS("Plus", BIND_PLUS), KEYS("Minus", BIND_MINUS), KEYS("DpadUp", BIND_DPAD_UP), KEYS("DpadDown", BIND_DPAD_DOWN),
     KEYS("DpadLeft", BIND_DPAD_LEFT), KEYS("DpadRight", BIND_DPAD_RIGHT), KEYS("LeftStickClick", BIND_LSTICK),
     KEYS("RightStickClick", BIND_RSTICK), KEYS("ItemLeft", BIND_ITEM_LEFT), KEYS("ItemRight", BIND_ITEM_RIGHT),
-    {"Multiplayer", "Port", SET_INT, F(ldn_port), 0, 1, 65535, NULL, NULL, true, ERR_NET},
+    {"Multiplayer", "Port", SET_INT, F(ldn_port), 0, 1, 65535, NULL, NULL, false, ERR_NET},
     {"Android", "SaveFolder", SET_TEXT, F(save_dir), sizeof g_config.save_dir, 0, 0, NULL, NULL, true, ERR_FOLDER},
     {"Android", "GameFolder", SET_TEXT, F(game_dir), sizeof g_config.game_dir, 0, 0, NULL, NULL, true, ERR_GAME_FOLDER},
-    {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, true, ERR_NET},
+    {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, false, ERR_NET},
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},
-    ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, true),
+    ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, false),
     ON_OFF("Multiplayer", "ShareUrgentCredit", share_urgent, false),
-    {"Monster HP", "1Player|1Players", SET_FACTOR, F(hp.scale[0]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
-    {"Monster HP", "2Players|2Player", SET_FACTOR, F(hp.scale[1]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
-    {"Monster HP", "3Players|3Player", SET_FACTOR, F(hp.scale[2]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
-    {"Monster HP", "4Players|4Player", SET_FACTOR, F(hp.scale[3]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
-    ON_OFF("Village Quests", "VillageQuestsInHub", village_in_hub, true),
-    {"Village Quests", "HubHP", SET_FACTOR, F(hp.village), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_VILLAGE},
+    {"Monster HP", "1Player|1Players", SET_FACTOR, F(hp.scale[0]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
+    {"Monster HP", "2Players|2Player", SET_FACTOR, F(hp.scale[1]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
+    {"Monster HP", "3Players|3Player", SET_FACTOR, F(hp.scale[2]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
+    {"Monster HP", "4Players|4Player", SET_FACTOR, F(hp.scale[3]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
+    ON_OFF("Village Quests", "VillageQuestsInHub", village_in_hub, false),
+    {"Village Quests", "HubHP", SET_FACTOR, F(hp.village), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_VILLAGE},
     ON_OFF("Discord", "RichPresence", discord, false),
     ON_OFF("Discord", "ShowHunter", discord_hunter, false),
-    ON_OFF("Bonus Content", "BonusContent", bonus_content, true),
+    ON_OFF("Bonus Content", "BonusContent", bonus_content, false),
     {"Audio", "Volume", SET_INT, F(volume), 0, 0, 100, NULL, NULL, false, ERR_MISC},
     ON_OFF("Audio", "MuteInBackground", mute_in_background, false),
     ON_OFF("Application", "ConfirmExit", confirm_exit, false),

@@ -286,6 +286,22 @@ static void hot_pull(void) {
 }
 
 #define IG_ENTER(c) (t_cpu = (c), hot_push())
+// A method called on a null object (the thunks, tools/imgui_thunks.py): ImGui would read through the null pointer and
+// the game would close (c0000005 / SIGSEGV, as with a plugin's draw list that was never set). Skipped instead, its
+// result zero (size: a struct returned through r0's pointer, zeroed there); logged once per function, with the
+// plugin's code that called it (lr), so the plugin's author can find it.
+static void ig_null_self(Cpu *c, const char *fn, uint32_t size) {
+    static const char *told[64];
+    static int ntold;
+    bool seen = false;
+    for (int i = 0; i < ntold; i++) seen |= told[i] == fn;
+    if (!seen) {
+        if (ntold < 64) told[ntold++] = fn;
+        LOG("[forge] a plugin called %s on a null object (code at %08x): skipped\n", fn, c->r[14]);
+    }
+    if (size) memset(G2H(c->r[0]), 0, size);
+    else c->r[0] = c->r[1] = 0;
+}
 #define IG_LEAVE(c) hot_pull()
 
 // an object handed to the plugin / a new one it asked for (constructors)
