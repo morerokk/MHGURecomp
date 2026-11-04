@@ -66,7 +66,9 @@ static int hunters(void) {
 
 // The factor for a quest and number of hunters (the host's settings in a hub we joined).
 static float factor(uint32_t quest, int n, bool *from_host) {
-    const HpScale *s = &g_config.hp;
+    HpScale own;  // ([Monster HP] as saved now)
+    config_live_hp(&own);
+    const HpScale *s = &own;
     pthread_mutex_lock(&g_lock);
     *from_host = g_have_host;
     if (g_have_host) s = &g_host;
@@ -79,8 +81,9 @@ static float factor(uint32_t quest, int n, bool *from_host) {
 
 // [Village Quests] HubHP (the host's in a hub we joined).
 static float village_factor(void) {
+    float own = config_live_hp_village();
     pthread_mutex_lock(&g_lock);
-    float v = g_have_host ? g_host.village : g_config.hp.village;
+    float v = g_have_host ? g_host.village : own;
     pthread_mutex_unlock(&g_lock);
     return v;
 }
@@ -136,7 +139,9 @@ void hpscale_tick(void) {
     if (!up || !ldn_hosting() || now - last < SYNC_NS) return;
     last = now;
     static uint8_t m[4 + 16 + HP_QUESTS_MAX * 20 + 4];
-    const HpScale *s = &g_config.hp;
+    static HpScale own;
+    config_live_hp(&own);
+    const HpScale *s = &own;
     int nq = s->quests;
     m[0] = SYNC_MAGIC, m[1] = 0, m[2] = (uint8_t)nq, m[3] = (uint8_t)(nq >> 8);
     memcpy(m + 4, s->scale, 16);

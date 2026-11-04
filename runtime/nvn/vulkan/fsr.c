@@ -1507,6 +1507,13 @@ static bool run_fsr(NvnTexture *h, NvnTexture *hs, NvnTexture *depth, NvnTexture
                              db->width, db->height, rw, rh);
         return false;
     }
+    // [Upscaler] Sharpness and Reactive as they are now (a Save in the settings menu changes them between frames)
+    float sharpness = config_live_fsr_sharpness(), reactive = config_live_fsr_reactive();
+    static float logged_sharpness = -1.0f, logged_reactive = -1.0f;
+    if (sharpness != logged_sharpness || reactive != logged_reactive) {
+        if (logged_sharpness >= 0.0f) LOG("[live] FSR sharpness %.2f, reactive %.2f\n", sharpness, reactive);
+        logged_sharpness = sharpness, logged_reactive = reactive;
+    }
     // camera motion vectors from the previous FSR frame's camera; history reset at a cut
     bool reset = !prev_cam.seq || prev_fsr_present + 1 < g_present_count || prev_cam.cam != cam->cam;
     double e0[3], e1[3];
@@ -1564,7 +1571,7 @@ static bool run_fsr(NvnTexture *h, NvnTexture *hs, NvnTexture *depth, NvnTexture
     // 1d. finish: the vectors FSR gets (object over camera) and the reactive mask
     sil_cur ^= 1;
     struct { float strength, vel_cap; uint32_t flags; float pad; } fp = {
-        g_config.fsr_reactive, 0.1f, (objv ? 1u : 0u) | (mb ? 2u : 0u) | (sil_ok && !reset ? 4u : 0u) | (anim ? 8u : 0u), 0};
+        reactive, 0.1f, (objv ? 1u : 0u) | (mb ? 2u : 0u) | (sil_ok && !reset ? 4u : 0u) | (anim ? 8u : 0u), 0};
     Bind fb[8] = {SAMPLED(&img_mv), SAMPLED(&img_vel), SAMPLED(mb ? mb : &img_depth), SAMPLED(&img_sil[sil_cur ^ 1]),
                   STORAGE(&img_mvf), STORAGE(&img_react), STORAGE(&img_sil[sil_cur]), SAMPLED(anim ? &img_tile[tile_cur] : &img_depth)};
     VkDescriptorSet fset = make_set(finish_set_layout, fb, 8);
@@ -1574,7 +1581,7 @@ static bool run_fsr(NvnTexture *h, NvnTexture *hs, NvnTexture *depth, NvnTexture
     vkCmdDispatch(cb, (rw + 7) / 8, (rh + 7) / 8, 1);
     vk_full_barrier(cb);
     sil_ok = mb != NULL;
-    bool react = (mb && g_config.fsr_reactive > 0.0f) || anim;
+    bool react = (mb && reactive > 0.0f) || anim;
     if (objv) n_objv_frames++;
     if (react) n_react_frames++;
     mv_check(cb, hb, &img_sil[sil_cur], !reset && prev_in_ok, jd);  // ((debug) MHGU_FSR_MVCHECK)
@@ -1610,8 +1617,8 @@ static bool run_fsr(NvnTexture *h, NvnTexture *hs, NvnTexture *depth, NvnTexture
     di.cameraNear = n, di.cameraFar = f;
     di.cameraVerticalFovRadians = cam->fovy > 0.05f && cam->fovy < 3.0f ? cam->fovy : 1.0f;
     di.viewSpaceToMeters = 0.01f;
-    di.sharpness = g_config.fsr_sharpness;
-    di.enableSharpening = g_config.fsr_sharpness > 0.0f;
+    di.sharpness = sharpness;
+    di.enableSharpening = sharpness > 0.0f;
     di.reset = reset;
     di.frameId = ++frame_id;
     uint64_t issues = ffxVkPortableValidateUpscaleDispatchInfo(&ctx_ci, &di);

@@ -67,7 +67,22 @@ int main(int argc, char **argv) {
     assert(config_save(&c, error, sizeof error));
     assert(fabsf(config_audio_gain() - 0.25f) < 0.001f && !config_confirm_exit());
     assert(config_language() == 1);
-    assert(config_restart_required(&c));
+    assert(!config_restart_required(&c));  // Quest overrides are live (config_live_hp), as are the factors.
+    HpScale live_hp; config_live_hp(&live_hp);
+    assert(live_hp.quests == 1 && live_hp.quest[0].quest == c.hp.quest[0].quest);
+    c.hp.scale[2] = 3.5f; c.hp.village = 1.5f; c.village_in_hub = 0;
+    assert(config_save(&c, error, sizeof error) && !config_restart_required(&c));
+    config_live_hp(&live_hp);
+    assert(live_hp.scale[2] == 3.5f && config_live_hp_village() == 1.5f && !config_live_village_in_hub());
+    assert(!config_restart_key("1Player") && !config_restart_key("HubHP") && !config_restart_key("VillageQuestsInHub"));
+    c.ldn_port = 40123; snprintf(c.ldn_join, sizeof c.ldn_join, "10.0.0.7:40124"); c.sync_small_monsters = 1;
+    assert(config_save(&c, error, sizeof error) && !config_restart_required(&c));  // the next hub / search / zone
+    char join[256]; config_live_ldn_join(join, sizeof join);
+    assert(config_live_ldn_port() == 40123 && !strcmp(join, "10.0.0.7:40124") && config_live_sync_small_monsters());
+    assert(!config_restart_key("Port") && !config_restart_key("Join") && !config_restart_key("SyncSmallMonsters"));
+    c.bonus_content = 0;  // (bonus content at the next open)
+    assert(config_save(&c, error, sizeof error) && !config_restart_required(&c));
+    assert(!config_live_bonus_content() && !config_restart_key("BonusContent"));
     Config restored=c; restored.hp=initial.hp; // Reconstruct the loaded quest overrides, not compiled defaults.
     restored.hp.quests=2; restored.hp.quest[0].quest=101;
     for(int i=0;i<4;i++) restored.hp.quest[0].scale[i]=0.6f;
@@ -178,6 +193,11 @@ int main(int argc, char **argv) {
     fsr_saved.volume=37;assert(config_save(&fsr_saved,error,sizeof error));
     assert(config_editable().msaa==8 && config_editable().fxaa==1);
     assert(config_live_msaa()==1 && config_live_fxaa()==0); // Saving cannot undo FSR's AA override.
+    assert(fabsf(config_live_fsr_sharpness()-.65f)<.001f && fabsf(config_live_fsr_reactive()-.35f)<.001f);
+    fsr_saved.fsr_sharpness=.2f;fsr_saved.fsr_reactive=.5f;  // Sharpness and Reactive: live at the Save, no restart
+    assert(config_save(&fsr_saved,error,sizeof error) && !config_restart_required(&fsr_saved));
+    assert(fabsf(config_live_fsr_sharpness()-.2f)<.001f && fabsf(config_live_fsr_reactive()-.5f)<.001f);
+    assert(!config_restart_key("Sharpness") && !config_restart_key("Reactive"));
     bad=fsr_saved;bad.fsr_quality=5;assert(!config_save(&bad,error,sizeof error));
     bad=fsr_saved;bad.fsr_sharpness=NAN;assert(!config_save(&bad,error,sizeof error));
     bad=fsr_saved;bad.fsr_reactive=1.1f;assert(!config_save(&bad,error,sizeof error));

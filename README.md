@@ -371,7 +371,7 @@ starting with its name in square brackets:
 04000000 000DFAB4 E1A00080
 ```
 
-- Turn single cheats on and off in the settings menu (F1), on the Cheats tab. It takes effect immediately when you press Save.
+- Turn single cheats on and off in the settings menu (F1), on the Cheats tab. It takes effect immediately when you press Save. Cheat files added, edited or removed count the next time the settings menu opens.
 - To turn off a file without deleting it, start its name with `_`.
 - Cheats that change the game's code also work, but for each one used, you may experience *very* slight performance loss. For the vast majority of cheat codes, this won't matter.
 - `log.txt` lists the cheats it loaded, and any it couldn't read.

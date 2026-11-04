@@ -106,8 +106,22 @@ void emsync_tick(void) {
     if (now - last < 33000000ull) return;
     last = now;
     static int was = -1;  // last logged state
-    if (!g_config.sync_small_monsters || !ldn_net_up()) { g_area = -1, g_claiming = false; return; }
     uint32_t sen = LD32(G_SENEMY), spl = LD32(G_SPLAYER), mem = LD32(G_MEMBER);
+    bool on = config_live_sync_small_monsters();
+    if (!on && g_area >= 0) {  // (turned off in the settings menu: this zone's small monsters as the game runs them)
+        for (int k = 0; sane(sen) && k < 10; k++) {
+            uint32_t en = LD32(sen + 0x1c + 4u * (uint32_t)k), info;
+            if (is_zako(en, &info)) set_flags(info, F_LOCAL, F_MASTER);
+        }
+        int me = sane(mem) ? (int)LD32(mem + 0x30) : -1;
+        if (me >= 0 && me <= 3 && ldn_net_up()) {
+            Claim m = {CLAIM_MAGIC, (uint8_t)me, (uint8_t)g_area, 0};
+            ldn_send_aux(&m, sizeof m);
+        }
+        LOG("[emsync] SyncSmallMonsters off: area %d's small monsters local (as the game does)\n", g_area);
+        sent_area = -2, sent_claim = -1, was = -1;
+    }
+    if (!on || !ldn_net_up()) { g_area = -1, g_claiming = false; return; }
     if (!sane(sen) || !sane(spl) || !sane(mem)) { g_area = -1, g_claiming = false; return; }
     int me = (int)LD32(mem + 0x30);
     if (me < 0 || me > 3) return;  // (keep the last state: a passing glitch)
@@ -153,7 +167,7 @@ void emsync_tick(void) {
 // The patched entry of the per-monster receive (0x2cb120: r0 = monster, r2 = the message's parameters, byte 1 = the
 // sender's slot). True: drop the message.
 int emsync_filter(Cpu *c) {
-    if (!g_config.sync_small_monsters || g_area < 0) return 0;
+    if (g_area < 0 || !config_live_sync_small_monsters()) return 0;
     uint32_t info;
     if (!is_zako(c->r[0], &info)) return 0;
     if (g_master) return 1;  // (a moment of two masters: keep ours)

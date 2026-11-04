@@ -98,7 +98,7 @@ void bonus_fill(const char *host_path) {
     const char *base = strrchr(host_path, '/');
     base = base ? base + 1 : host_path;
     if (strcmp(base, "system") && strcmp(base, "system_backup")) return;
-    if (!g_config.bonus_content) {
+    if (!config_live_bonus_content()) {  // (as saved now: a Save in the settings menu counts from the next open)
         static bool said;
         if (!said) LOG("[bonus] bonus content off (mhgurecomp.ini BonusContent): saves left as they are\n");
         said = true;
