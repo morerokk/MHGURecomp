@@ -119,6 +119,7 @@ Las versiones nuevas pueden salir bastante a menudo. Para actualizar automática
 | Registro | `log.txt`; adjúntalo cuando abras un issue |
 | Capturas de pantalla | `shots\` (pulsa F12) |
 | Mods | `mods\`, una carpeta por mod (ver más abajo) |
+| Módulos del motor | `engine_modules\` (ver más abajo) |
 | Trucos | `cheats\`, archivos `.txt` con códigos de trucos (ver más abajo) |
 | Caché de shaders | `cache\` |
 
@@ -388,6 +389,14 @@ juego al iniciarlo.
 **Recursos para hacer mods:**
 - [Wiki MHGU-Modding](https://github.com/RTHKKona/MHGU-Modding/wiki)
 - [Forge de Fexty](https://github.com/Fexty12573/forge)
+
+## Módulos del motor
+
+Los módulos del motor (engine modules) son programas nativos que amplían el port, no el juego (por ejemplo, otro escalador).
+No son mods ni plugins de Forge, y **se ejecutan con los mismos permisos que el juego, así que instala solo los que sean de
+confianza**. No se carga nada si no lo pides: pon la carpeta del módulo en `engine_modules\` y añade el nombre de su carpeta en
+una línea propia de `engine_modules\enabled.txt`. `log.txt` indica los que se han cargado. Detalles para quienes los programan:
+[docs/ENGINE-MODULES.md](docs/ENGINE-MODULES.md).
 
 ## Trucos
 

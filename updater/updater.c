@@ -5,7 +5,7 @@
 // - Only GitHub's "latest" release: never a draft, a pre-release or an older version than this one (MHGU_VERSION, the
 //   build's tag; a build that is not exactly a tag, e.g. 0.10.3-4-gabc or -dirty, is left alone: --update-force).
 // - The archive must match its asset's size and SHA-256 (the digest GitHub keeps for every upload).
-// - Never written: data/, mods/, cheats/, bonus/, cache/, shots/, save/, mhgurecomp.ini and log.txt (the player's), only
+// - Never written: data/, mods/, engine_modules/, cheats/, bonus/, cache/, shots/, save/, mhgurecomp.ini and log.txt (the player's), only
 //   the files the release carries besides those. Each file replaced is kept in update/backup/ until the next start, and
 //   put back if the install stops halfway.
 // - No connection, GitHub's rate limit (60 checks an hour per address; an unchanged release is answered "304" from its
@@ -42,7 +42,7 @@
 #define LATEST_URL "https://api.github.com/repos/morerokk/MHGURecomp/releases/latest"
 
 // what the archive must never write (first path component, any case): the player's
-static const char *const KEEP[] = {"data", "mods", "cheats", "bonus", "cache", "shots", "save", "update",
+static const char *const KEEP[] = {"data", "mods", "engine_modules", "cheats", "bonus", "cache", "shots", "save", "update",
                                    "mhgurecomp.ini", "log.txt"};
 
 static char root[1024];  // the game folder (this executable's), with the separator at its end

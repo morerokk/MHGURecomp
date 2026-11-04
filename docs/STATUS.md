@@ -1350,3 +1350,12 @@ warnings ... suppressed" line; 128 sites tracked per plugin. Also WARN, once per
 recompiled code is ignored (`foo.nro: code patch at main+0x... cannot apply to recompiled code: ignored`), and at
 load `[forge] [WARN] foo.nro: import X is not provided (calls return 0)`. Failed hooks stay ERROR lines
 (`Failed to hook ...`), as Forge's own.
+
+Engine modules (runtime/engine_module.c, docs/ENGINE-MODULES.md; 2026-11-04): native libraries in engine_modules/ that extend
+the port itself, loaded only when engine_modules/enabled.txt lists them, with no feature-specific seam in the port. Merged as
+"engine plugins" (PR 242) and renamed before any release, since "plugin" already means a Forge plugin. Things the loader's own
+test can't show: the renderer's atexit handler (nvn/vulkan/device.c exit_handler) is registered later, so it runs first and ends
+the process with _exit: a module's shutdown is called from there, after vkDeviceWaitIdle and the pipeline cache. The API version
+is an export (mhgu_engine_module_api) read before the entry is called: refused after the entry had run, a newer module could
+have written past the host's table and left hooks into a library about to be unloaded. MhguHost.port_version is what a module
+checks against the port's internals, which are not an API. The fault report names the modules that were loaded.

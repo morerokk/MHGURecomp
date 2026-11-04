@@ -117,6 +117,7 @@ Releases may come out pretty often. To update automatically, start `mhgurecomp-u
 | Log | `log.txt`, please attach this file when opening an issue |
 | Screenshots | `shots\` (press F12) |
 | Mods | `mods\` one folder per mod (see below) |
+| Engine modules | `engine_modules\` (see below) |
 | Cheats | `cheats\` `.txt` files with cheat codes (see below) |
 | Shader cache | `cache\` |
 
@@ -358,6 +359,13 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
 **Modding resources:**
 - [MHGU-Modding Wiki](https://github.com/RTHKKona/MHGU-Modding/wiki)
 - [Fexty's Forge](https://github.com/Fexty12573/forge)
+
+## Engine modules
+
+Engine modules are native programs that extend the port itself, not the game (for example a different upscaler). They aren't
+mods or Forge plugins, and **they run with the same rights as the game, so only install ones you trust**. Nothing loads unless
+you ask for it: put the module's folder in `engine_modules\` and add its folder name on a line of its own in
+`engine_modules\enabled.txt`. `log.txt` lists what was loaded. Details for module authors: [docs/ENGINE-MODULES.md](docs/ENGINE-MODULES.md).
 
 ## Cheats
 

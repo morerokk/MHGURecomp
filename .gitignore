@@ -8,6 +8,7 @@
 /game/
 /save/
 /mods/
+/engine_modules/
 /data/
 tools/venv/
 __pycache__/

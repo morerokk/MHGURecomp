@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "engine_module.h"
 #include "gamelib.h"
 #include "hle.h"
 #include "interp.h"
@@ -442,6 +443,7 @@ void rt_fault_report(const char *what, uint64_t fa, uint64_t pc, uint64_t lr) {
     if (fa >= GUEST_BASE && fa < GUEST_BASE + GUEST_SPACE) fprintf(stderr, " (guest %08llx)", (unsigned long long)(fa - GUEST_BASE));
     fprintf(stderr, "\n    host pc %llx (%s+%llx)\n    host lr %llx (%s)\n", (unsigned long long)pc, ps ? ps : "?",
             (unsigned long long)po, (unsigned long long)lr, ls ? ls : "?");
+    engine_modules_report();
     rt_fatal_trace();
 }
 

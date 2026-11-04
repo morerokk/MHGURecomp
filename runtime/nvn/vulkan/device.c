@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "../../engine_module.h"
 #include "../../overlay.h"
 #include "fsr.h"
 #include "vk.h"
@@ -730,6 +731,7 @@ static void exit_handler(void) {
         vkDeviceWaitIdle(g_vk.dev);
         pipeline_cache_save();
     }
+    engine_modules_shutdown();  // (its own atexit handler was registered before this one, so it would never run)
     fflush(stdout);
     fflush(stderr);
     _exit(0);
