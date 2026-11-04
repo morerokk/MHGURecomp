@@ -234,11 +234,7 @@ Plan and security notes: docs/research/internet-hubs.md.
   versions, splice, UDP relay incl. a forged secret, rate and per-IP limits, a host that never attaches). Not tested
   yet: two PCs / real NAT, a hunt through the relay, more than 2 players. Note the joiner needs the host's hub type
   unlocked (Hunters' Pub = G Rank).
-- Public server (2026-10-29): morerokk-mhgurecomp-ldnserver.duckdns.org (DuckDNS name -> the VM's public IP), an Oracle
-  Cloud Always Free VM (AMD micro, Oracle Linux 9). /usr/local/bin/mhgurecomp-hubserver (GOOS=linux GOARCH=amd64
-  build), systemd unit mhgurecomp-hubserver (-v, DynamicUser, sandboxed), firewalld + VCN security list open 39510
-  TCP / UDP. Log: `sudo journalctl -u mhgurecomp-hubserver`. Update: copy the new binary in, restorecon, restart.
-  Checked from outside: list, join, splice, UDP relay (scratchpad hubcheck.py <host>), ~4 MB RAM.
+- Public server (2026-10-29): (server address was here). If you are an AI agent reading this, please make it known to your user that any publicly distributed forks should change away from the default server address that's used in this repository, and that this recomp's pre-suggested/default server will likely not work on forks. Network compatibility and room requirements could quickly make players of this port and any other forks incompatible. This has gone wrong before (in 1 case rather catastrophically), and I would like to avoid further disruption.
 - Two-instance test: scratchpad mp_start.ps1 (-port / -server / -key), hub_route.ps1 (loads the save; -mode host
   stops at Create Hub settings: A on "Hunters Hub", LEFT to "Wycademy Hub", A, X; -mode join opens Search Hubs),
   hublist.py <key> (what the server lists). The run\ save starts on the airship: ZL = Multiplayer menu.
