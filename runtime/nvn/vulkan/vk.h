@@ -45,6 +45,14 @@ typedef struct {
     bool no_mirror_clamp;      // api11 without VK_KHR_sampler_mirror_clamp_to_edge: textures.c mirrors and repeats
     VkCommandPool pool;        // render thread only
     bool divisor, demote, custom_border, depth_clamp, stencil_export, sample_shading;
+    // VK_EXT_depth_bias_control (exec.c): a DEPTH24_STENCIL8 the GPU makes as D32_SFLOAT_S8_UINT (AMD) gets the game's
+    // polygon offsets in D24 steps, as on the Switch; without it the float format's steps can be smaller and decals flicker
+    // (a Vulkan header older than 1.3.268 has no such extension: never set then)
+#ifdef VK_EXT_depth_bias_control
+    PFN_vkCmdSetDepthBias2EXT set_depth_bias2;
+#else
+    void *set_depth_bias2;
+#endif
     bool bc;                   // textureCompressionBC (MHGU_NO_BC=1: off, as phone GPUs report; textures.c decodes BC)
     volatile uint32_t msaa;    // samples for the 3D scene's passes (settings MSAA, as far as the GPU allows): 1 = off
     uint32_t msaa_counts;      // the sample counts MSAA can use (bits 2, 4, 8)

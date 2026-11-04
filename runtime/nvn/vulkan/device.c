@@ -190,6 +190,18 @@ static void create_device(void) {
     if (g_vk.stencil_export) ext[n_ext++] = VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME;
     no_exclusive = surface_caps2 && has_ext(ep, ne, "VK_EXT_full_screen_exclusive") && !getenv("MHGU_VK_EXCLUSIVE");
     if (no_exclusive) ext[n_ext++] = "VK_EXT_full_screen_exclusive";
+    // (only where DEPTH24_STENCIL8 is made as D32S8: textures.c; MHGU_VK_NO_BIAS_CONTROL=1 leaves it off)
+#ifdef VK_EXT_depth_bias_control
+    bool bias_ctl = vk_depth24_stencil8() == VK_FORMAT_D32_SFLOAT_S8_UINT &&
+                    has_ext(ep, ne, VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME) && !getenv("MHGU_VK_NO_BIAS_CONTROL");
+    if (bias_ctl) {
+        VkPhysicalDeviceDepthBiasControlFeaturesEXT bc = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_BIAS_CONTROL_FEATURES_EXT};
+        VkPhysicalDeviceFeatures2 q = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &bc};
+        vkGetPhysicalDeviceFeatures2(g_vk.phys, &q);
+        bias_ctl = bc.depthBiasControl && bc.leastRepresentableValueForceUnormRepresentation;
+    }
+    if (bias_ctl) ext[n_ext++] = VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME;
+#endif
     if (g_vk.api11) {  // (Vulkan 1.2 has it as the feature samplerMirrorClampToEdge)
         g_vk.no_mirror_clamp = !has_ext(ep, ne, VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME);
         if (!g_vk.no_mirror_clamp) ext[n_ext++] = VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME;
@@ -258,12 +270,25 @@ static void create_device(void) {
         f12.shaderFloat16 = b->shaderInt16 = g_vk.fsr_fp16 = f12_have.shaderFloat16 && h->shaderInt16;  // (both, or neither)
     }
     if (!h->shaderInt64) LOG("[vk] warning: no shaderInt64 (64-bit address math in shaders)\n");
+#ifdef VK_EXT_depth_bias_control
+    VkPhysicalDeviceDepthBiasControlFeaturesEXT bias = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_BIAS_CONTROL_FEATURES_EXT, .depthBiasControl = VK_TRUE,
+        .leastRepresentableValueForceUnormRepresentation = VK_TRUE, .pNext = f.pNext};
+    if (bias_ctl) f.pNext = &bias;
+#endif
     float prio = 1.0f;
     VkDeviceQueueCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = g_vk.qfam,
                                   .queueCount = 1, .pQueuePriorities = &prio};
     VkDeviceCreateInfo di = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &f, .queueCreateInfoCount = 1,
                              .pQueueCreateInfos = &qi, .enabledExtensionCount = n_ext, .ppEnabledExtensionNames = ext};
     VK_CHECK(vkCreateDevice(g_vk.phys, &di, NULL, &g_vk.dev));
+#ifdef VK_EXT_depth_bias_control
+    if (bias_ctl) g_vk.set_depth_bias2 = (PFN_vkCmdSetDepthBias2EXT)vkGetDeviceProcAddr(g_vk.dev, "vkCmdSetDepthBias2EXT");
+#endif
+    LOG("[vk] polygon offsets on the D32S8 made for D24S8: %s\n",
+        vk_depth24_stencil8() != VK_FORMAT_D32_SFLOAT_S8_UINT ? "not needed (D24S8)"
+        : g_vk.set_depth_bias2                               ? "in D24 steps (VK_EXT_depth_bias_control)"
+                                                             : "as given (no VK_EXT_depth_bias_control)");
     if (!g_vk.fences) {
         g_vk.get_semaphore_counter = (PFN_vkGetSemaphoreCounterValue)vkGetDeviceProcAddr(g_vk.dev, "vkGetSemaphoreCounterValue");
         g_vk.wait_semaphores = (PFN_vkWaitSemaphores)vkGetDeviceProcAddr(g_vk.dev, "vkWaitSemaphores");
