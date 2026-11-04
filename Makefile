@@ -224,6 +224,37 @@ test-settings: $(LIB_STAMPS)
 	$(CC) $(RTFLAGS) tests/test_settings.c runtime/config.c runtime/config_store.c $(SDL_LIBS) -lm -o $(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe)
 	$(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe) $(O)/settings-test/settings.ini
 
+# Engine plugins (docs/ENGINE-PLUGINS.md). example-plugin builds the example into the folder layout plugins/ expects;
+# test-plugins builds the loader (runtime/plugin.c) into a host program and checks it against test plugins - one that loads,
+# and the ways one can fail - without the game files.
+PLUGIN_EXT  := $(if $(filter windows,$(PLATFORM)),dll,so)
+PLUGIN_CC   := $(CC) -O2 -Wall -fPIC -shared -fuse-ld=lld
+PLUGIN_TEST := $(O)/plugin-test
+.PHONY: example-plugin test-plugins
+example-plugin:
+	@mkdir -p $(PLUGIN_TEST)/plugins/example
+	$(PLUGIN_CC) extras/example-plugin/example_plugin.c -o $(PLUGIN_TEST)/plugins/example/example.$(PLUGIN_EXT)
+	@echo "built $(PLUGIN_TEST)/plugins/example: copy the folder to plugins/ and add the line 'example' to plugins/enabled.txt"
+
+test-plugins: $(LIB_STAMPS)
+	@rm -rf $(PLUGIN_TEST)/t && mkdir -p $(PLUGIN_TEST)/t/good $(PLUGIN_TEST)/t/hidden $(PLUGIN_TEST)/t/badapi $(PLUGIN_TEST)/t/declines $(PLUGIN_TEST)/t/notaplugin
+	$(PLUGIN_CC) extras/example-plugin/example_plugin.c -o $(PLUGIN_TEST)/t/good/good.$(PLUGIN_EXT)
+	cp $(PLUGIN_TEST)/t/good/good.$(PLUGIN_EXT) $(PLUGIN_TEST)/t/hidden/hidden.$(PLUGIN_EXT)
+	$(PLUGIN_CC) -DEXAMPLE_API=99 extras/example-plugin/example_plugin.c -o $(PLUGIN_TEST)/t/badapi/badapi.$(PLUGIN_EXT)
+	$(PLUGIN_CC) -DEXAMPLE_DECLINE extras/example-plugin/example_plugin.c -o $(PLUGIN_TEST)/t/declines/declines.$(PLUGIN_EXT)
+	printf 'int unrelated;\n' > $(PLUGIN_TEST)/t/notaplugin.c
+	$(PLUGIN_CC) $(PLUGIN_TEST)/t/notaplugin.c -o $(PLUGIN_TEST)/t/notaplugin/notaplugin.$(PLUGIN_EXT)
+	printf '# the loader test\ngood\n  badapi  \ndeclines\nnotaplugin\nnosuch\n../evil\ngood\n' > $(PLUGIN_TEST)/t/enabled.txt
+	$(CC) $(RTFLAGS) tests/test_plugin.c runtime/plugin.c runtime/config.c runtime/config_store.c $(SDL_LIBS) -lm -o $(PLUGIN_TEST)/test-plugin$(if $(filter windows,$(PLATFORM)),.exe)
+	MHGU_PLUGINS_DIR=$(PLUGIN_TEST)/t $(PLUGIN_TEST)/test-plugin$(if $(filter windows,$(PLATFORM)),.exe) > $(PLUGIN_TEST)/t/out.txt 2>&1 || { cat $(PLUGIN_TEST)/t/out.txt; exit 1; }
+	@cat $(PLUGIN_TEST)/t/out.txt
+	@for want in 'good: loaded (Example' 'badapi: built for plugin API 99' 'declines: the plugin declined' \
+	             'notaplugin: no mhgu_plugin_entry' 'nosuch: no such folder' '"../evil" is not a folder name' '\[example\] shutdown'; do \
+	    grep -q "$$want" $(PLUGIN_TEST)/t/out.txt || { echo "missing in the log: $$want"; exit 1; }; done
+	@! grep -q 'hidden' $(PLUGIN_TEST)/t/out.txt || { echo "a plugin enabled.txt does not list was loaded"; exit 1; }
+	@test "$$(grep -c 'good: loaded' $(PLUGIN_TEST)/t/out.txt)" = 1 || { echo "good loaded twice"; exit 1; }
+	@echo "test-plugins: OK"
+
 $(O)/gen/%.o: $(GEN)/%.c runtime/cpu.h runtime/vfp.h runtime/neon_rt.h
 	@mkdir -p $(dir $@)
 	@$(CC) $(GENFLAGS) -c $< -o $@

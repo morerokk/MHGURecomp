@@ -14,6 +14,7 @@
 #include "hle/mousecam.h"
 #include "kernel.h"
 #include "mods.h"
+#include "plugin.h"
 #include "app_actions.h"
 #include "net/discord.h"
 #ifdef __ANDROID__
@@ -230,6 +231,9 @@ int main(int argc, char **argv) {
         g_game_dir = data;
         mods_make_dir();
         cheats_make_dir();
+#ifndef __ANDROID__
+        plugins_make_dir();
+#endif
         static char save[1024];
         if (plat_user_dir(save, sizeof save - 8)) {
             strcat(save, "/save");
@@ -250,6 +254,9 @@ int main(int argc, char **argv) {
     { void fnprof_init(void); fnprof_init(); }
     crash_handler_install();
     ui_init();
+#ifndef __ANDROID__
+    plugins_init();  // (engine plugins plugins/enabled.txt lists: runtime/plugin.c)
+#endif
     boot(g_game_dir);
     return ui_run();
 }
