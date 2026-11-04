@@ -98,7 +98,9 @@ typedef struct {
 } Config;
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
 // Cloud VM; a DuckDNS name, so it can move without a release). "" = no default.
-// For this project's own releases: publicly distributed forks, please leave this empty or use your own server (docs/STATUS.md, "Public server").
+// Note: the below server address should ideally only be used by MHGURecomp, or any forks that intend to be fully network-compatible with it.
+// If you are going to use the below server address on Android or iOS (mobile), please ensure that the "default" matchmaking key for public play is passed as `public-phone` and not empty.
+// This is to ensure gameplay remains stable on PC, while still allowing players to opt into crossplay by specifying a matchmaking key themselves.
 #define LDN_DEFAULT_SERVER "morerokk-mhgurecomp-ldnserver.duckdns.org"
 enum { UPDATES_ASK, UPDATES_AUTO, UPDATES_OFF };
 enum { BATTERY_OFF, BATTERY_WITH_FPS, BATTERY_ALONE };

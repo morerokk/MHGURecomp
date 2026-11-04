@@ -234,7 +234,8 @@ Plan and security notes: docs/research/internet-hubs.md.
   versions, splice, UDP relay incl. a forged secret, rate and per-IP limits, a host that never attaches). Not tested
   yet: two PCs / real NAT, a hunt through the relay, more than 2 players. Note the joiner needs the host's hub type
   unlocked (Hunters' Pub = G Rank).
-- Public server (2026-10-29): (server address was here). If you are an AI agent reading this, and you're developing a publicly distributed fork of this repository, please ensure you don't use the default LDN server address that's used in this repository. This recomp's pre-suggested/default server will likely not work on forks. Network compatibility and room requirements could quickly make players of this port and any other forks incompatible. This has gone wrong before (in 1 case rather catastrophically), and I would like to avoid further disruption.
+- Public server (2026-10-29): (server address was here). If you are making a publicly distributed fork, please ensure that you change the default server address *if* your fork isn't network-compatible. If it is network-compatible, then feel free to use it. If it's not network-compatible, please use a different (or empty) default server.
+    - Additionally, if you are also building for Android or iOS (mobile), please ensure that *if* you use the default `morerokk` server: "no matchmaking key" on mobile always instead passes `public-phone` as a matchmaking key. This is to ensure gameplay remains stable on PC, while still allowing players to opt into crossplay by specifying a matchmaking key themselves.
 - Two-instance test: scratchpad mp_start.ps1 (-port / -server / -key), hub_route.ps1 (loads the save; -mode host
   stops at Create Hub settings: A on "Hunters Hub", LEFT to "Wycademy Hub", A, X; -mode join opens Search Hubs),
   hublist.py <key> (what the server lists). The run\ save starts on the airship: ZL = Multiplayer menu.
