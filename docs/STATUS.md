@@ -263,11 +263,13 @@ scenes with dialogue in the middle) not tested.
 ## Small monsters synced in multiplayer (2026-10-21)
 
 The original game syncs small monsters' HP / deaths only; each player's game runs their AI, so players see them in
-different places. runtime/net/emsync.c makes the first player in a zone their master (the game's own large-monster
-mechanism: flag 8 sends netEmAction, the others replay it); ini [Multiplayer] SyncSmallMonsters (default On; Off from 2026-10-27 to 2026-11-03, after
+different places. runtime/net/emsync.c makes the first player in a zone their owner (the game's own large-monster
+mechanism: flag 8 sends netEmAction, monster +0x7420 says who runs it, the others replay); ini [Multiplayer] SyncSmallMonsters (default On; Off from 2026-10-27 to 2026-11-03, after
 reports of synced small monsters that stop attacking and of players dropping: see "Monsters' attention scores" and below).
-Tested with two instances: positions agree within centimetres, hand-over when the master leaves works. Combat,
-3-4 players and two PCs not tested yet. Research, data layout and test details: docs/research/small-monster-sync.md.
+Tested with two instances: positions agree within centimetres, hand-over when the owner leaves works. 3-4 players and two PCs
+not tested yet. Research, data layout and test details: docs/research/small-monster-sync.md.
+Fixed 2026-11-04: small monsters ignored players with sync on: it forced flag 0x80 (species data, no attention scores) on all of
+them and left followers running their own AI. Jaggi and Rhenoplos now target and attack both hunters, the same on both games.
 Fixed 2026-11-03: players dropping in some zones (Volcanic Hollow zone 7): uEms100 restarts its first action every update,
 and a master's copy would send each restart. Such a monster is now left out of the sync.
 
