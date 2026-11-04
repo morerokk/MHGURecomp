@@ -833,6 +833,7 @@ void vk_framebuffers_forget_view(VkImageView v) {
 
 // ================================================================== passes
 static VkFormat pass_color[8], pass_depth;
+static bool pass_d24_as_float;  // the depth attachment is a DEPTH24_STENCIL8 made as D32S8 (polygon offsets in D24 steps)
 static uint32_t pass_ncolor, pass_samples = 1, pass_w, pass_h;
 static bool ui_relax_scissor;  // the draw being set up moved a HUD piece out from under the game's scissor
 static int ui_scissor_v = -1;  // 16:10: the draw being set up is a HUD piece anchored so (0 top, 1 centre, 2 bottom),
@@ -987,7 +988,7 @@ static struct {
     uint32_t known, vb_known;
     VkPipeline pipe;
     uint32_t sten[2][3];  // compare mask, write mask, reference per face
-    float bc[4], db[3];
+    float bc[4], db[4];
     VkViewport vp;
     VkRect2D sc;
     VkBuffer ib; VkDeviceSize io; VkIndexType it;
@@ -1603,6 +1604,7 @@ static void begin_pass(void) {
         pass_samples = b->samples;
     }
     pass_depth = VK_FORMAT_UNDEFINED;
+    pass_d24_as_float = false;
     NvnTexture *dt = st.rt.depth && pass_sx != 1.0f ? vk_fsr_map(st.rt.depth, true) : st.rt.depth;  // (FSR: as above)
     if (dt) {
         renderer_mark_gpu_owned(dt);
@@ -1610,6 +1612,7 @@ static void begin_pass(void) {
         TexBackend *b = dt->backend;
         if (v && renderer_format_is_depth(dt->format) && b->aspect != VK_IMAGE_ASPECT_COLOR_BIT) {
             pass_depth = b->format;
+            pass_d24_as_float = dt->format == 0x35 && b->format == VK_FORMAT_D32_SFLOAT_S8_UINT;  // (0x35: DEPTH24_STENCIL8)
             att[nviews] = b, att_fmt[nviews] = b->format, att_index[nviews] = -1;
             views[nviews++] = v;
             uint32_t lv = st.rt.has_dview && (st.rt.dview.setmask & 1) ? st.rt.dview.base_level : 0;
@@ -3874,9 +3877,26 @@ static void draw(CmdRec *r, bool indexed) {
     }
     if (ss_need(SS_BC, !memcmp(ss.bc, st.blend_color, sizeof ss.bc))) { memcpy(ss.bc, st.blend_color, sizeof ss.bc); vkCmdSetBlendConstants(cb, st.blend_color); }
     {
-        float f[3] = {0, 0, 0};
-        if (k.depth_bias) memcpy(f, st.poly_offset, sizeof f);
-        if (ss_need(SS_DB, !memcmp(ss.db, f, sizeof f))) { memcpy(ss.db, f, sizeof f); vkCmdSetDepthBias(cb, f[1], f[2], f[0]); }
+        // (f[3]: D24 steps on a D32S8, VK_EXT_depth_bias_control: a float format's steps follow each triangle's depth
+        // and can be finer than D24's, too small for the game's decal offsets)
+        float f[4] = {0, 0, 0, 0};
+        if (k.depth_bias) memcpy(f, st.poly_offset, 3 * sizeof *f);
+        bool d24 = k.depth_bias && pass_d24_as_float && g_vk.set_depth_bias2;
+        f[3] = d24;
+        if (ss_need(SS_DB, !memcmp(ss.db, f, sizeof f))) {
+            memcpy(ss.db, f, sizeof f);
+#ifdef VK_EXT_depth_bias_control
+            if (d24) {
+                VkDepthBiasRepresentationInfoEXT rep = {
+                    .sType = VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT,
+                    .depthBiasRepresentation = VK_DEPTH_BIAS_REPRESENTATION_LEAST_REPRESENTABLE_VALUE_FORCE_UNORM_EXT};
+                VkDepthBiasInfoEXT bi = {.sType = VK_STRUCTURE_TYPE_DEPTH_BIAS_INFO_EXT, .pNext = &rep,
+                                         .depthBiasConstantFactor = f[1], .depthBiasClamp = f[2], .depthBiasSlopeFactor = f[0]};
+                g_vk.set_depth_bias2(cb, &bi);
+            } else
+#endif
+                vkCmdSetDepthBias(cb, f[1], f[2], f[0]);
+        }
     }
     float *vp = st.viewport[0], movie_vp[4], v[4];
     PreviewMap pm;
