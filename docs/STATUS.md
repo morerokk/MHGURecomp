@@ -116,6 +116,19 @@ Fixed on the way (2026-10-20):
   (FXAA_FS_HASH, exec.c) and becomes a copy of its input when off.
   FXAAMode = 3_11 draws FXAA 3.11 Quality there instead (exec.c fxaa_311, shaders.c "fxaa.frag": preset 39, no
   sub-pixel blur, edge thresholds 0.063 / 0.0312, so textures stay sharp).
+  FXAAMode = Original draws shaders.c "fxaa.frag.game", the game's shader written out by hand (exec.c compile_program;
+  there and not at the translation, so sources already in programs.src get it too). The translation runs a loop over a
+  switch with 24 registers and a stack for every pixel. MHGU_CONTROL "gpuprof" now names the FXAA pass. The town at
+  1080p (MHGU_QUICKHUNT=town, about 25 s a run), the pass's GPU time, then the frame's and the frame rate:
+  - Radeon iGPU, Original: 2.97 -> 1.54 ms, 12.7 -> 11.3 ms, 71 -> 79 FPS (FXAA off: 0.26 ms, 10.0 ms, 88 FPS).
+  - Radeon iGPU, 3_11: 3.42 -> 2.75 ms, 13.2 -> 12.4 ms, 68 -> 72 FPS (two gathers, and no constant array read by index).
+  - RTX 5070 Ti, Original: 0.052 -> 0.035 ms of a 0.55 ms frame, too little to notice.
+  Two gathers replace five reads for the pixels that end at the range test: that path costs 0.45 ms on the iGPU. The
+  rest is edge pixels (31% of this town) searching along the edge. Original's picture is bit-identical: the old and new
+  code ran on the same frame with the output set to their difference x255 (MHGU_GLSL_OVERRIDE), all zero on both GPUs,
+  in the town, at a 1280x720 render size and in quest 101. The same test for 3_11 (town, both GPUs): also all zero. The
+  game's fma()s and the order of its sums had to stay: without them 0.15% of pixels differed, as exact ties go by rounding.
+  Not looking again at a search side that hasn't moved gives the same picture, but took 1.75 ms instead of 1.54 on the iGPU.
 - Frame rate: the settings' FPS or MHGU_FRAMERATE (default 60, 30..240) writes the engine's target fps (float at +0x3c of the object in
   global 0x2326764, the field theboy181's 60fps patch sets) each frame. Above the monitor's refresh rate it needs
   VSync = Off: see "Frame rates above 60". MHGU_VSYNC=0/1 overrides the setting: no vsync / classic vsync.

@@ -1135,6 +1135,7 @@ volatile int g_gpuprof_request;
 static int gp_active, gp_n, gp_pass;
 static VkQueryPool gp_pool;
 static char gp_label[256][64];
+static const char *gp_pass_note = "", *gp_next_note = "";  // what this pass and the next one are, when known (FXAA)
 
 static void gp_mark(const char *label) {
     if (!gp_active || gp_n >= 256) return;
@@ -1200,8 +1201,8 @@ void vk_end_pass(void) {
     in_pass = false;
     if (gp_active) {
         char l[64];
-        snprintf(l, sizeof l, "pass %d %ux%u%s, %llu draws", gp_pass++, pass_w, pass_h, pass_msaa ? " MSAA" : "",
-                 (unsigned long long)(stat_draws - pass_draws_at));
+        snprintf(l, sizeof l, "pass %d %ux%u%s, %llu draws%s", gp_pass++, pass_w, pass_h, pass_msaa ? " MSAA" : "",
+                 (unsigned long long)(stat_draws - pass_draws_at), gp_pass_note);
         gp_mark(l);
     }
     if (pass_msaa) for (uint32_t k = 0; k < pass_natt; k++) pass_att[k]->ms_dirty = true;
@@ -1700,6 +1701,7 @@ static void begin_pass(void) {
     }
     VkFramebuffer fb = vk_framebuffer(pass_rp, views, nviews, minw, minh);
     gp_mark("  (between passes)");
+    gp_pass_note = gp_next_note, gp_next_note = "";
     VkRenderPassBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, .renderPass = pass_rp, .framebuffer = fb,
                                 .renderArea = {{0, 0}, {minw, minh}}};
     vkCmdBeginRenderPass(cb, &bi, VK_SUBPASS_CONTENTS_INLINE);
@@ -2168,12 +2170,20 @@ static void save_glsl(const char *src, uint64_t addr, const char *suffix) {
     if (f) { fputs(src, f); fclose(f); }
 }
 
+#define FXAA_FS_HASH 0x8530ded68f4407dfull  // the game's FXAA fragment shader
+static uint64_t prog_fs_hash(Prog *p);
+
 static void compile_program(void *arg) {
     Prog *p = arg;
     uint64_t t0 = plat_now_ns();
     size_t nv = 0, nf = 0;
     uint32_t *sv = vk_glsl_to_spirv(p->vi->msl, STAGE_VERTEX, "vs", &nv);
     const char *fsrc = p->fi->msl;
+    // The game's FXAA: hand-written, as the translation is slow (shaders.c "fxaa.frag.game"). Here and not at the
+    // translation, so that it also reaches the sources kept in programs.src by earlier versions.
+    if (prog_fs_hash(p) == FXAA_FS_HASH && !p->fkey.alpha_func && !p->fkey.alpha_coverage && !p->fkey.rt_kind[0] &&
+        (p->fkey.vs_out_mask & 2))
+        fsrc = vk_builtin_source("fxaa.frag.game");
     char *over = NULL;
     if (getenv("MHGU_GLSL_OVERRIDE")) {  // (debug) glsl_override/<code address>_fs.glsl replaces the translated shader
         char path[96];
@@ -3670,6 +3680,7 @@ static bool fxaa_311(NvnTexture *src) {
     vkCmdSetScissor(cb, 0, 1, &area);
     vkCmdDraw(cb, 3, 1, 0, 0);
     vkCmdEndRenderPass(cb);
+    gp_mark("  FXAA 3.11");
     ss_forget();
     stat_draws++;
     return true;
@@ -3677,20 +3688,28 @@ static bool fxaa_311(NvnTexture *src) {
 
 // FXAA off (settings): the game's FXAA pass (recognised by its shader) copies its input instead; FXAAMode = 3_11 draws
 // FXAA 3.11 there (fxaa_311).
-#define FXAA_FS_HASH 0x8530ded68f4407dfull
 static void copy_texture(const TexRef *src, const TexRef *dst, uint64_t flags);
 static bool fxaa_skipped(Prog *pr) {
-    if (prog_fs_hash(pr) == FXAA_FS_HASH) aa_pass_frame = g_present_count;  // (menus: full_picture)
+    if (prog_fs_hash(pr) == FXAA_FS_HASH) {
+        aa_pass_frame = g_present_count;  // (menus: full_picture)
+        gp_next_note = " (FXAA)";
+    }
     bool fxaa_311_on = config_live_fxaa() && config_live_fxaa_mode() == FXAA_311;
     if ((config_live_fxaa() && !fxaa_311_on) || prog_fs_hash(pr) != FXAA_FS_HASH || pr->fi->ntex != 1 || !st.rt.ncolor ||
         !st.rt.color[0])
         return false;
     NvnTexture *src = shader_texture_object(1, &pr->fi->tex[0]);
     if (!src || src == st.rt.color[0]) return false;
-    if (fxaa_311_on) return fxaa_311(src);
+    if (fxaa_311_on) {
+        if (!fxaa_311(src)) return false;
+        gp_next_note = "";
+        return true;
+    }
     TexRef s = {.tex = (uint64_t)(uintptr_t)src}, d = {.tex = (uint64_t)(uintptr_t)st.rt.color[0]};
     if (st.rt.has_cview[0]) d.view = st.rt.cview[0], d.has_view = 1;
     copy_texture(&s, &d, 0);
+    gp_mark("  FXAA off: a copy");
+    gp_next_note = "";
     stat_draws++;
     return true;
 }
