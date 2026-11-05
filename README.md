@@ -477,7 +477,8 @@ On Windows that writes `dist\Windows-MHGURecomp.0.10.4.zip`; on Linux (or in WSL
 O=obj-linux`) `dist/Linux-MHGURecomp.0.10.4.tar.gz`, which keeps the programs executable. Each holds one folder
 with `mhgurecomp(.exe)`, `mhgugame.dll` / `.so`, `mhgurecomp-updater(.exe)`, the bundled DLLs, `licenses\`,
 `bonus\system` (from `BONUS`, else left empty), and empty `data\`, `mods\` and `cheats\` folders; never anything of
-the game's, or the build folder's settings, caches or mods. `make dist` prints each archive's SHA-256.
+the game's, or the build folder's settings, caches or mods. `make dist` prints each archive's SHA-256. It stops if
+`tools/gen.py` or the other translator sources changed since the last `make gen`: run that first.
 
 On Windows, when the Android SDK is installed (see [docs/research/android.md](docs/research/android.md)), `make dist`
 then also writes `dist\Android-MHGURecomp.0.10.4.apk`: arm64 only, with `pipelines.list`, `licenses` and the bonus

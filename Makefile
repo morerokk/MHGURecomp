@@ -160,6 +160,16 @@ endif
 GAMELIB_SRCS := tools/gen.py tools/lifter.py tools/neon.py tools/nso.py tools/gamelib_entry.c \
                 runtime/hle/hle_symbols.txt runtime/cpu.h runtime/vfp.h runtime/neon_rt.h runtime/gamelib.h
 GAMELIB_ID := $(shell (cat $(GAMELIB_SRCS); echo '$(GENFLAGS)') | sha256sum | cut -c1-16)
+# GEN_ID: what decides the code in generated/. make gen records it there and make dist refuses a release without a match:
+# neither make nor the game notices stale game code, GAMELIB_ID hashes the sources above and not what they generated.
+# (Line endings ignored: Windows and WSL builds share one generated/.)
+GEN_SRCS := tools/gen.py tools/lifter.py tools/neon.py tools/nso.py runtime/hle/hle_symbols.txt
+GEN_ID    = $(shell cat $(GEN_SRCS) | tr -d '\r' | sha256sum | cut -c1-16)
+ifneq ($(filter dist,$(MAKECMDGOALS)),)
+ifneq ($(shell cat $(GEN)/gen.id 2>/dev/null),$(GEN_ID))
+$(error dist: $(GEN)/ was not made from the current $(GEN_SRCS): run make gen GAME=<the game files> first)
+endif
+endif
 # SHADER_ID: the shader translator, whose output cache/programs.bin keeps (runtime/nvn/vulkan/exec.c): the cache stays
 # valid across builds until the translator changes. (Line endings ignored: the same sources hash the same everywhere.)
 SHADER_SRCS := runtime/nvn/maxwell/translate.c runtime/nvn/maxwell/shader.h
@@ -500,6 +510,7 @@ $(B)/data/.complete:
 gen:
 	cd tools && ../$(PY) gen.py sdk ../$(GAME)/exefs/sdk 0x02400000 ../$(GEN)/sdk --hle ../runtime/hle/hle_symbols.txt
 	cd tools && ../$(PY) gen.py main ../$(GAME)/exefs/main 0x00200000 ../$(GEN)/main
+	echo '$(GEN_ID)' > $(GEN)/gen.id
 
 # differential test of the recompiler against Unicorn (tools/test_lift.py)
 test-lift:
