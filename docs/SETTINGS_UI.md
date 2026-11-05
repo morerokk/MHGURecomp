@@ -1,7 +1,8 @@
 # Host settings overlay
 
 Minus + Plus (Back/Select + Start) or F1 opens a single panel inside the game.
-Insert still opens Forge. Options, Save and Reset share one scrolling flow, in that order.
+Insert still opens Forge; with a controller alone, Mods > Open the Forge menu opens it over the panel, which waits
+under it (Cancel in the Forge window, or Minus + Plus, closes it and returns to the panel). Options, Save and Reset share one scrolling flow, in that order.
 Back appears only as a guide beneath the options. Discard is available only
 in the unsaved-changes confirmation when leaving the menu. Menu Options also contains Restart and Exit. The panel is attached on
 every opening; detach allows dragging, and Move menu works with the controller.

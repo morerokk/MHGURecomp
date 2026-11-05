@@ -10,15 +10,19 @@
 //   - the host's main thread passes input on: while the menu is open, keyboard and mouse go to ImGui, and the
 //     controller moves through the menu (runtime/host_input.c then gives the game none)
 // The menu opens and closes with the key of Forge's config (nativeNX/forge/config.ini [menu] key; Insert by default).
+// With a controller alone (an Android TV box): the settings' Mods tab opens it, over the settings, which wait under
+// it (g_forge_over); Cancel in the Forge window (nothing else to cancel) or Start + Back closes it, back to them.
 #include <algorithm>
 #include <atomic>
 #include <cfloat>
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 #include <string>
 #include <vector>
 
 #include "imgui.h"
+#include "imgui_internal.h"  // (the Forge window's Cancel: ImGui's active item, popups and nav window)
 #ifndef MHGU_NULL_BACKEND
 #include "backends/imgui_impl_vulkan.h"
 #else  // (no renderer: no overlay)
@@ -48,6 +52,7 @@ bool shader_prewarm_progress(uint64_t *done, uint64_t *total);  // (runtime/nvn/
 
 static std::atomic<bool> g_enabled, g_ready, g_open, g_wants_text;
 static std::atomic<bool> g_settings_open, g_forge_open;
+static std::atomic<bool> g_forge_over;  // the Forge menu was opened from the settings: they wait under it, not drawn
 static std::mutex g_frame_lock;  // ImGui's frame: the game's thread, or the loading screen's before the game's first
 static int g_menu_key;
 static float g_font_size;
@@ -135,6 +140,7 @@ static ImGuiKey key_of(SDL_Scancode sc, SDL_Keycode kc) {
 
 static void set_open(bool open) {
     g_forge_open = open;
+    if (!open) g_forge_over = false;  // (the settings under it, if any, come back)
     g_open = open || g_settings_open;
     SDL_Window *w = ui_window();
     if (g_open) SDL_ShowCursor();  // (full screen hides it: runtime/ui.c)
@@ -152,15 +158,22 @@ void overlay_face_positions(const int positions[4]) {
 int overlay_face_position(int semantic) { return g_face_positions[semantic & 3]; }
 void overlay_request_close(void) {
     settings_panel_request_close();
+    g_forge_over = false;  // (the exit question shows, beside the Forge window if it is open)
     g_settings_open = true;
     set_open(g_forge_open);
 }
 bool overlay_settings_dirty(void) { return settings_panel_dirty(); }
 void overlay_toggle_settings(void) {
     if (!g_enabled) return;
+    if (g_forge_over) { set_open(false); return; }  // (back to the settings under it)
     if (g_settings_open) { settings_panel_request_back(); return; }
     g_settings_open = true;
     set_open(g_forge_open);
+}
+void overlay_menu_chord(void) {
+    if (!g_enabled) return;
+    if (g_forge_open && !g_settings_open) { set_open(false); return; }  // (Forge's menu alone: closed)
+    overlay_toggle_settings();
 }
 
 bool overlay_event(const SDL_Event *e) {
@@ -221,9 +234,12 @@ bool overlay_event(const SDL_Event *e) {
     return true;
 }
 
+static bool g_pad_fresh;  // (g_in_lock) the host has given the controller since the last frame took it
+
 void overlay_pad(const OverlayPad *p) {
     std::lock_guard<std::mutex> l(g_in_lock);
     g_pad = *p;
+    g_pad_fresh = true;
 }
 
 bool overlay_enabled(void) { return g_enabled; }
@@ -233,10 +249,13 @@ bool overlay_wants_text(void) { return g_wants_text; }
 static void apply_input(ImGuiIO &io) {
     std::vector<Ev> evs;
     OverlayPad pad;
+    bool fresh;
     {
         std::lock_guard<std::mutex> l(g_in_lock);
         evs.swap(g_in);
         pad = g_pad;
+        fresh = g_pad_fresh;
+        g_pad_fresh = false;
     }
     for (const Ev &e : evs) {
         switch (e.kind) {
@@ -260,27 +279,32 @@ static void apply_input(ImGuiIO &io) {
             io.ClearInputMouse();
             memset(&g_pad, 0, sizeof g_pad);
             pad = {};
+            fresh = false;  // (the zeros above are no reading: a button held through it is still held)
             break;
         }
     }
     // the controller (as Forge maps it: A activates, B cancels, the left stick and the d-pad move)
     if (!g_open) pad = {};
     // Apply only to settings. Forge retains its existing semantic A/B mapping.
-    if (g_settings_open) {
+    bool settings = g_settings_open && !g_forge_over;  // (the settings have the controller)
+    if (settings) {
         int a = overlay_face_position(0), b = overlay_face_position(1);
         int confirm, cancel;
         menu_confirm_buttons(config_live_menu_confirm(), a, b, pad.a, pad.b, &confirm, &cancel);
         pad.a = confirm; pad.b = cancel;
     }
-    static int last_policy = -1;
-    static bool wait_release, was_settings;
-    if (g_settings_open && !was_settings) wait_release = true;
-    was_settings = g_settings_open;
-    int policy = g_settings_open ? config_live_menu_confirm() : MENU_CONFIRM_ORIGINAL;
+    // A or B held from the menu that had the controller (the settings' row that opened Forge's menu, Cancel that
+    // closed it) does nothing in the next one until let go: as the host reads the controller, not as the clear left it
+    static int last_policy = -1, was_owner;
+    static bool wait_release;
+    int owner = settings ? 1 : g_forge_open ? 2 : 0;
+    if (owner && owner != was_owner) wait_release = true;
+    was_owner = owner;
+    int policy = settings ? config_live_menu_confirm() : MENU_CONFIRM_ORIGINAL;
     if (last_policy >= 0 && policy != last_policy) wait_release = true;
     last_policy = policy;
     if (wait_release) {
-        if (!pad.a && !pad.b) wait_release = false;
+        if (fresh && !pad.a && !pad.b) wait_release = false;
         pad.a = pad.b = false;
     }
     io.AddKeyEvent(ImGuiKey_GamepadFaceDown, pad.a);
@@ -712,14 +736,28 @@ void overlay_frame(void *cpu) {
         forge_imgui_init(cpu);
     }
     ImGui_ImplVulkan_NewFrame();
-    settings_panel_before_frame(g_settings_open);
+    // Cancel in the Forge window closes it when there is nothing else in it to cancel (an item being edited, a popup,
+    // a child window): as of before this frame's NewFrame, which acts on Cancel
+    ImGuiContext &g = *ImGui::GetCurrentContext();
+    bool forge_idle = g_forge_open && g.ActiveId == 0 && g.OpenPopupStack.Size == 0 && g.NavWindow &&
+                      g.NavWindow == g.NavWindow->RootWindow && !strcmp(g.NavWindow->Name, "forge");
+    bool under = g_forge_over;  // (the settings wait under Forge's menu: neither drawn nor given input)
+    if (!under) settings_panel_before_frame(g_settings_open);
     ImGui::NewFrame();
-    bool settings = g_settings_open;
-    settings_panel(&settings);
-    if (settings_panel_confirming()) settings = true;
-    if (settings != g_settings_open) { g_settings_open = settings; set_open(g_forge_open); }
+    if (!under) {
+        bool settings = g_settings_open;
+        settings_panel(&settings);
+        if (settings_panel_confirming()) settings = true;
+        if (settings != g_settings_open) { g_settings_open = settings; set_open(g_forge_open); }
+        if (settings_panel_take_forge() && g_settings_open) {
+            g_forge_over = true;
+            set_open(true);
+            ImGui::SetNextWindowFocus();  // (the controller moves in it, even if it was open beside the settings)
+        }
+    }
     if (g_forge_open) {
         bool keep = true;
+        if (forge_idle && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) keep = false;
         ImGui::SetNextWindowPos(ImVec2(40 * scale, 40 * scale), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(420 * scale, 360 * scale), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("forge", &keep)) {

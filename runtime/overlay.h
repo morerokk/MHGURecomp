@@ -23,7 +23,8 @@ bool overlay_settings_dirty(void);
 void overlay_request_close(void); // Close / Alt+F4 routes to controller confirmation inside settings.
 void overlay_face_positions(const int positions[4]);
 int overlay_face_position(int semantic); // A, B, X, Y -> physical south/east/west/north.
-void overlay_toggle_settings(void); // host main thread: F1 or Start + Back
+void overlay_toggle_settings(void); // host main thread: F1 (one level back while open; over Forge's menu: closes that)
+void overlay_menu_chord(void); // host main thread: Start + Back. As F1, but Forge's menu open by itself closes
 // Any thread: a notice shown over the game for a few seconds (title on its own line; the latest replaces any other).
 void overlay_notice(const char *title, const char *text);
 

@@ -347,8 +347,10 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   what was patched and loaded (`[mods]` lines).
 - Forge plugins (`.nro` in `romfs\nativeNX\plugins\`) are loaded. Forge's own loader (the `exefs\subsdk9` that
   Forge and mods with Forge plugins include) is not needed and is passed over: the port runs the plugins itself. Forge's menu with the plugins' settings opens with
-  Insert (or the key in Forge's own `config.ini`, if a mod includes Forge's files, which can also set `[log] level`);
-  use the mouse, keyboard or controller in it. While it is open the game gets no controller input. Window positions
+  Insert (or the key in Forge's own `config.ini`, if a mod includes Forge's files, which can also set `[log] level`),
+  or, with a controller alone, with **Open the Forge menu** at the bottom of the settings' Mods tab;
+  use the mouse, keyboard or controller in it. On a controller, the button that cancels in the game's menus (when
+  nothing in the Forge window is left to cancel) or Start + Back closes it. While it is open the game gets no controller input. Window positions
   are kept in `forge_imgui.ini`.
 - You do not need any resolution, FPS cap or connection fix mods. These features are included with this port.
 

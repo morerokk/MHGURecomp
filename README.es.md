@@ -378,8 +378,10 @@ juego al iniciarlo.
 - Se cargan los plugins de Forge (`.nro` en `romfs\nativeNX\plugins\`). El cargador propio de Forge (el
   `exefs\subsdk9` que incluyen Forge y los mods con plugins de Forge) no hace falta y se ignora: el port ejecuta los
   plugins él mismo. El menú de Forge con los ajustes de los plugins se abre con Insert (o la tecla del `config.ini`
-  de Forge, si un mod incluye los archivos de Forge, que también puede fijar `[log] level`); usa el ratón, el teclado o
-  el mando en él. Mientras está abierto, el juego no recibe la entrada del mando. Las posiciones de las ventanas se
+  de Forge, si un mod incluye los archivos de Forge, que también puede fijar `[log] level`) o, solo con mando, con
+  **Abrir el menú de Forge** al final de la pestaña Mods de las opciones; usa el ratón, el teclado o el mando en él.
+  Con mando, el botón que cancela en los menús del juego (cuando no queda nada que cancelar en la ventana de Forge) o
+  Start + Back lo cierra. Mientras está abierto, el juego no recibe la entrada del mando. Las posiciones de las ventanas se
   guardan en `forge_imgui.ini`.
 - No necesitas mods de resolución, de límite de FPS ni de conexión. Este port ya incluye esas funciones.
 
