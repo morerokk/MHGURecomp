@@ -590,7 +590,7 @@ static int act(int st, int action) {
     return st == ST_FAILED;
 }
 
-// The window's icon: the game's with a download arrow. Windows takes it from the exe (extras/icon/mhgurecomp-updater.rc),
+// The window's icon: a Palico, the game's is a greatsword. Windows takes it from the exe (extras/icon/mhgurecomp-updater.rc),
 // Linux from extras/icon/mhgurecomp-updater-128.png, built in here (the path is relative to the repo, where make runs).
 #ifndef _WIN32
 __asm__(".pushsection .rodata\n.globl mhgu_updater_icon_png\nmhgu_updater_icon_png:\n"
