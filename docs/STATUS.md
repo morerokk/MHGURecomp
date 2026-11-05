@@ -365,6 +365,17 @@ HR72 hosting a Wycademy Hub, client a new HR1 save with only Village 1 star): De
 Fungal Hunt (105, a 1-star quest the client hadn't unlocked) refused; Find the Ferns (101) joined. A Forge plugin
 could do the same (same hooks), but the HP part is the port's own.
 
+Maps (2026-11-05): a Village quest's supply box has one Map (0x6b3), a Hub quest's four. Started from the Hub or
+Pub (hpscale's test, `hpscale_village_from_hub`), it gets 3 more in the box's last empty slots. Supply data: the
+quest arc's quest\supp\supp_<n> (rSupplyList, DTI 0x1a8acf0): f32 1.0, u32 count, then entries of 40 slots
+{u16 item, u8 count, u8 group} (in memory 0xa4 B: +4 items, +0x54 counts, +0x7c groups; a nonzero group starts a
+delivery's items, 0 continues the previous). The box is sQuest +0x1a54: +4 cQuestData, +0xc 40 x {u16 item, u16
+count}, +0xac next slot, +0xc0 a bit per slot that is in the box now. 0x5abc00 (quest start) clears it, 0x5accbc
+copies group 0's non-empty items from slot 0 (bits set), and 0x5ace14 the deliveries' after them (bits clear until
+they arrive; delivery kind 4 from slot 32 on: Find the Ferns, 101, fills 32-39 so). Hooked after 0x5ace14: the maps
+go in the last empty slots (101: 29-31), so they never take a delivery's place. Tested with the hub test forced in
+101 (MHGU_VQ_TRACE=1 logs the box): maps in 29-31, bits set; not yet seen in the box's menu, nor in multiplayer.
+
 ## Urgent quests count for everyone (2026-11-01)
 
 ini [Multiplayer] ShareUrgentCredit = On (default, applies at Save): an Urgent quest someone else posted counts for you

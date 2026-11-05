@@ -18,13 +18,21 @@
 // The switch: the list job runs again (as at the area's loading; ~0.4 s the first time, then a few ms) and the UI goes
 // back to its first state, which lays out the menu anew. Only in the rank menu (UI state 1) and star menu (2): in the
 // quest list L / R page through a quest's details.
-//   MHGU_VQ_TRACE=1   log the filter's verdicts (once per counter type and quest group)
+// Maps: a Village quest's supply box holds one Map (a Hub quest's four). Started from the Hub or the Pub (the test
+// hpscale.c uses for its HP), the box gets a Map in its last 3 slots too, the bottom right. The box (sQuest +0x1a54):
+// +4 cQuestData, +0xc 40 slots {u16 item, u16 count}, +0xc0 a bit per slot that is in the box now (delayed
+// deliveries' slots are filled at the start and their bits set when they arrive). At a quest's start 0x5abc00 clears
+// it, 0x5accbc fills it from the quest's rSupplyList (quest\supp\supp_<number>: 40 slots {item, count, group}, the
+// group-0 items from slot 0 on, skipping empty ones) and then 0x5ace14 adds the deliveries' items after them (or from
+// slot 32 on, for one kind). The maps go in after that, in the last empty slots: they never take a delivery's place.
+//   MHGU_VQ_TRACE=1   log the filter's verdicts (once per counter type and quest group), and the supply box
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "../config.h"
 #include "../hle.h"
+#include "../mods.h"
 #include "input.h"
 
 // main v1.4.0, runtime addresses
@@ -54,6 +62,13 @@
 #define AREA_HUB          0
 #define AREA_VILLAGE      1           // (any village: they share the Village quest categories)
 #define AREA_PUB          7
+#define FN_SUPPLY_DELIVER 0x5ace14u   // (supply box): the delayed deliveries' items, after the box's own (0x5accbc)
+#define BOX_QUEST         0x4u        // supply box: cQuestData * (+0x8 quest number)
+#define BOX_SLOTS         0xcu        // supply box: 40 x {u16 item, u16 count}
+#define BOX_IN            0xc0u       // supply box: a bit per slot in the box now
+#define BOX_COUNT         40u
+#define ITEM_MAP          0x6b3u      // Map (the supply item)
+#define HUB_MAPS          3u          // added: 4 with the quest's own
 
 static bool g_village;  // the counter shows Village quests
 static int g_trace;
@@ -204,9 +219,37 @@ static void ui_update(Cpu *c) {
 
 // The hooks are set whatever the setting: each follows [Village Quests] VillageQuestsInHub as it is now (a Save in the
 // settings menu turns it on or off; when off, the counter goes back to the Hub's quests at its rank or star menu).
+// A Village quest started from the Hub or the Pub: a Map for each hunter, as in a Hub quest (see the top).
+static void supply_deliver(Cpu *c) {
+    uint32_t box = c->r[0];
+    fnhook_call_original(c, FN_SUPPLY_DELIVER);
+    uint32_t qd = box ? LD32(box + BOX_QUEST) : 0, q = qd ? LD32(qd + 8) : 0;
+    bool maps = q && village_active() && hpscale_village_from_hub(q);
+    uint32_t added = 0;
+    for (uint32_t i = BOX_COUNT; maps && i-- > 0 && added < HUB_MAPS;) {
+        uint32_t slot = box + BOX_SLOTS + 4 * i, in = box + BOX_IN + 4 * (i / 32);
+        if (LD16(slot)) continue;
+        ST16(slot, ITEM_MAP);
+        ST16(slot + 2, 1);
+        ST32(in, LD32(in) | 1u << (i % 32));
+        added++;
+    }
+    if (added) LOG("[vqhub] Village quest %07u from the Hub: %u Map(s) added to the supply box\n", q, added);
+    if (g_trace && box) {
+        char s[BOX_COUNT * 16] = "", *p = s;
+        for (uint32_t i = 0; i < BOX_COUNT; i++) {
+            uint32_t slot = box + BOX_SLOTS + 4 * i, in = LD32(box + BOX_IN + 4 * (i / 32)) >> (i % 32) & 1;
+            if (LD16(slot))
+                p += snprintf(p, (size_t)(s + sizeof s - p), " %u:%x x%u%s", i, LD16(slot), LD16(slot + 2), in ? "" : "(later)");
+        }
+        LOG("[vqhub] quest %07u supply box:%s\n", q, s);
+    }
+}
+
 void villagehub_init(void) {
     g_trace = getenv("MHGU_VQ_TRACE") != NULL;
     g_path = hle_alloc(64);
+    fnhook_set(FN_SUPPLY_DELIVER, hle_register("villagehub:supply_deliver", supply_deliver));
     fnhook_set(FN_QUEST_FILTER, hle_register("villagehub:quest_filter", quest_filter));
     fnhook_set(FN_QUEST_LOOKUP, hle_register("villagehub:quest_lookup", quest_lookup));
     fnhook_set(FN_CATEGORY_BUILD, hle_register("villagehub:category_build", category_build));

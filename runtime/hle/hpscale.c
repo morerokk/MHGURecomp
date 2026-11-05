@@ -54,6 +54,12 @@ static uint32_t quest_no(void) {
     return sane(qd) ? LD32(qd + 8) : 0;
 }
 
+// A Village quest started from the Hub or the Hunters' Pub (the town seen last). runtime/hle/villagehub.c gives it
+// the Hub's maps for 4 hunters with the same test.
+bool hpscale_village_from_hub(uint32_t quest) {
+    return quest && village_quest(quest) && (g_town == 0 || g_town == 7);
+}
+
 static int hunters(void) {
     uint32_t sel = LD32(G_SELECTOR);
     int n = sane(sel) ? (int)LD32(sel + 0xd750) : 0;
