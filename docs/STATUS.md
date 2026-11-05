@@ -1027,6 +1027,38 @@ it, and bundling AMD's SDK DLLs (PR 168) would add 36 MB (uncompressed) for few 
 has `Upscaler = ...` loads as before: the line is logged as an unknown setting, ignored and kept. The instance asks for
 Vulkan 1.2 in every case now.
 
+## Interpreter: pre-decoded blocks (2026-11-06, branch perf/interp-blocks)
+
+Asked for MH4U Port (reports: slow loading screens, frame drops with a bowgun even in the village, a laggy item box;
+slower than on emulators, which JIT the mod's code). The costs are the ones measured above (the "has skill" hook,
+quest_group_rename): the mod's own code, which only the interpreter runs. It took ~25 cycles a guest instruction
+(4.95 ns here), decoding every instruction each time it ran. Now (runtime/interp.c "pre-decoded blocks") a run
+decodes a straight stretch once into ops (up to an instruction that may branch, the end of its interpreted range, or
+32): the class function the decode picks, called without decoding again, and fast handlers for the common forms
+(data processing with an immediate or LSL'd register, CMP / CMN / TST, ADDS / SUBS, LDR / STR / LDRB / STRB / LDRH /
+STRH / LDRSB / LDRSH with an immediate or LSL'd register offset and writeback forms, literal loads, MOVW / MOVT, B /
+BL / BX / BLX). Anything else runs interp_exec as before. Blocks are per thread (no locks), direct-mapped by pc in a
+2 MiB arena (dropped when full) and link to the last two blocks they went on to. Changed code: each op compares the
+word in memory it was decoded from before it runs; fnhook_set / fnhook_keep_entry bump g_code_gen (code_word reads
+the hook bits), which drops a thread's blocks at its next block. interpwatch / interpread step one instruction the
+old way while on.
+- Checked: tools/test_lift.py --interp-ops (new: the ops through interp_exec_op) against Unicorn, 20000 instructions
+  of main and of sdk, and 20000 more of the fast-path forms each: none different from --interp and the lifted C (the
+  one sdk failure, `and r3, r5, r3` at 0x2451bd4, fails the lifted C and --interp too: the test's). The test harness
+  had bit-rotted for --interp (interp.c's newer externs): stubs added.
+- Standalone (a scratch harness running the game's own code interpreted): adler32 over 1 MiB 20.4 -> 5.7 ms,
+  the SDK's qsort of 20000 ints 203 -> 98 ms (2.5 ns an instruction, branchy code: blocks are ~5 instructions).
+- In the game (hidden window, MH4U Port core 1.8.0 + its 4 monster packages from the releases, testsave/save_0,
+  MHGU_QUICKHUNT=101, the master build at 6d81cc3 against this): the town's load with the mod 6.2 -> 3.0 s (from
+  "tigerstripe_zamtrios installed" to the town, two runs each, within 0.2 s); quest_group_rename's stretch 4.95 ->
+  2.3 ns an instruction; in quest 101 the interpreter 160 -> 82 ms a second of play (28 M instructions/s, 99% the
+  "has skill" hook at 34000 calls/s, 240 fps). The mod's log the same (710 lines), no faults. Not tried by hand: a
+  bowgun, the item box, a laptop CPU, Android / Linux builds (plain C, nothing platform-specific added).
+- Still the mod's to fix for most of the rest: gear_has_skill_c rescans every monster's sections per call (~820
+  instructions, almost always "no"); keeping the SKIL pointers once loaded cuts it to a few dozen. Further on our side:
+  tail-call threaded ops (each handler jumping to the next) might give another ~1.5x; matching an emulator would take a
+  JIT (AArch32 -> x86-64 and -> AArch64), a project of its own.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,

@@ -193,6 +193,7 @@ void fnhook_keep_entry(uint32_t addr, uint32_t w0, uint32_t w1) {
         __atomic_store_n(&nkept, n + 1, __ATOMIC_RELEASE);
     }
     pthread_mutex_unlock(&kept_lock);
+    interp_code_changed();
 }
 
 bool fnhook_entry_word(uint32_t pc, uint32_t *w) {
@@ -236,6 +237,7 @@ bool fnhook_set(uint32_t addr, uint32_t detour) {
     if (detour) __atomic_fetch_or(&g_fnhook[addr >> 5], bit, __ATOMIC_RELEASE);
     else __atomic_fetch_and(&g_fnhook[addr >> 5], (uint8_t)~bit, __ATOMIC_RELEASE);
     pthread_mutex_unlock(&hook_lock);
+    interp_code_changed();  // (code_word reads the bit)
     return true;
 }
 
