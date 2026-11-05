@@ -1571,26 +1571,413 @@ void interp_run(Cpu *c) {
     g_ip_pc = 0;  // (back in recompiled code or the host: a fault there is not the plugin's)
 }
 
+// ================================================================ pre-decoded blocks
+// A run decodes a straight stretch of instructions once (up to one that may branch, the end of its interpreted range,
+// or BLOCK_MAX) into ops: the function the decode above picks for the word, called without decoding it again, and
+// fast handlers with the fields taken out for the most common forms (data processing with an immediate or an LSL'd
+// register, compares, ADDS / SUBS, loads / stores with an immediate or LSL'd register offset, MOVW / MOVT). Anything
+// that may branch or link, and whatever is not listed, runs interp_exec, so the semantics stay those above
+// (tools/test_lift.py --interp-ops checks the ops against Unicorn). The blocks are the thread's own (no locks).
+// Changed code: each op keeps the word in memory it was decoded from and compares it before it runs (a different
+// word: decoded again); a hook set or an entry's words kept (dispatch.c) bump g_code_gen, which drops the thread's
+// blocks at its next block.
+volatile uint32_t g_code_gen;
+
+typedef struct Op Op;
+typedef uint32_t (*OpFn)(Cpu *c, const Op *o, uint32_t pc, int *link);
+struct Op {
+    OpFn fn;
+    uint32_t w;              // the instruction (code_word: a hooked entry's kept word)
+    uint32_t mem;            // the word in memory when it was decoded
+    uint32_t imm;            // immediate, or a load / store's offset (negative: U clear)
+    uint8_t rd, rn, rm, sh;  // registers (rd: a load / store's rt), LSL amount (TST immediate: carry 0 / 1, 2 kept)
+    uint8_t cond;            // tested before fn runs (14: always, also for interp_exec, which tests it itself)
+};
+
+#define OPFN(name) static uint32_t name(Cpu *c, const Op *o, uint32_t pc, int *link)
+OPFN(op_exec) { return interp_exec(c, pc, o->w, link); }
+OPFN(op_data_proc) { (void)link; return data_proc(c, pc, o->w); }
+OPFN(op_halfword_mul) { (void)link; return halfword_mul(c, pc, o->w); }
+OPFN(op_multiply) { (void)link; return multiply(c, pc, o->w); }
+OPFN(op_sync) { (void)link; return sync_insn(c, pc, o->w); }
+OPFN(op_extra_ldst) { (void)link; return extra_ldst(c, pc, o->w); }
+OPFN(op_ldst) { (void)link; return ldst_word_byte(c, pc, o->w); }
+OPFN(op_media) { (void)link; return media(c, pc, o->w); }
+OPFN(op_ldm_stm) { (void)link; return ldm_stm(c, pc, o->w); }
+OPFN(op_vfp) { (void)link; vfp(c, pc, o->w); return pc + 4; }
+OPFN(op_b) { (void)c, (void)link; return pc + 8 + o->imm; }
+OPFN(op_bl) { c->r[14] = pc + 4; *link = 1; return pc + 8 + o->imm; }
+OPFN(op_bx) {  // (rm not pc)
+    (void)link;
+    uint32_t t = c->r[o->rm];
+    if (t & 1) rt_thumb(c, pc);
+    return t;
+}
+OPFN(op_blx) {
+    uint32_t t = c->r[o->rm];
+    if (t & 1) rt_thumb(c, pc);
+    c->r[14] = pc + 4;
+    *link = 1;
+    return t;
+}
+OPFN(op_movw) { (void)link; c->r[o->rd] = o->imm; return pc + 4; }
+OPFN(op_movt) { (void)link; c->r[o->rd] = (c->r[o->rd] & 0xFFFFu) | o->imm; return pc + 4; }
+
+// data processing, no flags: _i an immediate, _r a register LSL #sh (rd, rn, rm not pc)
+#define DP(name, expr)                                                                                                 \
+    OPFN(name##_i) { (void)link; uint32_t a = c->r[o->rn], b = o->imm; (void)a; c->r[o->rd] = (expr); return pc + 4; } \
+    OPFN(name##_r) {                                                                                                   \
+        (void)link;                                                                                                    \
+        uint32_t a = c->r[o->rn], b = c->r[o->rm] << o->sh;                                                            \
+        (void)a;                                                                                                       \
+        c->r[o->rd] = (expr);                                                                                          \
+        return pc + 4;                                                                                                 \
+    }
+DP(op_and, a & b)
+DP(op_eor, a ^ b)
+DP(op_sub, a - b)
+DP(op_rsb, b - a)
+DP(op_add, a + b)
+DP(op_orr, a | b)
+DP(op_mov, b)
+DP(op_bic, a & ~b)
+DP(op_mvn, ~b)
+#undef DP
+static const OpFn dp_imm[16] = {op_and_i, op_eor_i, op_sub_i, op_rsb_i, op_add_i, [12] = op_orr_i, op_mov_i, op_bic_i, op_mvn_i};
+static const OpFn dp_reg[16] = {op_and_r, op_eor_r, op_sub_r, op_rsb_r, op_add_r, [12] = op_orr_r, op_mov_r, op_bic_r, op_mvn_r};
+
+// flag-setting arithmetic and compares
+#define DPS(name, stmt)                                                                                                \
+    OPFN(name##_i) { (void)link; uint32_t a = c->r[o->rn], b = o->imm; stmt; return pc + 4; }                       \
+    OPFN(name##_r) { (void)link; uint32_t a = c->r[o->rn], b = c->r[o->rm] << o->sh; stmt; return pc + 4; }
+DPS(op_subs, c->r[o->rd] = f_subs(c, a, b))
+DPS(op_adds, c->r[o->rd] = f_adds(c, a, b))
+DPS(op_cmp, f_subs(c, a, b))
+DPS(op_cmn, f_adds(c, a, b))
+#undef DPS
+OPFN(op_tst_i) {
+    (void)link;
+    uint32_t r = c->r[o->rn] & o->imm;
+    if (o->sh != 2) c->cf = o->sh;
+    c->nf = r >> 31;
+    c->zf = r == 0;
+    return pc + 4;
+}
+OPFN(op_tst_r) {  // (LSL #0: C kept)
+    (void)link;
+    uint32_t r = c->r[o->rn] & c->r[o->rm];
+    c->nf = r >> 31;
+    c->zf = r == 0;
+    return pc + 4;
+}
+
+// loads / stores: _io base + immediate, _ro base + register LSL #sh, no writeback; _pre / _post with writeback
+// (a load's rt is not its base); rt not pc
+#define LDSB(a) ((uint32_t)(int32_t)(int8_t)LD8(a))
+#define LDSH(a) ((uint32_t)(int32_t)(int16_t)LD16(a))
+#define LOAD(name, EA, LD) OPFN(name) { (void)link; uint32_t ea = (EA); c->r[o->rd] = LD(ea); return pc + 4; }
+#define STORE(name, EA, ST) OPFN(name) { (void)link; uint32_t ea = (EA); ST(ea, c->r[o->rd]); return pc + 4; }
+#define EA_IO (c->r[o->rn] + o->imm)
+#define EA_RO (c->r[o->rn] + (c->r[o->rm] << o->sh))
+#define LDST_FORMS(sfx, EA)                                                                                            \
+    LOAD(op_ldr##sfx, EA, LD32) LOAD(op_ldrb##sfx, EA, LD8) STORE(op_str##sfx, EA, ST32) STORE(op_strb##sfx, EA, ST8)  \
+    LOAD(op_ldrh##sfx, EA, LD16) STORE(op_strh##sfx, EA, ST16) LOAD(op_ldrsb##sfx, EA, LDSB) LOAD(op_ldrsh##sfx, EA, LDSH)
+LDST_FORMS(_io, EA_IO)
+LDST_FORMS(_ro, EA_RO)
+LOAD(op_ldr_lit, pc + 8 + o->imm, LD32)
+#define LOADWB(name, LD, PRE)                                                                                          \
+    OPFN(name) {                                                                                                       \
+        (void)link;                                                                                                    \
+        uint32_t b = c->r[o->rn], v = LD(PRE ? b + o->imm : b);                                                        \
+        c->r[o->rn] = b + o->imm;                                                                                      \
+        c->r[o->rd] = v;                                                                                               \
+        return pc + 4;                                                                                                 \
+    }
+#define STOREWB(name, ST, PRE)                                                                                         \
+    OPFN(name) {                                                                                                       \
+        (void)link;                                                                                                    \
+        uint32_t b = c->r[o->rn];                                                                                      \
+        ST(PRE ? b + o->imm : b, c->r[o->rd]);                                                                         \
+        c->r[o->rn] = b + o->imm;                                                                                      \
+        return pc + 4;                                                                                                 \
+    }
+LOADWB(op_ldr_pre, LD32, 1) LOADWB(op_ldrb_pre, LD8, 1) STOREWB(op_str_pre, ST32, 1) STOREWB(op_strb_pre, ST8, 1)
+LOADWB(op_ldr_post, LD32, 0) LOADWB(op_ldrb_post, LD8, 0) STOREWB(op_str_post, ST32, 0) STOREWB(op_strb_post, ST8, 0)
+#undef LOAD
+#undef STORE
+#undef LOADWB
+#undef STOREWB
+
+static OpFn decode_data_proc(Op *o, uint32_t w) {
+    uint32_t I = BIT(w, 25), opc = BITS(w, 21, 4), S = BIT(w, 20), rn = BITS(w, 16, 4), rd = BITS(w, 12, 4);
+    uint32_t rm = BITS(w, 0, 4);
+    o->rd = (uint8_t)rd, o->rn = (uint8_t)rn, o->rm = (uint8_t)rm;
+    if (I) {
+        int carry;
+        o->imm = imm_operand(w, &carry);
+        o->sh = carry < 0 ? 2 : (uint8_t)carry;
+    } else {
+        if (BIT(w, 4) || BITS(w, 5, 2) != 0 || rm == 15) return op_data_proc;  // (only LSL #imm)
+        o->sh = (uint8_t)BITS(w, 7, 5);
+    }
+    if (opc == 13 || opc == 15) o->rn = 0;  // (MOV / MVN: no first operand)
+    else if (rn == 15) return op_data_proc;
+    if (!S) {
+        if (rd == 15) return op_data_proc;
+        OpFn f = (I ? dp_imm : dp_reg)[opc];
+        return f ? f : op_data_proc;
+    }
+    switch (opc) {
+    case 2: return rd == 15 ? op_data_proc : I ? op_subs_i : op_subs_r;
+    case 4: return rd == 15 ? op_data_proc : I ? op_adds_i : op_adds_r;
+    case 10: return I ? op_cmp_i : op_cmp_r;
+    case 11: return I ? op_cmn_i : op_cmn_r;
+    case 8: return I ? op_tst_i : o->sh == 0 ? op_tst_r : op_data_proc;
+    default: return op_data_proc;
+    }
+}
+
+static OpFn decode_ldst(Op *o, uint32_t w) {  // LDR / STR / LDRB / STRB
+    uint32_t I = BIT(w, 25), P = BIT(w, 24), U = BIT(w, 23), B = BIT(w, 22), W = BIT(w, 21), L = BIT(w, 20);
+    uint32_t rn = BITS(w, 16, 4), rt = BITS(w, 12, 4), rm = BITS(w, 0, 4);
+    o->rd = (uint8_t)rt, o->rn = (uint8_t)rn, o->rm = (uint8_t)rm;
+    if (rt == 15) return op_ldst;
+    if (!I) {
+        o->imm = U ? BITS(w, 0, 12) : 0u - BITS(w, 0, 12);
+        if (P && !W) {
+            if (rn == 15) return L && !B ? op_ldr_lit : op_ldst;
+            return L ? (B ? op_ldrb_io : op_ldr_io) : (B ? op_strb_io : op_str_io);
+        }
+        if (rn == 15 || (L && rn == rt) || (!P && W)) return op_ldst;  // (P clear, W set: LDRT / STRT)
+        if (P) return L ? (B ? op_ldrb_pre : op_ldr_pre) : (B ? op_strb_pre : op_str_pre);
+        return L ? (B ? op_ldrb_post : op_ldr_post) : (B ? op_strb_post : op_str_post);
+    }
+    if (P && !W && U && BITS(w, 5, 2) == 0 && rn != 15 && rm != 15) {
+        o->sh = (uint8_t)BITS(w, 7, 5);
+        return L ? (B ? op_ldrb_ro : op_ldr_ro) : (B ? op_strb_ro : op_str_ro);
+    }
+    return op_ldst;
+}
+
+static OpFn decode_extra_ldst(Op *o, uint32_t w) {  // LDRH / STRH / LDRSB / LDRSH (LDRD / STRD: extra_ldst)
+    uint32_t I = BIT(w, 22), P = BIT(w, 24), U = BIT(w, 23), W = BIT(w, 21), L = BIT(w, 20), op2 = BITS(w, 5, 2);
+    uint32_t rn = BITS(w, 16, 4), rt = BITS(w, 12, 4), rm = BITS(w, 0, 4);
+    o->rd = (uint8_t)rt, o->rn = (uint8_t)rn, o->rm = (uint8_t)rm, o->sh = 0;
+    if (!P || W || rt == 15 || rn == 15) return op_extra_ldst;
+    int k = op2 == 1 ? (L ? 0 : 1) : op2 == 2 && L ? 2 : op2 == 3 && L ? 3 : -1;
+    if (k < 0) return op_extra_ldst;
+    static const OpFn io[4] = {op_ldrh_io, op_strh_io, op_ldrsb_io, op_ldrsh_io};
+    static const OpFn ro[4] = {op_ldrh_ro, op_strh_ro, op_ldrsb_ro, op_ldrsh_ro};
+    if (I) {
+        uint32_t off = (BITS(w, 8, 4) << 4) | BITS(w, 0, 4);
+        o->imm = U ? off : 0u - off;
+        return io[k];
+    }
+    return U && rm != 15 ? ro[k] : op_extra_ldst;
+}
+
+// The op for w. *end: w may branch (or ends the block for another reason): the last op of its block. Never fails:
+// a word that is not an instruction (a literal pool after a branch) is decoded as interp_exec, which would report it
+// only if it ran.
+static void decode_op(Op *o, uint32_t w, bool *end) {
+    memset(o, 0, sizeof *o);
+    o->fn = op_exec, o->w = w, o->cond = 14;
+    *end = false;
+    uint32_t cond = w >> 28, cls = BITS(w, 25, 3);
+    if (cond == 15) return;
+    OpFn f = NULL;
+    switch (cls) {
+    case 0:
+    case 1: {  // (dp_misc's decode)
+        uint32_t op = BITS(w, 20, 5);
+        if (!BIT(w, 25)) {
+            uint32_t b4 = BIT(w, 4), b7 = BIT(w, 7);
+            if ((op & 0x19) == 0x10 && b7 && !b4) {
+                f = op_halfword_mul;
+            } else if ((op & 0x19) == 0x10 && !b7) {  // misc: BX / BLX here, the rest (MRS, CLZ ...) interp_exec
+                uint32_t op2 = BITS(w, 4, 3);
+                o->rm = (uint8_t)BITS(w, 0, 4);
+                if (BITS(w, 21, 2) == 1 && (op2 == 1 || op2 == 3) && o->rm != 15) f = op2 == 1 ? op_bx : op_blx;
+                *end = true;
+            }
+            else if (b4 && b7) f = BITS(w, 5, 2) == 0 ? (BIT(w, 24) ? op_sync : op_multiply) : decode_extra_ldst(o, w);
+            else f = decode_data_proc(o, w);
+        } else if (op == 0x10 || op == 0x14) {  // MOVW / MOVT
+            uint32_t v = (BITS(w, 16, 4) << 12) | BITS(w, 0, 12);
+            o->rd = (uint8_t)BITS(w, 12, 4);
+            o->imm = op == 0x10 ? v : v << 16;
+            if (o->rd != 15) f = op == 0x10 ? op_movw : op_movt;
+        } else if ((op & 0x1B) != 0x12) {  // (MSR immediate / hints: interp_exec)
+            f = decode_data_proc(o, w);
+        }
+        if (BITS(w, 12, 4) == 15) *end = true;  // (may write pc)
+        break;
+    }
+    case 2:
+    case 3:
+        f = cls == 3 && BIT(w, 4) ? op_media : decode_ldst(o, w);
+        if (BITS(w, 12, 4) == 15) *end = true;
+        break;
+    case 4:
+        f = op_ldm_stm;
+        if (BIT(w, 20) && BIT(w, 15)) *end = true;
+        break;
+    case 5:  // B / BL
+        o->imm = (uint32_t)((int32_t)(w << 8) >> 6);
+        f = BIT(w, 24) ? op_bl : op_b;
+        *end = true;
+        break;
+    default:
+        if (BITS(w, 24, 4) == 0xF) { *end = true; return; }  // SVC
+        if (BITS(w, 8, 4) == 10 || BITS(w, 8, 4) == 11) f = op_vfp;
+        break;
+    }
+    if (f) o->fn = f, o->cond = (uint8_t)cond;
+}
+
+// (tools/test_lift.py --interp-ops) One instruction through its op: what a block runs for it.
+uint32_t interp_exec_op(Cpu *c, uint32_t pc, uint32_t w, int *link) {
+    Op o;
+    bool end;
+    decode_op(&o, w, &end);
+    *link = 0;
+    if (o.cond != 14 && !cond_pass(c, o.cond)) return pc + 4;
+    return o.fn(c, &o, pc, link);
+}
+
+#define BLOCK_MAX 32
+#define BLOCK_SLOTS 4096
+#define BLOCK_ARENA (2u << 20)
+// A block also remembers the last two blocks the run went on to inside interpreted code (link_pc 0: none), so a loop
+// or a call within the interpreted code skips the slot lookup and interp_owns. Links only point at blocks built since
+// the last drop (a drop clears the slots, and a block that links is reachable only from them).
+typedef struct Block Block;
+struct Block {
+    uint32_t pc, n;
+    uint32_t link_pc[2];
+    Block *link_to[2];
+    Op ops[];
+};
+typedef struct {
+    uint32_t gen, epoch;  // g_code_gen of the blocks; drops
+    size_t used;
+    Block *slot[BLOCK_SLOTS];  // direct-mapped by pc
+    _Alignas(16) uint8_t arena[BLOCK_ARENA];
+} BlockCache;
+static __thread BlockCache *t_blocks;
+
+static void blocks_drop(BlockCache *bc) {
+    memset(bc->slot, 0, sizeof bc->slot);
+    bc->used = 0;
+    bc->epoch++;
+}
+
+// Decodes the block at pc (replacing the slot's). A full arena drops every block first: no Block pointer is kept
+// across a call that may run another interpreted function (interp_run_inner looks its block up again after one).
+static __attribute__((noinline)) Block *block_build(BlockCache *bc, uint32_t pc) {
+    size_t most = sizeof(Block) + BLOCK_MAX * sizeof(Op);
+    if (bc->used + most > BLOCK_ARENA) blocks_drop(bc);
+    Block *b = (Block *)(bc->arena + bc->used);
+    uint32_t n = 0;
+    for (uint32_t a = pc;;) {
+        bool end;
+        Op *o = &b->ops[n++];
+        decode_op(o, code_word(a), &end);
+        o->mem = *(const uint32_t *)G2H(a);
+        a += 4;
+        if (end || n == BLOCK_MAX || !interp_owns(a)) break;
+    }
+    b->pc = pc, b->n = n;
+    b->link_pc[0] = b->link_pc[1] = 0;
+    bc->used += (sizeof(Block) + n * sizeof(Op) + 15) & ~(size_t)15;
+    bc->slot[(pc >> 2) & (BLOCK_SLOTS - 1)] = b;
+    return b;
+}
+
+static inline Block *block_at(uint32_t pc) {
+    BlockCache *bc = t_blocks;
+    if (__builtin_expect(!bc, 0)) {
+        bc = t_blocks = calloc(1, sizeof *bc);
+        if (!bc) FATAL("interp: no memory for the block cache\n");
+    }
+    uint32_t gen = __atomic_load_n(&g_code_gen, __ATOMIC_ACQUIRE);
+    if (__builtin_expect(bc->gen != gen, 0)) blocks_drop(bc), bc->gen = gen;
+    Block *b = bc->slot[(pc >> 2) & (BLOCK_SLOTS - 1)];
+    return b && b->pc == pc ? b : block_build(bc, pc);
+}
+
+// cond_pass as a table: bit NZCV (N bit 3 .. V bit 0) of cond_tab[cond] is set when cond passes
+static const uint16_t cond_tab[16] = {0xF0F0, 0x0F0F, 0xCCCC, 0x3333, 0xFF00, 0x00FF, 0xAAAA, 0x5555,
+                                      0x0C0C, 0xF3F3, 0xAA55, 0x55AA, 0x0A05, 0xF5FA, 0xFFFF, 0xFFFF};
+static inline int cond_ok(const Cpu *c, uint32_t cond) {
+    return (cond_tab[cond] >> ((c->nf << 3) | (c->zf << 2) | (c->cf << 1) | c->vf)) & 1;
+}
+
+// (debug: interpwatch / interpread on) One instruction, decoded as it runs, with the watches' checks.
+static __attribute__((noinline)) uint32_t step_watched(Cpu *c, uint32_t pc, int *link) {
+    g_ip_pc = g_ip_last = pc;
+    uint32_t wa = g_interp_watch, before = wa ? LD32(wa) : 0;
+    if (read_hi) read_check(c, pc, code_word(pc));
+    uint32_t next = interp_exec(c, pc, code_word(pc), link);
+    if (wa && LD32(wa) != before && watch_left > 0) {
+        watch_left--;
+        LOG("[watch] %08x: %08x -> %08x by %08x (r0 %08x lr %08x)\n", wa, before, LD32(wa), pc, c->r[0], c->r[14]);
+    }
+    return next;
+}
+
 static void interp_run_inner(Cpu *c) {
     g_ip_cpu = c;
     uint32_t ret = c->r[14], pc = c->pc, sp = c->r[13];
     uint64_t n = 0;  // (MHGU_INTERP_STATS: added to t_insns when the run ends)
+    Block *b = NULL, *nb = NULL;  // the block that ran last (NULL: none, or after a call out); the next, by a link
     for (;;) {
-        int link;
-        g_ip_pc = g_ip_last = pc;
-        uint32_t wa = g_interp_watch, before = wa ? LD32(wa) : 0;
-        if (read_hi) read_check(c, pc, code_word(pc));
-        n++;
-        uint32_t next = interp_exec(c, pc, code_word(pc), &link);
-        if (wa && LD32(wa) != before && watch_left > 0) {
-            watch_left--;
-            LOG("[watch] %08x: %08x -> %08x by %08x (r0 %08x lr %08x)\n", wa, before, LD32(wa), pc, c->r[0], c->r[14]);
+        int link = 0;
+        uint32_t next;
+        if (__builtin_expect(g_interp_watch | read_hi, 0)) {
+            next = step_watched(c, pc, &link);
+            n++;
+            b = nb = NULL;
+        } else {  // a block's ops while they run in sequence (pc: the op running)
+            b = nb ? nb : block_at(pc);
+            nb = NULL;
+            uint32_t epoch = t_blocks->epoch;
+            const Op *o = b->ops, *end = o + b->n;
+            for (;;) {
+                g_ip_pc = g_ip_last = pc;
+                if (__builtin_expect(*(const uint32_t *)G2H(pc) != o->mem, 0)) {  // (the code changed)
+                    b = block_build(t_blocks, pc);
+                    o = b->ops, end = o + b->n;
+                }
+                n++;
+                next = o->cond != 14 && !cond_ok(c, o->cond) ? pc + 4 : o->fn(c, o, pc, &link);
+                if (next != pc + 4 || link || ++o == end || next == ret) break;
+                pc = next;
+            }
+            if (t_blocks->epoch != epoch) b = NULL;  // (dropped while it ran: an SVC, a rebuild)
         }
+        // (after the last instruction run: pc is its address)
         if (next == ret && !link && c->r[13] >= sp) break;
+        if (b && t_blocks->gen == __atomic_load_n(&g_code_gen, __ATOMIC_ACQUIRE)) {  // (linked: interpreted code)
+            nb = b->link_pc[0] == next ? b->link_to[0] : b->link_pc[1] == next ? b->link_to[1] : NULL;
+            if (nb) {
+                pc = next;
+                continue;
+            }
+        }
         if (interp_owns(next)) {
             pc = next;
+            if (b) {  // link b to the block at next (unless finding it dropped the blocks)
+                uint32_t epoch = t_blocks->epoch;
+                nb = block_at(next);
+                if (t_blocks->epoch == epoch) {
+                    int k = b->link_pc[0] != 0;
+                    b->link_pc[k] = next, b->link_to[k] = nb;
+                }
+            }
             continue;
         }
+        b = NULL;  // (a call out may run other interpreted code, which may drop this thread's blocks)
         if (link) {
             c->pc = next;
             g_ip_pc = 0;

@@ -11,6 +11,8 @@
 #include <sys/mman.h>
 #endif
 
+#include <stdbool.h>
+
 #include "cpu.h"
 
 typedef void (*T)(Cpu *);
@@ -24,7 +26,15 @@ void rt_bkpt(Cpu *c, uint32_t imm, uint32_t pc) { (void)c; (void)imm; (void)pc; 
 void rt_udf(Cpu *c, uint32_t pc) { (void)c; (void)pc; abort(); }
 void rt_thumb(Cpu *c, uint32_t pc) { (void)c; (void)pc; abort(); }
 uint64_t rt_ticks(void) { return 0; }
-void rt_fatal_trace(void) { abort(); }  // (runtime/interp.c, --interp)
+void rt_fatal_trace(void) { abort(); }  // (runtime/interp.c, --interp / --interp-ops, and below)
+uint8_t g_fnhook[0x03000000u >> 5];  // (rt.h: HLE_BASE >> 5)
+bool fnhook_entry_word(uint32_t pc, uint32_t *w) { (void)pc; (void)w; return false; }
+bool kernel_mapped(uint64_t addr, uint32_t size) { (void)addr; (void)size; return true; }
+uint32_t kernel_heap_size(void) { return 0; }
+void forge_guest_fault(uint32_t pc, uint32_t addr, int size, int write, const char *why) {
+    (void)pc, (void)addr, (void)size, (void)write, (void)why;
+}
+uint64_t plat_now_ns(void) { return 0; }
 
 #define DATA 0x40000000u
 #define DATA_SIZE 0x2000u
