@@ -680,26 +680,45 @@ static void mouse_update(int *rx, int *ry) {
     *rx += (int)(x * t * 32767.0f), *ry += (int)(y * t * 32767.0f);
 }
 
-// The game's rumble (input_rumble) to the controller: on a change, at most every 16 ms (the game sends a value every
-// 5 ms, and a DualSense over Bluetooth takes a packet per call), renewed while it lasts, stopped at once.
+// The game's rumble (input_rumble) to the controller. It starts and stops at once; in between a new strength goes out
+// only when a motor moved by RUMBLE_STEP, at most every RUMBLE_CHANGE_NS (twice that on a wireless controller). The
+// game sends a value every 5 ms and a roar's changes nearly every time, while each new strength is an output report
+// that SDL's rumble thread writes holding the controller (HIDAPI: DualSense, DualShock 4...): its input is not read
+// meanwhile, and a Bluetooth write is slow. A new strength every 16 ms left the sticks stale and lost button presses
+// for the whole roar. Renewed while it lasts with the strength last sent (SDL sends no report for the same strength:
+// only its stop time moves).
+#define RUMBLE_STEP 0x0C00            // (of 0xFFFF: ~5%; the DualSense's motors take 8 bits)
+#define RUMBLE_CHANGE_NS 50000000ull
 static void rumble_update(void) {
-    static uint32_t sent, peak;
+    static uint32_t sent, peak, sends;
     static uint64_t sent_ns, on_ns;
     static SDL_Gamepad *sent_pad;
+    static bool wireless;
     uint32_t v = input_rumble();
     uint64_t now = plat_now_ns();
-    if (v && !on_ns) on_ns = now, peak = 0;  // (the log: each rumble's length and strongest motor values)
+    if (v && !on_ns) on_ns = now, peak = 0, sends = 0;  // (the log: each rumble's length, strongest motor values, reports)
     if (v) peak = ((v >> 16) > (peak >> 16) ? v & 0xFFFF0000u : peak & 0xFFFF0000u) | ((v & 0xFFFF) > (peak & 0xFFFF) ? v & 0xFFFF : peak & 0xFFFF);
     if (!v && on_ns) {
-        LOG("[input] rumble %.0f ms, low %u high %u%s\n", (now - on_ns) / 1e6, peak >> 16, peak & 0xFFFF, pad ? "" : " (no controller)");
+        LOG("[input] rumble %.0f ms, low %u high %u, %u strength(s) sent%s\n", (now - on_ns) / 1e6, peak >> 16, peak & 0xFFFF,
+            sends, pad ? (wireless ? " (wireless)" : "") : " (no controller)");
         on_ns = 0;
     }
     if (!pad) { sent_pad = NULL; return; }
-    if (pad != sent_pad) sent = 0, sent_pad = pad;
-    bool change = v != sent && (v == 0 || now - sent_ns >= 16000000ull), renew = v && now - sent_ns >= 100000000ull;
+    if (pad != sent_pad)
+        sent = 0, sent_pad = pad, wireless = SDL_GetGamepadConnectionState(pad) == SDL_JOYSTICK_CONNECTION_WIRELESS;
+    bool change;
+    if (!v || !sent) {
+        change = v != sent;  // (start, stop)
+    } else {
+        int dl = abs((int)(v >> 16) - (int)(sent >> 16)), dh = abs((int)(v & 0xFFFF) - (int)(sent & 0xFFFF));
+        change = (dl >= RUMBLE_STEP || dh >= RUMBLE_STEP) && now - sent_ns >= RUMBLE_CHANGE_NS * (wireless ? 2 : 1);
+    }
+    bool renew = v && now - sent_ns >= 100000000ull;
     if (!change && !renew) return;
-    SDL_RumbleGamepad(pad, (Uint16)(v >> 16), (Uint16)v, v ? 200 : 0);
-    sent = v, sent_ns = now;
+    uint32_t out = change ? v : sent;
+    SDL_RumbleGamepad(pad, (Uint16)(out >> 16), (Uint16)out, out ? 200 : 0);
+    if (change && v) sends++;
+    sent = out, sent_ns = now;
 }
 
 void host_input_update(void) {
