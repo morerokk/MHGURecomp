@@ -92,7 +92,10 @@ uint64_t plat_now_ns(void) {
     if (!qpf.QuadPart) QueryPerformanceFrequency(&qpf);
     LARGE_INTEGER t;
     QueryPerformanceCounter(&t);
-    return (uint64_t)((unsigned __int128)t.QuadPart * 1000000000u / (uint64_t)qpf.QuadPart);
+    // (no 128-bit division, __udivti3 is slow and this is called all the time; the same result)
+    uint64_t c = (uint64_t)t.QuadPart, f = (uint64_t)qpf.QuadPart;
+    if (f == 10000000) return c * 100;  // (the usual frequency)
+    return c / f * 1000000000u + c % f * 1000000000u / f;
 }
 
 #ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION

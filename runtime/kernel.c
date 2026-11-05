@@ -76,7 +76,8 @@ void kernel_signal(KObject *o) {
 
 // ------------------------------------------------------------------ time
 uint64_t rt_ticks(void) {  // 19.2 MHz system tick
-    return (uint64_t)((unsigned __int128)plat_now_ns() * 192 / 10000);
+    uint64_t ns = plat_now_ns();  // (ns * 12 / 625 without a 128-bit division: called all the time)
+    return ns / 625 * 12 + ns % 625 * 12 / 625;
 }
 
 static void deadline(struct timespec *ts, int64_t timeout_ns) {
