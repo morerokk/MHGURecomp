@@ -118,7 +118,11 @@ static void load_servers(void) {
         if (parse_server(t, &g_srv[g_nsrv])) g_nsrv++;
 }
 int ryu_server_count(void) { load_servers(); return g_nsrv; }
-bool ryu_enabled(void) { return ryu_server_count() > 0 || g_config.ldn_ryu_host[0]; }
+static char g_self[40];  // the server this game runs itself (ryusrv.h), when it does
+void ryu_set_self(const char *addr) { snprintf(g_self, sizeof g_self, "%s", addr ? addr : ""); }
+// The server a hub we create is made on: ini RyuHost, else our own server.
+const char *ryu_host_addr(void) { return g_config.ldn_ryu_host[0] ? g_config.ldn_ryu_host : g_self; }
+bool ryu_enabled(void) { return ryu_server_count() > 0 || ryu_host_addr()[0]; }
 
 // ---- sockets
 static bool send_all(rsock s, const void *b, size_t n) {
@@ -568,8 +572,8 @@ static Conn *begin(int server, bool host, uint32_t *fail) {
     load_servers();
     Server sv;
     int idx = server;
-    if (host && g_config.ldn_ryu_host[0] && server < 0) {
-        if (!parse_server(g_config.ldn_ryu_host, &sv)) { *fail = R_CONNECT_FAILURE; return NULL; }
+    if (host && ryu_host_addr()[0] && server < 0) {
+        if (!parse_server(ryu_host_addr(), &sv)) { *fail = R_CONNECT_FAILURE; return NULL; }
         idx = -1;
     } else if (server >= 0 && server < g_nsrv) {
         sv = g_srv[server];
@@ -607,7 +611,7 @@ uint32_t ryu_create(int server, const uint8_t *net_cfg, const uint8_t *sec_cfg, 
     conn_send(c, P_CREATE, req, CREATE_SIZE, req + CREATE_SIZE, adv_size);
     uint32_t r = wait_joined(c, ip, mask, info);
     if (r) { fail_lobby(); return r == R_CONNECT_FAILURE ? R_ACCESS_POINT_FAILED : r; }
-    LOG("[ryuldn] lobby created on %s as %u.%u.%u.%u\n", g_config.ldn_ryu_host[0] && server < 0 ? g_config.ldn_ryu_host : "the server",
+    LOG("[ryuldn] lobby created on %s as %u.%u.%u.%u\n", ryu_host_addr()[0] && server < 0 ? ryu_host_addr() : "the server",
         *ip >> 24, (*ip >> 16) & 255, (*ip >> 8) & 255, *ip & 255);
     return 0;
 }
@@ -676,7 +680,7 @@ void ryu_send(const RyuProxy *p, const void *data, uint32_t len) {
 RyuPeer *ryu_peer_join(const uint8_t *netinfo, const uint8_t *sec_cfg, const uint8_t *user, uint16_t lcv, const RyuPeerHooks *hooks,
                        void *ud, uint8_t *info_out, uint32_t *ip, uint32_t *mask, uint32_t *result) {
     Server sv;
-    if (!g_config.ldn_ryu_host[0] || !parse_server(g_config.ldn_ryu_host, &sv)) { *result = R_CONNECT_FAILURE; return NULL; }
+    if (!ryu_host_addr()[0] || !parse_server(ryu_host_addr(), &sv)) { *result = R_CONNECT_FAILURE; return NULL; }
     Conn *c = conn_open(&sv, -1, false, true);
     if (!c) { *result = R_CONNECT_TIMEOUT; return NULL; }
     pthread_mutex_lock(&c->mu);

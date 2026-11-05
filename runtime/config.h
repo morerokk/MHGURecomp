@@ -103,6 +103,8 @@ typedef struct {
     char ldn_room_pass[64];   // [Multiplayer] RoomPassword
     char ldn_room_nick[32];   // [Multiplayer] RoomName: the name shown in the room; "" MHGU Player
     int ldn_room_host;        // [Multiplayer] RoomHost: a hub you create lives in the room, for emulator players to join
+    int ldn_ryu_serve;        // [Multiplayer] RyuServe: this game runs the Ryujinx LDN server itself (runtime/net/ryusrv/) while local play is open
+    int ldn_ryu_serve_port;   // [Multiplayer] RyuServePort: its port; 0 = 30456, the LdnServer default
 } Config;
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
 // Cloud VM; a DuckDNS name, so it can move without a release). "" = no default.

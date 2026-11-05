@@ -44,6 +44,7 @@
 #include "room.h"
 #include "ryuldn.h"
 #include "xbridge.h"
+#include "ryusrv.h"
 
 #ifdef _WIN32
 typedef SOCKET hsock;
@@ -1508,6 +1509,23 @@ static void room_shutdown(void) {
     room_leave();
 }
 
+// ---- crossplay: the Ryujinx LDN server this game runs itself (ini RyuServe), up while local play is initialized
+static void ryusrv_wanted(void) {
+    if (!g_config.ldn_ryu_serve || ryusrv_running()) return;
+    int port = g_config.ldn_ryu_serve_port > 0 ? g_config.ldn_ryu_serve_port : 30456;
+    char err[96] = "";
+    if (!ryusrv_start(port, err, sizeof err)) { LOG("[ldn] can't run the Ryujinx LDN server on port %d: %s\n", port, err); return; }
+    char addr[32];
+    snprintf(addr, sizeof addr, "127.0.0.1:%d", port);
+    ryu_set_self(addr);
+    LOG("[ldn] Ryujinx players can use this PC as their LDN server (port %d); hubs you create are made on it\n", port);
+}
+static void ryusrv_unwanted(void) {
+    if (!ryusrv_running()) return;
+    ryu_set_self(NULL);
+    ryusrv_stop();
+}
+
 // ---- nn::ldn
 
 HLE_FUNC("_ZN2nn3ldn10InitializeEv", ldn_initialize) { NTRACE();
@@ -1516,6 +1534,7 @@ HLE_FUNC("_ZN2nn3ldn10InitializeEv", ldn_initialize) { NTRACE();
     static bool hooked;
     if (!hooked) { hooked = true; ryu_set_hooks(&(RyuHooks){ryu_lobby_changed, ryu_data_received}); }
     if (L.state == ST_NONE) {
+        ryusrv_wanted();
         room_start();
         L.state = ST_INITIALIZED, L.reason = DR_NONE;
         rand_bytes(L.mac, 6);
@@ -1546,6 +1565,7 @@ static void to_initialized(void) {
 HLE_FUNC("_ZN2nn3ldn8FinalizeEv", ldn_finalize) { NTRACE();
     to_initialized();
     room_shutdown();
+    ryusrv_unwanted();
     L.state = ST_NONE;
     (void)c;
 }
@@ -1629,7 +1649,7 @@ static uint32_t create_ryu(const uint8_t *cfg, const uint8_t *sec, const uint8_t
 
 static uint32_t create_network(const uint8_t *cfg, const uint8_t *sec, const uint8_t *sec_param, const uint8_t *user) {
     if (L.state != ST_ACCESS_POINT) return R_INVALID_STATE;
-    if (g_config.ldn_ryu_host[0]) return create_ryu(cfg, sec, user);
+    if (ryu_host_addr()[0]) return create_ryu(cfg, sec, user);
     bool via_room = g_config.ldn_room_host && room_connected();
     if (via_room) room_mac(L.mac);
     pthread_mutex_lock(&L.mu);

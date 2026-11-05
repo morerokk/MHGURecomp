@@ -324,6 +324,12 @@ static const char DEFAULT_INI[] =
     "RyuServers =\n"
     "RyuHost =\n"
     "RyuPassphrase =\n"
+    "; RyuServe = On: this game runs the Ryujinx LDN server itself while local play is open, so nobody needs a separate\n"
+    "; LdnServer: Ryujinx players set their LDN server to this PC's address (port RyuServePort, default 30456; forward\n"
+    "; it or use a VPN such as Radmin), and hubs you create are made on it (RyuHost can stay empty).\n"
+    "; Default: Off\n"
+    "RyuServe = Off\n"
+    "RyuServePort = 30456\n"
     "\n"
     "; Crossplay with suyu, yuzu and the forks that kept their multiplayer rooms (Eden, Citron, ...). RoomServer: the\n"
     "; room's address (host or host:port, default port 24872); this game joins it while local play is open, and the\n"
@@ -597,6 +603,8 @@ const ConfigSetting g_settings[] = {
     {"Multiplayer", "RoomPassword", SET_TEXT, F(ldn_room_pass), sizeof g_config.ldn_room_pass, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "RoomName", SET_TEXT, F(ldn_room_nick), sizeof g_config.ldn_room_nick, 0, 0, NULL, NULL, false, ERR_SERVER},
     ON_OFF("Multiplayer", "RoomHost", ldn_room_host, false),
+    ON_OFF("Multiplayer", "RyuServe", ldn_ryu_serve, false),
+    {"Multiplayer", "RyuServePort", SET_INT, F(ldn_ryu_serve_port), 0, 0, 65535, NULL, NULL, false, ERR_NET},
     ON_OFF("Discord", "RichPresence", discord, false),
     ON_OFF("Discord", "ShowHunter", discord_hunter, false),
     ON_OFF("Bonus Content", "BonusContent", bonus_content, false),

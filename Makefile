@@ -179,8 +179,13 @@ SHADER_ID := $(shell cat $(SHADER_SRCS) | tr -d '\r' | sha256sum | cut -c1-16)
 # release built before its tag is made.
 VERSION ?= $(shell git describe --tags 2>/dev/null || echo unknown)
 
-RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(RT_CXX) $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(IMGUI_OBJ) \
+RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(RYUSRV_OBJ) $(RT_CXX) $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(IMGUI_OBJ) \
            $(O)/updater/sha256.o $(ICON_RES) $(ENET_OBJ)
+# The Ryujinx LDN server this game can run itself (runtime/net/ryusrv/: C++, from the earlier suyu-based recompiler)
+RYUSRV_OBJ := $(patsubst runtime/net/ryusrv/%.cpp,$(O)/rt/net/ryusrv/%.o,$(wildcard runtime/net/ryusrv/*.cpp))
+$(O)/rt/net/ryusrv/%.o: runtime/net/ryusrv/%.cpp $(wildcard runtime/net/ryusrv/*.h) runtime/net/ryusrv.h
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++20 -O2 -g -Wall -Iruntime/net/ryusrv/shim -Iruntime/net/ryusrv $(if $(filter windows,$(PLATFORM)),-D_WIN32_WINNT=0x0A00) -c $< -o $@
 # ENet 1.3.18 (third_party/enet, MIT): the reliable UDP of suyu-family emulators' multiplayer rooms (runtime/net/room.c)
 ENET      := third_party/enet
 ENET_SRC  := $(addprefix $(ENET)/,callbacks.c compress.c host.c list.c packet.c peer.c protocol.c) \

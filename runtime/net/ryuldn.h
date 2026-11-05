@@ -29,6 +29,9 @@ void ryu_set_hooks(const RyuHooks *h);
 // ini [Multiplayer] RyuServers: the servers searched (host[:port], comma separated; "" none).
 int ryu_server_count(void);
 bool ryu_enabled(void);
+// The server hubs we create are made on: ini RyuHost, else the one this game runs itself (ryusrv.h; set by ldn.c). "" none.
+const char *ryu_host_addr(void);
+void ryu_set_self(const char *addr);
 
 // Asks every server for its lobbies (a ScanFilter, 0x60 bytes). infos[i] = lobby, server_of[i] = the server's index.
 // Returns how many. Blocks up to a few seconds per unreachable server: call it from the scan, which waits anyway.
