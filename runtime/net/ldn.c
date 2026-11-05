@@ -95,7 +95,7 @@ enum { DR_NONE, DR_BY_USER, DR_BY_SYSTEM, DR_DESTROYED_BY_USER, DR_DESTROYED_BY_
 
 // ---- link protocol
 #define PROTO_MAGIC "MHGL"
-#define PROTO_VERSION 2
+#define PROTO_VERSION 3
 enum { F_HELLO = 1, F_INFO, F_WELCOME, F_REFUSE, F_PACKET, F_DESTROY, F_AUX };  // F_AUX: the port's own messages (emsync.c, hle/hpscale.c)
 typedef struct {
     char magic[4];
