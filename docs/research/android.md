@@ -103,8 +103,13 @@ loops a second as on PC). A phone has neither cost. Measure on a phone.
    mods_find_dir finds: a romfs / exefs / nativeNX folder at most 3 deep; buried ones are moved up, loose
    .pchtxt / .ips go into exefs/, and the player is asked before either). From the settings menu the app closes afterwards (the game has the old files open), and the renderer draws
    nothing meanwhile (ui_window_away: the picker takes the window's surface, item 6).
-6. Lifecycle: the app paused / resumed (audio, the Vulkan surface going away: swapchain recreated), Android may kill a
-   backgrounded app, the back button.
+6. Lifecycle. The app leaving the screen and coming back works (2026-11-05, emulator): Android takes the window away and
+   makes a new one, which killed the Vulkan surface (every frame VK_ERROR_SURFACE_LOST_KHR, a black screen for good), so
+   device.c surface_ready closes the surface and swapchain and makes new ones. SDL pauses and resumes the sound. Tried: Home,
+   five quick round trips, 45 s away, the screen off and on, Recents, Home right at the start (backend_init waits for
+   the window), all in a hunt but the last. The game keeps running while it is away, the hunt's clock too, with no input (the
+   event loop's thread waits in SDL): decided 2026-11-05, as freezing it could drop the player from a multiplayer session.
+   Left: Android may kill a backgrounded app, the back button.
 7. LAN multiplayer: broadcast discovery needs Android's WifiManager.MulticastLock (a Java call). The hub server should
    work as it is.
 8. Left in but useless on Android: Discord Rich Presence (finds no Discord), the settings menu's Restart (can't start a
