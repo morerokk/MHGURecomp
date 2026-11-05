@@ -23,6 +23,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/ucontext.h>
 #include <time.h>
 #include <unistd.h>
@@ -297,6 +298,16 @@ static int count_files(const char *dir, int depth) {
     return n;
 }
 int plat_count_files(const char *dir) { return count_files(dir, 0); }
+
+bool plat_disk_free(const char *path, uint64_t *bytes) {
+    if (!path || !bytes) return false;
+    struct statvfs st;
+    if (statvfs(path, &st) != 0) {
+        if (statvfs(".", &st) != 0) return false;
+    }
+    *bytes = (uint64_t)st.f_bavail * (uint64_t)st.f_frsize;
+    return true;
+}
 
 void plat_error_box(const char *msg) {
     fprintf(stderr, "\n*** %s\n", msg);

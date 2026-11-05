@@ -18,16 +18,18 @@ import time
 import zipfile
 
 DATA_NOTE = ('Put your own dump of Monster Hunter Generations Ultimate 1.4.0 here: the exefs and romfs folders\n'
-             '(data/exefs/main, data/romfs/...).\n')
+             '(data/exefs/main, data/romfs/...). On Windows, run Extract MHGU NSP.bat (needs Python 3.10+ with\n'
+             'tkinter) with your base game NSP, 1.4.0 update NSP, and prod.keys; choose this data folder as output.\n'
+             'hactool.exe / hactool is shipped beside the program. Original NSPs are not modified.\n')
 
 
 def files(build, platform):
     """(path in the archive, file on disk, executable) of everything shipped from the build folder."""
     if platform == 'windows':
-        programs = ['mhgurecomp.exe', 'mhgugame.dll', 'mhgurecomp-updater.exe']
+        programs = ['mhgurecomp.exe', 'mhgugame.dll', 'mhgurecomp-updater.exe', 'hactool.exe']
         extra = sorted(n for n in os.listdir(build) if n.lower().endswith('.dll') and n not in programs)
     else:
-        programs = ['mhgurecomp', 'mhgugame.so', 'mhgurecomp-updater']
+        programs = ['mhgurecomp', 'mhgugame.so', 'mhgurecomp-updater', 'hactool']
         extra = []
     out = []
     for n in programs + extra:
@@ -46,6 +48,16 @@ def files(build, platform):
         for n in sorted(names):
             p = os.path.join(d, n)
             out.append(('licenses/' + os.path.relpath(p, lic).replace(os.sep, '/'), p, False))
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    extract_py = os.path.join(root, 'tools', 'extract_mhgu_nsp.py')
+    if not os.path.isfile(extract_py):
+        sys.exit(f'dist: {extract_py} is missing')
+    out.append(('tools/extract_mhgu_nsp.py', extract_py, False))
+    if platform == 'windows':
+        bat = os.path.join(root, 'Extract MHGU NSP.bat')
+        if not os.path.isfile(bat):
+            sys.exit(f'dist: {bat} is missing')
+        out.append(('Extract MHGU NSP.bat', bat, False))
     return out
 
 
@@ -78,7 +90,7 @@ def main():
         entries.append(('bonus/system', bonus, False))
     else:
         print('dist: no bonus/system (BONUS=<file>): bonus/ left empty')
-    dirs = ['', 'data', 'mods', 'cheats', 'bonus']
+    dirs = ['', 'data', 'mods', 'cheats', 'bonus', 'tools']
     for rel, _, _ in entries:
         parts = rel.split('/')[:-1]
         for k in range(1, len(parts) + 1):

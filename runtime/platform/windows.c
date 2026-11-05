@@ -228,6 +228,27 @@ static int count_files(const char *dir, int depth) {
 }
 int plat_count_files(const char *dir) { return count_files(dir, 0); }
 
+bool plat_disk_free(const char *path, uint64_t *bytes) {
+    if (!path || !bytes) return false;
+    ULARGE_INTEGER avail;
+    if (!GetDiskFreeSpaceExA(path, &avail, NULL, NULL)) {
+        char parent[MAX_PATH];
+        snprintf(parent, sizeof parent, "%s", path);
+        char *slash = strrchr(parent, '\\');
+        char *slash2 = strrchr(parent, '/');
+        if (slash2 > slash) slash = slash2;
+        if (slash && slash != parent) {
+            *slash = 0;
+            if (!GetDiskFreeSpaceExA(parent, &avail, NULL, NULL))
+                return GetDiskFreeSpaceExA(".", &avail, NULL, NULL) != 0 && (*bytes = avail.QuadPart, true);
+        } else if (!GetDiskFreeSpaceExA(".", &avail, NULL, NULL)) {
+            return false;
+        }
+    }
+    *bytes = avail.QuadPart;
+    return true;
+}
+
 void plat_error_box(const char *msg) { MessageBoxA(NULL, msg, "MHGU Recomp", MB_OK | MB_ICONERROR); }
 
 void plat_fatal_notice(void) {

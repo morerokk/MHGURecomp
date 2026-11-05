@@ -32,6 +32,10 @@ RT_SRC   := $(wildcard runtime/*.c) $(wildcard runtime/hle/*.c) $(wildcard runti
             runtime/nvn/objects.c runtime/nvn/cmdbuf.c runtime/nvn/nvn_args.c runtime/nvn/tegra.c runtime/nvn/formats.c \
             runtime/nvn/backend_null.c runtime/nvn/astc.c runtime/nvn/bcn.c runtime/nvn/maxwell/translate.c $(wildcard runtime/nvn/vulkan/*.c) \
             runtime/platform/$(PLATFORM).c
+# NSP import (desktop only): shells out to hactool; Android keeps its folder import instead
+ifeq ($(PLATFORM),android)
+RT_SRC   := $(filter-out runtime/nsp_import.c runtime/nsp_import_ui.c,$(RT_SRC))
+endif
 # (simd_int.c / neon.c, helpers of the recompiled code, live in the executable: the game code library imports them,
 # and runtime/interp.c uses them too)
 RT_HDRS  := $(wildcard runtime/*.h) $(wildcard runtime/net/*.h) $(wildcard runtime/platform/*.h) $(wildcard runtime/nvn/*.h) $(wildcard runtime/nvn/*/*.h)
@@ -224,7 +228,15 @@ else
 RT_CXX   := $(O)/rt/nvn/vulkan/vma.o $(FSR_OBJ)
 endif
 
-all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) \
+# hactool (SciresM): NSP/NCA extract helper shipped beside the game for the desktop NSP importer.
+HACTOOL_VER    := 1.4.0
+HACTOOL_SHA256 := 1373c98ef8c58da42cb1e81b361283955caad0e1b8b5ad389b0ee49b7a21da43
+HACTOOL_TAR    := third_party/hactool/hactool-$(HACTOOL_VER).tar.gz
+HACTOOL_SRC    := $(O)/hactool-$(HACTOOL_VER)
+HACTOOL_EXE    := $(B)/hactool$(if $(filter windows,$(PLATFORM)),.exe)
+HACTOOL_TARGET := $(if $(ANDROID),,$(HACTOOL_EXE))
+
+all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(HACTOOL_TARGET) $(if $(filter windows,$(PLATFORM)),bundle) \
      $(if $(ANDROID),apk,data licenses pipelist)
 
 # Host-only INI/settings regression test: no game dump or generated code required.
@@ -388,6 +400,20 @@ $(eval $(call FETCH,third_party/shaderc/shaderc-$(SHADERC_VER).tar.gz,https://gi
 $(eval $(call FETCH,third_party/shaderc/glslang-$(GLSLANG_VER).tar.gz,https://github.com/KhronosGroup/glslang/archive/refs/tags/$(GLSLANG_VER).tar.gz,9c09b901149c729df745057dafa815278aaa101b84d2b6e14f16a42de52f97f2))
 $(eval $(call FETCH,third_party/shaderc/SPIRV-Tools-$(SPIRV_VER).tar.gz,https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/vulkan-sdk-$(SPIRV_VER).tar.gz,e6c83a215538fbfd265ccf398d3877985055df1273dbed73912bd05307664688))
 $(eval $(call FETCH,third_party/shaderc/SPIRV-Headers-$(SPIRV_VER).tar.gz,https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-$(SPIRV_VER).tar.gz,5b3a0d099f5c7649e29c0938476c462e71d66ad89a0bde42fa1ba3eb476956c9))
+$(eval $(call FETCH,$(HACTOOL_TAR),https://github.com/SciresM/hactool/archive/refs/tags/$(HACTOOL_VER).tar.gz,$(HACTOOL_SHA256)))
+
+# hactool: its own Makefile + mbedtls; config.mk from the template (clang, same as the rest of the build)
+$(HACTOOL_EXE): $(HACTOOL_TAR)
+	rm -rf $(HACTOOL_SRC) && mkdir -p $(HACTOOL_SRC) $(dir $@)
+	tar -xzf $< -C $(HACTOOL_SRC) --strip-components=1
+	sed 's/^CC = .*/CC = clang/; s/^CFLAGS = .*/CFLAGS = -O2 -Wall -std=gnu11 -fPIC -Wno-unused-parameter -Wno-sign-compare/' \
+	    $(HACTOOL_SRC)/config.mk.template > $(HACTOOL_SRC)/config.mk
+ifeq ($(PLATFORM),windows)
+	echo 'EXEEXT = .exe' >> $(HACTOOL_SRC)/config.mk
+endif
+	$(MAKE) -C $(HACTOOL_SRC) -j$$(nproc) > $(HACTOOL_SRC)/build.log 2>&1 || { tail -40 $(HACTOOL_SRC)/build.log; exit 1; }
+	cp -f $(HACTOOL_SRC)/hactool$(if $(filter windows,$(PLATFORM)),.exe) $@
+	@echo "hactool: hactool $(HACTOOL_VER) built as $@"
 
 # the bundled FFmpeg: configure, build into $(FFMPEG_DIR)
 $(FFMPEG_DIR)/.built: $(FFMPEG_TAR)
@@ -447,7 +473,8 @@ $(B)/pipelines.list: extras/pipelines.list
 	cp $< $@
 
 LICENSE_TXT = $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt) \
-              $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt)
+              $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt) \
+              $(if $(HACTOOL_TARGET),$(B)/licenses/hactool.txt)
 licenses: $(LICENSE_TXT)
 $(B)/licenses/%.txt: %
 	@mkdir -p $(dir $@)
@@ -474,12 +501,23 @@ $(B)/licenses/shaderc.txt: $(SHADERC_DIR)/.built
 	   for f in LICENSE third_party/glslang/LICENSE.txt third_party/spirv-tools/LICENSE third_party/spirv-headers/LICENSE; do \
 	     echo; echo "==== $$f"; echo; cat $(SHADERC_DIR)/src/$$f; done; } > $@
 
+$(B)/licenses/hactool.txt: $(HACTOOL_EXE)
+	@mkdir -p $(dir $@)
+	@{ echo "This program ships hactool $(HACTOOL_VER) (https://github.com/SciresM/hactool) beside the executable for"; \
+	   echo "optional NSP extraction. ISC License. It embeds mbed TLS under Apache-2.0."; \
+	   echo "Source: https://github.com/SciresM/hactool/archive/refs/tags/$(HACTOOL_VER).tar.gz"; \
+	   echo; echo "==== hactool LICENSE ===="; echo; cat $(HACTOOL_SRC)/LICENSE; \
+	   echo; echo "==== mbedtls (bundled with hactool) ===="; echo; \
+	   cat $(HACTOOL_SRC)/mbedtls/LICENSE 2>/dev/null || true; } > $@
+
 $(GAMELIB): $(GEN_OBJ) | $(EXE)
 	@mkdir -p $(O)
 	$(CC) $(GAMELIB_LDFLAGS) -o $(O)/gamelib.tmp $^
 	mv -f $(O)/gamelib.tmp $@
 
-PY := $(firstword $(wildcard tools/venv/Scripts/python.exe) $(wildcard tools/venv/bin/python) python3)
+PY := $(firstword $(wildcard tools/venv/Scripts/python.exe) $(wildcard tools/venv/bin/python.exe) $(wildcard tools/venv/bin/python) $(wildcard /ucrt64/bin/python3.exe) $(wildcard /ucrt64/bin/python3) python3)
+# From tools/: path-based interpreters need ../; a bare name (python3) must stay on PATH.
+PY_RUN = $(if $(findstring /,$(PY)),../$(PY),$(if $(findstring \,$(PY)),../$(PY),$(PY)))
 
 # The build folder is the game folder: mhgurecomp.exe starts from it on its own (runtime/main.c), with
 # - bundle (Windows): the MSYS2 DLLs it needs beside it (tools/bundle_dlls.py; not the GPU driver's vulkan-1.dll)
@@ -490,8 +528,8 @@ PY := $(firstword $(wildcard tools/venv/Scripts/python.exe) $(wildcard tools/ven
 # (--with: MSYS2 packages linked into the executable or into a bundled DLL, whose licenses go along too: the static
 # GCC runtime, VulkanMemoryAllocator, and glslang / SPIRV-Tools inside shaderc's DLL)
 LICENSE_PKGS := libstdc++ libgcc libwinpthread vulkan-memory-allocator glslang spirv-tools zlib
-bundle: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER)
-	@$(PY) tools/bundle_dlls.py "$$(cygpath -m "$$(dirname "$$(command -v $(CC))")")" $(B) $^ \
+bundle: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(HACTOOL_EXE)
+	@$(PY) tools/bundle_dlls.py "$$(cygpath -m "$$(dirname "$$(command -v $(CC))")")" $(B) $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) \
 	    --licenses $(B)/licenses --with $(LICENSE_PKGS)
 
 data: $(B)/data/.complete
@@ -508,14 +546,14 @@ $(B)/data/.complete:
 	fi
 
 gen:
-	cd tools && ../$(PY) gen.py sdk ../$(GAME)/exefs/sdk 0x02400000 ../$(GEN)/sdk --hle ../runtime/hle/hle_symbols.txt
-	cd tools && ../$(PY) gen.py main ../$(GAME)/exefs/main 0x00200000 ../$(GEN)/main
+	cd tools && $(PY_RUN) gen.py sdk ../$(GAME)/exefs/sdk 0x02400000 ../$(GEN)/sdk --hle ../runtime/hle/hle_symbols.txt
+	cd tools && $(PY_RUN) gen.py main ../$(GAME)/exefs/main 0x00200000 ../$(GEN)/main
 	echo '$(GEN_ID)' > $(GEN)/gen.id
 
 # differential test of the recompiler against Unicorn (tools/test_lift.py)
 test-lift:
-	cd tools && ../$(PY) test_lift.py ../$(GAME)/exefs/main 0x00200000 --tests 6000
-	cd tools && ../$(PY) test_lift.py ../$(GAME)/exefs/sdk 0x02400000 --tests 6000
+	cd tools && $(PY_RUN) test_lift.py ../$(GAME)/exefs/main 0x00200000 --tests 6000
+	cd tools && $(PY_RUN) test_lift.py ../$(GAME)/exefs/sdk 0x02400000 --tests 6000
 
 runtime-objs: $(RT_OBJ)
 
@@ -540,7 +578,8 @@ dist: all
 	$(if $(ANDROID_DIST),$(MAKE) PLATFORM=android ABI=arm64-v8a dist $(if $(BONUS),BONUS="$(abspath $(BONUS))"),@echo "dist: no Android SDK: no APK")
 endif
 
-.PHONY: all gen test-lift runtime-objs clean bundle data licenses pipelist dist FORCE
+.PHONY: all gen test-lift runtime-objs clean bundle data licenses pipelist dist FORCE hactool
+hactool: $(HACTOOL_EXE)
 
 ifeq ($(PLATFORM),android)
 include android/apk.mk

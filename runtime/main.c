@@ -17,6 +17,7 @@
 #include "engine_module.h"
 #include "app_actions.h"
 #include "net/discord.h"
+#include "nsp_import.h"
 #ifdef __ANDROID__
 #include <SDL3/SDL_main.h>  // (main becomes SDL_main, which SDL's Java activity calls in libmain.so)
 #endif
@@ -144,7 +145,7 @@ static int spelled_on_disk(const char *base, const char *rel, bool first_any, ch
 }
 
 // What is wrong with the game files in data (into msg), or false when they are fine.
-static bool game_files_problem(const char *data, char *msg, size_t size) {
+bool game_files_problem(const char *data, char *msg, size_t size) {
     char main_path[1200];
     snprintf(main_path, sizeof main_path, "%s/exefs/main", data);
     FILE *f = fopen(main_path, "rb");
@@ -245,6 +246,11 @@ int main(int argc, char **argv) {
             fprintf(stderr, "%s\n", msg);
 #ifdef __ANDROID__
             if (android_offer_import(msg, data, sizeof data)) continue;  // (from a folder the player picked: check again)
+#else
+            // Opt-in in-app NSP pickers. Usual path: Extract MHGU NSP.bat into data/.
+            if (getenv("MHGU_NSP_IMPORT") && nsp_import_available() &&
+                nsp_import_offer(msg, data, sizeof data, false))
+                continue;
 #endif
             plat_error_box(msg);
             return 1;

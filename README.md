@@ -71,9 +71,20 @@ graphics API are reimplemented on Windows, Linux and Android, with Vulkan for re
 
 [Download the latest prebuilt release from the Releases page. Make sure you download the right ZIP file for your desired platform.](https://github.com/morerokk/MHGURecomp/releases)
 
-You need the `exefs` and `romfs` folders from Monster Hunter Generations Ultimate 1.4.0. If you are coming from Ryujinx, you can right-click the game (make sure the 1.4.0 title update is applied), and Extract the game files with the patches pre-applied. Similar functionality also exists in Yuzu, or you can use other tools to extract the game files.
+You need Monster Hunter Generations Ultimate **1.4.0** (Title ID `0100770008DD8000`; `exefs/main` build ID starting with `FB08F1D20FD1204F`). On Windows and Linux you can extract from NSP files with the included GUI, or place a pre-extracted dump in `data/` as before.
 
-You may be able to extract the files with another tool, just make sure that you extract both the base game files and the 1.4.0 title update. The title update's `exefs` and `romfs` files should be copied on top of the base game's.
+### Option A — Extract from NSP (Windows / Linux)
+
+1. Extract the release zip anywhere, for example `C:\Games\MHGURecomp\`. Keep `hactool.exe` / `hactool` next to `mhgurecomp`.
+2. Have ready: the base game NSP, the **1.4.0** update NSP, and your own `prod.keys` (from your Switch; never share keys). `title.keys` is optional.
+3. Run **Extract MHGU NSP.bat** (Windows; needs Python 3.10+ with tkinter) or `python tools/extract_mhgu_nsp.py`, pick those files, and set the output folder to this release’s `data\` (or any folder, then copy `exefs`/`romfs` into `data\`). About **20 GB free** while extracting; original NSPs are not modified.
+4. Start `mhgurecomp.exe`.
+
+(Optional) Set `MHGU_NSP_IMPORT=1` before launching to use in-app NSP file pickers instead of the extract GUI.
+
+### Option B — Pre-extracted `exefs` / `romfs`
+
+If you are coming from Ryujinx, right-click the game (with the 1.4.0 update applied) and extract with patches pre-applied. Similar tools work if you merge the update’s `exefs` and `romfs` over the base game’s.
 
 1. Extract the release zip anywhere, for example `C:\Games\MHGURecomp\`.
 2. Put the game's `exefs` and `romfs` folders in the `data` subfolder. It should look like this:
@@ -82,6 +93,8 @@ You may be able to extract the files with another tool, just make sure that you 
    MHGURecomp\
      mhgurecomp.exe
      mhgugame.dll
+     hactool.exe
+     Extract MHGU NSP.bat
      (other .dll files)
      data\
        exefs\

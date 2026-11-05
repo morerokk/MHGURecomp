@@ -73,9 +73,20 @@ para el renderizado. No es un emulador.
 
 [Descarga la última versión compilada desde la página de Releases. Asegúrate de descargar el ZIP correcto para tu plataforma.](https://github.com/morerokk/MHGURecomp/releases)
 
-Necesitas las carpetas `exefs` y `romfs` de Monster Hunter Generations Ultimate 1.4.0. Si vienes de Ryujinx, haz clic derecho en el juego (con la actualización 1.4.0 aplicada) y extrae los archivos del juego con los parches ya aplicados.
+Necesitas Monster Hunter Generations Ultimate **1.4.0**. En Windows y Linux puedes extraer desde NSP con la GUI incluida, o colocar un dump ya extraído en `data/`.
 
-Puede que puedas extraerlos con otra herramienta; solo asegúrate de extraer tanto los archivos del juego base como la actualización 1.4.0. Los archivos `exefs` y `romfs` de la actualización se copian encima de los del juego base. Comprueba que la primera subcarpeta se llama `nativeNX` (no `NativeNX`) y que los nombres conservan sus mayúsculas.
+### Opción A — Extraer desde NSP (Windows / Linux)
+
+1. Extrae el zip donde quieras. Deja `hactool` junto a `mhgurecomp`.
+2. Ten listos: NSP base, NSP actualización **1.4.0**, y tu `prod.keys` (no lo compartas).
+3. Ejecuta **Extract MHGU NSP.bat** (Windows; Python 3.10+ con tkinter) o `python tools/extract_mhgu_nsp.py`, elige esos archivos y como salida la carpeta `data\` de la versión. Hace falta unos **20 GB libres**; los NSP no se modifican.
+4. Inicia `mhgurecomp.exe`.
+
+(Opcional) Con `MHGU_NSP_IMPORT=1` se usan los selectores NSP de la app.
+
+### Opción B — `exefs` / `romfs` ya extraídos
+
+Si vienes de Ryujinx, haz clic derecho en el juego (con 1.4.0) y extrae con parches aplicados. Combina el update encima del base. Comprueba `nativeNX` (mayúsculas).
 
 1. Extrae el zip de la versión donde quieras, por ejemplo en `C:\Games\MHGURecomp\`.
 2. Pon las carpetas `exefs` y `romfs` del juego en la subcarpeta `data`. Debería quedar así:
@@ -84,6 +95,8 @@ Puede que puedas extraerlos con otra herramienta; solo asegúrate de extraer tan
    MHGURecomp\
      mhgurecomp.exe
      mhgugame.dll
+     hactool.exe
+     Extract MHGU NSP.bat
      (otros archivos .dll)
      data\
        exefs\
