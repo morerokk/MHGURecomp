@@ -222,7 +222,12 @@ static KThread *thread_new(uint32_t entry, uint32_t arg, uint32_t stack_top, int
 static void thread_start(KThread *t) {
     pthread_attr_t attr;
     pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 256ull << 20);  // guest recursion runs on the host stack
+    // Guest recursion runs on the host stack: 256 MB. On Windows that comes from the linker's default (Makefile --stack),
+    // reserved and committed as it is used: a stack size given here is committed whole, 5.4 GB for the game's 21 threads,
+    // and with a small page file the game ran out of commit at start-up.
+#ifndef _WIN32
+    pthread_attr_setstacksize(&attr, 256ull << 20);
+#endif
     t->started = true;
     pthread_create(&t->host, &attr, thread_main, t);
     pthread_attr_destroy(&attr);
