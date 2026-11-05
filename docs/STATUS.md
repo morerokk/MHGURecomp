@@ -444,6 +444,30 @@ that was set in these tests, set by 0x2b73c8) nets at most 0 for a hunter who on
 default Palico table climbs. Without Palicoes they attack the hunter, score 0. Most likely the original game's behaviour
 (game data, not compared with the original yet).
 
+Monsters' stall timers and the frame rate (2026-11-05): fixed. Reported: above 30 fps large monsters "forget" how to close the gap,
+circle the hunter and run diagonally (Rathian). While a monster hunts a target it can see, 0x2c3d08 counts how long it has gone
+without settling that: monster +0x1414 (past 300: bit 0x10 of +0x1408) and +0x1418 (past 1800: bit 0x20; only while it moves slowly,
++0x140c at most step x 15; 60x as fast in some map cells). They rise by a fixed amount per update (sEnemy +0x2a30 + 1, 2 here), not
+by the step, tuned for 30 updates a second: 8x as fast at 240 fps. Past them the monster repositions: 0x2c46c8 picks a point 60
+degrees off its target (+0xba60). Fix (runtime/hle/emstall.c, tools/gen.py PATCHES 0x2c4058 and 0x2c4150): what they add is scaled by
+step / 2; the same at 30 fps. MHGU_NO_EMSTALL=1 turns it off (for comparing). Measured, +0x1418 per second: 40 at 30 fps, 38 at 240 fps
+with the fix, about 265 at 240 fps without (from one pair of samples).
+Rathian (quest 405), action 2:20, the diagonal run (about 2300 units, 57 degrees off the hunter): 9 in 10 min at 240 fps without the fix.
+With it: 0 in 15 min with the hunter pinned; 8 in 20 min with the hunter free, none while in the hunter's zone (the same action is also how
+a monster moves when apart from the hunter). At 30 fps: 0 in 10 min and 0 in 15 min pinned. Mean distance to the hunter 1002 without, 814 with, 822 at 30 fps. Not explained: with the hunter pinned, 7:0
+(a close bite) 15 at 30 fps and 31 at 240 fps in 15 min. 7:45, likely the reported side bite (not checked by eye): 6 and 3 in 15 min, by the
+same script path; with the hunter free to move, none in 30 min at 240 fps, unexplained. Rajang (quest 405 with em023, 5 min each): no clear
+difference between 30 fps and 240 fps, fixed or not; 2:6 (a long run away from the hunter) 3 times without the fix and never in the two others,
+too few to mean much. The timers are shared monster code (not for two monster numbers, en +0xb5f4 = 3 and 0x53, and stops on some stages by
+0x2c457c), but each species' script decides what repositioning looks like. Not measured: other species, 60 and 144 fps.
+"Monsters change areas too often at high frame rates": not reproduced. In all these runs (standing hunter, about 2 h) a monster
+changed zones only to follow the test's summon. The hunter did no damage, though, and hits may well be what makes monsters leave.
+Tools: MHGU_SUMMON=<cm> (hle/dummy.c: the zone's large monster placed in front of the hunter outside the camp, again after 15 s apart;
+hunter's HP +0x13d6, red part +0x13da held high, position pinned, or a knockback out of the area puts it back in the camp),
+MHGU_EMTRACE_POS=1 (10 times a second: position, yaw, target), MHGU_EMTRACE_CMD=1 (each step of the AI script: interpreter 0x282f80,
+rEnemyCmd, enemy\cmd_tbl\emNNN_00_cmdtbl in the monster's arc). A monster's species is en +0xb5f0. Swapping a quest's monster for a test: byte
++0x7e of questData_0000405 and a b_m01emNNN_00 set file (mtarc, from a quest with it on that map), in a mod.
+
 Monster jumps and the frame rate (2026-10-27): fixed. Reported: Volvidon's body press (it leaps at the hunter and
 lands on its back) far too fast, faster the higher the frame rate. Some actions move the monster with the velocity and
 acceleration in its status block (*(monster + 0x1428) = monster + 0x1440: +0x40 position, +0x10 velocity, +0x20

@@ -120,6 +120,16 @@ static void zako_log(uint32_t sen, uint64_t now) {
     }
 }
 
+// MHGU_EMTRACE_CMD=1: each step of the AI script's interpreter (0x282f80, rEnemyCmd), for large monsters: the action now, the
+// script position and the command's first bytes. tools/gen.py PATCHES, the store of the position in its loop (r8: the monster).
+void emtrace_cmd(Cpu *c) {
+    static int on = -1;
+    if (on < 0) on = getenv("MHGU_EMTRACE_CMD") != NULL;
+    uint32_t en = c->r[8], pc = c->r[0];
+    if (!on || !large(en)) return;
+    LOG("[cmd] %08x act %08x pc %08x op %08x %08x\n", en, LD32(en + EN_ACTION), pc, LD32(pc), LD32(pc + 4));
+}
+
 static void frame(Cpu *c) {
     fnhook_call_original(c, FN_FRAME);
     uint32_t sen = LD32(G_SENEMY), sys = LD32(G_SYSTEM);
@@ -127,6 +137,22 @@ static void frame(Cpu *c) {
     uint64_t now = plat_now_ns();
     if (g_zako) zako_log(sen, now);
     float step = sys ? LDF(sys + 0x68) : 0;
+    static bool pos_log, pos_read;  // MHGU_EMTRACE_POS=1: 10 times a second, each large monster and the hunter
+    static uint64_t pos_last;
+    if (!pos_read) pos_read = true, pos_log = getenv("MHGU_EMTRACE_POS") != NULL;
+    if (pos_log && now - pos_last >= 100000000ull) {
+        pos_last = now;
+        uint32_t spl = LD32(0x1a85b58u), p = spl ? LD32(spl + 0x1c) : 0;
+        for (int k = 0; p && k < MAX_EN; k++) {
+            uint32_t en = LD32(sen + 0x1c + 4u * (uint32_t)k);
+            if (!en || !large(en)) continue;
+            uint32_t info = LD32(en + EN_INFO);
+            LOG("[emp] %llu %08x z %u act %08x pos %.0f %.0f yaw %d hunter %.0f %.0f hz %u at %.0f %.0f t %u/%u/%u mask %02x step %.3f\n",
+                (unsigned long long)(now / 1000000), en, LD8(en + 0x1054), LD32(en + EN_ACTION), LDF(info + 0x40), LDF(info + 0x48),
+                (int)LD32(info + 0x54), LDF(p + 0x40), LDF(p + 0x48), LD8(p + 0x1054), LDF(info + 0x1d0), LDF(info + 0x1d8),
+                LD8(info + 0x230), LD8(info + 0x232), LD8(info + 0x234), LD8(info + 0x24d), LDF(en + 0x1c));
+        }
+    }
     for (int k = 0; k < MAX_EN; k++) {
         uint32_t en = LD32(sen + 0x1c + 4u * (uint32_t)k);
         if (!en || !large(en)) continue;

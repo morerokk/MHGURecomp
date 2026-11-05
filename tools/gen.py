@@ -48,6 +48,12 @@ PATCHES = {
     ('main', 0x21c3c0): (0xEE221A01, '{ extern float camera_fovy(float, float); c->v.f[2] = camera_fovy(c->v.f[4] * c->v.f[2], c->v.f[3]); }'),
     ('main', 0xaf44a8): (0xEDD11A0E, '{ extern float g_render_aspect; float a = LDF(c->r[1] + 0x38u); c->v.f[3] = a > 1.77f && a < 1.786f ? g_render_aspect : a; }'),
     ('main', 0xaf44ac): (0xEE211A02, '{ extern float camera_fovy(float, float); c->v.f[2] = camera_fovy(c->v.f[2] * c->v.f[4], c->v.f[3]); }'),
+    # A monster's stall timers count per update (`vadd.f32 s0, s16, s0` / `vadd.f32 s0, s2, s0`; r4 = the monster):
+    # runtime/hle/emstall.c scales what they add by its step
+    ('main', 0x2c4058): (0xEE380A00, '{ extern float emstall_scale(uint32_t); c->v.f[0] += c->v.f[16] * emstall_scale(c->r[4]); }'),
+    ('main', 0x2c4150): (0xEE310A00, '{ extern float emstall_scale(uint32_t); c->v.f[0] = c->v.f[2] + c->v.f[0] * emstall_scale(c->r[4]); }'),
+    # The AI script interpreter's loop, `str r0, [r4]`, the new script position (debug, MHGU_EMTRACE_CMD: runtime/hle/emtrace.c)
+    ('main', 0x2855b4): (0xE5840000, '{ extern void emtrace_cmd(Cpu *); ST32(c->r[4], c->r[0]); emtrace_cmd(c); }'),
     # Per-monster network receive (push {r4, r5, fp, lr}): runtime/net/emsync.c may drop a small monster's message
     ('main', 0x2cb120): (0xE92D4830, '{ extern int emsync_filter(Cpu *); if (emsync_filter(c)) { c->pc = c->r[14]; return; } '
                                      'uint32_t ea = c->r[13] - 16u; ST32(ea, c->r[4]); ST32(ea + 4u, c->r[5]); '
