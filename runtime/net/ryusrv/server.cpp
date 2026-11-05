@@ -179,6 +179,7 @@ struct Server::Impl {
     }
 
     void SendError(Session& s, NetworkError error) {
+        LOG_INFO(Network, "ryuldn server: client #{} gets error {}", s.serial, static_cast<int>(error));
         Send(s, Encode(PacketId::NetworkError, NetworkErrorMessage{error}));
     }
 
@@ -335,6 +336,7 @@ struct Server::Impl {
     // ── handlers (lock held) ──
 
     void HandleInitialize(Session& s, std::span<const u8> data) {
+        LOG_INFO(Network, "ryuldn server: client #{} initializes", s.serial);
         const auto msg = Read<InitializeMessage>(data);
         if (!msg || s.initialized) {
             return;
@@ -486,6 +488,7 @@ struct Server::Impl {
         }
         const auto game = it->second;
         const u16 host_lcv = Get<u16>(game->info, Info::Nodes + NodeOff::Lcv);
+        LOG_INFO(Network, "ryuldn server: client #{} wants to join: its version {}, the host's {}", s.serial, lcv, host_lcv);
         if (lcv > host_lcv) {
             SendError(s, NetworkError::VersionTooHigh);
             return;
@@ -511,6 +514,8 @@ struct Server::Impl {
             SessionKey id;
             std::memcpy(id.data(), req->network_info.data() + Info::SessionId, id.size());
             ConnectTo(s, id, req->user_config, req->local_communication_version);
+        } else {
+            LOG_INFO(Network, "ryuldn server: client #{} sent a Connect that is too short ({} bytes)", s.serial, data.size());
         }
     }
 
@@ -528,6 +533,7 @@ struct Server::Impl {
             return;
         }
         const u32 flag = Get<u32>(*filter, Filter::Flag);
+        LOG_INFO(Network, "ryuldn server: client #{} scans ({} lobbies, filter flags {})", s.serial, games.size(), flag);
         const auto now = Clock::now();
         for (const auto& [id, game] : games) {
             const auto& info = game->info;
@@ -618,8 +624,14 @@ struct Server::Impl {
             return; // can't pretend to be someone else
         }
         u32 dest = info.dest_ip;
-        if (dest == kAltBroadcast) {
+        if (dest == kAltBroadcast || dest == 0xFFFFFFFFu) {
             dest = kBroadcast;
+        }
+        static int logged = 0;
+        if (logged < 40) {
+            logged++;
+            LOG_INFO(Network, "ryuldn server: game packet from {} to {} ({} -> {}, {} bytes)", info.source_ip, info.dest_ip, info.source_port,
+                     info.dest_port, data.size());
         }
         const auto bytes = Encode(type, *msg, Trailing<T>(data));
         for (Session* p : s.game->players) {
@@ -638,6 +650,9 @@ struct Server::Impl {
 
     void Handle(Session& s, const Packet& packet) {
         std::scoped_lock lk{lock};
+        if (packet.type != PacketId::ProxyData) {
+            LOG_INFO(Network, "ryuldn server: client #{} sent packet {} ({} bytes)", s.serial, static_cast<int>(packet.type), packet.data.size());
+        }
         s.last_message = Clock::now();
         const std::span<const u8> data{packet.data};
         switch (packet.type) {

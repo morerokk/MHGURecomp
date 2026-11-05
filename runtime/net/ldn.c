@@ -420,7 +420,7 @@ static void ryu_xmit(const VPacket *p, const void *data, uint32_t len) {
         room_send_proxy(sb, p->src_port, db, p->dst_port, 4, all, data, len);
         return;
     }
-    RyuProxy r = {p->src_ip, p->dst_ip, p->src_port, p->dst_port, 17};
+    RyuProxy r = {p->src_ip, all ? ldn_broadcast_ip() : p->dst_ip, p->src_port, p->dst_port, 17};  // (the server knows its subnet's broadcast)
     ryu_send(&r, data, len);
 }
 
