@@ -8,6 +8,7 @@
 //   MHGU_FPS=1             frames per second in the log every 2 s
 //   MHGU_NO_BC=1           act as if the GPU had no BC textures, as phone GPUs (they are decoded on the CPU then)
 //   MHGU_VK11=1            take the path for Vulkan 1.1 devices on any device (g_vk.api11), to test it on a PC
+//   MHGU_NO_LOADING_SCREEN=1   no loading indicator before the game's first frame (a black window, as before)
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <math.h>
@@ -783,6 +784,7 @@ void backend_present(NvnTexture *t) {
 // ================================================================== init
 void vk_exec_init(void);
 void vk_shaders_init(void);
+static SDL_AtomicInt vk_up;  // backend_init has finished (the loading screen waits for it)
 
 // exit() from any thread. The atexit chain is the danger: SDL_Quit and libnvidia's own destructors tear the
 // driver down while other threads are still inside nvnQueueSubmitCommands / vkWaitSemaphores (the exit-time
@@ -825,4 +827,40 @@ void backend_init(void) {
     vk_fsr_init();  // ([Upscaler] FSR: fsr.c)
     create_swapchain();
     atexit(exit_handler);
+    SDL_SetAtomicInt(&vk_up, 1);
+}
+
+// ================================================================== loading screen
+// From backend_init until the game presents its first frame (its own start-up, then the first programs of the shader
+// prewarm: seconds of a black window, more on a first run or a slow PC) a thread of its own presents the window image
+// with the overlay's loading indicator (runtime/overlay.cpp overlay_loading), about 30 times a second, between the
+// game's submissions (under the Vulkan lock; backend_execute submits all it records). Its frames are not counted as
+// the game's (g_frames: MHGU_SHOT_AT, the control file's frame counts). MHGU_NO_LOADING_SCREEN=1: none.
+static void *loading_thread(void *arg) {
+    (void)arg;
+    while (!SDL_GetAtomicInt(&vk_up)) SDL_Delay(20);  // (Android: the game's thread starts the renderer)
+    uint64_t t0 = plat_now_ns();
+    int n = 0;
+    for (;;) {
+        vk_lock();
+        bool game = g_frames != 0;
+        if (!game && frame_begin()) {
+            OverlayTarget ot = {g_vk.inst, g_vk.phys, g_vk.dev, g_vk.qfam, g_vk.queue, g_vk.pcache, sc_pass,
+                                g_vk.sc_extent.width, g_vk.sc_extent.height};
+            overlay_loading(vk_cmd(), &ot);
+            frame_end(NULL);
+            n++;
+        }
+        vk_unlock();
+        if (game) break;
+        SDL_Delay(33);
+    }
+    LOG("[vk] loading screen: %d frames, %.1f s until the game's first\n", n, (plat_now_ns() - t0) / 1e9);
+    return NULL;
+}
+
+void backend_loading_screen(void) {
+    if (!g_config.loading_indicator || getenv("MHGU_NO_LOADING_SCREEN")) return;  // ([Performance] LoadingIndicator)
+    pthread_t t;
+    if (pthread_create(&t, NULL, loading_thread, NULL) == 0) pthread_detach(t);
 }

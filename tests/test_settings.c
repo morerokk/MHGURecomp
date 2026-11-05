@@ -174,6 +174,7 @@ int main(int argc, char **argv) {
     assert(config_defaults().sync_small_monsters==1);
     assert(config_defaults().share_urgent==1);
     assert(config_defaults().shader_prewarm==1);
+    assert(config_defaults().loading_indicator==1);
     assert(config_defaults().draw_distance==1.0f);
     assert(config_defaults().mute_in_background==0);
     assert(config_defaults().combo_window==COMBO_LENIENT);

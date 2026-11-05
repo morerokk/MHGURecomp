@@ -55,6 +55,7 @@
     .fps = 60,                                                                                      \
     .vsync = 1,                                                                                     \
     .shader_prewarm = 1,                                                                            \
+    .loading_indicator = 1,                                                                         \
     /* [Controls] */                                                                                \
     .face_buttons = FACE_POSITION,                                                                  \
     .menu_confirm = MENU_CONFIRM_ORIGINAL,                                                          \
@@ -209,6 +210,11 @@ static const char DEFAULT_INI[] =
     "; they appear. The first start does this in about 20 seconds while the logos play; it needs about 340 MB in the cache folder.\n"
     "; Default: On\n"
     "ShaderPrewarm = On\n"
+    "\n"
+    "; A \"Loading\" box in the bottom right corner while the game starts up and prepares its shaders. Not in the\n"
+    "; settings menu: turn it off here if it stays on screen or gets in the way.\n"
+    "; Default: On\n"
+    "LoadingIndicator = On\n"
     "\n"
     "[Controls]\n"
     "; Controller face button layout. Set to \"Label\" to reverse A/B and X/Y on XBox controllers to match the button prompts (not recommended)\n"
@@ -532,6 +538,7 @@ const ConfigSetting g_settings[] = {
     {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, 30, 240, NULL, NULL, false, ERR_MISC},
     ON_OFF("Performance", "VSync", vsync, false),
     ON_OFF("Performance", "ShaderPrewarm", shader_prewarm, true),
+    ON_OFF("Performance", "LoadingIndicator", loading_indicator, true),  // (ini only: not in the settings menu)
     {"Controls", "FaceButtons", SET_CHOICE, F(face_buttons), 0, 0, 0, "Position|positional|nintendo,Label|labels|xbox",
      NULL, false, ERR_MISC},
     {"Controls", "MenuConfirm", SET_CHOICE, F(menu_confirm), 0, 0, 0, "Original,South,East", NULL, false, ERR_CONFIRM},

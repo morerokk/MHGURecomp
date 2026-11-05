@@ -2508,7 +2508,16 @@ static void prog_want(Prog *p) {
 typedef struct { uint64_t code[2], cmax[2]; } PrewarmReq;
 static void plist_seen(const uint64_t code[2], const uint64_t cmax[2], const uint64_t chash[2]);  // (pipelines.list)
 static uint64_t pw_t0;
-static _Atomic uint64_t pw_total_new, pw_total_known;
+static _Atomic uint64_t pw_total_new, pw_total_known, pw_created;
+
+// The prewarm's progress for the loading indicator (runtime/overlay.cpp): programs done of those the game has made so
+// far; false once none is left (or there never was a prewarm). Any thread.
+bool shader_prewarm_progress(uint64_t *done, uint64_t *total) {
+    uint64_t left = atomic_load(&stat_pw_left), all = atomic_load(&pw_created);  // (left first: all >= left)
+    if (done) *done = all > left ? all - left : 0;
+    if (total) *total = all;
+    return left != 0;
+}
 
 static void prewarm_done(void) {
     if (atomic_fetch_sub(&stat_pw_left, 1) != 1) return;
@@ -2585,6 +2594,7 @@ void backend_program_created(const NvnProgram *np) {
         r->code[i] = np->stages[i].code_addr;
         r->cmax[i] = np->stages[i].const_offset ? np->stages[i].const_offset : 0x10000;
     }
+    atomic_fetch_add(&pw_created, 1);
     if (atomic_fetch_add(&stat_pw_left, 1) == 0 && !pw_t0) pw_t0 = plat_now_ns();
     enqueue(&translate_q, 1, true, prewarm_translate, r);
 }

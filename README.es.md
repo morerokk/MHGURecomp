@@ -289,6 +289,8 @@ Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
   las zonas habituales; con el precalentamiento activado también se preparan en segundo plano, así que al entrar en
   esas zonas por primera vez ya no se ven superficies negras un momento. Solo se hizo con MSAA desactivado; el resto
   se sigue preparando la primera vez que hace falta. Cómo grabar más: [docs/PIPELINE_LIST.md](docs/PIPELINE_LIST.md).
+  `LoadingIndicator` (On / Off: el recuadro "Cargando" de la esquina inferior derecha mientras el juego arranca y
+  prepara sus shaders; solo en el ini, no en el menú de ajustes)
 - `[Controls]`: `FaceButtons` (Position / Label), `MenuConfirm` (el botón de confirmar del menú de ajustes),
   `BackgroundInput` (On / Off: el mando sigue funcionando con la ventana del juego en segundo plano, por ejemplo con
   una wiki delante; On por defecto), `ComboInputWindow` (Lenient / Strict: cuánto espera el juego a un segundo botón

@@ -272,7 +272,8 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   340 MB). `pipelines.list` next to the exe lists the shader combinations the common areas use; with the prewarm on,
   they are prepared in the background as well, so entering those areas for the first time no longer shows surfaces
   briefly black. Only made with MSAA Off; the rest is still prepared the first time it is needed. Recording more of
-  it: [docs/PIPELINE_LIST.md](docs/PIPELINE_LIST.md).
+  it: [docs/PIPELINE_LIST.md](docs/PIPELINE_LIST.md). `LoadingIndicator` (On / Off: the "Loading" box in the bottom
+  right corner while the game starts up and prepares its shaders; only in the ini, not in the settings menu)
 - `[Controls]`: `FaceButtons` (Position / Label), `MenuConfirm` (the settings menu's confirm button),
   `BackgroundInput` (On / Off: the controller keeps working while the game's window is in the background, such as
   with a wiki in front of it; default On), `ComboInputWindow` (Lenient / Strict: how long the game waits for a

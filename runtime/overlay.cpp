@@ -32,6 +32,7 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #include "menu_confirm.h"
 #include "overlay.h"
 #include "hle/chat.h"
+#include "settings_locale.h"
 #include "settings_panel.h"
 
 extern "C" volatile uint64_t g_present_count;  // (runtime/rt.h: frames the game presented)
@@ -42,10 +43,12 @@ extern "C" {
 void vk_lock(void);
 void vk_unlock(void);
 SDL_Window *ui_window(void);
+bool shader_prewarm_progress(uint64_t *done, uint64_t *total);  // (runtime/nvn/vulkan/exec.c)
 }
 
 static std::atomic<bool> g_enabled, g_ready, g_open, g_wants_text;
 static std::atomic<bool> g_settings_open, g_forge_open;
+static std::mutex g_frame_lock;  // ImGui's frame: the game's thread, or the loading screen's before the game's first
 static int g_menu_key;
 static float g_font_size;
 static ImGuiStyle g_base_style;  // (unscaled; scaled copies follow the window's height)
@@ -372,26 +375,48 @@ static void forge_style(ImGuiStyle &style) {  // Forge's own (source/forge/graph
     c[ImGuiCol_NavWindowingDimBg] = c[ImGuiCol_ModalWindowDimBg] = dim;
 }
 
-void overlay_init(const char *font_path, float font_size, int menu_key) {
-#ifdef MHGU_NULL_BACKEND
-    return;
-#endif
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
+// The context, ImGui's own font and Forge's style at 12 px: from the start (overlay_init_early), Forge's settings
+// once its config is read (overlay_init). (Under g_frame_lock: the loading screen may be drawing.)
+static void context_init(const char *font_path, float font_size) {
+    if (!ImGui::GetCurrentContext()) {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO &io = ImGui::GetIO();
+        io.IniFilename = "forge_imgui.ini";  // (window positions; in the game folder, beside mhgurecomp.ini)
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
+        io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
+        io.BackendPlatformName = "mhgurecomp";
+    }
     ImGuiIO &io = ImGui::GetIO();
-    io.IniFilename = "forge_imgui.ini";  // (window positions; in the game folder, beside mhgurecomp.ini)
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
-    io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
-    io.BackendPlatformName = "mhgurecomp";
     g_font_size = font_size > 0 ? font_size : 12.0f;
     ImFontConfig cfg;
     cfg.SizePixels = g_font_size;
     ImFont *font = font_path ? io.Fonts->AddFontFromFileTTF(font_path, g_font_size, &cfg) : nullptr;
-    if (!font) io.Fonts->AddFontDefaultVector(&cfg);
-    ImGui::StyleColorsDark();
-    forge_style(ImGui::GetStyle());
-    ImGui::GetStyle().FontSizeBase = g_font_size;
-    g_base_style = ImGui::GetStyle();
+    if (font) io.FontDefault = font;
+    else if (io.Fonts->Fonts.Size == 0) io.Fonts->AddFontDefaultVector(&cfg);
+    ImGuiStyle style;
+    ImGui::StyleColorsDark(&style);
+    forge_style(style);
+    style.FontSizeBase = g_font_size;
+    ImGui::GetStyle() = g_base_style = style;
+    g_scale = 0;  // (frame_setup scales it again)
+}
+
+void overlay_init_early(void) {
+#ifndef MHGU_NULL_BACKEND
+    std::lock_guard<std::mutex> l(g_frame_lock);
+    context_init(nullptr, 0);
+    g_enabled = true;
+#endif
+}
+
+void overlay_init(const char *font_path, float font_size, int menu_key) {
+#ifdef MHGU_NULL_BACKEND
+    return;
+#endif
+    std::lock_guard<std::mutex> l(g_frame_lock);
+    context_init(font_path, font_size);
+    bool font = font_path && ImGui::GetIO().FontDefault;
     g_menu_key = menu_key;
     g_enabled = true;
     LOG("[forge] ImGui %s overlay: %s opens the menu (font %s, %.0f px)\n", IMGUI_VERSION,
@@ -543,12 +568,83 @@ static void draw_fps(uint64_t now) {
     }
 }
 
+// ------------------------------------------------------------------ loading indicator
+// A spinner and "Loading" in the bottom right corner, with the shader prewarm's count while it runs: on the black
+// window until the game's first frame (overlay_loading: device.c's loading screen), then over the game while the
+// prewarm still has programs left, and for the game's first second at least (its own first frames are black too).
+// Then it fades and stays gone. (Under g_frame_lock: the loading screen's thread and the game's both draw it.)
+static const uint64_t LOADING_HOLD_NS = 1000000000ull, LOADING_FADE_NS = 400000000ull;
+static uint64_t g_loading_t0, g_loading_fade;  // the game's first overlay frame; when the fade began (0: not yet)
+static bool g_loading_over;
+
+static float loading_alpha(uint64_t now) {  // (the game's frames)
+    if (!g_config.loading_indicator) g_loading_over = true;  // ([Performance] LoadingIndicator = Off: never)
+    if (g_loading_over) return 0;
+    if (!g_loading_t0) g_loading_t0 = now;
+    if (!g_loading_fade && now - g_loading_t0 >= LOADING_HOLD_NS && !shader_prewarm_progress(nullptr, nullptr))
+        g_loading_fade = now;
+    if (!g_loading_fade) return 1;
+    float a = 1 - (now - g_loading_fade) / (float)LOADING_FADE_NS;
+    if (a <= 0) g_loading_over = true;
+    return std::max(a, 0.0f);
+}
+
+static void draw_loading(uint64_t now, float scale, float alpha) {
+    auto color = [alpha](float r, float g, float b, float a) {
+        return ImGui::ColorConvertFloat4ToU32(ImVec4(r, g, b, a * alpha));
+    };
+    int language = config_language();
+    const char *title = settings_text(language, "Loading");
+    uint64_t done, total;
+    char line[128] = "", widest[128] = "";
+    if (shader_prewarm_progress(&done, &total) && total) {
+        const char *what = settings_text(language, "Compiling shaders");
+        snprintf(line, sizeof line, "%s  %llu / %llu", what, (unsigned long long)done, (unsigned long long)total);
+        snprintf(widest, sizeof widest, "%s  %llu / %llu", what, (unsigned long long)total, (unsigned long long)total);
+    }
+    ImGuiViewport *vp = ImGui::GetMainViewport();
+    ImFont *font = ImGui::GetFont();
+    float size = ImGui::GetFontSize() * 1.25f, small = ImGui::GetFontSize(), pad = 10 * scale, gap = 3 * scale;
+    float r = size * 0.55f, margin = 24 * scale;
+    ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0, title);
+    ImVec2 ls = line[0] ? font->CalcTextSizeA(small, FLT_MAX, 0, widest) : ImVec2(0, 0);  // (no jitter as it counts)
+    float w = pad + 2 * r + pad + std::max(ts.x, ls.x) + pad, h = pad + ts.y + (line[0] ? gap + ls.y : 0) + pad;
+    ImVec2 p1(vp->WorkPos.x + vp->WorkSize.x - margin, vp->WorkPos.y + vp->WorkSize.y - margin), p0(p1.x - w, p1.y - h);
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    dl->AddRectFilled(p0, p1, color(.025f, .04f, .065f, .85f), 6 * scale);
+    ImVec2 c(p0.x + pad + r, (p0.y + p1.y) * 0.5f);  // (a three-quarter ring, once round a second)
+    const float pi = 3.14159265f;
+    float a0 = (float)(now % 1000000000ull) / 1e9f * 2 * pi;
+    dl->PathArcTo(c, r, a0, a0 + pi * 1.5f, 32);
+    dl->PathStroke(color(1, .72f, .3f, 1), ImDrawFlags_None, 3 * scale);
+    ImVec2 at(c.x + r + pad, p0.y + pad);
+    dl->AddText(font, size, at, color(.96f, .97f, 1, 1), title);
+    if (line[0]) dl->AddText(font, small, ImVec2(at.x, at.y + ts.y + gap), color(.72f, .76f, .84f, 1), line);
+}
+
 // ------------------------------------------------------------------ frames (game thread)
 static std::mutex g_snap_lock;  // the copy the render thread draws
 static ImDrawData g_snap;
 static std::atomic<uint32_t> g_disp_w, g_disp_h;
 static bool g_plugins_init;
 static uint64_t g_last_ns;
+
+// The display's size and scale, the style scaled to it, the time step (under g_frame_lock)
+static float frame_setup(ImGuiIO &io, uint32_t w, uint32_t h, uint64_t now) {
+    io.DisplaySize = ImVec2((float)w, (float)h);
+    io.DisplayFramebufferScale = ImVec2(1, 1);
+    float scale = std::max(1.0f, h / 720.0f);  // (Forge's sizes are for the console's 720p screen)
+    if (scale != g_scale) {
+        ImGuiStyle &style = ImGui::GetStyle();
+        style = g_base_style;
+        style.ScaleAllSizes(scale);
+        style.FontScaleDpi = scale;
+        g_scale = scale;
+    }
+    io.DeltaTime = g_last_ns ? std::clamp((now - g_last_ns) / 1e9f, 1e-4f, 0.1f) : 1.0f / 30;
+    g_last_ns = now;
+    return scale;
+}
 
 static void snap_clear(void) {
     for (ImDrawList *l : g_snap.CmdLists) IM_DELETE(l);
@@ -584,6 +680,7 @@ static bool tex_create_failed(ImTextureData *) { return false; }
 
 void overlay_frame(void *cpu) {
     if (!g_ready) return;
+    std::lock_guard<std::mutex> frame(g_frame_lock);
     if (!g_settings_open) { bool closed = false; settings_panel(&closed); }
     bool open = g_open, free_render = forge_plugins_have(FORGE_IMGUI_FREE_RENDER);
     uint64_t now = SDL_GetTicksNS();
@@ -597,7 +694,8 @@ void overlay_frame(void *cpu) {
 #else
     bool fps = config_show_fps();
 #endif
-    if (!open && !free_render && !notice && !chat && !fps) {  // (nothing to draw)
+    float loading = loading_alpha(now);
+    if (!open && !free_render && !notice && !chat && !fps && !loading) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
         apply_input(io);  // (keep the queue short)
@@ -606,18 +704,7 @@ void overlay_frame(void *cpu) {
     }
     uint32_t w = g_disp_w, h = g_disp_h;
     if (!w || !h) return;
-    io.DisplaySize = ImVec2((float)w, (float)h);
-    io.DisplayFramebufferScale = ImVec2(1, 1);
-    float scale = std::max(1.0f, h / 720.0f);  // (Forge's sizes are for the console's 720p screen)
-    if (scale != g_scale) {
-        ImGuiStyle &style = ImGui::GetStyle();
-        style = g_base_style;
-        style.ScaleAllSizes(scale);
-        style.FontScaleDpi = scale;
-        g_scale = scale;
-    }
-    io.DeltaTime = g_last_ns ? std::clamp((now - g_last_ns) / 1e9f, 1e-4f, 0.1f) : 1.0f / 30;
-    g_last_ns = now;
+    float scale = frame_setup(io, w, h, now);
     apply_input(io);
 
     if (!g_plugins_init) {  // (Forge: right after its context is made)
@@ -663,6 +750,7 @@ void overlay_frame(void *cpu) {
     if (notice) draw_notice(now, scale);
     if (chat) draw_chat(line, now, scale);
     if (fps) draw_fps(now);
+    if (loading) draw_loading(now, scale, loading);
     ImGui::Render();
 
     ImDrawData *dd = ImGui::GetDrawData();
@@ -697,9 +785,10 @@ static void vk_check(VkResult r) {
     if (r < 0) LOG("[forge] ImGui Vulkan error %d\n", (int)r);
 }
 
-void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
 #ifndef MHGU_NULL_BACKEND
-    if (!g_enabled) return;
+// ImGui's Vulkan renderer for the window's render pass (under the Vulkan lock); false: no overlay
+static bool backend_ready(const OverlayTarget *t) {
+    if (!g_enabled) return false;
     g_disp_w = t->width, g_disp_h = t->height;
     if (t->pass != g_pass) {  // (the window's render pass: made once, again only if the window's format changes)
         if (g_pass) {
@@ -726,13 +815,63 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
         if (!ImGui_ImplVulkan_Init(&info)) {
             LOG("[forge] ImGui's Vulkan renderer did not start: no overlay\n");
             g_enabled = false;
-            return;
+            return false;
         }
         g_pass = t->pass;
         g_dev = t->dev;
         g_ready = true;
     }
+    return true;
+}
+#endif
+
+#ifndef MHGU_NULL_BACKEND
+// A frame of its own with only the loading indicator, drawn at once (holding the Vulkan lock and g_frame_lock)
+static void loading_frame(VkCommandBuffer cb, const OverlayTarget *t) {
+    uint64_t now = SDL_GetTicksNS();
+    float scale = frame_setup(ImGui::GetIO(), t->width, t->height, now);
+    ImGui_ImplVulkan_NewFrame();
+    ImGui::NewFrame();
+    draw_loading(now, scale, 1);
+    ImGui::Render();
+    ImDrawData *dd = ImGui::GetDrawData();
+    if (dd->Textures)  // (the font atlas, the first time: the Vulkan lock is held already)
+        for (ImTextureData *tex : *dd->Textures)
+            if (tex->Status != ImTextureStatus_OK) {
+                bool create = tex->Status == ImTextureStatus_WantCreate;
+                ImGui_ImplVulkan_UpdateTexture(tex);
+                if (create && tex->TexID == ImTextureID_Invalid && tex_create_failed(tex)) return;
+            }
+    ImGui_ImplVulkan_RenderDrawData(dd, cb);
+}
+#endif
+
+// (render thread) The game's overlay frame; before the game's thread has made one (its first frame or two), the
+// loading indicator as the loading screen draws it, so it doesn't blink out.
+void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
+#ifndef MHGU_NULL_BACKEND
+    if (!backend_ready(t)) return;
+    {
+        std::unique_lock<std::mutex> frame(g_frame_lock, std::try_to_lock);  // (see overlay_loading)
+        if (frame.owns_lock() && g_config.loading_indicator && !g_loading_t0 && !g_loading_over && g_present_count < 60) {
+            loading_frame(cb, t);
+            return;
+        }
+    }
     std::lock_guard<std::mutex> l(g_snap_lock);
     if (g_snap.Valid && g_snap.CmdListsCount) ImGui_ImplVulkan_RenderDrawData(&g_snap, cb);
+#endif
+}
+
+// (the loading screen's thread, holding the Vulkan lock) If the game's thread is building its overlay frame, nothing:
+// its frames have begun, the game's first is near. (Only tried, never waited for: the game's thread takes the Vulkan
+// lock inside its frame, for texture uploads.)
+void overlay_loading(VkCommandBuffer cb, const OverlayTarget *t) {
+#ifndef MHGU_NULL_BACKEND
+    if (!backend_ready(t)) return;
+    std::unique_lock<std::mutex> frame(g_frame_lock, std::try_to_lock);
+    if (frame.owns_lock()) loading_frame(cb, t);
+#else
+    (void)cb, (void)t;
 #endif
 }

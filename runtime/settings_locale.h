@@ -51,6 +51,8 @@ static inline const char *settings_text(int language, const char *english) {
         {"Frame rate limit", "Límite de FPS"},
         {"VSync", "Sincronización vertical"},
         {"Shader prewarm", "Precarga de shaders"},
+        {"Loading", "Cargando"},  // (the loading indicator: runtime/overlay.cpp)
+        {"Compiling shaders", "Compilando shaders"},
         {"FXAA mode", "Modo de FXAA"},
         {"Application audio", "Audio de la aplicación"},
         {"Master volume", "Volumen general"},

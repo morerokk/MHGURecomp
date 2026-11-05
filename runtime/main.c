@@ -257,6 +257,15 @@ int main(int argc, char **argv) {
 #ifndef __ANDROID__
     engine_modules_init(MHGU_VERSION);  // (the ones engine_modules/enabled.txt lists: runtime/engine_module.c)
 #endif
+    {   // The renderer now rather than at the game's nvnDeviceInitialize, so the loading screen shows while the game
+        // starts (Android: still there, this thread mustn't wait for a window the app may not have yet)
+        void backend_init(void), backend_loading_screen(void), overlay_init_early(void);
+        overlay_init_early();  // (its indicator: ImGui's font until Forge's config is read in boot)
+#if !defined(__ANDROID__) && !defined(MHGU_NULL_BACKEND)
+        backend_init();
+#endif
+        backend_loading_screen();
+    }
     boot(g_game_dir);
     return ui_run();
 }
