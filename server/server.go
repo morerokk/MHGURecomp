@@ -57,7 +57,7 @@ const (
 	errNotFound = 1 // no such hub (or not for this key / version)
 	errNoAnswer = 2 // the host did not take the player
 	errBusy     = 3 // a limit was reached
-	errVersion  = 4 // server protocol mismatch
+	errVersion  = 4 // server protocol mismatch, or a link protocol older than Config.MinProto
 	errBadReq   = 5
 
 	udpMagic  = "MHGR"
@@ -86,6 +86,7 @@ type Config struct {
 	Bandwidth     float64       // bytes a second per pair and direction (TCP), and per pair (UDP)
 	HandshakeTime time.Duration // for the first frame, and a joining player's wait for the host
 	PingEvery     time.Duration
+	MinProto      uint16 // the oldest link protocol (PROTO_VERSION) served; older games get errVersion (0: any)
 	Verbose       bool
 }
 
@@ -320,6 +321,10 @@ func (s *Server) handle(c *net.TCPConn) {
 		return
 	}
 	proto := binary.LittleEndian.Uint16(p[6:])
+	if proto < s.cfg.MinProto { // (the game: "the hub server runs another version", LAN / Join hubs only)
+		sendError(c, errVersion)
+		return
+	}
 	var room [16]byte
 	copy(room[:], p[8:24])
 	body := p[headerSize:]

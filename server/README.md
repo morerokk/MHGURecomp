@@ -42,6 +42,7 @@ Open the port for **TCP and UDP** in the firewall (and forward it, if the server
 | `-max-hubs-per-ip` | 4 | hubs from one IP address |
 | `-list-max` | 18 | hubs in one search answer, as many as the game's Join Hub list shows (3 pages of 6). With more hubs than that, each search gets a random choice of them (hubs with a free place before full ones), so a Retry shows others. The answer is sorted: free places first, then the fullest, then the newest |
 | `-bandwidth` | 1048576 | bytes a second per player link and direction (a hub uses far less) |
+| `-min-proto` | 0 | the oldest link protocol (the game's `PROTO_VERSION`, runtime/net/ldn.c) served: older games are refused, and they say "The hub server runs another version" and show only LAN / Join hubs. `-min-proto 3` refuses 0.14.2 and older. 0: any version. Restart the server to apply it: hubs already up stay until they disconnect |
 | `-v` | off | log hubs and joins (never IP addresses) |
 
 With Docker: `docker build -t mhgurecomp-hubserver server` and

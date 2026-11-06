@@ -115,6 +115,30 @@ func TestKeysAndVersions(t *testing.T) {
 	}
 }
 
+// MinProto: older games are refused for every request (errVersion); that version and newer ones are served.
+func TestMinProto(t *testing.T) {
+	s := start(t, func(c *Config) { c.MinProto = 3 })
+	for _, r := range []struct {
+		typ  byte
+		body []byte
+	}{{tList, nil}, {tHost, testInfo(1)}, {tJoin, u64(1)}, {tAttach, u64(1)}} {
+		c := dial(t, s)
+		send(t, c, r.typ, header(2, 0), r.body)
+		if code := binary.LittleEndian.Uint32(expect(t, c, tError)); code != errVersion {
+			t.Fatalf("request %d: error %d", r.typ, code)
+		}
+	}
+	c := dial(t, s)
+	send(t, c, tHost, header(3, 0), testInfo(1))
+	id := binary.LittleEndian.Uint64(expect(t, c, tHosted))
+	if l := list(t, s, 3, 0); len(l) != 1 || l[id] == nil {
+		t.Fatalf("protocol 3 list %v", l)
+	}
+	if l := list(t, s, 4, 0); len(l) != 0 {
+		t.Fatal("protocol 4 sees a protocol 3 hub")
+	}
+}
+
 // More hubs than ListMax: each answer is a random choice of hubs with a free place (full ones only when those run
 // out), sorted (the fullest first), and repeated searches see more than ListMax of them.
 func TestListRandomChoice(t *testing.T) {
