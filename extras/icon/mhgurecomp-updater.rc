@@ -1,0 +1,3 @@
+// The updater's icon on Windows (Makefile: windres, linked into mhgurecomp-updater.exe): fan-made pixel art (a Palico,
+// used with permission), so it's easy to tell from the game's. SDL takes the window's icon from the exe's first one.
+1 ICON "mhgurecomp-updater.ico"

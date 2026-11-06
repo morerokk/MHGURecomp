@@ -248,6 +248,13 @@ bool plat_user_dir(char *buf, size_t size) {
     return true;
 }
 
+// [Application] SaveLocation: the folder the player named, created if missing (UTF-8 paths open as they are here).
+bool plat_use_folder(const char *utf8, char *buf, size_t size) {
+    if (!*utf8 || snprintf(buf, size, "%s", utf8) >= (int)size || !mkdir_p(buf)) return false;
+    struct stat st;
+    return stat(buf, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
 static int count_files(const char *dir, int depth) {
     DIR *dd = depth > 32 ? NULL : opendir(dir);
     if (!dd) return 0;

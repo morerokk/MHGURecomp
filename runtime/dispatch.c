@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "engine_module.h"
 #include "gamelib.h"
 #include "hle.h"
 #include "interp.h"
@@ -195,6 +196,7 @@ void fnhook_keep_entry(uint32_t addr, uint32_t w0, uint32_t w1) {
         __atomic_store_n(&nkept, n + 1, __ATOMIC_RELEASE);
     }
     pthread_mutex_unlock(&kept_lock);
+    interp_code_changed();
 }
 
 bool fnhook_entry_word(uint32_t pc, uint32_t *w) {
@@ -238,6 +240,7 @@ bool fnhook_set(uint32_t addr, uint32_t detour) {
     if (detour) __atomic_fetch_or(&g_fnhook[addr >> 5], bit, __ATOMIC_RELEASE);
     else __atomic_fetch_and(&g_fnhook[addr >> 5], (uint8_t)~bit, __ATOMIC_RELEASE);
     pthread_mutex_unlock(&hook_lock);
+    interp_code_changed();  // (code_word reads the bit)
     return true;
 }
 
@@ -445,6 +448,7 @@ void rt_fault_report(const char *what, uint64_t fa, uint64_t pc, uint64_t lr) {
     if (fa >= GUEST_BASE && fa < GUEST_BASE + GUEST_SPACE) fprintf(stderr, " (guest %08llx)", (unsigned long long)(fa - GUEST_BASE));
     fprintf(stderr, "\n    host pc %llx (%s+%llx)\n    host lr %llx (%s)\n", (unsigned long long)pc, ps ? ps : "?",
             (unsigned long long)po, (unsigned long long)lr, ls ? ls : "?");
+    engine_modules_report();
     rt_fatal_trace();
 }
 

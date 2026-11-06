@@ -92,7 +92,10 @@ uint64_t plat_now_ns(void) {
     if (!qpf.QuadPart) QueryPerformanceFrequency(&qpf);
     LARGE_INTEGER t;
     QueryPerformanceCounter(&t);
-    return (uint64_t)((unsigned __int128)t.QuadPart * 1000000000u / (uint64_t)qpf.QuadPart);
+    // (no 128-bit division, __udivti3 is slow and this is called all the time; the same result)
+    uint64_t c = (uint64_t)t.QuadPart, f = (uint64_t)qpf.QuadPart;
+    if (f == 10000000) return c * 100;  // (the usual frequency)
+    return c / f * 1000000000u + c % f * 1000000000u / f;
 }
 
 #ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
@@ -175,6 +178,28 @@ bool plat_user_dir(char *buf, size_t size) {
     if (n < 0 || n >= MAX_PATH) return false;
     CreateDirectoryW(dir, NULL);
     if (GetFileAttributesW(dir) == INVALID_FILE_ATTRIBUTES) return false;
+    BOOL lossy = FALSE;
+    int len = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, dir, -1, buf, (int)size, NULL, &lossy);
+    if (len > 0 && !lossy) return true;
+    wchar_t shrt[MAX_PATH];
+    DWORD m = GetShortPathNameW(dir, shrt, MAX_PATH);
+    if (!m || m >= MAX_PATH) return false;
+    len = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, shrt, -1, buf, (int)size, NULL, &lossy);
+    return len > 0 && !lossy;
+}
+
+bool plat_use_folder(const char *utf8, char *buf, size_t size) {
+    wchar_t dir[MAX_PATH];
+    if (!*utf8 || !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1, dir, MAX_PATH)) return false;
+    for (wchar_t *p = dir; *p; p++) if (*p == L'/') *p = L'\\';
+    for (wchar_t *p = dir; (p = wcschr(p + 1, L'\\'));) {  // (each missing folder on the way, then the folder itself)
+        *p = 0;
+        CreateDirectoryW(dir, NULL);
+        *p = L'\\';
+    }
+    CreateDirectoryW(dir, NULL);
+    DWORD attr = GetFileAttributesW(dir);
+    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) return false;
     BOOL lossy = FALSE;
     int len = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, dir, -1, buf, (int)size, NULL, &lossy);
     if (len > 0 && !lossy) return true;

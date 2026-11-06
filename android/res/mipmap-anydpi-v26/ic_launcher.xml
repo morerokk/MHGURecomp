@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon (AndroidManifest.xml): the game's greatsword (fan-made pixel art, used with permission) on a dark
+     ground. An adaptive icon, so the launcher masks it to its own shape; the art sits in the circle of the middle 66 of
+     the 108 dp, the part every mask keeps. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

@@ -14,6 +14,8 @@ extern "C" {
 // From runtime/forge.c once plugins are loaded: font (a .ttf; NULL: ImGui's own), its size in pixels at 720 lines
 // (scaled with the window), the key that opens the menu (SDL scancode = HID usage, as Forge's config has it).
 void overlay_init(const char *font_path, float font_size, int menu_key);
+// Host main thread, before the renderer: ImGui with its own font, for the loading screen until overlay_init.
+void overlay_init_early(void);
 bool overlay_enabled(void);
 bool overlay_menu_open(void);
 bool overlay_wants_text(void);  // a text field of the open menu (a Forge plugin's) has the focus
@@ -21,7 +23,8 @@ bool overlay_settings_dirty(void);
 void overlay_request_close(void); // Close / Alt+F4 routes to controller confirmation inside settings.
 void overlay_face_positions(const int positions[4]);
 int overlay_face_position(int semantic); // A, B, X, Y -> physical south/east/west/north.
-void overlay_toggle_settings(void); // host main thread: F1 or Start + Back
+void overlay_toggle_settings(void); // host main thread: F1 (one level back while open; over Forge's menu: closes that)
+void overlay_menu_chord(void); // host main thread: Start + Back. As F1, but Forge's menu open by itself closes
 // Any thread: a notice shown over the game for a few seconds (title on its own line; the latest replaces any other).
 void overlay_notice(const char *title, const char *text);
 
@@ -53,6 +56,9 @@ typedef struct {
     uint32_t width, height;
 } OverlayTarget;
 void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t);
+// Before the game's first frame (device.c's loading screen thread, under the Vulkan lock, inside the window image's
+// render pass): the loading indicator alone, on the black window.
+void overlay_loading(VkCommandBuffer cb, const OverlayTarget *t);
 
 #ifdef __cplusplus
 }

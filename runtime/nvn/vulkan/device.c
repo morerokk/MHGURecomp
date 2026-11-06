@@ -8,6 +8,7 @@
 //   MHGU_FPS=1             frames per second in the log every 2 s
 //   MHGU_NO_BC=1           act as if the GPU had no BC textures, as phone GPUs (they are decoded on the CPU then)
 //   MHGU_VK11=1            take the path for Vulkan 1.1 devices on any device (g_vk.api11), to test it on a PC
+//   MHGU_NO_LOADING_SCREEN=1   no loading indicator before the game's first frame (a black window, as before)
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <math.h>
@@ -16,6 +17,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "../../engine_module.h"
 #include "../../overlay.h"
 #include "fsr.h"
 #include "vk.h"
@@ -200,6 +202,18 @@ static void create_device(void) {
     if (g_vk.portability) ext[n_ext++] = "VK_KHR_portability_subset";
     no_exclusive = surface_caps2 && has_ext(ep, ne, "VK_EXT_full_screen_exclusive") && !getenv("MHGU_VK_EXCLUSIVE");
     if (no_exclusive) ext[n_ext++] = "VK_EXT_full_screen_exclusive";
+    // (only where DEPTH24_STENCIL8 is made as D32S8: textures.c; MHGU_VK_NO_BIAS_CONTROL=1 leaves it off)
+#ifdef VK_EXT_depth_bias_control
+    bool bias_ctl = vk_depth24_stencil8() == VK_FORMAT_D32_SFLOAT_S8_UINT &&
+                    has_ext(ep, ne, VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME) && !getenv("MHGU_VK_NO_BIAS_CONTROL");
+    if (bias_ctl) {
+        VkPhysicalDeviceDepthBiasControlFeaturesEXT bc = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_BIAS_CONTROL_FEATURES_EXT};
+        VkPhysicalDeviceFeatures2 q = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &bc};
+        vkGetPhysicalDeviceFeatures2(g_vk.phys, &q);
+        bias_ctl = bc.depthBiasControl && bc.leastRepresentableValueForceUnormRepresentation;
+    }
+    if (bias_ctl) ext[n_ext++] = VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME;
+#endif
     if (g_vk.api11) {  // (Vulkan 1.2 has it as the feature samplerMirrorClampToEdge)
         g_vk.no_mirror_clamp = !has_ext(ep, ne, VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME);
         if (!g_vk.no_mirror_clamp) ext[n_ext++] = VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME;
@@ -268,12 +282,25 @@ static void create_device(void) {
         f12.shaderFloat16 = b->shaderInt16 = g_vk.fsr_fp16 = f12_have.shaderFloat16 && h->shaderInt16;  // (both, or neither)
     }
     if (!h->shaderInt64) LOG("[vk] warning: no shaderInt64 (64-bit address math in shaders)\n");
+#ifdef VK_EXT_depth_bias_control
+    VkPhysicalDeviceDepthBiasControlFeaturesEXT bias = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_BIAS_CONTROL_FEATURES_EXT, .depthBiasControl = VK_TRUE,
+        .leastRepresentableValueForceUnormRepresentation = VK_TRUE, .pNext = f.pNext};
+    if (bias_ctl) f.pNext = &bias;
+#endif
     float prio = 1.0f;
     VkDeviceQueueCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = g_vk.qfam,
                                   .queueCount = 1, .pQueuePriorities = &prio};
     VkDeviceCreateInfo di = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &f, .queueCreateInfoCount = 1,
                              .pQueueCreateInfos = &qi, .enabledExtensionCount = n_ext, .ppEnabledExtensionNames = ext};
     VK_CHECK(vkCreateDevice(g_vk.phys, &di, NULL, &g_vk.dev));
+#ifdef VK_EXT_depth_bias_control
+    if (bias_ctl) g_vk.set_depth_bias2 = (PFN_vkCmdSetDepthBias2EXT)vkGetDeviceProcAddr(g_vk.dev, "vkCmdSetDepthBias2EXT");
+#endif
+    LOG("[vk] polygon offsets on the D32S8 made for D24S8: %s\n",
+        vk_depth24_stencil8() != VK_FORMAT_D32_SFLOAT_S8_UINT ? "not needed (D24S8)"
+        : g_vk.set_depth_bias2                               ? "in D24 steps (VK_EXT_depth_bias_control)"
+                                                             : "as given (no VK_EXT_depth_bias_control)");
     if (!g_vk.fences) {
         g_vk.get_semaphore_counter = (PFN_vkGetSemaphoreCounterValue)vkGetDeviceProcAddr(g_vk.dev, "vkGetSemaphoreCounterValue");
         g_vk.wait_semaphores = (PFN_vkWaitSemaphores)vkGetDeviceProcAddr(g_vk.dev, "vkWaitSemaphores");
@@ -396,9 +423,21 @@ static VkFramebuffer sc_fb[8];
 static int sc_req_w, sc_req_h;  // the window's pixel size the swapchain was made for (its extent may differ: MoltenVK)
 static bool sc_stale;           // the surface's size changed under the swapchain (SUBOPTIMAL): recreate when it settles
 
+// Android takes the app's window away when it leaves the screen (minimised, a file picker over it) and makes a new one
+// when it comes back. A surface dies with its window: everything on it says VK_ERROR_SURFACE_LOST_KHR from then on, so
+// frame_begin makes a new surface (surface_ready). The window can also go while a swapchain is being made: not fatal.
+#ifdef __ANDROID__
+static bool surface_lost;
+#define SURFACE_CHECK(x) do { VkResult sr_ = (x); \
+        if (sr_ == VK_ERROR_SURFACE_LOST_KHR || sr_ == VK_ERROR_NATIVE_WINDOW_IN_USE_KHR) { surface_lost = true; return; } \
+        VK_CHECK(sr_); } while (0)
+#else
+#define SURFACE_CHECK(x) VK_CHECK(x)
+#endif
+
 static void create_swapchain(void) {
     VkSurfaceCapabilitiesKHR caps;
-    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk.phys, g_vk.surface, &caps));
+    SURFACE_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk.phys, g_vk.surface, &caps));
     int w, h;
     SDL_GetWindowSizeInPixels(ui_window(), &w, &h);
     VkExtent2D ext = caps.currentExtent.width != UINT32_MAX ? caps.currentExtent : (VkExtent2D){(uint32_t)w, (uint32_t)h};
@@ -408,6 +447,9 @@ static void create_swapchain(void) {
     VkSurfaceFormatKHR fmts[64];
     if (nf > 64) nf = 64;
     vkGetPhysicalDeviceSurfaceFormatsKHR(g_vk.phys, g_vk.surface, &nf, fmts);
+#ifdef __ANDROID__
+    if (!nf) { surface_lost = true; return; }
+#endif
     // scanout shows the bytes the game wrote: a UNORM swapchain (sRGB game images are read through UNORM views)
     VkSurfaceFormatKHR sf = fmts[0];
     for (uint32_t i = 0; i < nf; i++)
@@ -436,7 +478,7 @@ static void create_swapchain(void) {
     FullScreenExclusiveInfo fse = {.sType = VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_INFO_EXT,
                                    .fullScreenExclusive = FULL_SCREEN_EXCLUSIVE_DISALLOWED};
     if (no_exclusive) ci.pNext = &fse;
-    VK_CHECK(vkCreateSwapchainKHR(g_vk.dev, &ci, NULL, &g_vk.swapchain));
+    SURFACE_CHECK(vkCreateSwapchainKHR(g_vk.dev, &ci, NULL, &g_vk.swapchain));
     for (uint32_t i = 0; i < g_vk.sc_count; i++) {
         vkDestroyFramebuffer(g_vk.dev, sc_fb[i], NULL);
         vkDestroyImageView(g_vk.dev, g_vk.sc_views[i], NULL);
@@ -507,6 +549,52 @@ static VkSemaphore binary_semaphore(void) {
     return s;
 }
 
+#ifdef __ANDROID__
+static void *surface_window;  // the window g_vk.surface was made for
+
+static void *android_window(void) {
+    return SDL_GetPointerProperty(SDL_GetWindowProperties(ui_window()), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, NULL);
+}
+
+static void surface_destroy(void) {
+    vk_wait_seq(vk_pending_seq() - 1);
+    vkDeviceWaitIdle(g_vk.dev);
+    for (uint32_t i = 0; i < g_vk.sc_count; i++) {
+        vkDestroyFramebuffer(g_vk.dev, sc_fb[i], NULL);
+        vkDestroyImageView(g_vk.dev, g_vk.sc_views[i], NULL);
+    }
+    g_vk.sc_count = 0;
+    for (int i = 0; i < 8; i++) {  // (a present that failed may have left these signalled)
+        if (done_sem[i]) vkDestroySemaphore(g_vk.dev, done_sem[i], NULL);
+        done_sem[i] = VK_NULL_HANDLE;
+    }
+    if (g_vk.swapchain) vkDestroySwapchainKHR(g_vk.dev, g_vk.swapchain, NULL);
+    g_vk.swapchain = VK_NULL_HANDLE;
+    SDL_Vulkan_DestroySurface(g_vk.inst, g_vk.surface, NULL);
+    g_vk.surface = VK_NULL_HANDLE;
+    surface_window = NULL;
+}
+
+// Is there a surface to draw on? Lets go of a dead one (a window can only have one surface, and the memory is better
+// given back while the app is away) and makes one on the window Android has now.
+static bool surface_ready(void) {
+    void *win = android_window();
+    if (win && win == surface_window && !surface_lost) return true;
+    if (g_vk.swapchain) LOG("[vk] the window went away: surface closed\n");
+    if (g_vk.surface) surface_destroy();
+    surface_lost = false;
+    if (!win) return false;
+    if (!SDL_Vulkan_CreateSurface(ui_window(), g_vk.inst, NULL, &g_vk.surface)) {
+        LOG("[vk] no new surface yet: %s\n", SDL_GetError());
+        g_vk.surface = VK_NULL_HANDLE;
+        return false;
+    }
+    surface_window = win;
+    create_swapchain();
+    return !surface_lost;
+}
+#endif
+
 typedef struct { uint32_t image; VkSemaphore acquired; bool ok; } Frame;
 static Frame cur_frame;
 
@@ -516,6 +604,9 @@ static bool frame_begin(void) {
     int w, h;
     SDL_GetWindowSizeInPixels(ui_window(), &w, &h);
     if (!w || !h || ui_window_away()) return false;  // minimised (or the window going away: ui.c)
+#ifdef __ANDROID__
+    if (!surface_ready()) return false;
+#endif
     // All GPU mutations happen here under vk_lock(), after resolving the old
     // scene. Existing attachment caches defer old image destruction safely.
     int msaa = config_live_msaa();
@@ -540,6 +631,9 @@ static bool frame_begin(void) {
         recreate_swapchain();
         r = vkAcquireNextImageKHR(g_vk.dev, g_vk.swapchain, UINT64_MAX, acquire_sem[slot], VK_NULL_HANDLE, &cur_frame.image);
     }
+#ifdef __ANDROID__
+    if (r == VK_ERROR_SURFACE_LOST_KHR) { surface_lost = true; return false; }
+#endif
     if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) { LOG("[vk] acquire failed: %d\n", r); return false; }
     if (r == VK_SUBOPTIMAL_KHR) check_suboptimal();
     cur_frame.acquired = acquire_sem[slot];
@@ -610,6 +704,7 @@ static void frame_end(const char *shot_path) {
     // window size is caught in frame_begin.)
 #ifdef __ANDROID__
     if (r == VK_ERROR_OUT_OF_DATE_KHR) recreate_swapchain();
+    if (r == VK_ERROR_SURFACE_LOST_KHR) surface_lost = true;
 #else
     if (r == VK_ERROR_OUT_OF_DATE_KHR) sc_stale = true;  // (the next acquire recreates it at once)
     else if (r == VK_SUBOPTIMAL_KHR) check_suboptimal();
@@ -745,6 +840,7 @@ void backend_quit(void) {
     if (backend_ready) exit_handler();  // (does not return)
 }
 void vk_shaders_init(void);
+static SDL_AtomicInt vk_up;  // backend_init has finished (the loading screen waits for it)
 
 // exit() from any thread. The atexit chain is the danger: SDL_Quit and libnvidia's own destructors tear the
 // driver down while other threads are still inside nvnQueueSubmitCommands / vkWaitSemaphores (the exit-time
@@ -766,6 +862,7 @@ static void exit_handler(void) {
         vkDeviceWaitIdle(g_vk.dev);
         if (quiet) pipeline_cache_save();  // (not under a pipeline still being created)
     }
+    engine_modules_shutdown();  // (its own atexit handler was registered before this one, so it would never run)
     fflush(stdout);
     fflush(stderr);
     _exit(0);
@@ -786,12 +883,18 @@ void backend_init(void) {
     done = true;
     if (!ui_window()) FATAL("no window\n");
     create_instance();
+#ifdef __ANDROID__
+    while (!android_window()) SDL_Delay(50);  // (minimised right at the start: no window until the app comes back)
+#endif
 #ifdef __APPLE__
     if (!SDL_RunOnMainThread(create_surface, NULL, true)) FATAL("SDL_RunOnMainThread: %s\n", SDL_GetError());
 #else
     create_surface(NULL);
 #endif
     if (!surface_ok) FATAL("SDL_Vulkan_CreateSurface: %s\n", SDL_GetError());
+#ifdef __ANDROID__
+    surface_window = android_window();
+#endif
     pick_device();
     create_device();
     vk_exec_init();
@@ -800,4 +903,40 @@ void backend_init(void) {
     create_swapchain();
     atexit(exit_handler);
     backend_ready = true;
+    SDL_SetAtomicInt(&vk_up, 1);
+}
+
+// ================================================================== loading screen
+// From backend_init until the game presents its first frame (its own start-up, then the first programs of the shader
+// prewarm: seconds of a black window, more on a first run or a slow PC) a thread of its own presents the window image
+// with the overlay's loading indicator (runtime/overlay.cpp overlay_loading), about 30 times a second, between the
+// game's submissions (under the Vulkan lock; backend_execute submits all it records). Its frames are not counted as
+// the game's (g_frames: MHGU_SHOT_AT, the control file's frame counts). MHGU_NO_LOADING_SCREEN=1: none.
+static void *loading_thread(void *arg) {
+    (void)arg;
+    while (!SDL_GetAtomicInt(&vk_up)) SDL_Delay(20);  // (Android: the game's thread starts the renderer)
+    uint64_t t0 = plat_now_ns();
+    int n = 0;
+    for (;;) {
+        vk_lock();
+        bool game = g_frames != 0;
+        if (!game && frame_begin()) {
+            OverlayTarget ot = {g_vk.inst, g_vk.phys, g_vk.dev, g_vk.qfam, g_vk.queue, g_vk.pcache, sc_pass,
+                                g_vk.sc_extent.width, g_vk.sc_extent.height};
+            overlay_loading(vk_cmd(), &ot);
+            frame_end(NULL);
+            n++;
+        }
+        vk_unlock();
+        if (game) break;
+        SDL_Delay(33);
+    }
+    LOG("[vk] loading screen: %d frames, %.1f s until the game's first\n", n, (plat_now_ns() - t0) / 1e9);
+    return NULL;
+}
+
+void backend_loading_screen(void) {
+    if (!g_config.loading_indicator || getenv("MHGU_NO_LOADING_SCREEN")) return;  // ([Performance] LoadingIndicator)
+    pthread_t t;
+    if (pthread_create(&t, NULL, loading_thread, NULL) == 0) pthread_detach(t);
 }
