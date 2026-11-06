@@ -11,7 +11,6 @@ extern "C" {
 bool ryusrv_start(int port, char *err, int err_size);  // listens on every adapter; true when it runs
 void ryusrv_stop(void);
 bool ryusrv_running(void);
-int ryusrv_port(void);
 
 #ifdef __cplusplus
 }

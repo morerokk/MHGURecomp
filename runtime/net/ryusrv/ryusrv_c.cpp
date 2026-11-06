@@ -7,7 +7,6 @@
 #include "server.h"
 
 static std::unique_ptr<Network::RyuLdn::Server> g_server;
-static int g_port;
 
 extern "C" bool ryusrv_start(int port, char *err, int err_size) {
     if (g_server) return true;
@@ -18,9 +17,7 @@ extern "C" bool ryusrv_start(int port, char *err, int err_size) {
         return false;
     }
     g_server = std::move(s);
-    g_port = port;
     return true;
 }
 extern "C" void ryusrv_stop(void) { g_server.reset(); }
 extern "C" bool ryusrv_running(void) { return g_server != nullptr; }
-extern "C" int ryusrv_port(void) { return g_port; }

@@ -372,7 +372,7 @@ void xb_room_members(const uint8_t (*ips)[4], int n) {
 void xb_room_proxy(const uint8_t sip[4], uint16_t sport, const uint8_t dip[4], uint16_t dport, uint8_t proto, bool bc, const void *data,
                    uint32_t len) {
     static int seen;
-    if (seen < 40) {
+    if (seen < 40 && ENV("MHGU_LOG_NET")) {
         seen++;
         LOG("[xbridge] room packet %u.%u.%u.%u:%u -> %u.%u.%u.%u:%u proto %u%s, %u bytes\n", sip[0], sip[1], sip[2], sip[3], sport, dip[0], dip[1],
             dip[2], dip[3], dport, proto, bc ? " (broadcast)" : "", len);
@@ -384,7 +384,7 @@ void xb_room_proxy(const uint8_t sip[4], uint16_t sport, const uint8_t dip[4], u
     Peer *p = active ? peer_by_room(sip) : NULL;
     if (!p || !p->joined || !p->rp) {
         pthread_mutex_unlock(&mu);
-        if (seen < 40) LOG("[xbridge]   (not from a joined room player: dropped)\n");
+        if (seen < 40 && ENV("MHGU_LOG_NET")) LOG("[xbridge]   (not from a joined room player: dropped)\n");
         return;
     }
     room_own_ip(own);
@@ -400,7 +400,7 @@ void xb_room_proxy(const uint8_t sip[4], uint16_t sport, const uint8_t dip[4], u
     }
     if (!dst) {
         pthread_mutex_unlock(&mu);
-        if (seen < 40) LOG("[xbridge]   (no hub address for it: dropped)\n");
+        if (seen < 40 && ENV("MHGU_LOG_NET")) LOG("[xbridge]   (no hub address for it: dropped)\n");
         return;
     }
     RyuProxy r = {p->ryu_ip, dst, sport, dport, 17};

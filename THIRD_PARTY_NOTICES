@@ -228,6 +228,29 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 Ryujinx LDN protocol (runtime/net/ryuldn.c)
 ================================================================================
 
-The RyuLdn protocol and behaviour come from Ryujinx's LdnServer and LDN client (MIT License, Copyright (c) Ryujinx Team and
-Contributors); the room protocol from suyu / yuzu / Citra (GPL-2.0-or-later projects: only the wire format was used). The code
-here was written from the protocols, not copied.
+The RyuLdn client (runtime/net/ryuldn.c) and the room client (runtime/net/room.c) were written from the protocols: Ryujinx's
+LdnServer and LDN client (MIT License, Copyright (c) Ryujinx Team and Contributors) and the suyu / yuzu / Citra room protocol.
+
+The two embedded servers are NOT written from scratch: runtime/net/roomsrv/ (the room) is derived from the room server of
+Citra / yuzu / suyu (GPL-2.0-or-later; Copyright (c) Citra Emulator Project and the yuzu / suyu Emulator Projects), and
+runtime/net/ryusrv/ (the Ryujinx LDN server) is C++ from the earlier suyu-based recompiler that follows Ryujinx's LdnServer
+(GPL-3.0-or-later). Their files keep their SPDX headers.
+
+
+================================================================================
+Zstandard (linked statically; runtime/net/room.c)
+================================================================================
+
+BSD License. Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved. Redistribution and use in source and
+binary forms, with or without modification, are permitted provided that the following conditions are met: redistributions of
+source code must retain the above copyright notice, this list of conditions and the following disclaimer; redistributions in
+binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution; neither the name Facebook, nor Meta Platforms, Inc. nor
+the names of its contributors may be used to endorse or promote products derived from this software without specific prior
+written permission. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+THE POSSIBILITY OF SUCH DAMAGE.

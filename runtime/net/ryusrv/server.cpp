@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <list>
@@ -631,7 +632,7 @@ struct Server::Impl {
             dest = kBroadcast;
         }
         int& seen = dest == kBroadcast ? s.logged_bc : s.logged_uni;
-        if (seen < (dest == kBroadcast ? 10 : 100)) {
+        if (std::getenv("MHGU_LOG_NET") && seen < (dest == kBroadcast ? 10 : 100)) {
             seen++;
             LOG_INFO(Network, "ryuldn server: game packet from {} to {} ({} -> {}, {} bytes)", info.source_ip, info.dest_ip, info.source_port,
                      info.dest_port, data.size());
@@ -639,7 +640,7 @@ struct Server::Impl {
         const auto bytes = Encode(type, *msg, Trailing<T>(data));
         for (Session* p : s.game->players) {
             if (dest == kBroadcast || p->ip == dest) {
-                if (p != &s && p->logged_rx < 10) {
+                if (std::getenv("MHGU_LOG_NET") && p != &s && p->logged_rx < 10) {
                     p->logged_rx++;
                     LOG_INFO(Network, "ryuldn server: relayed {} bytes (to {}:{}) to client #{} ({})", bytes.size(), info.dest_ip, info.dest_port,
                              p->serial, p->ip);
