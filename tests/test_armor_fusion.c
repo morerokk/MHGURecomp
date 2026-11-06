@@ -240,6 +240,7 @@ enum {
     COORD_CHILDREN = 0x5030000, COMMON = 0x5040000, COMMON_CHILDREN = 0x5050000,
     WIDGETS = 0x5060000, RECORDS = 0x5080000, ITEM = 0x5090000,
     INPUT = 0x50a0000, FACILITY = 0x50b0000, BOX = 0x50c0000, PLAYER = 0x50d0000,
+    PREVIEW = 0x50d1000, AMBIENT = 0x50d2000, DIRECTIONAL = 0x50d3000,
     ACCEPT = 0x2000, BACK = 0x4000, MEMORY_SIZE = 0x8000000
 };
 static struct { uint32_t address; HostFn fn; } hooks[16];
@@ -317,6 +318,9 @@ static void guest_dispatch(Cpu *c, uint32_t address) {
     case 0x85fcec: return;
     case 0x5ea218: c->r[0] = 1; return;
     case 0x75d2b4: c->r[0] = COMMON; return;
+    case 0xa88238: // Native unit draw-view setter; preserve other flags.
+        ST32(c->r[0] + 0xc, (LD32(c->r[0] + 0xc) & 0xfc00ffff) | ((c->r[1] & 0x3ff) << 16));
+        return;
     case 0x85cb3c:
         assert(c->r[0] == SMITH && c->r[1] < 30);
         c->r[0] = LD32(SMITH_CHILDREN + c->r[1] * 4); return;
@@ -415,6 +419,9 @@ static void reset(Cpu *c) {
     ST8(FACILITY + 0x198, 3); ST8(FACILITY + 0x199, 4);
     ST32(SMITH + 4, 1); ST32(SMITH + 0xc, 1); ST8(SMITH + 0x1f71, 4);
     ST32(SMITH + 0x34, SMITH_CHILDREN); ST32(SMITH + 0x30, 30);
+    ST32(SMITH + 0x3210, PREVIEW);
+    ST32(PREVIEW + 8, AMBIENT); ST32(PREVIEW + 12, DIRECTIONAL);
+    ST32(AMBIENT + 0xc, 0x00404c82); ST32(DIRECTIONAL + 0xc, 0x00504c82);
     ST32(COORD + 4, 2); ST32(COORD + 0x34, COORD_CHILDREN); ST32(COORD + 0x30, 30);
     ST32(COORD + 0x84, 0); ST32(COORD + 0x88, 1);
     ST32(COMMON + 0x34, COMMON_CHILDREN); ST32(COMMON + 0x30, 6);
@@ -465,11 +472,21 @@ static void check_native(void) {
         {0x8fb8e4,0xe92d4ff0}, {0x8fcea8,0xe92d4ff0}, {0x8fd448,0xe92d4bf0},
         {0x8fb720,0xe92d48f0}, {0x74edec,0xe92d4800}, {0x74ee34,0xe1c011b4},
         {0x74ee98,0xe92d4ff0}, {0x74fa74,0xe92d4010}, {0x394228,0xe590001c},
-        {0x85cb3c,0xe5900034}, {0x85cba0,0xe92d4010}, {0x85cc0c,0xe92d4010}
+        {0x85cb3c,0xe5900034}, {0x85cba0,0xe92d4010}, {0x85cc0c,0xe92d4010},
+        {0xa88238,0xe590200c}
     };
     for (size_t i = 0; i < sizeof anchors / sizeof anchors[0]; ++i) ST32(anchors[i][0], anchors[i][1]);
     armorfusion_init(); assert(hook_count == 13);
     Cpu cpu;
+
+    // A suspended forge must not add another light to the child's paper model.
+    reset(&cpu); open_picker(&cpu);
+    assert((LD16(AMBIENT + 0xe) & 0x3ff) == 0);
+    assert((LD16(DIRECTIONAL + 0xe) & 0x3ff) == 0);
+    ST32(AMBIENT + 0xc, LD32(AMBIENT + 0xc) | 0x1000);
+    close_coordinate(&cpu);
+    assert(LD32(AMBIENT + 0xc) == 0x00405c82);
+    assert(LD32(DIRECTIONAL + 0xc) == 0x00504c82);
 
     reset(&cpu); finish_picker(&cpu);
     assert(frame(&cpu, ACCEPT, ACCEPT) == 0);
@@ -516,6 +533,7 @@ static void check_native(void) {
         unsigned before = ui_changes;
         cpu.r[0] = SMITH; hook(teardown[i])(&cpu);
         assert(closes == 1 && ui_changes == before);
+        assert((LD16(DIRECTIONAL + 0xe) & 0x3ff) == 0);
         assert(charges == 0 && deductions == 0);
     }
     reset(&cpu); open_picker(&cpu);

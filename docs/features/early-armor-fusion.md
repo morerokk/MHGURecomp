@@ -43,7 +43,9 @@ coverage, not proof that the native validator accepts every pair.
   equipped handling, appearance mutation, saving and separation remain native.
 - Explicit selection, button-release, question and approved phases prevent a
   held input from accepting the fee. Teardown checks ownership before restoring
-  suspended widgets. The guest-call helper in `runtime/rt.h` preserves registers.
+  suspended widgets and preview lights. Only the active preview supplies light
+  to the paper model, avoiding an unsupported two-light shader fallback.
+  The guest-call helper in `runtime/rt.h` preserves registers.
 
 `tools/fusion_materials.py` derives the catalog from the builder's own dump.
 Only `armor-fusion.afus` is needed beside the executable; desktop archives and
@@ -76,15 +78,19 @@ teardown, partial selection, rounding and caller scope. Python checks cover
 table parsing, category precedence, tier boundaries, binary output and packaging.
 Host tests do not replace in-game transactions.
 
-Earlier Linux checks on a copied HR1 save covered paid equipped fusion, exact
-item/zenny deductions, cancellation, separation and cold save/load. A decorated
-base retained its Attack Jewel 1, stats and skills. A second Linux Local Play
-hub client, with this feature disabled, received the fused appearances and
-matching equipment/stats. These checks predate the latest consolidation.
+Linux copied-save checks cover six paid fusion/separation cases: decorated LR
+Bulldrome/Maccao, LR/HR/G Rathalos, HR Hero and G Hylian event armor. Exact gear,
+material and zenny deltas were checked. Base decorations, stats and skills stay
+unchanged; donor decorations return to the item box. All six mixed-rank
+directions are grayed out and reject confirmation without payment.
+Decorated LR fusion and separation each survive native Save and a cold process
+restart with exact equipment, inventory, zenny and hunter-stat comparisons.
 
-After consolidation, a copied-save Linux smoke test checks the native picker,
-partial selection/undo, held confirmation, cancellation and forge re-entry.
-No payment was confirmed in that smoke test.
+Solo and shared Local Play quest checks compare the same equipped base before
+and after fusion. A second client with the extension disabled receives the
+expected appearance and matching equipment, decorations, stats and skills.
+Shared-quest checks also pass after merging upstream a272b61. HD texture/UI/font
+mods were loaded with 2560x1440 internal rendering and windowed output.
 
-Native HR/G transactions, decorated donor jewel return, full item boxes,
-shared-quest multiplayer and Windows/Android runtime remain untested.
+Windows/Android runtime, WAN/NAT, four-player sessions, full-box separation and
+every individual armor appearance/recipe remain outside this test coverage.

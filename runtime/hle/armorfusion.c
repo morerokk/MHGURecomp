@@ -37,6 +37,7 @@
 #define FN_MESSAGE      0x75bc7cu
 #define FN_DIALOG_TEXT  0x75bac0u
 #define G_FACILITY      0x1a99458u
+#define FN_DRAW_VIEW    0xa88238u
 
 enum { COORDINATE_KEEP = (1u << 0) | (1u << 1) | (1u << 4) | (1u << 10) };
 
@@ -57,6 +58,7 @@ static uint8_t parent_facility_flags[2];
 static bool open_latched;
 static uint32_t parent_ui;
 static uint32_t visible_children;
+static uint16_t preview_views[2];
 static bool aborting;
 
 static uint32_t visible_mask(uint32_t ui) {
@@ -301,10 +303,23 @@ static int materials_poll(Cpu *c) {
     return 0;
 }
 
+static void preview_lighting(Cpu *c, bool hide) {
+    // Each preview owns ambient/directional lights for the shared paper model.
+    // Leaving Smith's lights active requests an unsupported two-light shader.
+    uint32_t preview = LD32(parent_ui + 0x3210);
+    for (unsigned i = 0; preview && i < 2; ++i) {
+        uint32_t light = LD32(preview + 8 + 4 * i);
+        if (!light) continue;
+        if (hide) preview_views[i] = LD16(light + 0xe) & 0x3ff;
+        guest_call4(c, FN_DRAW_VIEW, light, hide ? 0 : preview_views[i], 0, 0);
+    }
+}
+
 static void suspend_parent(Cpu *c, uint32_t ui) {
     parent_ui = ui;
     visible_children = visible_mask(ui);
     apply_mask(c, ui, visible_children, FN_HIDE_CHILD);
+    preview_lighting(c, true);
 }
 
 static bool parent_live(void) {
@@ -316,6 +331,7 @@ static bool parent_live(void) {
 
 static void restore_parent(Cpu *c) {
     if (parent_live()) {
+        preview_lighting(c, false);
         apply_mask(c, parent_ui, visible_children, FN_SHOW_CHILD);
         ST8(parent_ui + 4, 0); // Native main-menu setup restores its hints/title.
     }
@@ -711,6 +727,7 @@ void armorfusion_init(void) {
         {FN_SMITH_CLOSE, 0xe92d4800}, {FN_SMITH_DTOR, 0xe92d4830}, {FN_SMITH_DELETE, 0xe92d4800},
         {FN_DIALOG_TEXT, 0xe92d4070},
         {0x75d2b4, 0xe0800101}, {0x85e5bc, 0xe92d41f0}, {0x85e794, 0xe92d4830},
+        {FN_DRAW_VIEW, 0xe590200cu},
     };
     for (size_t i = 0; i < sizeof anchors / sizeof anchors[0]; ++i) {
         if (LD32(anchors[i].addr) != anchors[i].word) {
