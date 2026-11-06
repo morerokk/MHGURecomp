@@ -847,6 +847,11 @@ static bool ui_menu_pass;  // this pass drew a layer 97 menu before (the windows
 // is drawn in a pass of its own, after the parchment it sits in.
 #define UI_RECENT 256
 static struct { float x, y; uint8_t vanchor, hanchor; } ui_recent[UI_RECENT];
+// The last model preview's box (canvas units) and how its frame was anchored vertically (ui_preview_map): its button
+// prompts just under it go with the frame (cbuf_info; they are drawn before the model, so last frame's box)
+static float ui_pv_x0, ui_pv_x1, ui_pv_y1;
+static int ui_pv_v = -1;
+static uint64_t ui_pv_present;
 static uint32_t ui_nrecent, ui_pass_recent;  // (quads recorded so far, the slot is the count modulo UI_RECENT; and when
                                              // this pass began)
 static bool ui_loading_pass;  // this pass draws the loading screen (its backdrop, layer 110, came first)
@@ -1790,6 +1795,16 @@ static bool ui_preview_map(PreviewMap *pm) {
     } else {
         float sy = asp / (16.0f / 9.0f);
         pm->ky = sy;
+        // (config.c camera_aspect gives a camera of this box's shape the box's 16:9 shape)
+        float a = w / h;
+        int slot = 0;
+        for (int i = 0; i < 4; i++) {
+            if (fabsf(g_preview_box_aspect[i] / a - 1.0f) < 0.001f) { slot = i; break; }
+            if (g_preview_box_present[i] < g_preview_box_present[slot]) slot = i;
+        }
+        g_preview_box_aspect[slot] = a, g_preview_box_present[slot] = g_present_count;
+        ui_pv_x0 = vp[0] / pw * 1280.0f, ui_pv_x1 = (vp[0] + w) / pw * 1280.0f;
+        ui_pv_y1 = (fminf(vp[1], vp[1] + vp[3]) + h) / ph * 720.0f, ui_pv_v = vanchor, ui_pv_present = g_present_count;
         if (vanchor == 0) pm->sy = 0;
         else if (vanchor == 2) pm->sy = ph * (1.0f - sy);
         else pm->sy = ph * 0.5f * (1.0f - sy);
@@ -3356,6 +3371,13 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // frame's lower edge slid away from it. All of it but the header and prompts (below y 600) goes top.
                     if (fabsf(pos_z - 105.0f) < 0.5f && pos_x == 215.0f && pos_y == 0.0f) ui_meownster_pass = true;
                     if (ui_meownster_pass && pos_z > 97.5f && pos_z < 105.5f) vanchor = pos_y > 600.0f ? V_BOTTOM : V_TOP;
+                    // A model preview's button prompts just under its box (the Palico Scout's "Rotate", layer 100 like its
+                    // frame) go with the frame the preview followed: the frame (one turned quad, its corner at the top
+                    // right) went Top with the target cam's rule and the prompt Bottom, below the frame. (The Smithy's
+                    // prompts and parchment are both Bottom already.)
+                    if (sy < 1.0f && ui_pv_v >= 0 && ui_pv_present + 2 >= g_present_count && fabsf(pos_z - 100.0f) < 0.5f &&
+                        pos_x >= ui_pv_x0 - 30.0f && pos_x <= ui_pv_x1 + 30.0f && pos_y >= ui_pv_y1 && pos_y <= ui_pv_y1 + 40.0f)
+                        vanchor = ui_pv_v == 0 ? V_TOP : ui_pv_v == 2 ? V_BOTTOM : V_CENTER;
                     // The loading backdrop's tiles (x -30, 549, 1128...: one every 579, past 1280) are one picture sideways
                     // too, from the screen's left edge: by place they went Left / Centre / Right, three copies with gaps
                     // between them with Edges / 21:9; centred (or Center), nothing covered the left of the first tile.
@@ -3968,9 +3990,16 @@ static void draw(CmdRec *r, bool indexed) {
     PreviewMap pm;
     if (movie && movie_viewport(movie, vp, movie_vp)) vp = movie_vp;
     memcpy(v, vp, sizeof v);
-    if (vp != movie_vp && ui_preview_map(&pm)) {  // (a model preview: the viewport keeps its size, its centre moves)
-        v[0] = pm.sx + (vp[0] + vp[2] * 0.5f) * pm.kx - vp[2] * 0.5f;
-        v[1] = pm.sy + (vp[1] + vp[3] * 0.5f) * pm.ky - vp[3] * 0.5f;
+    if (vp != movie_vp && ui_preview_map(&pm)) {  // (a model preview: its centre moves with its window)
+        // On a narrower picture (16:10) the game's viewport is its 16:9 one stretched to the taller picture, and so is
+        // the model's camera (made for the viewport's shape): the model came out 1 / ky times too big for its frame
+        // (flattened by ky), and its scissor cut it. config.c camera_aspect gives that camera the 16:9 shape, and the
+        // viewport its 16:9 height: the model as big and with as much room to the sides as at 16:9. Until the camera has
+        // it (the first frame), the viewport shrinks by ky both ways instead: the right size, narrower.
+        if (pm.ky < 1.0f && g_preview_cam_present + 2 >= g_present_count) v[3] = vp[3] * pm.ky;
+        else if (pm.ky < 1.0f) v[2] = vp[2] * pm.ky, v[3] = vp[3] * pm.ky;
+        v[0] = pm.sx + (vp[0] + vp[2] * 0.5f) * pm.kx - v[2] * 0.5f;
+        v[1] = pm.sy + (vp[1] + vp[3] * 0.5f) * pm.ky - v[3] * 0.5f;
     }
     set_viewport(cb, v[0] * pass_sx, v[1] * pass_sy, v[2] * pass_sx, v[3] * pass_sy, st.depth_range[0][0],
                  st.depth_range[0][1]);  // (FSR: pass_s* scale onto output-size stand-ins, else 1)
