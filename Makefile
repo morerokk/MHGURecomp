@@ -174,9 +174,11 @@ EXE      := $(B)/mhgurecomp
 MINFLAG  := -mmacosx-version-min=$(MACOS_MIN)
 OSFLAGS  := -I$(DEPS)/include -I$(BREW)/opt/vulkan-headers/include $(MINFLAG)
 GENFLAGS += -fPIC $(MINFLAG)
+# (the bundled zstd, a static library linked into the executable: built for the same macOS)
+ZSTD_FLAGS += $(MINFLAG)
 # (the rpath: build/mhgurecomp runs from there; make_app replaces it with the app's Frameworks folder)
 LDFLAGS  := -L$(DEPS)/lib -Wl,-rpath,$(abspath $(DEPS)/lib) $(MINFLAG) -rdynamic -lSDL3 $(AV_LIBS) \
-            -lvulkan -lshaderc_shared -lpthread -lm -framework Cocoa
+            -lvulkan -lshaderc_shared $(ZSTD_LIBS) -lpthread -lm -framework Cocoa
 # (the Settings menu and window; building the game code on a player's Mac)
 RT_OBJC  := runtime/platform/darwin_menu.m runtime/platform/darwin_settings.m runtime/platform/darwin_gamecode.m
 GAMELIB  := $(B)/mhgugame.dylib
@@ -236,13 +238,13 @@ RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(patsubst runtime/%.m,
 RYUSRV_OBJ := $(patsubst runtime/net/ryusrv/%.cpp,$(O)/rt/net/ryusrv/%.o,$(wildcard runtime/net/ryusrv/*.cpp))
 $(O)/rt/net/ryusrv/%.o: runtime/net/ryusrv/%.cpp $(wildcard runtime/net/ryusrv/*.h) runtime/net/ryusrv.h
 	@mkdir -p $(dir $@)
-	$(CXX) -std=c++20 -O2 -g -Wall -Iruntime/net/ryusrv/shim -Iruntime/net/ryusrv $(if $(filter windows,$(PLATFORM)),-D_WIN32_WINNT=0x0A00) -c $< -o $@
+	$(CXX) -std=c++20 -O2 -g -Wall -Iruntime/net/ryusrv/shim -Iruntime/net/ryusrv $(if $(filter windows,$(PLATFORM)),-D_WIN32_WINNT=0x0A00) $(MINFLAG) -c $< -o $@
 # ENet 1.3.18 (third_party/enet, MIT): the reliable UDP of suyu-family emulators' multiplayer rooms (runtime/net/room.c)
 ENET      := third_party/enet
 ENET_SRC  := $(addprefix $(ENET)/,callbacks.c compress.c host.c list.c packet.c peer.c protocol.c) \
              $(ENET)/$(if $(filter windows,$(PLATFORM)),win32.c,unix.c)
 ENET_OBJ  := $(patsubst $(ENET)/%.c,$(O)/enet/%.o,$(ENET_SRC))
-ENETFLAGS := -O2 -g -w -I$(ENET)/include $(if $(filter windows,$(PLATFORM)),,-DHAS_FCNTL -DHAS_POLL -DHAS_GETADDRINFO -DHAS_GETNAMEINFO -DHAS_INET_PTON -DHAS_INET_NTOP -DHAS_MSGHDR_FLAGS -DHAS_SOCKLEN_T)
+ENETFLAGS := -O2 -g -w -I$(ENET)/include $(MINFLAG) $(if $(filter windows,$(PLATFORM)),,-DHAS_FCNTL -DHAS_POLL -DHAS_GETADDRINFO -DHAS_GETNAMEINFO -DHAS_INET_PTON -DHAS_INET_NTOP -DHAS_MSGHDR_FLAGS -DHAS_SOCKLEN_T)
 $(O)/enet/%.o: $(ENET)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(ENETFLAGS) -c $< -o $@
