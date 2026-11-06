@@ -317,6 +317,42 @@ You can also play multiplayer without an LDN server if you want to play with you
 
 Choose the "Local Wireless" multiplayer options, as this port pretends to be a local nearby Switch with a wireless connection. The online options are unavailable and are unnecessary.
 
+### Crossplay with emulators (experimental)
+
+You can also play with people on Ryujinx / Ryubing, and on suyu, yuzu, Eden, Citron and the other forks that kept their multiplayer rooms. This is still experimental: it has been tested against the emulators' server software, but not yet in real hunts with real emulator players. Please [open an issue](https://github.com/morerokk/MHGURecomp/issues/new/choose) with your `log.txt` if something goes wrong.
+
+Some things to know first:
+- Crossplay is set up in `mhgurecomp.ini`, under `[Multiplayer]`, not in the F1 menu. If your .ini is from an older version and doesn't have the settings below yet, just add them.
+- Everyone needs game version 1.4.0, the emulator players too.
+- This port's extras (small monster sync, HP scaling) are off in a hub with emulator players: only players on this port understand them.
+
+**The easy way: one player on this port hosts everything.** The host turns on the servers that are built into the game:
+
+```ini
+RyuServe = On        ; for Ryujinx / Ryubing players (TCP port 30456)
+RoomServe = On       ; for suyu, yuzu, Eden, Citron... players (UDP port 24872)
+RoomPassword =       ; optional: a password for the room
+```
+
+These only run while Local Wireless play is open, so the host creates a hub as usual. To play over the internet, the host forwards those ports, or everyone uses a VPN such as Radmin. Then:
+- **Ryujinx players** set their LDN server to the host's address (port 30456) and search for hubs in Local Play.
+- **suyu / Eden / Citron players** connect to a multiplayer room at the host's IP, port 24872 (with the room password, if there is one).
+- **Other players on this port** set `RyuServers = <the host's address>`, so the hub shows up in their Search Hubs.
+
+With both servers on, Ryujinx players and room players all play in the same hub.
+
+**Using a server that already exists:**
+- `RyuServers = host[:port], ...`: Ryujinx LDN servers whose lobbies show up in Search Hubs (default port 30456).
+- `RyuHost = host`: hubs you create are made on that server, so Ryujinx players on it can join them.
+- `RoomServer = host[:port]` and `RoomHost = On`: the same for a suyu-style multiplayer room (default port 24872). `RoomName` is your name in the room, `RoomPassword` its password.
+- `RyuHost` and `RoomHost` together make one hub that both Ryujinx and room players can join.
+- Please don't use Ryujinx's own public LDN server for this, it's meant for Ryujinx users. Run your own Ryujinx LdnServer, or just use `RyuServe`.
+
+**Good to know:**
+- For a private group with Ryujinx players, set `RyuPassphrase` to `Ryujinx-` followed by exactly 8 hex digits (for example `Ryujinx-1a2b3c4d`), and have the Ryujinx players enter the same one. Anything else (a typo too) counts as no passphrase, which means your lobby is **public**. Ryujinx does the same.
+- Hubs with both Ryujinx and room players are the least tested. If something odd happens there (players not seeing each other in a quest, for example), try a hub with only Ryujinx players or only room players.
+- If things get strange after someone left and rejoined a crossplay hub, make a new hub.
+
 ## Bonus content
 
 By default, the `bonus` subfolder in releases contains a savegame with all the free online content (event quests, item packs, palicoes), which will be copied into your savegame when the game starts the 2nd time.
