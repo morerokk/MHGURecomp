@@ -51,7 +51,7 @@ SDL3_NEED :=
 SDL_DEPS  := $(SDL3_DIR)/lib/libSDL3.so
 SDL_LIBS  := -L$(SDL3_DIR)/lib -lSDL3
 $(SDL3_DIR)/lib/libSDL3.so: $(SDL3_DIR)/.built ;
-LIB_INC   := -I$(SDL3_DIR)/include -I$(SHADERC_DIR)/include
+LIB_INC   := -I$(SDL3_DIR)/include -I$(SHADERC_DIR)/include -I$(ZSTD_DIR)/include
 
 # FFmpeg cross-compiled with the NDK's clang (its configure runs here, its test programs aren't run). No assembly: its
 # configure checks the arm64 assembler without --target (so the NDK's clang fails it), and plain C decodes the game's
@@ -64,6 +64,6 @@ FFMPEG_CONF += --enable-cross-compile --target-os=android --arch=$(if $(filter x
 
 # libmain.so: SDL calls its SDL_main. (--exclude-libs: shaderc and FFmpeg stay inside, as on Linux; libc++ static.)
 # (--no-undefined: a function newer than Android $(API) fails here, not on the player's device when the game starts)
-LDFLAGS   := -shared -Wl,-soname,libmain.so -Wl,--no-undefined $(PAGE16) -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -lvulkan $(SHADERC_LIBS) \
+LDFLAGS   := -shared -Wl,-soname,libmain.so -Wl,--no-undefined $(PAGE16) -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -lvulkan $(SHADERC_LIBS) $(ZSTD_LIBS) \
              -landroid -llog -ldl -lm -static-libstdc++
 GAMELIB_LDFLAGS := -shared -Wl,-soname,libmhgugame.so -Wl,--no-undefined $(PAGE16) -L$(B)/lib/$(ABI) -lmain

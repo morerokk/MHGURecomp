@@ -34,6 +34,7 @@ typedef struct {
 // ldn.c
 bool ldn_net_up(void);           // a network exists (hosting with it created, or joined)
 bool ldn_hosting(void);          // we host it
+bool ldn_crossplay(void);        // the network is a lobby on a Ryujinx LDN server: the port-only features (emsync, hpscale) are off
 // The hub's players and their maximum, and an id for it (a hash of its session id: the same in every player's
 // game); false: no hub.
 bool ldn_party(int *n, int *max, char *id, size_t size);

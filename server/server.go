@@ -22,8 +22,10 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	mrand "math/rand/v2"
@@ -57,7 +59,7 @@ const (
 	errNotFound = 1 // no such hub (or not for this key / version)
 	errNoAnswer = 2 // the host did not take the player
 	errBusy     = 3 // a limit was reached
-	errVersion  = 4 // server protocol mismatch
+	errVersion  = 4 // server protocol mismatch, or a link protocol older than Config.MinProto
 	errBadReq   = 5
 
 	udpMagic  = "MHGR"
@@ -86,13 +88,18 @@ type Config struct {
 	Bandwidth     float64       // bytes a second per pair and direction (TCP), and per pair (UDP)
 	HandshakeTime time.Duration // for the first frame, and a joining player's wait for the host
 	PingEvery     time.Duration
-	Verbose       bool
+	MinProto      uint16 // the oldest link protocol (PROTO_VERSION) served; older games get errVersion (0: any)
+	// Android's public hubs (the game sends the key "public-phone" when it has none) in a room of their own, as the
+	// game asks; false: that room is the public room, so phones and PCs without a key see each other's hubs
+	SeparatePhones bool
+	Verbose        bool
 }
 
 func DefaultConfig() Config {
 	return Config{
 		Addr: ":39510", MaxConns: 4000, MaxConnsPerIP: 24, MaxHubs: 2000, MaxHubsPerIP: 4, ListMax: 18,
 		ReqRate: 2, ReqBurst: 15, Bandwidth: 1 << 20, HandshakeTime: 10 * time.Second, PingEvery: 15 * time.Second,
+		SeparatePhones: true,
 	}
 }
 
@@ -149,6 +156,26 @@ func (s *Server) vlog(format string, args ...any) {
 	if s.cfg.Verbose {
 		log.Printf(format, args...)
 	}
+}
+
+// The room of Android's public hubs: the key "public-phone" (runtime/net/ldn.c lobby_header).
+var phoneRoom = func() (r [16]byte) {
+	h := sha256.Sum256([]byte("MHGURecomp matchmaking key:public-phone"))
+	copy(r[:], h[:])
+	return
+}()
+
+// A room for the log: "public", "phone" (Android's public room) or "key" and the room: the key's hash as the game
+// sends it (the key itself never reaches the server). A guessed key's room, to compare: the first 16 bytes of
+// SHA-256("MHGURecomp matchmaking key:" + key), README.md.
+func roomName(r [16]byte) string {
+	switch r {
+	case [16]byte{}:
+		return "public"
+	case phoneRoom:
+		return "phone"
+	}
+	return fmt.Sprintf("key %x", r)
 }
 
 // Listen opens the TCP and UDP ports (the same number); Serve then runs until Close.
@@ -322,6 +349,17 @@ func (s *Server) handle(c *net.TCPConn) {
 	proto := binary.LittleEndian.Uint16(p[6:])
 	var room [16]byte
 	copy(room[:], p[8:24])
+	if proto < s.cfg.MinProto { // (the game: "the hub server runs another version", LAN / Join hubs only)
+		if t == tHost {
+			s.vlog("hub refused (protocol %d, %s)", proto, roomName(room))
+		}
+		sendError(c, errVersion)
+		return
+	}
+	phone := room == phoneRoom
+	if phone && !s.cfg.SeparatePhones { // (for every request: hubs, searches and joins all meet in the public room)
+		room = [16]byte{}
+	}
 	body := p[headerSize:]
 	switch t {
 	case tList:
@@ -335,7 +373,7 @@ func (s *Server) handle(c *net.TCPConn) {
 			sendError(c, errBadReq)
 			return
 		}
-		s.host(c, ip, proto, room, body)
+		s.host(c, ip, proto, room, phone, body)
 	case tAttach:
 		if len(body) != 8 {
 			return
@@ -395,7 +433,8 @@ func (s *Server) list(c *net.TCPConn, proto uint16, room [16]byte) {
 	writeFrame(c, frame(tHubs, out))
 }
 
-func (s *Server) host(c *net.TCPConn, ip string, proto uint16, room [16]byte, info []byte) {
+// phone: the game sent Android's public room (room: where the hub is listed, the public room without SeparatePhones)
+func (s *Server) host(c *net.TCPConn, ip string, proto uint16, room [16]byte, phone bool, info []byte) {
 	h := &hub{room: room, proto: proto, created: time.Now(), ip: ip, out: make(chan []byte, 16),
 		done: make(chan struct{})}
 	copy(h.info[:], info)
@@ -412,7 +451,11 @@ func (s *Server) host(c *net.TCPConn, ip string, proto uint16, room [16]byte, in
 	s.hubs[h.id] = h
 	st.hubs++
 	s.mu.Unlock()
-	s.vlog("hub %016x up (%d players)", h.id, h.info[niNodeCount])
+	name := roomName(room)
+	if phone && room != phoneRoom {
+		name = "public, from a phone"
+	}
+	s.vlog("hub %016x up (%d players, protocol %d, %s)", h.id, h.info[niNodeCount], proto, name)
 	defer func() {
 		s.mu.Lock()
 		delete(s.hubs, h.id)
