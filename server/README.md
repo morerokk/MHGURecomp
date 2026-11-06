@@ -43,7 +43,7 @@ Open the port for **TCP and UDP** in the firewall (and forward it, if the server
 | `-list-max` | 18 | hubs in one search answer, as many as the game's Join Hub list shows (3 pages of 6). With more hubs than that, each search gets a random choice of them (hubs with a free place before full ones), so a Retry shows others. The answer is sorted: free places first, then the fullest, then the newest |
 | `-bandwidth` | 1048576 | bytes a second per player link and direction (a hub uses far less) |
 | `-min-proto` | 0 | the oldest link protocol (the game's `PROTO_VERSION`, runtime/net/ldn.c) served: older games are refused, and they say "The hub server runs another version" and show only LAN / Join hubs. `-min-proto 3` refuses 0.14.2 and older. 0: any version. Restart the server to apply it: hubs already up stay until they disconnect |
-| `-v` | off | log hubs and joins (never IP addresses) |
+| `-v` | off | log hubs and joins (never IP addresses): each hub with its link protocol and room, and hubs refused by `-min-proto` |
 
 With Docker: `docker build -t mhgurecomp-hubserver server` and
 `docker run -d --restart unless-stopped -p 39510:39510/tcp -p 39510:39510/udp mhgurecomp-hubserver`.
@@ -71,6 +71,16 @@ then `systemctl enable --now mhgurecomp-hubserver`.
 `[Multiplayer] Server = your.host.name` (or `host:port` for another port) in `mhgurecomp.ini`, or "Hub server" in the
 settings menu (Multiplayer page). Empty means the default server built into the game, `Off` no internet hubs.
 Everyone who wants to see each other's hubs must use the same server.
+
+### The log's rooms
+
+With `-v`, a hub's line names its room: `public` (no matchmaking key), `phone` (Android without a key: the key
+`public-phone`) or `key` and 32 hex digits, the key's hash as the game sends it (the server never sees a key). To
+check whether a room is a key you can guess, hash the guess the way the game does and compare:
+
+```
+python3 -c "import hashlib,sys; print(hashlib.sha256(b'MHGURecomp matchmaking key:' + sys.argv[1].strip(' ').encode()).hexdigest()[:32])" "the key"
+```
 
 ## Protocol
 

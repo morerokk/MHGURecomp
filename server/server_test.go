@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -136,6 +137,24 @@ func TestMinProto(t *testing.T) {
 	}
 	if l := list(t, s, 4, 0); len(l) != 0 {
 		t.Fatal("protocol 4 sees a protocol 3 hub")
+	}
+}
+
+// The log's room names: the public room, Android's public room (the same hash as the game's), any other key.
+func TestRoomName(t *testing.T) {
+	var keyed [16]byte
+	keyed[0], keyed[3] = 0xab, 0x01
+	for _, c := range []struct {
+		room [16]byte
+		want string
+	}{{[16]byte{}, "public"}, {phoneRoom, "phone"}, {keyed, "key ab000001000000000000000000000000"}} {
+		if got := roomName(c.room); got != c.want {
+			t.Errorf("roomName(%x) = %q, want %q", c.room, got, c.want)
+		}
+	}
+	// runtime/net/ldn.c: the first 16 bytes of SHA-256("MHGURecomp matchmaking key:public-phone")
+	if got := fmt.Sprintf("%x", phoneRoom[:4]); got != "4efa8642" {
+		t.Errorf("phone room %s", got)
 	}
 }
 
