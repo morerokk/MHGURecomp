@@ -31,6 +31,8 @@ extern "C" int ui_take_picked_folder(char *out, size_t size) {
 }
 extern "C" int ldn_hub_status(const char *, const char *, int *, int *) { return 0; }
 extern "C" void ldn_hub_check(const char *, const char *) {}
+extern "C" bool forge_plugins_have(int) { return false; }
+extern "C" int forge_plugin_titles(const char **, int) { return 0; }
 // (cheats.c: two cheats, a master code and one that can be turned off)
 static bool cheat_on[2] = {true, true};
 extern "C" int cheats_count(void) { return 2; }
