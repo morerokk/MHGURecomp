@@ -47,6 +47,7 @@ graphics API are reimplemented on Windows, Linux and Android, with Vulkan for re
 | **Multiplayer** | Online play through the "Local Wireless" feature. Comes preloaded with an online server, but you can also host your own or directly connect to friends by forwarding port 39500. |
 | **Multiplayer options** | Small monsters are synced between players, monster HP optionally scaled by player count, Village quests playable in Multiplayer Hubs, Urgent Quest credit for everyone |
 | **Quality of life** | Fast-forward unskippable cutscenes with A, an in-game PC settings menu (F1 or `Plus`+`Minus`), Discord Rich Presence |
+| **Armor Fusion** | [Available from every forge](docs/features/early-armor-fusion.md), with matching LR/HR/G tiers and monster-material point costs |
 | **Mods and cheats** | Drop-in `mods` folder with load order and conflict checks. Natively supports Forge plugins ([Mods](#mods)), and Ryujinx / Atmosphère cheat files ([Cheats](#cheats)) |
 
 ## Requirements
