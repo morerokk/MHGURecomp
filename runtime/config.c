@@ -486,6 +486,25 @@ static int parse_factors(const char *v, float f[4]) {
     return *v ? 0 : n;
 }
 
+// A 3D camera's aspect (tools/gen.py PATCHES: the three callers of the perspective matrix that load a camera's). One
+// made for the screen (16:9) gets the picture's shape. On a picture narrower than 16:9 (16:10), a model preview's camera
+// (the Smithy's, made for its box in the HUD) has the shape of that box stretched to the taller picture: the renderer
+// (nvn/vulkan/exec.c ui_preview_map) records the shapes of the preview boxes it drew, and a camera of one of those shapes
+// gets the box's 16:9 shape instead, so the model is as big and as wide as at 16:9 (the renderer draws it in a box of
+// that shape, g_preview_cam_present says it can). Any other camera keeps its aspect.
+volatile float g_preview_box_aspect[4];
+volatile uint64_t g_preview_box_present[4], g_preview_cam_present;
+float camera_aspect(float a) {
+    if (a > 1.77f && a < 1.786f) return g_render_aspect;
+    if (g_render_aspect >= 16.0f / 9.0f - 0.01f) return a;
+    for (int i = 0; i < 4; i++)
+        if (g_preview_box_present[i] + 30 >= g_present_count && fabsf(a / g_preview_box_aspect[i] - 1.0f) < 0.001f) {
+            g_preview_cam_present = g_present_count;
+            return a * (16.0f / 9.0f) / g_render_aspect;
+        }
+    return a;
+}
+
 // The vertical field of view (radians) a camera of this aspect gets (tools/gen.py PATCHES: the three callers of the
 // perspective matrix that load a camera's). One made for the screen (its 16:9 aspect replaced with g_render_aspect)
 // gets the FOV factor and, on a picture narrower than 16:9 (16:10), the height that keeps 16:9's width (Vert+): more

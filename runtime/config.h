@@ -129,6 +129,9 @@ extern float g_ui_anchor_aspect;   // the HUD's width / height, 16:9 .. g_render
 extern uint32_t g_fsr_output[2];   // FSR on: the size it upscales to (what g_render_size would be without it), else 0
 extern float g_fsr_lod_bias;       // FSR on: texture LOD bias for the lower render size, log2(render / output); else 0
 float camera_fovy(float fovy, float aspect);  // a 3D camera's vertical field of view for its aspect (gen.py PATCHES)
+float camera_aspect(float aspect);            // a 3D camera's aspect: the screen's, a preview's 16:9 shape (gen.py PATCHES)
+extern volatile float g_preview_box_aspect[4];  // model preview boxes drawn lately: shape (render pixels), when; and when
+extern volatile uint64_t g_preview_box_present[4], g_preview_cam_present;  // a camera got its 16:9 shape (camera_aspect)
 
 void config_load(void);  // before the window and the guest start
 void config_path(char *buf, size_t size);  // the settings file (MHGU_CONFIG, else mhgurecomp.ini)
