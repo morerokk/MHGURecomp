@@ -10,7 +10,7 @@ ENET="$E/callbacks.c $E/compress.c $E/host.c $E/list.c $E/packet.c $E/peer.c $E/
 O=obj/xb-test
 clang $FLAGS tests/test_xbridge.c runtime/net/xbridge.c runtime/net/ryuldn.c runtime/net/room.c $ENET -lws2_32 -lwinmm -lzstd -pthread -o $O/test_xbridge.exe || exit 1
 clang $FLAGS tests/test_ryuldn.c runtime/net/ryuldn.c -lws2_32 -pthread -o $O/test_ryuldn.exe || exit 1
-clang $FLAGS tests/test_room.c runtime/net/room.c $ENET -lws2_32 -lwinmm -lzstd -pthread -o $O/test_room.exe || exit 1
+clang $FLAGS tests/test_room.c runtime/net/room.c runtime/net/roomsrv.c $ENET -lws2_32 -lwinmm -lzstd -pthread -o $O/test_room.exe || exit 1
 clang $FLAGS tests/emu_room.c runtime/net/room.c $ENET -lws2_32 -lwinmm -lzstd -pthread -o $O/emu_room.exe || exit 1
 PS=${PS:-30491}; RP=${RP:-24891}
 SERVER=${LDN_SERVER:-127.0.0.1:$PS}

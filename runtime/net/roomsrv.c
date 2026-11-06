@@ -24,6 +24,7 @@ enum {  // message ids (room.c has the same list from the member's side)
 #define NAME_MAX_LEN 63
 #define TEXT_MAX 96
 #define MAX_MESSAGE 0x20000
+#define JOIN_MS 10000  // an ENet connection that hasn't joined by then is let go (it holds one of the few slots)
 
 typedef struct {
     ENetPeer *peer;
@@ -31,6 +32,7 @@ typedef struct {
     uint8_t ip[4];
     char game[TEXT_MAX], version[32];
     uint64_t game_id;
+    bool host;  // the game's own member (host_nick, from this computer): the gateway, and the only one that sends for others
 } Member;
 
 static struct {
@@ -114,6 +116,13 @@ static Member *by_nick(const char *nick) {
     for (int i = 0; i < S.n; i++) if (!strcmp(S.m[i].nick, nick)) return &S.m[i];
     return NULL;
 }
+static Member *gateway(void) {
+    for (int i = 0; i < S.n; i++) if (S.m[i].host) return &S.m[i];
+    return NULL;
+}
+static bool loopback(const ENetPeer *p) { return (ENET_NET_TO_HOST_32(p->address.host) >> 24) == 127; }
+// 192.168.250.x: the stand-ins the game's bridge answers for (xbridge.c), so no member may take one as its address
+static bool reserved_ip(const uint8_t ip[4]) { return ip[0] == 192 && ip[1] == 168 && ip[2] == 250; }
 
 // The next address nobody has: 10.255.1.1, 10.255.1.2, ... (inside 10.x: an emulator that sees a /8 mask on its own adapter
 // still finds the broadcast of that mask in 10.x, which stays in the room).
@@ -139,10 +148,14 @@ static void on_join(ENetPeer *peer, const uint8_t *d, uint32_t n) {
     uint32_t version = rd_u32(&r);
     rd_str(&r, pass, sizeof pass), rd_str(&r, token, sizeof token);
     if (r.bad) return;
-    if (strcmp(pass, S.password)) { send_id(peer, M_WRONG_PASSWORD); return; }
-    if (!m.nick[0] || by_nick(m.nick)) { send_id(peer, M_NAME_COLLISION); return; }
+    // (a wrong password ends the connection: one connection can't keep guessing)
+    if (strcmp(pass, S.password)) { send_id(peer, M_WRONG_PASSWORD); enet_peer_disconnect_later(peer, 0); return; }
+    // The host's name is the game's own member, from this computer: whoever has it is the gateway.
+    bool host = S.host_nick[0] && !strcmp(m.nick, S.host_nick);
+    if (!m.nick[0] || by_nick(m.nick) || (host && !loopback(peer))) { send_id(peer, M_NAME_COLLISION); return; }
+    m.host = host;
     if (memcmp(want, "\xFF\xFF\xFF\xFF", 4)) {
-        if (by_ip(want)) { send_id(peer, M_IP_COLLISION); return; }
+        if (by_ip(want) || reserved_ip(want)) { send_id(peer, M_IP_COLLISION); return; }
         memcpy(m.ip, want, 4);
     } else {
         free_ip(m.ip);
@@ -172,18 +185,21 @@ static void on_game_info(ENetPeer *peer, const uint8_t *d, uint32_t n) {
     broadcast_info();
 }
 
-// A member's packet (LDN or game): the message goes on as it came. Its destination address sits at `off` in it, the
-// broadcast flag at `bc_off`. Broadcast: every member but the sender. Otherwise the member with that address; for an address
-// nobody has, the host member (when the sender is not that member).
+// A member's packet (LDN or game): the message goes on as it came. Its sender's address sits at offset 2 in both kinds, its
+// destination at `off`, the broadcast flag at `bc_off`. Broadcast: every member but the sender. Otherwise the member with
+// that address; for an address nobody has, the host member (when the sender is not that member). The members take a
+// packet's sender from it, so a member sends as its own address only (the host also for the Ryujinx players' stand-ins).
 static void relay(ENetPeer *from, const uint8_t *d, uint32_t n, uint32_t off, uint32_t bc_off) {
-    if (!by_peer(from) || n < bc_off + 1) return;
+    Member *m = by_peer(from);
+    if (!m || n < bc_off + 1) return;
+    if (!m->host && memcmp(d + 2, m->ip, 4)) return;
     if (d[bc_off]) {
         for (int i = 0; i < S.n; i++) if (S.m[i].peer != from) send_to(S.m[i].peer, d, n);
         return;
     }
     Member *to = by_ip(d + off);
-    if (!to && S.host_nick[0]) {
-        Member *h = by_nick(S.host_nick);
+    if (!to) {
+        Member *h = gateway();
         if (h && h->peer != from) to = h;
     }
     if (to) send_to(to->peer, d, n);
@@ -219,12 +235,21 @@ static void *loop(void *arg) {
     while (S.run) {
         ENetEvent ev;
         while (enet_host_service(S.host, &ev, 5) > 0) {
-            if (ev.type == ENET_EVENT_TYPE_RECEIVE) {
+            if (ev.type == ENET_EVENT_TYPE_CONNECT) {
+                ev.peer->data = (void *)(uintptr_t)(enet_time_get() | 1);  // (when it came: it has JOIN_MS to join)
+            } else if (ev.type == ENET_EVENT_TYPE_RECEIVE) {
                 if (ev.packet->dataLength <= MAX_MESSAGE) on_message(ev.peer, ev.packet->data, (uint32_t)ev.packet->dataLength);
                 enet_packet_destroy(ev.packet);
             } else if (ev.type == ENET_EVENT_TYPE_DISCONNECT) {
+                ev.peer->data = NULL;
                 on_leave(ev.peer);
             }
+        }
+        for (size_t i = 0; i < S.host->peerCount; i++) {  // (connections that never joined)
+            ENetPeer *p = &S.host->peers[i];
+            enet_uint32 since = (enet_uint32)(uintptr_t)p->data;
+            if (p->state != ENET_PEER_STATE_CONNECTED || !since || by_peer(p)) continue;
+            if ((enet_uint32)(enet_time_get() - since) > JOIN_MS) p->data = NULL, enet_peer_disconnect_now(p, 0);
         }
     }
     for (int i = 0; i < S.n; i++) send_id(S.m[i].peer, M_CLOSE_ROOM);
@@ -256,6 +281,9 @@ bool roomsrv_start(int port, const char *name, const char *password, const char 
         if (err && err_size > 0) snprintf(err, (size_t)err_size, "the port may be in use");
         return false;
     }
+    // (ENet's own limits are 32 MB, and a message is put together whole before the room sees its size)
+    S.host->maximumPacketSize = MAX_MESSAGE;
+    S.host->maximumWaitingData = 4 * MAX_MESSAGE;
     S.run = true;
     if (pthread_create(&S.th, NULL, loop, NULL) != 0) {
         enet_host_destroy(S.host);

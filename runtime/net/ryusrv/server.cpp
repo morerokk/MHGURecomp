@@ -38,6 +38,7 @@ constexpr u32 kAltBroadcast = 0xC0A800FF; // 192.168.0.255, used by some games
 constexpr auto kPingAfter = std::chrono::seconds(10);    // idle time before the server pings
 constexpr auto kPingTimeout = std::chrono::seconds(10); // no echo by then: disconnect
 constexpr auto kGhostLobbyAge = std::chrono::hours(16);  // older lobbies aren't listed
+constexpr std::size_t kMaxMacs = 4096;                    // remembered client MACs (HandleInitialize)
 constexpr std::size_t kMaxQueuedBytes = 4u << 20;       // a client this far behind is dropped
 
 // Nintendo LDN layouts (= Service::LDN types) used by the server.
@@ -107,9 +108,12 @@ struct Server::Impl {
         std::deque<std::vector<u8>> out;
         std::size_t out_bytes = 0;
         bool closing = false;
-        // Closed once (Drop or Reap). Windows doesn't wake a blocked recv on shutdown(), only on
-        // closesocket(), so dropping a client closes the socket under its threads.
+        // Closed once, in Reap, after both threads have ended: closed earlier, the number could go to
+        // the next client while this session's threads still use it. Windows doesn't wake a blocked
+        // recv on shutdown(), so Drop sets `dropped`, which the reader checks every second.
         std::atomic<bool> sock_closed{false};
+        std::atomic<bool> dropped{false};
+        u32 remote_ip = 0; // the client's real address (host order)
 
         std::thread reader;
         std::thread writer;
@@ -157,10 +161,8 @@ struct Server::Impl {
             s.out_bytes = 0;
             s.out_cv.notify_all();
         }
+        s.dropped = true;
         ShutdownSocket(s.sock);
-        if (!s.sock_closed.exchange(true)) {
-            CloseSocket(s.sock);
-        }
     }
 
     void Send(Session& s, std::vector<u8> bytes) {
@@ -348,7 +350,18 @@ struct Server::Impl {
         std::memcpy(old_id.data(), msg->id.data(), old_id.size());
         std::array<u8, 6> old_mac;
         std::memcpy(old_mac.data(), msg->mac.data(), old_mac.size());
-        // Same MAC as before for a client that comes back with its id and MAC.
+        // Same MAC as before for a client that comes back with its id and MAC. (The tables only grow,
+        // one entry per Initialize: past kMaxMacs they start again from the clients still here.)
+        if (macs.size() >= kMaxMacs) {
+            macs.clear();
+            used_macs.clear();
+            for (const auto& o : sessions) {
+                if (o->initialized && !o->finished) {
+                    macs[o->id] = o->mac;
+                    used_macs.insert(o->mac);
+                }
+            }
+        }
         if (const auto it = macs.find(old_id); it != macs.end() && it->second == old_mac) {
             s.mac = it->second;
         } else {
@@ -716,11 +729,15 @@ struct Server::Impl {
                 continue;
             }
             std::scoped_lock lk{lock};
-            std::size_t live = 0;
+            std::size_t live = 0, same_ip = 0;
             for (const auto& s : sessions) {
                 live += s->finished ? 0 : 1;
+                same_ip += !s->finished && s->remote_ip == remote_ip;
             }
-            if (live >= MaxConnections) {
+            // (one address can't take every place; this computer's own game opens one per room
+            // player it brings into a hub, xbridge.c, so it isn't counted)
+            const bool loopback = (remote_ip >> 24) == 127;
+            if (live >= MaxConnections || (!loopback && same_ip >= MaxConnectionsPerIp)) {
                 CloseSocket(sock);
                 continue;
             }
@@ -728,13 +745,14 @@ struct Server::Impl {
             Session* s = session.get();
             s->serial = next_serial++;
             s->sock = sock;
+            s->remote_ip = remote_ip;
             for (std::size_t i = 0; i < s->id.size(); i += 8) {
                 const u64 r = rng();
                 std::memcpy(s->id.data() + i, &r, 8);
             }
             s->writer = std::thread([this, s] { WriterLoop(s); });
             s->reader = std::thread([this, s] {
-                ReadMessages(s->sock, [this, s](const Packet& p) { Handle(*s, p); });
+                ReadMessages(s->sock, [this, s](const Packet& p) { Handle(*s, p); }, &s->dropped);
                 EndSession(*s);
             });
             sessions.push_back(std::move(session));

@@ -106,9 +106,27 @@ else
 SHADERC_DEPS := $(SHADERC_DIR)/lib/libshaderc_combined.a
 SHADERC_LIBS := $(SHADERC_DEPS)
 endif
+# zstd (runtime/net/room.c: suyu-family rooms compress every game packet): Windows links MSYS2's static libzstd; Linux
+# and Android a static build of a pinned release, compiled here from its source like FFmpeg (the NDK has no zstd, and on
+# Linux the programs need nothing more than before). ZSTD=system links the system's libzstd instead.
+ZSTD          ?= $(if $(filter windows,$(PLATFORM)),system,bundled)
+ZSTD_VER      := 1.5.7
+ZSTD_SHA256   := eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
+ZSTD_TAR      := third_party/zstd/zstd-$(ZSTD_VER).tar.gz
+ZSTD_DIR      := $(O)/zstd-$(ZSTD_VER)
+ZSTD_FLAGS    := -O2 -fPIC -DZSTD_DISABLE_ASM -DZSTD_LEGACY_SUPPORT=0 -DZSTD_NO_TRACE -DXXH_NAMESPACE=ZSTD_
+ZSTD_AR        = $(if $(ANDROID),$(LLVM)/llvm-ar,ar)
+ifeq ($(ZSTD),system)
+ZSTD_DEPS :=
+ZSTD_LIBS := -lzstd
+else
+ZSTD_DEPS := $(ZSTD_DIR)/lib/libzstd.a
+ZSTD_LIBS := $(ZSTD_DEPS)
+endif
 # the libraries' headers, for everything compiled here (the stamps: built before anything includes them)
-LIB_INC    := $(if $(SDL_DEPS),-I$(SDL3_DIR)/include -DMHGU_SDL_BUNDLED) $(if $(SHADERC_DEPS),-I$(SHADERC_DIR)/include)
-LIB_STAMPS := $(if $(SDL_DEPS),$(SDL3_DIR)/.built) $(if $(SHADERC_DEPS),$(SHADERC_DIR)/.built)
+LIB_INC    := $(if $(SDL_DEPS),-I$(SDL3_DIR)/include -DMHGU_SDL_BUNDLED) $(if $(SHADERC_DEPS),-I$(SHADERC_DIR)/include) \
+              $(if $(ZSTD_DEPS),-I$(ZSTD_DIR)/include)
+LIB_STAMPS := $(if $(SDL_DEPS),$(SDL3_DIR)/.built) $(if $(SHADERC_DEPS),$(SHADERC_DIR)/.built) $(if $(ZSTD_DEPS),$(ZSTD_DIR)/.built)
 
 ifeq ($(PLATFORM),windows)
 EXE      := $(B)/mhgurecomp.exe
@@ -117,7 +135,7 @@ GENFLAGS += -D_FILE_OFFSET_BITS=64
 # (the GCC runtime - libstdc++, libgcc, winpthreads - linked in: three DLLs fewer to ship, and their licenses ask no
 # more than their notices then; build/licenses has those)
 LDFLAGS  := -fuse-ld=lld -Wl,--stack,268435456 $(SDL_LIBS) $(AV_LIBS) -lvulkan-1 $(SHADERC_LIBS) -lwinmm -lversion -lole32 -lshell32 -luuid -lws2_32 \
-            -lbcrypt -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -lzstd -Wl,-Bdynamic \
+            -lbcrypt -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread $(ZSTD_LIBS) -Wl,-Bdynamic \
             -Wl,--export-all-symbols -Wl,--out-implib,$(O)/mhgurecomp.dll.a
 GAMELIB  := $(B)/mhgugame.dll
 GAMELIB_LDFLAGS := -shared -fuse-ld=lld -static-libgcc $(O)/mhgurecomp.dll.a
@@ -140,7 +158,7 @@ FFMPEG_CONF += --enable-pic
 # (--exclude-libs: the static libraries linked in - SDL3, shaderc with glslang, FFmpeg - stay inside; only the runtime's
 # own functions are exported, for the game code library. A Vulkan layer or overlay with its own glslang or SDL then
 # doesn't bind to ours, as happened with ImGui: see IMGUIFLAGS.)
-LDFLAGS  := -fuse-ld=lld -rdynamic -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -lvulkan $(SHADERC_LIBS) -lpthread -ldl -lm
+LDFLAGS  := -fuse-ld=lld -rdynamic -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -lvulkan $(SHADERC_LIBS) $(ZSTD_LIBS) -lpthread -ldl -lm
 # The programs start with glibc GLIBC_MAX or later (Ubuntu 24.04, Linux Mint 22, Debian 13, SteamOS): calls to the
 # functions newer glibc versions gave a new symbol version go to the old one (runtime/platform/linux_glibc.c), and the
 # link checks that nothing newer is left.
@@ -397,6 +415,7 @@ $(1):
 	mv -f $$@.part $$@
 endef
 $(eval $(call FETCH,$(FFMPEG_TAR),https://ffmpeg.org/releases/ffmpeg-$(FFMPEG_VER).tar.xz,$(FFMPEG_SHA256)))
+$(eval $(call FETCH,$(ZSTD_TAR),https://github.com/facebook/zstd/releases/download/v$(ZSTD_VER)/zstd-$(ZSTD_VER).tar.gz,$(ZSTD_SHA256)))
 $(eval $(call FETCH,$(SDL3_TAR),https://github.com/libsdl-org/SDL/releases/download/release-$(SDL3_VER)/SDL3-$(SDL3_VER).tar.gz,$(SDL3_SHA256)))
 $(eval $(call FETCH,third_party/shaderc/shaderc-$(SHADERC_VER).tar.gz,https://github.com/google/shaderc/archive/refs/tags/v$(SHADERC_VER).tar.gz,f06ce5bcca94e5df7f34e115743597d0ad2e13c5fe9213c67dc8c76031241947))
 $(eval $(call FETCH,third_party/shaderc/glslang-$(GLSLANG_VER).tar.gz,https://github.com/KhronosGroup/glslang/archive/refs/tags/$(GLSLANG_VER).tar.gz,9c09b901149c729df745057dafa815278aaa101b84d2b6e14f16a42de52f97f2))
@@ -414,6 +433,20 @@ $(FFMPEG_DIR)/.built: $(FFMPEG_TAR)
 	@echo "ffmpeg: FFmpeg $(FFMPEG_VER) (H.264 + AAC in MP4) built in $(FFMPEG_DIR)"
 
 $(FFMPEG_LIBS): $(FFMPEG_DIR)/.built ;
+
+# the bundled zstd: its library's sources (common, compress, decompress; no assembly, no legacy formats) compiled with
+# this build's compiler into $(ZSTD_DIR)/lib/libzstd.a, its headers into $(ZSTD_DIR)/include
+$(ZSTD_DIR)/.built: $(ZSTD_TAR)
+	rm -rf $(ZSTD_DIR) && mkdir -p $(ZSTD_DIR)/src $(ZSTD_DIR)/obj $(ZSTD_DIR)/lib $(ZSTD_DIR)/include
+	tar -xzf $< -C $(ZSTD_DIR)/src --strip-components=1 zstd-$(ZSTD_VER)/lib zstd-$(ZSTD_VER)/LICENSE  # (only these: its tests hold symlinks, which MSYS2's tar can't make)
+	@cd $(ZSTD_DIR) && for f in src/lib/common/*.c src/lib/compress/*.c src/lib/decompress/*.c; do \
+	    $(CC) $(ZSTD_FLAGS) -c $$f -o obj/$$(basename $$f .c).o || exit 1; done
+	$(ZSTD_AR) rcs $(ZSTD_DIR)/lib/libzstd.a $(ZSTD_DIR)/obj/*.o
+	cp $(ZSTD_DIR)/src/lib/zstd.h $(ZSTD_DIR)/src/lib/zstd_errors.h $(ZSTD_DIR)/include/
+	touch $@
+	@echo "zstd: zstd $(ZSTD_VER) built in $(ZSTD_DIR)"
+
+$(ZSTD_DIR)/lib/libzstd.a: $(ZSTD_DIR)/.built ;
 
 # the bundled SDL3: configure (checking that it found SDL3_NEED), build, install into $(SDL3_DIR)
 $(SDL3_DIR)/.built: $(SDL3_TAR)
@@ -461,7 +494,8 @@ $(B)/pipelines.list: extras/pipelines.list
 	cp $< $@
 
 LICENSE_TXT = $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt) \
-              $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt)
+              $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt) \
+              $(if $(ZSTD_DEPS),$(B)/licenses/zstd.txt)
 licenses: $(LICENSE_TXT)
 $(B)/licenses/%.txt: %
 	@mkdir -p $(dir $@)
@@ -487,6 +521,11 @@ $(B)/licenses/shaderc.txt: $(SHADERC_DIR)/.built
 	   echo "KhronosGroup/glslang, KhronosGroup/SPIRV-Tools and KhronosGroup/SPIRV-Headers."; \
 	   for f in LICENSE third_party/glslang/LICENSE.txt third_party/spirv-tools/LICENSE third_party/spirv-headers/LICENSE; do \
 	     echo; echo "==== $$f"; echo; cat $(SHADERC_DIR)/src/$$f; done; } > $@
+$(B)/licenses/zstd.txt: $(ZSTD_DIR)/.built
+	@mkdir -p $(dir $@)
+	@{ echo "This program contains zstd $(ZSTD_VER) (its library), linked statically, under the BSD license (below). Its source code"; \
+	   echo "is https://github.com/facebook/zstd/releases/download/v$(ZSTD_VER)/zstd-$(ZSTD_VER).tar.gz."; \
+	   echo; cat $(ZSTD_DIR)/src/LICENSE; } > $@
 
 $(GAMELIB): $(GEN_OBJ) | $(EXE)
 	@mkdir -p $(O)
@@ -503,7 +542,7 @@ PY := $(firstword $(wildcard tools/venv/Scripts/python.exe) $(wildcard tools/ven
 # log.txt are written only when the game runs). run-game.bat runs it with those in run/ (MHGU_HOME), not here.
 # (--with: MSYS2 packages linked into the executable or into a bundled DLL, whose licenses go along too: the static
 # GCC runtime, VulkanMemoryAllocator, and glslang / SPIRV-Tools inside shaderc's DLL)
-LICENSE_PKGS := libstdc++ libgcc libwinpthread vulkan-memory-allocator glslang spirv-tools zlib
+LICENSE_PKGS := libstdc++ libgcc libwinpthread vulkan-memory-allocator glslang spirv-tools zlib zstd
 bundle: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER)
 	@$(PY) tools/bundle_dlls.py "$$(cygpath -m "$$(dirname "$$(command -v $(CC))")")" $(B) $^ \
 	    --licenses $(B)/licenses --with $(LICENSE_PKGS)

@@ -45,6 +45,7 @@ public:
     Status GetStatus() const;
 
     static constexpr std::size_t MaxConnections = 64;
+    static constexpr std::size_t MaxConnectionsPerIp = 8; // (not counting this computer's own)
 
 private:
     struct Impl;

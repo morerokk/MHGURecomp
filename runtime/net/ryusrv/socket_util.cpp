@@ -163,11 +163,33 @@ bool SendAll(std::uintptr_t s, const std::vector<u8>& bytes) {
 }
 
 /// Reads messages until the connection ends; returns why it ended.
-std::string ReadMessages(std::uintptr_t s, const std::function<void(const Packet&)>& handle) {
+std::string ReadMessages(std::uintptr_t s, const std::function<void(const Packet&)>& handle,
+                         const std::atomic<bool>* stop) {
     Framer framer;
     std::vector<u8> buffer(64 * 1024);
     std::vector<Packet> packets;
     for (;;) {
+        if (stop) { // wait for data a second at a time, so a dropped client's reader ends
+#ifdef _WIN32
+            fd_set r;
+            FD_ZERO(&r);
+            FD_SET(static_cast<SOCKET>(s), &r);
+            timeval tv{1, 0};
+            const int k = select(0, &r, nullptr, nullptr, &tv);
+#else
+            pollfd p{static_cast<int>(s), POLLIN, 0};
+            const int k = poll(&p, 1, 1000);
+#endif
+            if (stop->load()) {
+                return "dropped by the server";
+            }
+            if (k == 0 || (k < 0 && LastSocketError() == EINTR)) {
+                continue;
+            }
+            if (k < 0) {
+                return fmt::format("connection error {}", LastSocketError());
+            }
+        }
 #ifdef _WIN32
         const int n = recv(static_cast<SOCKET>(s), reinterpret_cast<char*>(buffer.data()),
                            static_cast<int>(buffer.size()), 0);
@@ -246,6 +268,9 @@ std::uintptr_t AcceptTcp(std::uintptr_t listener, u32& remote_ip) {
     BOOL nodelay = TRUE;
     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&nodelay),
                sizeof(nodelay));
+    // (a client that stops reading fails the writer's send instead of holding it: Drop then ends the session)
+    DWORD send_timeout = 10000;
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&send_timeout), sizeof(send_timeout));
 #else
     socklen_t len = sizeof(addr);
     const int s = accept(static_cast<int>(listener), reinterpret_cast<sockaddr*>(&addr), &len);
@@ -254,6 +279,8 @@ std::uintptr_t AcceptTcp(std::uintptr_t listener, u32& remote_ip) {
     }
     int nodelay = 1;
     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+    timeval send_timeout{10, 0};
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &send_timeout, sizeof(send_timeout));
 #endif
     remote_ip = ntohl(addr.sin_addr.s_addr);
     return static_cast<std::uintptr_t>(s);

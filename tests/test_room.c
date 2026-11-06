@@ -94,11 +94,12 @@ int main(int argc, char **argv) {
     if (argc < 3) return 2;
     if (!strcmp(argv[1], "server")) return run_server(atoi(argv[2]));
     if (!strcmp(argv[1], "roomsrv")) {  // the game's own room (runtime/net/roomsrv.c) in the stand-in's place
+        // (optional: the host member's name, as the game's own member has it, and how many seconds the room stays up)
         char e[64];
-        if (!roomsrv_start(atoi(argv[2]), "test", "", "", e, sizeof e)) return 2;
+        if (!roomsrv_start(atoi(argv[2]), "test", "", argc > 3 ? argv[3] : "", e, sizeof e)) return 2;
         printf("[server] up\n");
         fflush(stdout);
-        plat_sleep_until_ns(plat_now_ns() + 12000000000ull);
+        plat_sleep_until_ns(plat_now_ns() + (argc > 4 ? (uint64_t)atoi(argv[4]) : 12ull) * 1000000000ull);
         roomsrv_stop();
         return 0;
     }

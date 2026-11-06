@@ -62,6 +62,8 @@ static struct {
 } R = {.mu = PTHREAD_MUTEX_INITIALIZER};
 static RoomHooks g_hooks;
 static volatile bool g_leaving;  // room_leave() is ending the thread: not a lost connection
+static pthread_mutex_t g_jmu = PTHREAD_MUTEX_INITIALIZER;  // one room_join / room_leave at a time (R.host, R.peer, R.th)
+static void leave_locked(void);
 
 void room_set_hooks(const RoomHooks *h) { g_hooks = *h; }
 static char s_self[48];
@@ -243,7 +245,7 @@ static void *loop(void *arg) {
         ENetEvent ev;
         if (enet_host_service(R.host, &ev, 5) > 0) {
             if (ev.type == ENET_EVENT_TYPE_RECEIVE) {
-                if (ev.packet->dataLength > 0) got(ev.packet->data, (uint32_t)ev.packet->dataLength);
+                if (ev.packet->dataLength > 0 && ev.packet->dataLength <= MAX_MESSAGE) got(ev.packet->data, (uint32_t)ev.packet->dataLength);
                 enet_packet_destroy(ev.packet);
             } else if (ev.type == ENET_EVENT_TYPE_DISCONNECT) {
                 if (R.state == 2) R.error = M_CLOSE_ROOM;
@@ -276,7 +278,8 @@ bool room_join(const char *server, const char *nick, const char *password, uint8
     static bool inited;
     char e[96] = "";
 #define FAIL(...) do { snprintf(e, sizeof e, __VA_ARGS__); goto fail; } while (0)
-    room_leave();
+    pthread_mutex_lock(&g_jmu);
+    leave_locked();
     if (!inited) {
         if (enet_initialize() != 0) FAIL("ENet did not start");
         inited = true;
@@ -289,6 +292,8 @@ bool room_join(const char *server, const char *nick, const char *password, uint8
     if (!*host || port <= 0 || port > 65535) FAIL("bad room address");
     R.host = enet_host_create(NULL, 1, 1, 0, 0);
     if (!R.host) FAIL("could not create the client");
+    R.host->maximumPacketSize = MAX_MESSAGE;  // (ENet's own limits are 32 MB, put together before got() sees the size)
+    R.host->maximumWaitingData = 4 * MAX_MESSAGE;
     ENetAddress addr = {0};
     if (enet_address_set_host(&addr, host) != 0) FAIL("room address not found");
     addr.port = (enet_uint16)port;
@@ -325,16 +330,24 @@ bool room_join(const char *server, const char *nick, const char *password, uint8
     }
     memcpy(fake_ip, R.ip, 4);
     LOG("[room] joined %s as %u.%u.%u.%u\n", server, R.ip[0], R.ip[1], R.ip[2], R.ip[3]);
+    pthread_mutex_unlock(&g_jmu);
     return true;
 fail:
     if (err && err_size) snprintf(err, (size_t)err_size, "%s", e);
     LOG("[room] can't join %s: %s\n", server, e);
-    room_leave();
+    leave_locked();
+    pthread_mutex_unlock(&g_jmu);
     return false;
 #undef FAIL
 }
 
 void room_leave(void) {
+    pthread_mutex_lock(&g_jmu);
+    leave_locked();
+    pthread_mutex_unlock(&g_jmu);
+}
+
+static void leave_locked(void) {
     g_leaving = true;
     R.run = false;
     if (R.has_th) { pthread_join(R.th, NULL); R.has_th = false; }

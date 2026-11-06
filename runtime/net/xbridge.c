@@ -34,9 +34,11 @@ typedef struct {
     uint8_t node[NODE_SIZE];
     uint32_t ryu_ip;      // its address in the hub on the server
     RyuPeer *rp;
+    int busy;             // sends through rp in progress outside mu: rp is closed only once they are done
 } Peer;
 
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t idle = PTHREAD_COND_INITIALIZER;  // a peer's busy went back to 0
 static bool active;
 static uint8_t lobby[NETINFO_SIZE];  // the hub as the server sees it
 static uint32_t host_ip, host_mask;
@@ -152,6 +154,9 @@ static void peer_data(void *ud, const RyuProxy *r, const void *data, uint32_t le
 typedef struct { Peer *p; RyuPeer *rp; } Reap;
 static void *reaper(void *arg) {
     Reap *r = arg;
+    pthread_mutex_lock(&mu);
+    while (r->p->busy) pthread_cond_wait(&idle, &mu);  // (a room packet on its way through rp)
+    pthread_mutex_unlock(&mu);
     ryu_peer_close(r->rp);
     pthread_mutex_lock(&mu);
     r->p->used = false;
@@ -405,9 +410,13 @@ void xb_room_proxy(const uint8_t sip[4], uint16_t sport, const uint8_t dip[4], u
     }
     RyuProxy r = {p->ryu_ip, dst, sport, dport, 17};
     RyuPeer *rp = p->rp;
+    p->busy++;  // (retire() can run meanwhile: its reaper waits for this send before closing rp)
     int ns = build_subs(subs);
     pthread_mutex_unlock(&mu);
     memcpy(buf, data, len);
     translate(buf, len, subs, ns, true);
     ryu_peer_send(rp, &r, buf, len);
+    pthread_mutex_lock(&mu);
+    if (!--p->busy) pthread_cond_broadcast(&idle);
+    pthread_mutex_unlock(&mu);
 }

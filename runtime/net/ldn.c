@@ -1364,6 +1364,15 @@ static void room_stop(void) {
     vsock_network_down();
 }
 
+// A room's packets say who sent them, and a room run by someone else may not check that: a hub here takes its
+// network changes from its host only, and game packets from its own players only. (Caller holds L.mu.)
+static bool room_from_host_locked(const uint8_t ip[4]) { return ip_u32(ip) == rd32(node_at(L.info, 0) + NODE_IP); }
+static bool room_in_hub_locked(uint32_t ip) {
+    for (int i = 0; i < MAX_NODES; i++)
+        if (node_at(L.info, i)[NODE_CONNECTED] && rd32(node_at(L.info, i) + NODE_IP) == ip) return true;
+    return false;
+}
+
 static void room_ldn_received(uint8_t type, const uint8_t lip[4], const uint8_t rip[4], bool bc, const void *data, uint32_t len) {
     (void)bc, (void)rip;
     if (xb_active() && (type == RLDN_SCAN || type == RLDN_CONNECT || type == RLDN_DISCONNECT)) {  // a hub on the Ryujinx server, shared with the room
@@ -1396,11 +1405,18 @@ static void room_ldn_received(uint8_t type, const uint8_t lip[4], const uint8_t 
         break;
     case RLDN_CONNECT: {
         if (len < NODE_SIZE) break;
-        bool changed = false;
+        bool changed = false, refused = false, again = false;
         pthread_mutex_lock(&L.mu);
-        if (L.room && L.state == ST_AP_CREATED && L.info[NI_NODE_COUNT] < L.info[NI_NODE_MAX]) {
+        if (L.room && L.state == ST_AP_CREATED) {
+            uint16_t lcv = rd16((const uint8_t *)data + NODE_LCV);  // (0 from older suyu builds: taken as ours, as they do)
+            for (int k = 1; k < MAX_NODES; k++) again |= L.room_client[k] && !memcmp(L.room_cip[k], lip, 4);
+            refused = !again && (L.info[NI_NODE_COUNT] >= L.info[NI_NODE_MAX] || L.info[NI_ACCEPT_POLICY] == 1 /* AlwaysReject */ ||
+                                 (lcv && lcv != L.lcv));
+        }
+        if (L.room && L.state == ST_AP_CREATED && !again && !refused) {
             int i = 1;
             while (i < MAX_NODES && node_at(L.info, i)[NODE_CONNECTED]) i++;
+            refused = i == MAX_NODES;
             if (i < MAX_NODES) {
                 uint8_t *nd = node_at(L.info, i);
                 memcpy(nd, data, NODE_SIZE);
@@ -1413,7 +1429,9 @@ static void room_ldn_received(uint8_t type, const uint8_t lip[4], const uint8_t 
             }
         }
         pthread_mutex_unlock(&L.mu);
-        if (changed) { room_sync_all(); signal_change(); }
+        if (refused) room_send_ldn(RLDN_DESTROY_NETWORK, own, lip, false, NULL, 0);  // (full, closed or another version)
+        if (changed || again) room_sync_all();  // (asking again: the same answer)
+        if (changed) signal_change();
         break;
     }
     case RLDN_DISCONNECT: {
@@ -1436,7 +1454,7 @@ static void room_ldn_received(uint8_t type, const uint8_t lip[4], const uint8_t 
     case RLDN_SYNC_NETWORK:
         if (len >= NETINFO_SIZE && info_sane((uint8_t *)data)) {
             pthread_mutex_lock(&L.mu);
-            if (L.room && (L.state == ST_STATION || L.state == ST_STATION_CONNECTED)) {
+            if (L.room && (L.state == ST_STATION || L.state == ST_STATION_CONNECTED) && room_from_host_locked(lip)) {
                 memcpy(L.info, data, NETINFO_SIZE);
                 L.state = ST_STATION_CONNECTED, L.reason = DR_NONE;
             }
@@ -1447,7 +1465,7 @@ static void room_ldn_received(uint8_t type, const uint8_t lip[4], const uint8_t 
     case RLDN_DESTROY_NETWORK: {
         bool gone = false;
         pthread_mutex_lock(&L.mu);
-        if (L.room && L.state == ST_STATION_CONNECTED) {
+        if (L.room && L.state == ST_STATION_CONNECTED && room_from_host_locked(lip)) {
             L.state = ST_STATION, L.reason = DR_DESTROYED_BY_SYSTEM;
             L.own_ip = L.subnet = 0, gone = true;
             L.room = false;
@@ -1463,6 +1481,10 @@ static void room_proxy_received(const uint8_t sip[4], uint16_t sport, const uint
                                 const void *data, uint32_t len) {
     if (xb_active()) { xb_room_proxy(sip, sport, dip, dport, proto, bc, data, len); return; }
     if (!L.room || proto != 4) return;  // UDP only
+    pthread_mutex_lock(&L.mu);
+    bool ours = L.room && ldn_net_up() && room_in_hub_locked(ip_u32(sip));  // (the room's other members aren't in this hub)
+    pthread_mutex_unlock(&L.mu);
+    if (!ours) return;
     VPacket p = {.src_ip = ip_u32(sip), .dst_ip = ip_u32(dip), .src_port = sport, .dst_port = dport, .proto = VPROTO_UDP, .kind = 0};
     vsock_deliver(&p, data, len);
 }
@@ -1483,7 +1505,10 @@ static void room_lost(void) {
 }
 
 // Keeps the room joined while local play is initialized (a failed join is tried again every 15 s).
+// The keeper also leaves the room when local play ends: a join can take seconds (an unanswering room), and the game's
+// thread doesn't wait for it (room.c lets one join or leave run at a time).
 static volatile int room_keep_gen;
+static volatile bool room_wanted;
 static void *room_keeper(void *arg) {
     int gen = (int)(intptr_t)arg;
     uint64_t next = 0;
@@ -1496,6 +1521,7 @@ static void *room_keeper(void *arg) {
         }
         plat_sleep_until_ns(plat_now_ns() + 500000000ull);
     }
+    if (!room_wanted) room_leave();  // (local play ended, and no newer keeper took over)
     return NULL;
 }
 static void room_start(void) {
@@ -1503,13 +1529,14 @@ static void room_start(void) {
     static bool hooked;
     if (!hooked) { hooked = true; room_set_hooks(&(RoomHooks){room_ldn_received, room_proxy_received, room_lost, room_members_changed}); }
     pthread_t t;
+    room_wanted = true;
     room_keep_gen++;
     if (!pthread_create(&t, NULL, room_keeper, (void *)(intptr_t)room_keep_gen)) pthread_detach(t);
 }
 static void room_shutdown(void) {
+    room_wanted = false;
     room_keep_gen++;
     room_stop();
-    room_leave();
 }
 
 // ---- crossplay: the Ryujinx LDN server this game runs itself (ini RyuServe), up while local play is initialized
@@ -1791,6 +1818,25 @@ HLE_FUNC("_ZN2nn3ldn6RejectENS0_11Ipv4AddressE", ldn_reject) { NTRACE();
     if (L.ryu) {
         for (int i = 1; i < MAX_NODES; i++)
             if (node_at(L.info, i)[NODE_CONNECTED] && rd32(node_at(L.info, i) + NODE_IP) == ARG(0)) ryu_reject((uint32_t)i, r);
+        RET(0);
+        return;
+    }
+    if (L.room) {  // a room member in a hub we host: told the hub is gone for it, and its node freed
+        uint8_t own[4], to[MAX_NODES][4];
+        int n = 0;
+        room_own_ip(own);
+        pthread_mutex_lock(&L.mu);
+        for (int i = 1; i < MAX_NODES; i++)
+            if (L.room_client[i] && rd32(node_at(L.info, i) + NODE_IP) == ARG(0)) {
+                memcpy(to[n++], L.room_cip[i], 4);
+                memset(node_at(L.info, i), 0, NODE_SIZE);
+                node_at(L.info, i)[NODE_ID] = (uint8_t)i;
+                L.room_client[i] = false;
+                if (L.info[NI_NODE_COUNT] > 1) L.info[NI_NODE_COUNT]--;
+            }
+        pthread_mutex_unlock(&L.mu);
+        for (int i = 0; i < n; i++) room_send_ldn(RLDN_DESTROY_NETWORK, own, to[i], false, NULL, 0);
+        if (n) { room_sync_all(); signal_change(); }
         RET(0);
         return;
     }

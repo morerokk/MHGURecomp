@@ -70,6 +70,7 @@ enum { E_NONE = 0, E_PORT_UNREACHABLE, E_TOO_MANY_PLAYERS, E_VERSION_TOO_LOW, E_
 #define CONNECT_MS 4000
 #define SCAN_MS 4000
 #define REJECT_MS 4000
+#define SEND_MS 5000
 #define LDN_RESULT(d) ((uint32_t)(((203) & 0x1FF) | ((d) << 9)))
 #define R_CONNECT_FAILURE LDN_RESULT(64)
 #define R_CONNECT_NOT_FOUND LDN_RESULT(65)
@@ -175,6 +176,14 @@ static rsock connect_to(const char *host, int port, int timeout_ms) {
     rnonblock(s, false);
     int one = 1;
     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof one);
+    // A server that stops reading must not hold the game's thread (ryu_send runs on it): a send gives up after SEND_MS, and
+    // the connection ends (conn_send).
+#ifdef _WIN32
+    DWORD to = SEND_MS;
+#else
+    struct timeval to = {SEND_MS / 1000, (SEND_MS % 1000) * 1000};
+#endif
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char *)&to, sizeof to);
     return s;
 }
 
@@ -185,6 +194,7 @@ typedef struct Conn {
     bool has_th;
     pthread_mutex_t mu, wmu;  // mu: the state below; wmu: one writer at a time
     volatile bool alive;      // the connection is up (cleared by the reader or by close)
+    bool broken;              // a send failed (under wmu): nothing more is sent, the socket is shut down
     bool p2p;                 // a host's proxy: only ProxyConfig and ProxyData
     int srv;
     // answers
@@ -219,7 +229,11 @@ static bool conn_send(Conn *c, uint8_t type, const void *a, uint32_t alen, const
     h[4] = type, h[5] = 1;
     put32(h + 8, alen + blen);
     pthread_mutex_lock(&c->wmu);
-    bool ok = send_all(c->s, h, HDR) && (!alen || send_all(c->s, a, alen)) && (!blen || send_all(c->s, b, blen));
+    bool ok = !c->broken && send_all(c->s, h, HDR) && (!alen || send_all(c->s, a, alen)) && (!blen || send_all(c->s, b, blen));
+    if (!ok && !c->broken) {  // (timed out or failed, maybe mid-message: the stream is no good any more; the reader sees it end)
+        c->broken = true;
+        rshutdown(c->s);
+    }
     pthread_mutex_unlock(&c->wmu);
     return ok;
 }
@@ -334,11 +348,19 @@ static void p2p_start(Conn *main, const uint8_t *d, uint32_t n) {
         return;
     }
     p->p2p = true, p->parent = main;
+    // One proxy per lobby, and only while this server connection is still the lobby's: ryu_leave() may be closing main
+    // meanwhile (it waits for this thread), and a second offer would leave the first connection behind.
+    pthread_mutex_lock(&g_mu);
+    bool keep = g_main == main && !g_p2p;
+    if (keep) g_p2p = p;
+    pthread_mutex_unlock(&g_mu);
+    if (!keep) {
+        LOG("[ryuldn] ignored an offer of the host's own proxy (%s:%d): %s\n", ip, sv.port, g_p2p ? "it already has one" : "leaving the lobby");
+        conn_close(p);
+        return;
+    }
     conn_send(p, P_EXTERNAL_PROXY, d, 0x26, NULL, 0);
     LOG("[ryuldn] the host runs its own proxy (%s:%d): connected to it\n", ip, sv.port);
-    pthread_mutex_lock(&g_mu);
-    g_p2p = p;
-    pthread_mutex_unlock(&g_mu);
 }
 
 static void got_data(Conn *c, const uint8_t *d, uint32_t n) {

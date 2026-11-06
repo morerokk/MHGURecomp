@@ -26,6 +26,7 @@ __pycache__/
 /third_party/ffmpeg/
 /third_party/sdl3/
 /third_party/shaderc/
+/third_party/zstd/
 /dist/
 
 # the hub server built in place (server/README.md)
