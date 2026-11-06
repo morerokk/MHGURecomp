@@ -8,8 +8,7 @@
 #include <strings.h>
 
 #include "camera_jitter.h"
-#include "armor_fusion_catalog.h"
-#include "hle/armorfusion.h"
+#include "armor_fusion.h"
 #include "gamelib.h"
 #include "hle.h"
 #include "hle/itembar.h"
@@ -74,7 +73,7 @@ static void boot(const char *root) {
     kernel_init();
     dispatch_init();
     mods_patch_code();  // (the mods' patches of the game's code: runtime/mods.c)
-    if (armor_fusion_catalog_init()) armorfusion_init();
+    if (fusion_catalog_load()) armorfusion_init();
     forge_init();  // (Forge plugins in the mods: runtime/forge.c)
     hpscale_init();  // (large monster HP by the number of hunters: runtime/hle/hpscale.c)
     villagehub_init();  // (Village quests at the Hub / Pub counter: runtime/hle/villagehub.c)

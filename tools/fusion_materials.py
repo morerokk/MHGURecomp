@@ -1,11 +1,11 @@
-"""Audit native material-point recipes from a player's MHGU 1.4.0 dump.
+"""Build the fusion catalog from a player's MHGU 1.4.0 dump.
 
 Normal armor uses MHGU's conventional armor tiers: rarity 1..3 LR, 4..7 HR,
 8..10 G. Original Special Permit armor is HR at levels 1..10 and G at 11..15,
 matching its native crafting material tiers. The six G-only Deviant families
 are G throughout. A quest's LR classification does not define the armor tier.
-An upgrade's material rank never defines
-the armor tier. No copyrighted tables are embedded; dumps/saves are read-only.
+An upgrade's material rank never defines the armor tier. No copyrighted tables
+are embedded; dumps/saves are read-only.
 """
 from __future__ import annotations
 
@@ -35,6 +35,7 @@ G_ONLY_SPECIAL_PERMIT = frozenset(range(1108, 1120))
 # (Blangonga Pelt+, Jaggi Shard, Congalala Fur, Diametrical Horn respectively).
 SPECIFIC_CRAFT_CATEGORIES = {422: 105, 778: 40, 879: 322, 880: 322,
                              1044: 259, 1045: 259, 1046: 259, 1047: 259}
+RANKS = ("LR", "HR", "G")
 
 
 def records(raw: bytes, name: str) -> list[bytes]:
@@ -57,34 +58,53 @@ def unique_records(rows: list[bytes], name: str) -> dict[int, bytes]:
     return result
 
 
-def recipe_choices(rank, rows, crafts, categories, members, maximum_level=255):
-    matching = [r for r in rows if r["material_rank"] == rank and r["level"] <= maximum_level]
-    # The final point recipe within a tier uses the armor monster's own
-    # category. Earlier recipes can instead use generic Fang/Claw categories,
-    # particularly for Special Permit armor.
-    tier_matching = [r for r in matching if r["level"] == matching[-1]["level"]] if matching else []
-    choices = sorted({r["category_id"] for r in tier_matching})
-    # Reuse a native point recipe of the armor's tier, including later
-    # upgrades: Leather S initially uses LR materials but also has an HR
-    # recipe. If there is no such recipe, use a uniquely eligible category
-    # from the crafting key materials; never select an arbitrary category.
-    if not choices and rank:
-        key_categories = {cat for craft in crafts for mat in craft["materials"]
-                          if mat["flags"] & 2 for cat in mat["category_ids"]
-                          if categories[cat][6] in (0, 1, 2) and
-                          ("LR", "HR", "G")[categories[cat][6]] == rank and members[cat]}
-        choices = sorted(key_categories)
-    if not choices and rank:
-        # Non-monster/ticket armor frequently has no point upgrade recipe
-        # and its ticket has no category. Reuse the first eligible material
-        # category in its native crafting recipe (slot order, then native
-        # ingredient order); its item point values remain unchanged.
-        primary = next((cat for craft in crafts for mat in craft["materials"]
-                        for cat in mat["category_ids"]
-                        if categories[cat][6] in (0, 1, 2) and
-                        ("LR", "HR", "G")[categories[cat][6]] == rank and members[cat]), None)
-        choices = [primary] if primary is not None else []
-    return choices
+def eligible(category, rank, categories, members):
+    return (category in categories and categories[category][6] < len(RANKS)
+            and RANKS[categories[category][6]] == rank and bool(members[category]))
+
+
+def recipe_category(armor_id, rank, rows, crafts, categories, members, maximum_level):
+    # Prefer the latest point recipe in the armor's tier, including later
+    # upgrades. Earlier recipes can use generic Fang/Claw categories instead.
+    matching = [(level, cat) for level, cat in rows if level <= maximum_level
+                and eligible(cat, rank, categories, members)]
+    choices = {cat for level, cat in matching if level == matching[-1][0]} if matching else set()
+    if not choices:
+        choices = {cat for flags, cats in crafts if flags & 2 for cat in cats
+                   if eligible(cat, rank, categories, members)}
+    if not choices:
+        # Ticket/cosmetic armor may have no categorized key ingredient. Keep
+        # native slot, ingredient and category order for its first fallback.
+        primary = next((cat for _, cats in crafts for cat in cats
+                        if eligible(cat, rank, categories, members)), None)
+        choices = {primary} if primary is not None else set()
+    if len(choices) != 1 and armor_id in SPECIFIC_CRAFT_CATEGORIES:
+        specific = SPECIFIC_CRAFT_CATEGORIES[armor_id]
+        if (not any(specific in cats for _, cats in crafts)
+                or not eligible(specific, rank, categories, members)):
+            raise ValueError(f"armor {armor_id}: changed specific crafting category")
+        choices = {specific}
+    if not choices:
+        # Preserve native membership/points for award armor's rank category.
+        generic = RANKS.index(rank) + 1
+        choices = {generic} if eligible(generic, rank, categories, members) else set()
+    return next(iter(choices)) if len(choices) == 1 else 0
+
+
+def armor_ranges(armor_id, row):
+    rarity = row[103] + 1
+    if 617 <= armor_id <= 640:
+        if rarity != 11 or row[105] != 5:
+            raise ValueError(f"armor {armor_id}: changed progressive Special Permit metadata")
+        # Their quests can start at LR, but level-I armor uses native HR
+        # tickets/materials. Quest stars do not determine the armor's tier.
+        return [(1, 10, "HR"), (11, 15, "G")]
+    if armor_id in G_ONLY_SPECIAL_PERMIT:
+        if rarity != 11 or row[105] != 1:
+            raise ValueError(f"armor {armor_id}: changed G-only Special Permit metadata")
+        return [(1, 5, "G")]
+    rank = "LR" if rarity <= 3 else "HR" if rarity <= 7 else "G" if rarity <= 10 else None
+    return [(1, 255, rank)] if rank else []
 
 
 def audit(tables: dict[str, bytes]) -> dict:
@@ -98,7 +118,7 @@ def audit(tables: dict[str, bytes]) -> dict:
         points = row[27]
         item_categories[item_id] = sorted(set(struct.unpack_from("<8H", row, 28)) - {0})
         # Eight category IDs share the item's native point value.
-        for category in sorted(set(struct.unpack_from("<8H", row, 28)) - {0}):
+        for category in item_categories[item_id]:
             if category not in categories:
                 raise ValueError(f"item {item_id}: unknown category {category}")
             if points:
@@ -115,17 +135,11 @@ def audit(tables: dict[str, bytes]) -> dict:
                     continue
                 if item_id not in items or not quantity:
                     raise ValueError(f"crafting: invalid item/quantity {item_id}/{quantity}")
-                materials.append({"item_id": item_id, "quantity": quantity,
-                                  "flags": flags, "category_ids": item_categories[item_id]})
-            ranks = {categories[category][6] for mat in materials
-                     for category in mat["category_ids"] if categories[category][6] in (0, 1, 2)}
+                materials.append((flags, item_categories[item_id]))
             for armor_id in armor_ids:
                 if armor_id not in armor:
                     raise ValueError(f"crafting: unknown armor {armor_id}")
-                crafting[armor_id].append({
-                    "slot": slot + 1, "materials": materials,
-                    "material_rank_lower_bound": ("LR", "HR", "G")[max(ranks)] if ranks else None,
-                })
+                crafting[armor_id].extend(materials)
 
     upgrades = defaultdict(list)
     for row in parsed["armorProcessA00.apd"]:
@@ -143,85 +157,28 @@ def audit(tables: dict[str, bytes]) -> dict:
         for armor_id in armor_ids:
             if armor_id not in armor:
                 raise ValueError(f"upgrade: unknown armor {armor_id}")
-            upgrades[armor_id].append({
-                "level": level, "category_id": category,
-                "material_rank": ("LR", "HR", "G")[categories[category][6]],
-                "native_points": points,
-            })
+            upgrades[armor_id].append((level, category))
 
     result = []
     for armor_id in sorted(set(armor) - {0}):
-        rows = sorted(upgrades[armor_id], key=lambda r: (r["level"], r["category_id"]))
-        rarity = armor[armor_id][103] + 1
-        rank = "LR" if rarity <= 3 else "HR" if rarity <= 7 else "G" if rarity <= 10 else None
-        if armor_id in G_ONLY_SPECIAL_PERMIT:
-            if rarity != 11 or armor[armor_id][105] != 1:
-                raise ValueError(f"armor {armor_id}: changed G-only Special Permit metadata")
-            rank = "G"
+        rows = sorted(upgrades[armor_id])
+        ranges = armor_ranges(armor_id, armor[armor_id])
         slot_mask = sum(1 << slot for slot in range(5) if armor[armor_id][6 + slot])
-        ranges = [(1, 255, rank)] if rank else []
-        if 617 <= armor_id <= 640:
-            if rarity != 11 or armor[armor_id][105] != 5:
-                raise ValueError(f"armor {armor_id}: changed progressive Special Permit metadata")
-            # Special Permit quests can start at LR, but their level-I armor
-            # key tickets and monster materials already belong to native HR
-            # categories. Do not infer armor rank from the quest's star rank.
-            ranges = [(1, 10, "HR"), (11, 15, "G")]
-        elif armor_id in G_ONLY_SPECIAL_PERMIT:
-            ranges = [(1, 5, "G")]
         rank_recipes = []
         for minimum, maximum, tier in ranges:
-            tier_choices = recipe_choices(tier, rows, crafting[armor_id], categories, members, maximum)
-            source = "native_recipe"
-            if len(tier_choices) != 1 and armor_id in SPECIFIC_CRAFT_CATEGORIES:
-                specific = SPECIFIC_CRAFT_CATEGORIES[armor_id]
-                eligible = {cat for craft in crafting[armor_id] for mat in craft["materials"]
-                            for cat in mat["category_ids"]}
-                if (specific not in eligible or specific not in categories or not members[specific]
-                        or ("LR", "HR", "G")[categories[specific][6]] != tier):
-                    raise ValueError(f"armor {armor_id}: changed specific crafting category")
-                tier_choices = [specific]
-                source = "specific_craft_category"
-            if not tier_choices:
-                # Award/ticket/cosmetic armor without an associated native
-                # point recipe uses the existing rank's Monster category.
-                # Preserve its native item membership and point values.
-                generic = {"LR": 1, "HR": 2, "G": 3}[tier]
-                if (generic in categories and members[generic] and
-                        ("LR", "HR", "G")[categories[generic][6]] == tier):
-                    tier_choices = [generic]
-                    source = "generic_rank_fallback"
+            category = recipe_category(armor_id, tier, rows, crafting[armor_id],
+                                       categories, members, maximum)
             rank_recipes.append({"min_level": minimum, "max_level": maximum,
-                                 "rank": tier, "category_id": tier_choices[0] if len(tier_choices) == 1 else 0,
-                                 "recipe_source": source})
+                                 "rank": tier, "category_id": category})
         if not slot_mask:
             rank_recipes = []
-        effective_category = (rank_recipes[0]["category_id"]
-                              if len(rank_recipes) == 1 else None)
-        result.append({
-            "armor_id": armor_id,
-            "status": ("candidate" if effective_category else "progressive"
-                       if any(r["category_id"] for r in rank_recipes) else "base_only"
-                       if rank_recipes else "unresolved"),
-            "candidate_category_id": effective_category or None,
-            "armor_rank": rank,
-            "rank_recipes": rank_recipes,
-            "rarity": rarity,
-            "slot_mask": slot_mask,
-            "rank_source": ("g_only_special_permit" if armor_id in G_ONLY_SPECIAL_PERMIT else
-                            "native_special_permit_material_tiers" if 617 <= armor_id <= 640 else
-                            "conventional_armor_tier" if rank else "special_permit_unresolved"),
-            "fusion_points": 10,
-            "upgrade_evidence": rows,
-            "crafting_evidence": crafting[armor_id],
-        })
+        result.append({"armor_id": armor_id, "slot_mask": slot_mask, "rank_recipes": rank_recipes})
     return {
         "schema": 2,
-        "runtime_approved": True,
         "source_sha256": {name: hashlib.sha256(tables[name]).hexdigest() for name in FORMATS},
         "armor": result,
         "categories": [
-            {"category_id": cat, "material_rank": ("LR", "HR", "G")[categories[cat][6]],
+            {"category_id": cat, "material_rank": RANKS[categories[cat][6]],
              "items": sorted(values, key=lambda x: x["item_id"])}
             for cat, values in sorted(members.items()) if categories[cat][6] in (0, 1, 2)
         ],
@@ -237,7 +194,7 @@ def binary_catalog(result: dict) -> bytes:
     Members <HHB3x>: category ID, item ID, unchanged native point value.
     Entries sorted by (armor ID, minimum level); ranges never overlap.
     """
-    ranks = {"LR": 1, "HR": 2, "G": 3}
+    ranks = {rank: i + 1 for i, rank in enumerate(RANKS)}
     categories = {row["category_id"]: row for row in result["categories"]}
     entries, used = [], set()
     for row in result["armor"]:

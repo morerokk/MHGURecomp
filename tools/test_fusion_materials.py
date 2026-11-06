@@ -1,5 +1,9 @@
+from pathlib import Path
 import struct
+import tempfile
 import unittest
+
+from dist import files
 
 from fusion_materials import FORMATS, audit, binary_catalog, records
 
@@ -61,10 +65,9 @@ class FusionMaterialsTest(unittest.TestCase):
 
     def test_paired_ids_not_series_display_order(self):
         result = audit(fixture())
-        self.assertEqual([a["candidate_category_id"] for a in result["armor"]], [197, 197])
+        self.assertEqual([a["rank_recipes"][0]["category_id"] for a in result["armor"]], [197, 197])
         self.assertEqual(result["categories"][0]["items"], [{"item_id": 1202, "points": 2}])
-        self.assertTrue(all(a["armor_rank"] == "LR" for a in result["armor"]))
-        self.assertTrue(result["runtime_approved"])
+        self.assertTrue(all(a["rank_recipes"][0]["rank"] == "LR" for a in result["armor"]))
 
     def test_reject_truncated_or_extra_bytes(self):
         for name, data in fixture().items():
@@ -85,13 +88,13 @@ class FusionMaterialsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown category"):
             audit(data)
 
-    def test_missing_recipe_stays_unresolved(self):
+    def test_missing_point_recipe_uses_crafting_key_category(self):
         data = fixture()
         data["armorProcessA00.apd"] = table("armorProcessA00.apd", [])
         result = audit(data)
-        self.assertTrue(all(a["candidate_category_id"] == 197 for a in result["armor"]))
+        self.assertTrue(all(a["rank_recipes"][0]["category_id"] == 197 for a in result["armor"]))
 
-    def test_crafting_categories_are_independent_evidence(self):
+    def test_crafting_material_rank_does_not_change_armor_tier(self):
         data = fixture()
         item = bytearray(data["itemData.itm"])
         struct.pack_into("<I", item, 8, 1203)
@@ -102,12 +105,11 @@ class FusionMaterialsTest(unittest.TestCase):
         struct.pack_into("<H", craft, 10, 1203)
         data["armorCreateA00.acrd"] = table("armorCreateA00.acrd", [craft])
         row = audit(data)["armor"][0]
-        self.assertEqual(row["upgrade_evidence"][0]["material_rank"], "LR")
-        self.assertEqual(row["crafting_evidence"][0]["material_rank_lower_bound"], "HR")
-        self.assertEqual(row["armor_rank"], "LR")
+        self.assertEqual(row["rank_recipes"], [{"min_level": 1, "max_level": 255,
+                                                "rank": "LR", "category_id": 197}])
 
     def test_conflicting_categories_stay_unresolved(self):
-        data = fixture()
+        data = self.with_generic_category(fixture())
         categories = bytearray(data["itemCategoryTypeData.ict"])
         categories[8 + 7 + 6] = 0
         data["itemCategoryTypeData.ict"] = categories
@@ -118,7 +120,7 @@ class FusionMaterialsTest(unittest.TestCase):
         second = bytearray(row)
         struct.pack_into("<H", second, 22, 198)
         data["armorProcessA00.apd"] = table("armorProcessA00.apd", [row, second])
-        self.assertTrue(all(a["status"] == "base_only" for a in audit(data)["armor"]))
+        self.assertTrue(all(a["rank_recipes"][0]["category_id"] == 0 for a in audit(data)["armor"]))
 
     def test_binary_layout_and_counts(self):
         binary = binary_catalog(audit(fixture()))
@@ -134,8 +136,7 @@ class FusionMaterialsTest(unittest.TestCase):
         armor[8 + 103] = 10
         data["armorSeriesData.asd"] = armor
         row = audit(data)["armor"][0]
-        self.assertIsNone(row["armor_rank"])
-        self.assertEqual(row["status"], "unresolved")
+        self.assertEqual(row["rank_recipes"], [])
 
     def test_no_point_recipe_remains_base_only(self):
         data = fixture()
@@ -156,8 +157,8 @@ class FusionMaterialsTest(unittest.TestCase):
         data["armorProcessA00.apd"] = table("armorProcessA00.apd", [])
         data["armorCreateA00.acrd"] = table("armorCreateA00.acrd", [])
         row = next(a for a in audit(data)["armor"] if a["armor_id"] == 1108)
-        self.assertEqual(row["armor_rank"], "G")
-        self.assertEqual(row["rank_source"], "g_only_special_permit")
+        self.assertEqual(row["rank_recipes"], [{"min_level": 1, "max_level": 5,
+                                                "rank": "G", "category_id": 0}])
 
     def test_classic_special_permit_ranges_are_disjoint(self):
         for ident, expected in (
@@ -185,7 +186,6 @@ class FusionMaterialsTest(unittest.TestCase):
         result = audit(data)
         recipe = result["armor"][0]["rank_recipes"][0]
         self.assertEqual(recipe["category_id"], 1)
-        self.assertEqual(recipe["recipe_source"], "generic_rank_fallback")
         generic = next(c for c in result["categories"] if c["category_id"] == 1)
         self.assertEqual(generic["items"], [{"item_id": 1210, "points": 3}])
 
@@ -193,7 +193,6 @@ class FusionMaterialsTest(unittest.TestCase):
         result = audit(self.with_generic_category(fixture()))
         recipe = result["armor"][0]["rank_recipes"][0]
         self.assertEqual(recipe["category_id"], 197)
-        self.assertEqual(recipe["recipe_source"], "native_recipe")
 
     def test_specific_craft_category_resolves_blangonga_ambiguity(self):
         data = fixture()
@@ -215,7 +214,23 @@ class FusionMaterialsTest(unittest.TestCase):
         data["armorProcessA00.apd"] = table("armorProcessA00.apd", [])
         row = next(a for a in audit(data)["armor"] if a["armor_id"] == 422)
         self.assertEqual(row["rank_recipes"][0]["category_id"], 105)
-        self.assertEqual(row["rank_recipes"][0]["recipe_source"], "specific_craft_category")
+
+
+    def test_catalog_is_packaged_without_names(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("mhgurecomp", "mhgugame.so", "mhgurecomp-updater", "pipelines.list",
+                         "armor-fusion.afus"):
+                (root / name).write_bytes(b"fixture")
+            (root / "licenses").mkdir()
+            names = {entry[0] for entry in files(directory, "linux")}
+            self.assertIn("armor-fusion.afus", names)
+            self.assertNotIn("armor-fusion.names", names)
+            (root / "armor-fusion.names").write_bytes(b"old labels")
+            self.assertNotIn("armor-fusion.names", {entry[0] for entry in files(directory, "linux")})
+            (root / "armor-fusion.afus").unlink()
+            with self.assertRaises(SystemExit):
+                files(directory, "linux")
 
 
 if __name__ == "__main__":

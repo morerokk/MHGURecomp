@@ -565,16 +565,9 @@ $(B)/armor-fusion.afus: tools/fusion_materials.py $(wildcard $(GAME)/romfs/nativ
 	@mkdir -p $(B) $(O)
 	$(PY) tools/fusion_materials.py $(GAME)/romfs/nativeNX/table --output $(O)/fusion-audit.json --binary $(B)/armor-fusion.afus
 $(EXE): | fusion-catalog
-$(O)/rt/hle/armorfusion.o $(O)/rt/hle/fusion_materials.o: runtime/hle/guest_call.h
 
 test-armor-fusion:
 	@mkdir -p $(O)/fusion-test
-	$(CC) -std=c11 -Wall -Wextra -Werror tools/test_armor_fusion_policy.c runtime/armor_fusion_policy.c -o $(O)/fusion-test/policy
-	$(O)/fusion-test/policy
-	$(CC) -std=c11 -Wall -Wextra -Werror -Iruntime tests/test_armor_fusion_catalog.c runtime/armor_fusion_catalog.c -o $(O)/fusion-test/catalog
-	cd $(O)/fusion-test && ./catalog && ./catalog extra
-	$(CC) -std=c11 -Wall -Wextra -Werror -Iruntime tests/test_guest_call.c -o $(O)/fusion-test/guest-call
-	$(O)/fusion-test/guest-call
-	$(CC) -std=c11 -Wall -Wextra -Werror -Iruntime tests/test_native_armor_fusion.c runtime/hle/armorfusion.c runtime/hle/fusion_materials.c runtime/armor_fusion_policy.c -o $(O)/fusion-test/native
-	$(O)/fusion-test/native
+	$(CC) -std=c11 -Wall -Wextra -Werror -Iruntime tests/test_armor_fusion.c runtime/armor_fusion.c runtime/hle/armorfusion.c -o $(O)/fusion-test/armor-fusion
+	cd $(O)/fusion-test && ./armor-fusion
 	$(PY) -m unittest discover -s tools -p 'test_fusion*.py' -v

@@ -134,6 +134,19 @@ void quickhunt_poll(void);               // (debug) MHGU_QUICKHUNT's presses (ru
 
 // ---- helpers
 void guest_call(Cpu *c, uint32_t addr);   // call a guest function (saves / restores lr)
+
+// Preserve caller registers while inspecting a guest function; guest_call
+// itself restores only LR. The return value is separate from the saved r0.
+static inline uint32_t guest_call4(Cpu *c, uint32_t fn, uint32_t a, uint32_t b,
+                                  uint32_t d, uint32_t e) {
+    uint32_t saved[16];
+    memcpy(saved, c->r, sizeof saved);
+    c->r[0] = a; c->r[1] = b; c->r[2] = d; c->r[3] = e;
+    guest_call(c, fn);
+    uint32_t result = c->r[0];
+    memcpy(c->r, saved, sizeof saved);
+    return result;
+}
 uint32_t guest_sym(const char *name);     // cached loader_find_symbol, fatal if missing
 uint32_t hle_alloc(uint32_t size);        // zeroed guest memory owned by the host (never freed): guest address
 extern const char *g_game_dir;            // folder holding exefs/ and romfs/

@@ -1,17 +1,11 @@
-// Pure fusion policy. Guest memory and inventory mutation belong to the native
-// transaction adapter; this module must also be used again at confirmation.
-#ifndef ARMOR_FUSION_POLICY_H
-#define ARMOR_FUSION_POLICY_H
+// Armor fusion catalog and read-only policy; the native adapter owns mutation.
+#ifndef ARMOR_FUSION_H
+#define ARMOR_FUSION_H
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 enum FusionRank { FUSION_RANK_UNKNOWN, FUSION_LR, FUSION_HR, FUSION_G };
-enum FusionResult {
-    FUSION_OK, FUSION_UNKNOWN_RANK, FUSION_RANK_MISMATCH,
-    FUSION_INVALID_PAIR, FUSION_NATIVE_REJECTED, FUSION_INVALID_RECIPE,
-    FUSION_INVALID_SELECTION, FUSION_NOT_OWNED, FUSION_TOO_FEW_POINTS,
-    FUSION_TOO_MANY_MATERIALS
-};
 enum { FUSION_POINTS = 10, FUSION_MAX_MATERIALS = 10 };
 
 typedef struct {
@@ -46,8 +40,15 @@ typedef struct {
 // Validates an explicit player selection, without consuming anything. Failure
 // clears the output. Rebuild using current equipment/inventory at confirmation;
 // a previously successful plan is not authorization to mutate a changed save.
-enum FusionResult fusion_plan(const FusionPiece *base, const FusionPiece *appearance,
+bool fusion_plan(const FusionPiece *base, const FusionPiece *appearance,
     uint32_t native_pair_result, const FusionRecipe *recipe,
     const FusionSelection *selection, size_t count,
     FusionOwned owned, void *context, FusionPlan *out);
+
+// Catalog values come from verified progression-rank data. Queries fail closed
+// without a valid catalog. Material storage is immutable until the next load.
+bool fusion_catalog_load(void);
+bool fusion_classify(FusionPiece *piece);
+bool fusion_recipe(FusionPiece *base, FusionPiece *appearance, FusionRecipe *recipe);
+void armorfusion_init(void);
 #endif

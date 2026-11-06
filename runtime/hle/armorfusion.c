@@ -2,11 +2,9 @@
 // armor handling remain responsible for the equipment mutation. The host
 // intercepts confirmation BEFORE the native zenny charge and substitutes the
 // selected materials at the native token deduction call site.
-#include "armorfusion.h"
-#include "fusion_materials.h"
+#include "../armor_fusion.h"
 #include <stdio.h>
 #include "../hle.h"
-#include "guest_call.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -40,8 +38,8 @@
 #define FN_DIALOG_TEXT  0x75bac0u
 #define G_FACILITY      0x1a99458u
 
-static ArmorFusionQuery catalog;
-static ArmorFusionClassify classify;
+enum { COORDINATE_KEEP = (1u << 0) | (1u << 1) | (1u << 4) | (1u << 10) };
+
 static uint32_t active_ui, context_ui;
 static enum { IDLE, MATERIALS, RELEASE_CONFIRM, CONFIRM, APPROVED } phase;
 static FusionSelection selected[FUSION_MAX_MATERIALS];
@@ -61,20 +59,252 @@ static uint32_t parent_ui;
 static uint32_t visible_children;
 static bool aborting;
 
-static void suspend_parent(Cpu *c, uint32_t ui) {
-    parent_ui = ui;
-    visible_children = 0;
-    uint32_t children = LD32(ui + 0x34), count = LD32(ui + 0x30);
+static uint32_t visible_mask(uint32_t ui) {
+    uint32_t mask = 0, children = LD32(ui + 0x34), count = LD32(ui + 0x30);
     for (unsigned i = 0; children && i < count && i < 30; ++i) {
         uint32_t child = LD32(children + 4 * i);
-        if (!child) continue;
-        // These children are uGUI nodes, unlike the plain facility object.
-        // Native conditional show/hide (0x76df00/0x76e04c) checks +0x18.
-        if (LD8(child + 0x18)) {
-            visible_children |= 1u << i;
-            guest_call4(c, FN_HIDE_CHILD, ui, i, 0, 0);
-        }
+        if (child && LD8(child + 0x18)) mask |= 1u << i;
     }
+    return mask;
+}
+
+static void apply_mask(Cpu *c, uint32_t ui, uint32_t mask, uint32_t fn) {
+    for (unsigned i = 0; i < 30; ++i)
+        if (mask & (1u << i)) guest_call4(c, fn, ui, i, 0, 0);
+}
+
+// Native point-material widgets borrow only the forge's value models; the
+// original upgrade/payment controllers are never entered.
+enum { MAX_AVAILABLE = 128, CONFIRM_BUTTON = 0x2000, BACK = 0x4000 };
+static uint32_t smith;
+static bool quantity, released;
+static uint32_t visibility;
+// Only value models/selectors are copied. No constructed GUI object, allocation
+// or ownership link is rewound. The widget bindings already point into smith.
+static const struct { uint16_t offset, length; } ranges[] = {
+    {0x44, 1}, {0x49, 3}, {0x6c, 8}, {0x84, 12}, {0x1f71, 1},
+    {0x1ff4, 0x48}, {0x28d4, 0x30}, {0x2a54, 0x280}, {0x2d50, 0x4c0},
+};
+static uint8_t saved[0x900];
+static uint32_t dirty[4];
+static const uint8_t dirty_children[] = {0xa, 0xb, 0xe, 0xf};
+
+static uint32_t child(Cpu *c, unsigned index) { return guest_call4(c, 0x85cb3c, smith, index, 0, 0); }
+static void visible(Cpu *c, unsigned index, bool show) {
+    // Forge and Coordinate widgets have distinct objects but share native
+    // renderer resources (Money, Preview, EquipDetail). Never hide a forge
+    // widget already hidden: unconditional hide would close the child's
+    // renderer resource while another live facility is displaying it.
+    guest_call4(c, show ? 0x85cba0 : 0x85cc0c, smith, index, 0, 0);
+}
+static void mark(Cpu *c) {
+    for (unsigned i = 2; i < 4; ++i) {
+        uint32_t widget = child(c, dirty_children[i]);
+        if (widget) ST32(widget + 0x50, LD32(widget + 0x50) | 1);
+    }
+}
+static bool supported(void) {
+    const struct { uint32_t address, prologue; } anchors[] = {
+        {0x8fcbcc,0xe92d4ff0}, {0x8fa3d8,0xe92d4ff0},
+        {0x8f8e48,0xe92d4ff0}, {0x8fb8e4,0xe92d4ff0},
+        {0x8fcea8,0xe92d4ff0}, {0x8fd448,0xe92d4bf0},
+        {0x8fb720,0xe92d48f0}, {0x74edec,0xe92d4800},
+        {0x74ee34,0xe1c011b4}, {0x74ee98,0xe92d4ff0},
+        {0x74fa74,0xe92d4010}, {0x394228,0xe590001c},
+        {0x85e5bc,0xe92d41f0}, {0x75d2b4,0xe0800101},
+        {0x85cb3c,0xe5900034}, {0x85cba0,0xe92d4010}, {0x85cc0c,0xe92d4010},
+    };
+    for (size_t i = 0; i < sizeof anchors / sizeof anchors[0]; ++i)
+        if (LD32(anchors[i].address) != anchors[i].prologue) return false;
+    return true;
+}
+static unsigned current(void) {
+    return LD8(smith + 0x2001) + LD8(smith + 0x2002) * LD16(smith + 0x2004);
+}
+static void refresh(Cpu *c) {
+    // This display-only helper has a point-pool branch selected by main7,
+    // phase2. In that branch it reads item ownership and writes only the grid
+    // model. The synthetic row prevents any fixed-ingredient subtraction.
+    uint32_t state = LD32(smith + 4);
+    ST32(smith + 4, 0x00021907);
+    guest_call4(c, 0x8f8e48, smith, 0, 0, 0);
+    ST32(smith + 4, state);
+    guest_call4(c, 0x8fb8e4, smith, LD16(smith + 0x2004), 0, 0);
+    guest_call4(c, 0x8fcea8, smith, LD16(smith + 0x2028), 0, 0);
+    ST16(smith + 0x2e6a, LD32(smith + 0x8c));
+    mark(c);
+    // Exact native point-pool help lookup from 0x905960..0x9059b0. Keep
+    // the existing game message widget visible instead of a host hint.
+    unsigned idx = current();
+    bool owned = idx < LD32(smith + 0x88) && LD16(smith + 0x2ad6 + idx * 4) > 0;
+    uint32_t sp = c->r[13]; c->r[13] -= 16;
+    ST32(c->r[13], 0); ST32(c->r[13] + 4, 0);
+    guest_call4(c, 0x85e5bc, 4, 1, 14, owned ? 0x5e : 0x5f);
+    c->r[13] = sp;
+    uint32_t facility = LD32(0x1a99458);
+    uint32_t common = facility ? guest_call4(c, 0x75d2b4, facility, 0, 0, 0) : 0;
+    if (common && LD32(common + 0x34) && LD32(common + 0x30) > 4)
+        guest_call4(c, 0x85cba0, common, 4, 0, 0);
+}
+
+static void materials_cancel(Cpu *c, bool restore) {
+    if (!smith) return;
+    if (restore) {
+        for (unsigned i = 0; i < 30; ++i) visible(c, i, false);
+        size_t cursor = 0;
+        for (size_t i = 0; i < sizeof ranges / sizeof ranges[0]; ++i) {
+            memcpy(G2H(smith + ranges[i].offset), saved + cursor, ranges[i].length);
+            cursor += ranges[i].length;
+        }
+        for (unsigned i = 0; i < 4; ++i) {
+            uint32_t widget = child(c, dirty_children[i]);
+            if (widget) ST32(widget + 0x50, dirty[i] | 1); // redraw restored value model
+        }
+        apply_mask(c, smith, visibility, FN_SHOW_CHILD);
+    }
+    smith = 0; quantity = released = false;
+}
+
+static bool materials_open(Cpu *c, uint32_t parent, uint16_t category) {
+    if (smith || !parent || !supported() || category < 1 || category > 337 ||
+        !LD32(parent + 0x34) || LD32(parent + 0x30) < 30) return false;
+    uint32_t item = LD32(0x1a583a8);
+    if (!item || !LD32(item + category * 8 + 0x414) ||
+        LD32(item + category * 8 + 0x418) > MAX_AVAILABLE) return false;
+    smith = parent;
+    // Fail before touching parent state if any required resource is absent or
+    // its native model binding is incompatible with the supported forge.
+    const unsigned required[] = {0xa, 0xb, 0xe, 0xf, 0x10, 0x11};
+    for (unsigned i = 0; i < sizeof required / sizeof required[0]; ++i) if (!child(c, required[i])) { smith = 0; return false; }
+    if (LD32(child(c, 0xe) + 0x4c) != smith + 0x2e20 ||
+        LD32(child(c, 0xf) + 0x4c) != smith + 0x2e20 ||
+        LD32(child(c, 0x10) + 0x4c) != smith + 0x1ff4 ||
+        LD32(child(c, 0x10) + 0x50) != smith + 0x2d50 ||
+        LD32(child(c, 0x11) + 0x50) != smith + 0x3200) { smith = 0; return false; }
+    visibility = visible_mask(smith);
+    size_t cursor = 0;
+    for (size_t i = 0; i < sizeof ranges / sizeof ranges[0]; ++i) {
+        memcpy(saved + cursor, G2H(smith + ranges[i].offset), ranges[i].length);
+        cursor += ranges[i].length;
+    }
+    for (unsigned i = 0; i < 4; ++i) {
+        uint32_t widget = child(c, dirty_children[i]);
+        dirty[i] = widget ? LD32(widget + 0x50) : 0;
+    }
+    memset(G2H(smith + 0x28d4), 0, 0x30);
+    ST8(smith + 0x1f71, 0); ST8(smith + 0x44, 0); ST8(smith + 0x49, 0);
+    ST16(smith + 0x28da, category); ST8(smith + 0x28de, FUSION_POINTS);
+    guest_call4(c, 0x8fcbcc, smith, 0, 0, 0);
+    if (LD32(smith + 0x88) > MAX_AVAILABLE) { materials_cancel(c, true); return false; }
+    guest_call4(c, 0x8fa3d8, smith, 0, 0, 0);
+    ST8(smith + 0x2e67, FUSION_POINTS);
+    guest_call4(c, 0x74edec, smith + 0x1ff4, 8, 1, 0);
+    guest_call4(c, 0x74ee34, smith + 0x1ff4, LD32(smith + 0x88), 3, 0);
+    guest_call4(c, 0x74ee34, smith + 0x2018, 1, 5, 0);
+    for (unsigned i = 0; i < 30; ++i) visible(c, i, false);
+    visible(c, 0xe, true); visible(c, 0xf, true); visible(c, 0x10, true);
+    quantity = released = false;
+    refresh(c);
+    LOG("[armor-fusion] native material pool %x category %u available %u required 10\n",
+        smith, category, LD32(smith + 0x88));
+    return true;
+}
+
+static bool material_selection(void) {
+    uint32_t n = LD32(smith + 0x84);
+    if (!n || n > FUSION_MAX_MATERIALS) return false;
+    for (unsigned i = 0; i < n; ++i) {
+        uint32_t row = smith + 0x2a54 + 4 * i;
+        uint16_t id = LD16(row), qty = LD16(row + 2);
+        if (!id || !qty || qty > FUSION_POINTS) return false;
+        for (unsigned j = 0; j < i; ++j) if (selected[j].item_id == id) return false;
+        selected[i] = (FusionSelection){id, qty};
+    }
+    selected_count = n;
+    return true;
+}
+
+static int materials_poll(Cpu *c) {
+    selected_count = 0;
+    memset(selected, 0, sizeof selected);
+    if (!smith) return 2;
+    if (LD32(smith + 0x84) > FUSION_MAX_MATERIALS || LD32(smith + 0x88) > MAX_AVAILABLE) {
+        materials_cancel(c, true); return 2;
+    }
+    uint32_t input = LD32(0x1a8c670);
+    if (!input) return 0;
+    uint32_t pressed = LD32(input + 0x6bfc), held = pressed | LD32(input + 0x6c34);
+    if (!released) { if (!(held & (CONFIRM_BUTTON | BACK))) released = true; return 0; }
+    ST32(smith + 0x6c, pressed); ST32(smith + 0x70, held);
+    if (quantity) {
+        uint32_t sp = c->r[13]; c->r[13] -= 16; ST32(c->r[13], smith + 0x320c);
+        unsigned result = guest_call4(c, 0x74fa74, smith + 0x3202, LD16(smith + 0x3204), pressed, held);
+        c->r[13] = sp;
+        if (!result) return 0;
+        quantity = false; released = false;
+        visible(c, 0x11, false); visible(c, 0xf, true);
+        if (result == 1) {
+            unsigned idx = current(), n = LD32(smith + 0x84), qty = LD16(smith + 0x3202);
+            if (idx >= LD32(smith + 0x88) || n > FUSION_MAX_MATERIALS || !qty || qty > 10) return 0;
+            uint32_t row = smith + 0x2ad4 + idx * 4; uint16_t id = LD16(row);
+            if (!id || qty > LD16(row + 2)) return 0;
+            unsigned merged = qty; bool exists = false;
+            for (unsigned i = 0; i < n; ++i) if (LD16(smith + 0x2a54 + i * 4) == id) {
+                exists = true; merged += LD16(smith + 0x2a56 + i * 4);
+            }
+            if (merged > 10 || (!exists && n >= FUSION_MAX_MATERIALS)) return 0;
+            guest_call4(c, 0x8fd448, smith, 0, 0, 0);
+            refresh(c);
+            if (LD32(smith + 0x8c) >= FUSION_POINTS) {
+                bool valid = material_selection();
+                materials_cancel(c, true);
+                if (!valid) { memset(selected, 0, sizeof selected); selected_count = 0; return 2; }
+                return 1;
+            }
+            return 0;
+        }
+        refresh(c);
+        return 0;
+    }
+    if (pressed & BACK) {
+        if (LD32(smith + 0x84)) {
+            guest_call4(c, 0x8fb720, smith, 0, 0, 0);
+            refresh(c); released = false; return 0;
+        }
+        materials_cancel(c, true); return 2;
+    }
+    if (pressed & CONFIRM_BUTTON) {
+        unsigned idx = current();
+        if (idx >= LD32(smith + 0x88) || LD32(smith + 0x8c) >= FUSION_POINTS) return 0;
+        uint32_t row = smith + 0x2ad4 + idx * 4;
+        uint16_t id = LD16(row), owned = LD16(row + 2);
+        uint32_t info = id ? guest_call4(c, 0x394228, LD32(0x1a583a8), id, 0, 0) : 0;
+        unsigned points = info ? LD8(info + 0x24) : 0;
+        if (!points || !owned) return 0;
+        unsigned max = (FUSION_POINTS - LD32(smith + 0x8c) + points - 1) / points;
+        if (max > owned) max = owned;
+        for (unsigned i = 0; i < LD32(smith + 0x84); ++i)
+            if (LD16(smith + 0x2a54 + i * 4) == id) {
+                unsigned previous = LD16(smith + 0x2a56 + i * 4);
+                if (previous >= 10) return 0;
+                if (max > 10 - previous) max = 10 - previous;
+            }
+        if (!max) return 0;
+        ST32(smith + 0x320c, 0); ST32(smith + 0x3200, 0); ST16(smith + 0x3202, 1);
+        ST16(smith + 0x3204, max); ST32(smith + 0x3208, points);
+        visible(c, 0xf, false); visible(c, 0x11, true);
+        quantity = true; released = false; return 0;
+    }
+    // Native list paging uses L/R while its grid uses directional navigation.
+    if (guest_call4(c, 0x74ee98, smith + 0x2018, held, 0, 0)) { refresh(c); return 0; }
+    if (guest_call4(c, 0x74ee98, smith + 0x1ff4, held, 0, 0)) refresh(c);
+    return 0;
+}
+
+static void suspend_parent(Cpu *c, uint32_t ui) {
+    parent_ui = ui;
+    visible_children = visible_mask(ui);
+    apply_mask(c, ui, visible_children, FN_HIDE_CHILD);
 }
 
 static bool parent_live(void) {
@@ -86,8 +316,7 @@ static bool parent_live(void) {
 
 static void restore_parent(Cpu *c) {
     if (parent_live()) {
-        for (unsigned i = 0; i < 30; ++i)
-            if (visible_children & (1u << i)) guest_call4(c, FN_SHOW_CHILD, parent_ui, i, 0, 0);
+        apply_mask(c, parent_ui, visible_children, FN_SHOW_CHILD);
         ST8(parent_ui + 4, 0); // Native main-menu setup restores its hints/title.
     }
     parent_ui = visible_children = 0;
@@ -97,26 +326,26 @@ static bool scope(void) {
     // +0x44 mode 0 is the hunter domain. Material interception additionally
     // requires the fusion-specific confirmation/consume return addresses;
     // separation keeps its original native costs and transaction.
-    return catalog && context_ui && context_ui == active_ui && LD32(context_ui + 0x44) == 0;
+    return context_ui && context_ui == active_ui && LD32(context_ui + 0x44) == 0;
+}
+
+static FusionPiece decode_piece(uint32_t record, uint32_t box_index) {
+    unsigned flags = LD16(record + 4);
+    return (FusionPiece){ .box_index = box_index, .armor_id = LD16(record + 6), .slot = flags & 31,
+        .level = ((flags >> 5) & 31) + 1 };
 }
 
 static bool pieces(Cpu *c, uint32_t ui, FusionPiece *base, FusionPiece *appearance,
                    uint32_t *base_record, uint32_t *appearance_record) {
     uint32_t box = LD32(G_EQUIP_BOX);
     if (!box || LD32(ui + 0x6c) != 0) return false;
-    base->box_index = LD32(ui + 0x84);
-    appearance->box_index = LD32(ui + 0x88);
-    if (base->box_index == appearance->box_index || base->box_index >= 2000 || appearance->box_index >= 2000)
-        return false;
-    *base_record = guest_call4(c, FN_BOX_RECORD, box, 0, base->box_index, 0);
-    *appearance_record = guest_call4(c, FN_BOX_RECORD, box, 0, appearance->box_index, 0);
+    uint32_t base_index = LD32(ui + 0x84), appearance_index = LD32(ui + 0x88);
+    if (base_index == appearance_index || base_index >= 2000 || appearance_index >= 2000) return false;
+    *base_record = guest_call4(c, FN_BOX_RECORD, box, 0, base_index, 0);
+    *appearance_record = guest_call4(c, FN_BOX_RECORD, box, 0, appearance_index, 0);
     if (!*base_record || !*appearance_record) return false;
-    base->slot = LD16(*base_record + 4) & 31;
-    appearance->slot = LD16(*appearance_record + 4) & 31;
-    base->armor_id = LD16(*base_record + 6);
-    appearance->armor_id = LD16(*appearance_record + 6);
-    base->level = ((LD16(*base_record + 4) >> 5) & 31) + 1;
-    appearance->level = ((LD16(*appearance_record + 4) >> 5) & 31) + 1;
+    *base = decode_piece(*base_record, base_index);
+    *appearance = decode_piece(*appearance_record, appearance_index);
     return base->slot >= 1 && base->slot <= 5 && appearance->slot >= 1 && appearance->slot <= 5;
 }
 
@@ -140,7 +369,7 @@ static bool snapshot(Cpu *c, uint32_t ui, FusionPiece *base, FusionPiece *appear
     uint32_t b, a;
     memset(base, 0, sizeof *base); memset(appearance, 0, sizeof *appearance);
     memset(recipe, 0, sizeof *recipe); *fee = 0;
-    if (!pieces(c, ui, base, appearance, &b, &a) || !catalog(base, appearance, recipe)) return false;
+    if (!pieces(c, ui, base, appearance, &b, &a) || !fusion_recipe(base, appearance, recipe)) return false;
     uint32_t sp = c->r[13];
     c->r[13] -= 16;
     ST32(c->r[13], c->r[13] + 8);
@@ -155,16 +384,15 @@ static bool snapshot(Cpu *c, uint32_t ui, FusionPiece *base, FusionPiece *appear
 static void validity(Cpu *c) {
     uint32_t record = c->r[1];
     fnhook_call_original(c, FN_VALID);
-    if (scope() && classify && record) {
-        FusionPiece piece = { .armor_id = LD16(record + 6), .slot = LD16(record + 4) & 31,
-            .level = ((LD16(record + 4) >> 5) & 31) + 1 };
+    if (scope() && record) {
+        FusionPiece piece = decode_piece(record, 0);
         // Native 0x340bd8..bfc sets bit 0x08 only for the category unlock.
         // With hunter slot 1..5, helper 0x2daeb8 necessarily returns true;
         // therefore bit 0x10 can only come from the special-armor progress
         // flag lookup at 0x340c84..ca0, including the late Deviant unlock.
         // Clear these progression gates only for a catalog-recognized owned
         // hunter piece. Empty/type/sex/already-fused/decorations bits remain.
-        if (piece.slot >= 1 && piece.slot <= 5 && classify(&piece) &&
+        if (piece.slot >= 1 && piece.slot <= 5 && fusion_classify(&piece) &&
             piece.rank >= FUSION_LR && piece.rank <= FUSION_G) c->r[0] &= ~0x18u;
     }
 }
@@ -173,12 +401,9 @@ static void pair(Cpu *c) {
     uint32_t b = c->r[1], a = c->r[2];
     fnhook_call_original(c, FN_PAIR);
     if (!scope() || !b || !a) return;
-    FusionPiece base = { .armor_id = LD16(b + 6), .slot = LD16(b + 4) & 31,
-            .level = ((LD16(b + 4) >> 5) & 31) + 1 },
-        appearance = { .armor_id = LD16(a + 6), .slot = LD16(a + 4) & 31,
-            .level = ((LD16(a + 4) >> 5) & 31) + 1 };
+    FusionPiece base = decode_piece(b, 0), appearance = decode_piece(a, 0);
     FusionRecipe recipe;
-    if (!catalog(&base, &appearance, &recipe) || base.rank == FUSION_RANK_UNKNOWN ||
+    if (!fusion_recipe(&base, &appearance, &recipe) || base.rank == FUSION_RANK_UNKNOWN ||
         base.rank != appearance.rank) c->r[0] |= 0x400;
 }
 
@@ -192,35 +417,19 @@ static void quote(Cpu *c) {
 
 static void picker_visibility(Cpu *c, bool hide) {
     if (hide) {
-        coordinate_visibility = 0;
-        uint32_t children = LD32(active_ui + 0x34), count = LD32(active_ui + 0x30);
-        for (unsigned i = 0; children && i < count && i < 30; ++i) {
-            uint32_t child = LD32(children + i * 4);
-            // Native class bindings from 0x85ff6c: keep the shop header,
-            // money, hunter type and left paper/3D-preview frame. Only the
-            // equipment detail/list widgets overlap the point-material UI.
-            if (child && LD8(child + 0x18)) {
-                coordinate_visibility |= 1u << i;
-                if (i != 0 && i != 1 && i != 4 && i != 10)
-                    guest_call4(c, FN_HIDE_CHILD, active_ui, i, 0, 0);
-            }
-        }
+        // Coordinate keeps the header, money, hunter type and preview frame.
+        // Smith uses conditional hide (0x85cc0c), not this facility hide.
+        coordinate_visibility = visible_mask(active_ui);
+        apply_mask(c, active_ui, coordinate_visibility & ~COORDINATE_KEEP, FN_HIDE_CHILD);
         // Shared native message/Yes-No controls are owned by the common
         // facility, independently of Coordinate. Preserve both visibility
         // states; the pool uses message4 for native material instructions.
         common_picker_ui = guest_call4(c, 0x75d2b4, parent_facility, 0, 0, 0);
-        common_picker_visibility = 0;
-        if (common_picker_ui && LD32(common_picker_ui + 0x34) && LD32(common_picker_ui + 0x30) > 5) {
-            uint32_t children = LD32(common_picker_ui + 0x34);
-            for (unsigned i = 4; i <= 5; ++i) {
-                uint32_t child = LD32(children + i * 4);
-                if (child && LD8(child + 0x18)) common_picker_visibility |= 1u << i;
-            }
+        common_picker_visibility = common_picker_ui ? visible_mask(common_picker_ui) & 0x30u : 0;
+        if (common_picker_ui && LD32(common_picker_ui + 0x34) && LD32(common_picker_ui + 0x30) > 5)
             guest_call4(c, FN_HIDE_CHILD, common_picker_ui, 5, 0, 0);
-        }
     } else {
-        for (unsigned i = 0; i < 30; ++i)
-            if (coordinate_visibility & (1u << i)) guest_call4(c, FN_SHOW_CHILD, active_ui, i, 0, 0);
+        apply_mask(c, active_ui, coordinate_visibility, FN_SHOW_CHILD);
         // Never restore cached GUI addresses after a parent/scene teardown.
         if (parent_live() && common_picker_ui &&
             guest_call4(c, 0x75d2b4, parent_facility, 0, 0, 0) == common_picker_ui) {
@@ -255,11 +464,11 @@ static bool final_question(Cpu *c) {
 static void confirmation(Cpu *c) {
     if (!scope() || c->r[14] != 0x860e7c) { fnhook_call_original(c, FN_CONFIRM); return; }
     if (!parent_live()) {
-        fusion_materials_cancel(c, false);
+        materials_cancel(c, false);
         phase = IDLE; c->r[0] = 2; return;
     }
     if (phase == MATERIALS) {
-        int result = fusion_materials_poll(c, selected, FUSION_MAX_MATERIALS, &selected_count);
+        int result = materials_poll(c);
         c->r[0] = 0;
         if (!result) return;
         phase = IDLE;
@@ -290,8 +499,8 @@ static void confirmation(Cpu *c) {
             appearance.level != opened_appearance.level ||
             fee != opened_zenny ||
             !guest_call4(c, FN_ZENNY_CHECK, LD32(G_PLAYER_DATA), fee, 0, 0) ||
-            fusion_plan(&base, &appearance, native, &recipe, selected, selected_count,
-                inventory, c, &approved_plan) != FUSION_OK) { c->r[0] = 2; return; }
+            !fusion_plan(&base, &appearance, native, &recipe, selected, selected_count,
+                inventory, c, &approved_plan)) { c->r[0] = 2; return; }
         phase = APPROVED;
         ST8(context_ui + 0x62, 0);
         ST32(context_ui + 0x48, fee);
@@ -310,15 +519,12 @@ static void confirmation(Cpu *c) {
         snprintf(G2H(fusion_question), 96,
             "Fuse these pieces of armor for %uz?\r\nUse the selected monster materials.", fee);
         picker_visibility(c, true);
-        phase = fusion_materials_open(c, parent_ui, recipe.category_id) ? MATERIALS : IDLE;
+        phase = materials_open(c, parent_ui, recipe.category_id) ? MATERIALS : IDLE;
         if (phase == MATERIALS) {
             // Smith and Coordinate Money/Preview objects share renderer
             // resources. Reassert the preserved Coordinate panels after the
             // point UI has finished switching the parent's native widgets.
-            const unsigned keep[] = {0, 1, 4, 10};
-            for (unsigned i = 0; i < sizeof keep / sizeof keep[0]; ++i)
-                if (coordinate_visibility & (1u << keep[i]))
-                    guest_call4(c, FN_SHOW_CHILD, active_ui, keep[i], 0, 0);
+            apply_mask(c, active_ui, coordinate_visibility & COORDINATE_KEEP, FN_SHOW_CHILD);
         } else picker_visibility(c, false);
         if (trace) LOG("[armor-fusion] native material chooser %s for armor %u Lv%u category %u\n",
             phase == MATERIALS ? "opened" : "rejected", appearance.armor_id, appearance.level, recipe.category_id);
@@ -363,7 +569,6 @@ static void update(Cpu *c) {
 
 static void smith_update(Cpu *c) {
     uint32_t ui = c->r[0];
-    if (!catalog) { fnhook_call_original(c, FN_SMITH_UPDATE); return; }
     uint32_t input = LD32(G_INPUT);
     bool confirm = input && (LD32(input + 0x6bfc) & 0x2000);
     if (!confirm) open_latched = false;
@@ -433,7 +638,7 @@ static void dialog_text(Cpu *c) {
     // Message 45 is the unrelated "Equip now?" and must remain untouched.
     // GUI lookup may run after the facility update, so use the owned active
     // hunter-fusion UI and the exact native dialog lookup caller.
-    if (catalog && active_ui && LD8(active_ui + 4) == 2 && LD32(active_ui + 0x44) == 0 &&
+    if (active_ui && LD8(active_ui + 4) == 2 && LD32(active_ui + 0x44) == 0 &&
         c->r[14] == 0x842a48 && c->r[1] == 1 && c->r[2] == 37 && c->r[3] == 43) {
         static uint32_t traced_ui;
         if (trace && traced_ui != active_ui) {
@@ -464,7 +669,7 @@ static void close_ui(Cpu *c) {
         if (trace) LOG("[armor-fusion] native menu %x closed at caller %x, state %x, flags %x\n",
             active_ui, c->r[14], LD32(active_ui + 4), LD32(active_ui + 0xc));
         bool restore = parent_live();
-        fusion_materials_cancel(c, restore);
+        materials_cancel(c, restore);
         // A normal native close can interrupt the pool before poll returns.
         // Restore its shared controls while both owners are still live;
         // teardown/scene changes must only discard cached guest addresses.
@@ -493,9 +698,6 @@ static void abort_child(Cpu *c) {
 static void smith_close(Cpu *c) { abort_child(c); fnhook_call_original(c, FN_SMITH_CLOSE); }
 static void smith_dtor(Cpu *c) { abort_child(c); fnhook_call_original(c, FN_SMITH_DTOR); }
 static void smith_delete(Cpu *c) { abort_child(c); fnhook_call_original(c, FN_SMITH_DELETE); }
-
-void armorfusion_set_catalog(ArmorFusionQuery query) { catalog = query; }
-void armorfusion_set_classifier(ArmorFusionClassify classifier) { classify = classifier; }
 
 void armorfusion_init(void) {
     trace = getenv("MHGU_FUSION_TRACE") != NULL;

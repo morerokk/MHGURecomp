@@ -1,5 +1,5 @@
-// Exercise the real native adapters and policy. Only guest functions, memory
-// allocation and hook dispatch are replaced; no adapter state is exposed.
+// Real catalog, policy and native adapters. Only guest calls, hook dispatch
+// and guest allocation are replaced; no adapter internals are exposed.
 #define _GNU_SOURCE
 #include <assert.h>
 #include <stdio.h>
@@ -9,8 +9,227 @@
 #else
 #include <sys/mman.h>
 #endif
-#include "hle/armorfusion.h"
+#include "armor_fusion.h"
 #include "rt.h"
+
+bool plat_exe_path(char *out, size_t size) { return snprintf(out, size, "./test-program") < (int)size; }
+static void word(FILE *f, unsigned value, int bytes) {
+    while (bytes--) { fputc(value & 255, f); value >>= 8; }
+}
+static void write_catalog(void) {
+    FILE *f = fopen("armor-fusion.afus", "wb"); assert(f);
+    fwrite("AFUS", 1, 4, f); word(f, 2, 4); word(f, 3, 4); word(f, 3, 4);
+    for (int i = 0; i < 32; ++i) fputc(0, f);
+    for (int i = 0; i < 3; ++i) {
+        word(f, i ? 149 + i : 100, 2); fputc(1, f); fputc(255, f);
+        fputc(1, f); fputc(1, f); word(f, i ? 196 + i : 0, 2);
+        word(f, i ? 10 : 0, 2); word(f, 0, 2);
+    }
+    const unsigned categories[] = {197, 197, 198}, items[] = {1202, 1203, 1300}, points[] = {2, 3, 5};
+    for (int i = 0; i < 3; ++i) {
+        word(f, categories[i], 2); word(f, items[i], 2); fputc(points[i], f);
+        for (int j = 0; j < 3; ++j) fputc(0, f);
+    }
+    fclose(f);
+}
+
+static void check_recipes(void) {
+    FusionPiece base = {1, 100, 1, FUSION_RANK_UNKNOWN, 1};
+    FusionPiece appearance = {2, 150, 1, FUSION_RANK_UNKNOWN, 1};
+    FusionRecipe first, second, repeated;
+    assert(fusion_classify(&base) && base.rank == FUSION_LR);
+    assert(fusion_recipe(&base, &appearance, &first));
+    assert(base.rank == FUSION_LR && appearance.rank == FUSION_LR);
+    assert(first.armor_id == 150 && first.category_id == 197 && first.count == 2);
+    assert(first.materials[0].item_id == 1202 && first.materials[0].points == 2);
+    assert(first.materials[1].item_id == 1203 && first.materials[1].points == 3);
+    appearance.armor_id = 151;
+    assert(fusion_recipe(&base, &appearance, &second));
+    assert(second.armor_id == 151 && second.category_id == 198 && second.count == 1);
+    assert(second.materials[0].item_id == 1300 && second.materials[0].points == 5);
+    assert(first.materials[0].item_id == 1202 && first.materials[0].points == 2);
+    assert(first.materials[1].item_id == 1203 && first.materials[1].points == 3);
+    assert(first.materials != second.materials);
+    appearance.armor_id = 150;
+    assert(fusion_recipe(&base, &appearance, &repeated));
+    assert(repeated.materials == first.materials);
+    assert(second.materials[0].item_id == 1300 && second.materials[0].points == 5);
+    appearance.slot = 2;
+    assert(!fusion_recipe(&base, &appearance, &repeated));
+    appearance.slot = 1; appearance.level = 0;
+    assert(!fusion_recipe(&base, &appearance, &repeated));
+    appearance.level = 1; appearance.armor_id = 100;
+    assert(!fusion_recipe(&base, &appearance, &repeated)); // Base-only cannot supply appearance.
+    appearance.armor_id = 2048;
+    assert(!fusion_recipe(&base, &appearance, &repeated));
+    appearance.armor_id = 150;
+    assert(!fusion_recipe(NULL, &appearance, &repeated));
+    assert(!fusion_recipe(&base, NULL, &repeated));
+    assert(!fusion_recipe(&base, &appearance, NULL));
+    assert(!fusion_classify(NULL));
+    appearance.slot = 6;
+    assert(!fusion_classify(&appearance));
+}
+
+static void patch_catalog(long offset, unsigned value, int bytes) {
+    FILE *f = fopen("armor-fusion.afus", "r+b"); assert(f);
+    assert(fseek(f, offset, SEEK_SET) == 0);
+    word(f, value, bytes);
+    fclose(f);
+}
+
+static bool catalog_available(void) {
+    FusionPiece piece = {1, 100, 1, FUSION_RANK_UNKNOWN, 1};
+    return fusion_classify(&piece);
+}
+
+static void check_invalid_catalogs(void) {
+    const struct { long offset; unsigned value; int bytes; } invalid[] = {
+        {0, 0, 1}, {4, 1, 4}, {8, 6145, 4}, {12, 32769, 4}, // Header limits/version.
+        {48, 0, 2}, {48, 2048, 2}, {50, 0, 1}, {51, 0, 1}, // Armor ID/level bounds.
+        {52, 0, 1}, {52, 4, 1}, {53, 0, 1}, {53, 32, 1}, // Rank/slot bounds.
+        {54, 1024, 2}, {56, 10, 2}, {68, 9, 2}, {70, 1, 2}, // Category/points/reserved.
+        {60, 100, 2}, {72, 150, 2}, // Unsorted/duplicate armor intervals.
+        {84, 0, 2}, {84, 1024, 2}, {86, 0, 2}, {86, 4096, 2}, {88, 0, 1},
+        {94, 1202, 2}, {100, 196, 2}, // Duplicate/unsorted material members.
+        {12, 4, 4}, // Truncated member array.
+    };
+    for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; ++i) {
+        write_catalog();
+        assert(fusion_catalog_load());
+        patch_catalog(invalid[i].offset, invalid[i].value, invalid[i].bytes);
+        assert(!fusion_catalog_load() && !catalog_available());
+    }
+    write_catalog();
+    assert(fusion_catalog_load());
+    patch_catalog(72, 150, 2); patch_catalog(74, 2, 1); // Sorted but overlapping intervals.
+    assert(!fusion_catalog_load() && !catalog_available());
+    write_catalog();
+    assert(fusion_catalog_load());
+    FILE *f = fopen("armor-fusion.afus", "wb"); assert(f);
+    fputs("AFUS", f); fclose(f);
+    assert(!fusion_catalog_load() && !catalog_available());
+    write_catalog();
+    assert(fusion_catalog_load());
+    assert(remove("armor-fusion.afus") == 0);
+    assert(!fusion_catalog_load() && !catalog_available());
+}
+
+static void check_catalog(void) {
+    assert(!catalog_available()); // Queries fail closed before the first load.
+    write_catalog();
+    remove("armor-fusion.names");
+    assert(fusion_catalog_load());
+    check_recipes();
+    FILE *f = fopen("armor-fusion.names", "wb"); assert(f);
+    fputs("obsolete invalid names metadata\n", f); fclose(f);
+    assert(fusion_catalog_load());
+    check_recipes();
+    f = fopen("armor-fusion.afus", "ab"); assert(f); fputc(1, f); fclose(f);
+    assert(!fusion_catalog_load() && !catalog_available());
+    check_invalid_catalogs();
+    remove("armor-fusion.names");
+    puts("armor fusion catalog checks passed");
+}
+
+static uint32_t owned(void *context, uint16_t id) {
+    return id == 1202 ? *(unsigned *)context : 0;
+}
+
+static void check_policy(void) {
+    FusionPiece base = {1, 100, 1, FUSION_LR, 1}, appearance = {2, 150, 1, FUSION_LR, 1};
+    FusionMaterial material = {1202, 2};
+    FusionRecipe recipe = {150, 197, FUSION_LR, &material, 1};
+    FusionSelection selection[] = {{1202, 5}, {1202, 1}};
+    unsigned inventory = 5;
+    FusionPlan plan;
+#define PLAN(n) fusion_plan(&base, &appearance, 1, &recipe, selection, n, owned, &inventory, &plan)
+    assert(PLAN(1) && plan.points == 10 && plan.count == 1);
+    assert(plan.deductions[0].quantity == 5 && inventory == 5); // Preview is read-only.
+    inventory = 4; // Inventory changed after preview: confirmation must reject.
+    assert(!PLAN(1) && plan.count == 0 && plan.points == 0);
+    inventory = 5;
+    selection[0].quantity = 4;
+    assert(!PLAN(1));
+    selection[0].quantity = 5;
+    assert(!PLAN(2)); // Duplicate rows cannot double-spend.
+    appearance.rank = FUSION_HR;
+    assert(!PLAN(1));
+    appearance.rank = FUSION_RANK_UNKNOWN;
+    assert(!PLAN(1));
+    appearance.rank = FUSION_LR;
+    recipe.rank = FUSION_HR;
+    assert(!PLAN(1));
+    recipe.rank = FUSION_LR;
+    recipe.armor_id = 100;
+    assert(!PLAN(1));
+    recipe.armor_id = 150;
+    appearance.slot = 2;
+    assert(!PLAN(1));
+    appearance.slot = 1;
+    assert(!fusion_plan(&base, &appearance, 0x2001, &recipe, selection, 1,
+        owned, &inventory, &plan));
+    selection[0].item_id = 1203; // Same monster, wrong material rank/category.
+    assert(!PLAN(1));
+    selection[0].item_id = 1202;
+    selection[0].quantity = 6;
+    inventory = 6;
+    assert(PLAN(1) && plan.points == 12); // Explicit overpayment allowed.
+    selection[0].quantity = 65535;
+    inventory = 65535;
+    assert(!PLAN(1) && !plan.count);
+    selection[0].quantity = 6;
+    FusionMaterial duplicates[] = {{1202, 2}, {1202, 3}};
+    recipe.materials = duplicates;
+    recipe.count = 2;
+    assert(!PLAN(1));
+    puts("armor fusion policy checks passed");
+#undef PLAN
+}
+
+enum { OUTER_FN = 0x123400, INNER_FN = 0x567800 };
+static uint32_t caller[16];
+static unsigned calls;
+
+static void register_guest_call(Cpu *c, uint32_t address) {
+    ++calls;
+    if (address == INNER_FN) {
+        assert(c->r[0] == 11 && c->r[1] == 22 && c->r[2] == 33 && c->r[3] == 44);
+        for (unsigned i = 4; i < 16; ++i) assert(c->r[i] == 0xa0000000u + i);
+        for (unsigned i = 0; i < 16; ++i) c->r[i] = 0xb0000000u + i;
+        c->r[0] = 0x87654321;
+        c->pc = 0x11223344;
+        c->zf = 1;
+        return;
+    }
+    assert(address == OUTER_FN);
+    assert(c->r[0] == 101 && c->r[1] == 202 && c->r[2] == 303 && c->r[3] == 404);
+    for (unsigned i = 4; i < 16; ++i) assert(c->r[i] == caller[i]);
+    for (unsigned i = 0; i < 16; ++i) c->r[i] = 0xa0000000u + i;
+    uint32_t nested_result = guest_call4(c, INNER_FN, 11, 22, 33, 44);
+    assert(nested_result == 0x87654321);
+    for (unsigned i = 0; i < 16; ++i) assert(c->r[i] == 0xa0000000u + i);
+    assert(c->pc == 0x11223344 && c->zf == 1);
+    c->r[0] = 0xdeadbeef;
+}
+
+static void check_registers(void) {
+    Cpu cpu = {0};
+    for (unsigned pass = 0; pass < 2; ++pass) {
+        for (unsigned i = 0; i < 16; ++i) caller[i] = 0x10000000u * (pass + 1) + i;
+        memcpy(cpu.r, caller, sizeof caller);
+        cpu.pc = 0xabcdef00;
+        cpu.zf = 0;
+        uint32_t result = guest_call4(&cpu, OUTER_FN, 101, 202, 303, 404);
+        assert(result == 0xdeadbeef);
+        // Includes r0, SP, LR and the normally unused r15.
+        assert(!memcmp(cpu.r, caller, sizeof caller));
+        // This helper promises only r[] preservation, matching the adapters.
+        assert(cpu.pc == 0x11223344 && cpu.zf == 1);
+    }
+    assert(calls == 4);
+    puts("guest call register preservation checks passed");
+}
 
 enum {
     UPDATE = 0x860314, CLOSE = 0x86549c, CONFIRM = 0x74fd94,
@@ -54,14 +273,6 @@ bool fnhook_set(uint32_t address, uint32_t detour) {
 }
 uint32_t hle_alloc(uint32_t size) { uint32_t p = heap; heap += size; return p; }
 void rt_fatal_trace(void) { abort(); }
-
-static bool query(FusionPiece *base, FusionPiece *appearance, FusionRecipe *recipe) {
-    static FusionMaterial materials[] = {{7, 2}};
-    materials[0].points = material_points;
-    base->rank = appearance->rank = FUSION_LR;
-    *recipe = (FusionRecipe){appearance->armor_id, 1, FUSION_LR, materials, 1};
-    return true;
-}
 
 void fnhook_call_original(Cpu *c, uint32_t address) {
     switch (address) {
@@ -140,6 +351,7 @@ static void guest_dispatch(Cpu *c, uint32_t address) {
 }
 
 void guest_call(Cpu *c, uint32_t address) {
+    if (address == OUTER_FN || address == INNER_FN) { register_guest_call(c, address); return; }
     uint32_t lr = c->r[14];
     c->r[14] = 0;
     guest_dispatch(c, address);
@@ -174,12 +386,28 @@ static void finish_picker(Cpu *c) {
 }
 static void close_coordinate(Cpu *c) { c->r[0] = COORD; hook(CLOSE)(c); }
 
+static void native_catalog(unsigned points) {
+    FILE *f = fopen("armor-fusion.afus", "wb"); assert(f);
+    fwrite("AFUS", 1, 4, f); word(f, 2, 4); word(f, 3, 4); word(f, 1, 4);
+    for (unsigned i = 0; i < 32; ++i) fputc(0, f);
+    const unsigned ids[] = {100, 200, 201};
+    for (unsigned i = 0; i < sizeof ids / sizeof ids[0]; ++i) {
+        word(f, ids[i], 2); fputc(1, f); fputc(31, f);
+        fputc(FUSION_LR, f); fputc(1, f); word(f, 1, 2);
+        word(f, FUSION_POINTS, 2); word(f, 0, 2);
+    }
+    word(f, 1, 2); word(f, 7, 2); word(f, points, 1); word(f, 0, 3);
+    fclose(f);
+    assert(fusion_catalog_load());
+}
+
 static void reset(Cpu *c) {
     memset(G2H(SMITH), 0, 0xe0000); memset(c, 0, sizeof *c); c->r[13] = 0x7000000;
     confirms = charges = deductions = refreshes = ui_changes = closes = questions = 0;
     poll_result = 0; native_answer = 1; material_quantity = 5;
     zenny = 500; ownership = 20; native_pair_result = 1; material_points = 2;
     consumed_item = consumed_quantity = 0;
+    native_catalog(material_points);
     confirm_in_update = consume_in_update = true;
     confirm_caller = 0x860e7c; consume_caller = 0x860eb0;
     ST32(0x1a99458, FACILITY); ST32(FACILITY + 0x15c, SMITH);
@@ -216,7 +444,7 @@ static void reset(Cpu *c) {
     ST8(SMITH + 0x1f71, 4);
 }
 
-int main(void) {
+static void check_native(void) {
 #ifdef _WIN32
     void *memory = VirtualAlloc(G2H(0), MEMORY_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 #else
@@ -239,7 +467,7 @@ int main(void) {
         {0x85cb3c,0xe5900034}, {0x85cba0,0xe92d4010}, {0x85cc0c,0xe92d4010}
     };
     for (size_t i = 0; i < sizeof anchors / sizeof anchors[0]; ++i) ST32(anchors[i][0], anchors[i][1]);
-    armorfusion_set_catalog(query); armorfusion_init(); assert(hook_count == 13);
+    armorfusion_init(); assert(hook_count == 13);
     Cpu cpu;
 
     reset(&cpu); finish_picker(&cpu);
@@ -297,7 +525,7 @@ int main(void) {
     close_coordinate(&cpu); assert(ui_changes == before);
 
     // A native point value that crosses ten still completes after refresh.
-    reset(&cpu); material_points = 3; ST8(ITEM + 0x2000 + 0x24, 3);
+    reset(&cpu); material_points = 3; native_catalog(material_points); ST8(ITEM + 0x2000 + 0x24, 3);
     open_picker(&cpu); choose(&cpu, 4);
     assert(questions == 1 && refreshes == 2);
     assert(frame(&cpu, 0, 0) == 0);
@@ -331,5 +559,13 @@ int main(void) {
     assert(munmap(memory, MEMORY_SIZE) == 0);
 #endif
     puts("native armor fusion transition checks passed");
+    remove("armor-fusion.afus");
+}
+
+int main(void) {
+    check_policy();
+    check_catalog();
+    check_registers();
+    check_native();
     return 0;
 }
