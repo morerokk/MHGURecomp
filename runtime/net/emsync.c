@@ -136,7 +136,7 @@ void emsync_tick(void) {
     last = now;
     static int was = -1;  // last logged state
     uint32_t sen = LD32(G_SENEMY), spl = LD32(G_SPLAYER), mem = LD32(G_MEMBER);
-    bool on = config_live_sync_small_monsters(), up = ldn_net_up();
+    bool on = config_live_sync_small_monsters(), up = ldn_net_up() && !ldn_crossplay();  // (crossplay: no small monster sync)
     if ((!on || !up) && g_area >= 0) {  // (turned off in the settings menu, or the link is gone: this zone's small monsters as the game runs them)
         int me = sane(mem) ? (int)LD32(mem + 0x30) : -1;
         for (int k = 0; sane(sen) && k < 10; k++) {

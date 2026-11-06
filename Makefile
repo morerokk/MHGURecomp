@@ -117,7 +117,7 @@ GENFLAGS += -D_FILE_OFFSET_BITS=64
 # (the GCC runtime - libstdc++, libgcc, winpthreads - linked in: three DLLs fewer to ship, and their licenses ask no
 # more than their notices then; build/licenses has those)
 LDFLAGS  := -fuse-ld=lld -Wl,--stack,268435456 $(SDL_LIBS) $(AV_LIBS) -lvulkan-1 $(SHADERC_LIBS) -lwinmm -lversion -lole32 -lshell32 -luuid -lws2_32 \
-            -lbcrypt -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic \
+            -lbcrypt -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -lzstd -Wl,-Bdynamic \
             -Wl,--export-all-symbols -Wl,--out-implib,$(O)/mhgurecomp.dll.a
 GAMELIB  := $(B)/mhgugame.dll
 GAMELIB_LDFLAGS := -shared -fuse-ld=lld -static-libgcc $(O)/mhgurecomp.dll.a
@@ -179,8 +179,22 @@ SHADER_ID := $(shell cat $(SHADER_SRCS) | tr -d '\r' | sha256sum | cut -c1-16)
 # release built before its tag is made.
 VERSION ?= $(shell git describe --tags 2>/dev/null || echo unknown)
 
-RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(RT_CXX) $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(IMGUI_OBJ) \
-           $(O)/updater/sha256.o $(ICON_RES)
+RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(RYUSRV_OBJ) $(RT_CXX) $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(IMGUI_OBJ) \
+           $(O)/updater/sha256.o $(ICON_RES) $(ENET_OBJ)
+# The Ryujinx LDN server this game can run itself (runtime/net/ryusrv/: C++)
+RYUSRV_OBJ := $(patsubst runtime/net/ryusrv/%.cpp,$(O)/rt/net/ryusrv/%.o,$(wildcard runtime/net/ryusrv/*.cpp))
+$(O)/rt/net/ryusrv/%.o: runtime/net/ryusrv/%.cpp $(wildcard runtime/net/ryusrv/*.h) runtime/net/ryusrv.h
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++20 -O2 -g -Wall -Iruntime/net/ryusrv/shim -Iruntime/net/ryusrv $(if $(filter windows,$(PLATFORM)),-D_WIN32_WINNT=0x0A00) -c $< -o $@
+# ENet 1.3.18 (third_party/enet, MIT): the reliable UDP of suyu-family emulators' multiplayer rooms (runtime/net/room.c)
+ENET      := third_party/enet
+ENET_SRC  := $(addprefix $(ENET)/,callbacks.c compress.c host.c list.c packet.c peer.c protocol.c) \
+             $(ENET)/$(if $(filter windows,$(PLATFORM)),win32.c,unix.c)
+ENET_OBJ  := $(patsubst $(ENET)/%.c,$(O)/enet/%.o,$(ENET_SRC))
+ENETFLAGS := -O2 -g -w -I$(ENET)/include $(if $(filter windows,$(PLATFORM)),,-DHAS_FCNTL -DHAS_POLL -DHAS_GETADDRINFO -DHAS_GETNAMEINFO -DHAS_INET_PTON -DHAS_INET_NTOP -DHAS_MSGHDR_FLAGS -DHAS_SOCKLEN_T)
+$(O)/enet/%.o: $(ENET)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(ENETFLAGS) -c $< -o $@
 # (updater/sha256.c: runtime/net/ldn.c hashes the matchmaking key with it)
 # Dear ImGui with cimgui's C API (third_party/cimgui: Forge plugins' ImGui, runtime/forge_imgui.c, overlay.cpp)
 IMGUI    := third_party/cimgui
@@ -193,7 +207,7 @@ IMGUI_OBJ := $(patsubst $(IMGUI)/%.cpp,$(O)/imgui/%.o,$(IMGUI_SRC))
 IMGUIFLAGS := -O2 -g -fvisibility=hidden -DCIMGUI_NO_EXPORT -I$(IMGUI) -I$(IMGUI)/imgui $(LIB_INC)
 # (vendored VulkanMemoryAllocator fallback: -I on a missing dir is ignored, so MSYS2 builds
 # with the system vulkan-memory-allocator package are unaffected)
-RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -Iruntime -Ithird_party/vk_mem_alloc -I$(IMGUI) $(OSFLAGS) $(LIB_INC)
+RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -Iruntime -Ithird_party/vk_mem_alloc -I$(IMGUI) -Ithird_party/enet/include $(OSFLAGS) $(LIB_INC)
 # FSR 3.1 temporal upscaler (runtime/nvn/vulkan/fsr.c): third_party/fsr-vulkan = AMD FidelityFX SDK 1.1.4's FSR 3.1.4
 # upscaler (host scheduler, Vulkan backend, its GLSL) + a portable C wrapper, all MIT. No AMD binaries: the shaders are
 # compiled with shaderc from the embedded GLSL when first used (src/ffx_fsr3_shaderblobs.cpp), linked into the executable.

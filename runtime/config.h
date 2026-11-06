@@ -96,6 +96,17 @@ typedef struct {
                               // (%APPDATA%\MHGURecomp\save, ~/.local/share/MHGURecomp/save: main.c)
     char save_dir[256];       // [Android] SaveFolder: the folder holding the save (save_0/), "" the app's own (fs.c)
     char game_dir[256];       // [Android] GameFolder: the folder holding exefs/ and romfs/, "" the app's own (main.c)
+    char ldn_ryu_servers[256]; // [Multiplayer] RyuServers: Ryujinx LDN servers searched for crossplay (host[:port], comma separated); "" none
+    char ldn_ryu_host[128];   // [Multiplayer] RyuHost: the Ryujinx LDN server a hosted hub is created on, for Ryujinx players to join; "" a normal hub
+    char ldn_ryu_pass[40];    // [Multiplayer] RyuPassphrase: "" public lobbies, or "Ryujinx-" + 8 hex digits for a private group
+    char ldn_room_server[128]; // [Multiplayer] RoomServer: a suyu-family emulator room joined for crossplay (host[:port]); "" none
+    char ldn_room_pass[64];   // [Multiplayer] RoomPassword
+    char ldn_room_nick[32];   // [Multiplayer] RoomName: the name shown in the room; "" MHGU Player
+    int ldn_room_host;        // [Multiplayer] RoomHost: a hub you create lives in the room, for emulator players to join
+    int ldn_ryu_serve;        // [Multiplayer] RyuServe: this game runs the Ryujinx LDN server itself (runtime/net/ryusrv/) while local play is open
+    int ldn_ryu_serve_port;   // [Multiplayer] RyuServePort: its port; 0 = 30456, the LdnServer default
+    int ldn_room_serve;       // [Multiplayer] RoomServe: this game runs a suyu-style room itself (runtime/net/roomsrv.c): the pseudo room for suyu-family players
+    int ldn_room_serve_port;  // [Multiplayer] RoomServePort: its port; 0 = 24872, the rooms' default
 } Config;
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
 // Cloud VM; a DuckDNS name, so it can move without a release). "" = no default.
