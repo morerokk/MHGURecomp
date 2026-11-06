@@ -1,4 +1,4 @@
-// A suyu-style multiplayer room inside the game (runtime/net/roomsrv/, from the earlier suyu-based recompiler): suyu, yuzu,
+// A suyu-style multiplayer room inside the game (runtime/net/roomsrv.c, written from the room protocol): suyu, yuzu,
 // Eden and Citron players join it as they would any room, so nobody needs a room server of their own.
 // ini [Multiplayer] RoomServe = On, RoomServePort. This game joins it as the host member (its hubs are shared with it).
 #pragma once

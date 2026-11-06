@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: Copyright 2026 suyu Emulator Project
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 
 // Behaviour follows Ryujinx's LdnServer (MIT, Copyright (c) Ryujinx Team and Contributors):
 // written from the protocol and the server's observable behaviour, not copied.

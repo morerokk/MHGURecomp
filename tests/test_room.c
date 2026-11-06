@@ -10,6 +10,7 @@
 #include "../runtime/config.h"
 #include "../runtime/hle.h"
 #include "../runtime/net/room.h"
+#include "../runtime/net/roomsrv.h"
 
 Config g_config;
 uint64_t plat_now_ns(void) {
@@ -92,6 +93,15 @@ static bool wait_for(volatile int *v, int sec) {
 int main(int argc, char **argv) {
     if (argc < 3) return 2;
     if (!strcmp(argv[1], "server")) return run_server(atoi(argv[2]));
+    if (!strcmp(argv[1], "roomsrv")) {  // the game's own room (runtime/net/roomsrv.c) in the stand-in's place
+        char e[64];
+        if (!roomsrv_start(atoi(argv[2]), "test", "", "", e, sizeof e)) return 2;
+        printf("[server] up\n");
+        fflush(stdout);
+        plat_sleep_until_ns(plat_now_ns() + 12000000000ull);
+        roomsrv_stop();
+        return 0;
+    }
     bool a = !strcmp(argv[1], "a");
     snprintf(g_config.ldn_room_server, sizeof g_config.ldn_room_server, "%s", argv[2]);
     room_set_hooks(&(RoomHooks){on_ldn, on_proxy, NULL});
@@ -99,7 +109,7 @@ int main(int argc, char **argv) {
     uint8_t ip[4], none[4] = {255, 255, 255, 255};
     char err[96] = "";
     CHECK(room_join(argv[2], a ? "PlayerA" : "PlayerB", "", ip, err, sizeof err), "joined the room");
-    CHECK(ip[0] == 192 && ip[1] == 168, "fake address 192.168.x.y from the room");
+    CHECK((ip[0] == 192 && ip[1] == 168) || (ip[0] == 10 && ip[1] == 255), "a fake address (192.168.x.y or 10.255.x.y) from the room");
     if (a) {  // answers a scan, then echoes a game packet
         CHECK(wait_for(&got_scan, 15), "scan broadcast from b");
         uint8_t target[4];

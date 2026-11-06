@@ -105,7 +105,7 @@ typedef struct {
     int ldn_room_host;        // [Multiplayer] RoomHost: a hub you create lives in the room, for emulator players to join
     int ldn_ryu_serve;        // [Multiplayer] RyuServe: this game runs the Ryujinx LDN server itself (runtime/net/ryusrv/) while local play is open
     int ldn_ryu_serve_port;   // [Multiplayer] RyuServePort: its port; 0 = 30456, the LdnServer default
-    int ldn_room_serve;       // [Multiplayer] RoomServe: this game runs a suyu-style room itself (runtime/net/roomsrv/): the pseudo room for suyu-family players
+    int ldn_room_serve;       // [Multiplayer] RoomServe: this game runs a suyu-style room itself (runtime/net/roomsrv.c): the pseudo room for suyu-family players
     int ldn_room_serve_port;  // [Multiplayer] RoomServePort: its port; 0 = 24872, the rooms' default
 } Config;
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle

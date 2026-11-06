@@ -231,10 +231,9 @@ Ryujinx LDN protocol (runtime/net/ryuldn.c)
 The RyuLdn client (runtime/net/ryuldn.c) and the room client (runtime/net/room.c) were written from the protocols: Ryujinx's
 LdnServer and LDN client (MIT License, Copyright (c) Ryujinx Team and Contributors) and the suyu / yuzu / Citra room protocol.
 
-The two embedded servers are the project author's own hybrid code from the earlier suyu-based recompiler, written against
-Ryujinx's LdnServer (MIT) and the Citra / yuzu / suyu room server (GPL-2.0-or-later; Copyright (c) Citra Emulator Project and the
-yuzu / suyu Emulator Projects) and based on them: runtime/net/ryusrv/ (the Ryujinx LDN server) and runtime/net/roomsrv/ (the
-room). Where they follow the GPL projects' code closely (the room, most of all) the upstream SPDX headers are kept in the files.
+The two embedded servers are the project author's own code. runtime/net/ryusrv/ (the Ryujinx LDN server) follows the behaviour
+of Ryujinx's LdnServer (MIT, Copyright (c) Ryujinx Team and Contributors); runtime/net/roomsrv.c (the room) is written from the
+room protocol as the suyu / yuzu / Citra members speak it and contains no code of those projects.
 
 
 ================================================================================
