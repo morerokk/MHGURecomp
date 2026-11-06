@@ -262,57 +262,16 @@ def binary_catalog(result: dict) -> bytes:
     return b"AFUS" + struct.pack("<III", 2, len(entries), len(materials)) + digest + b"".join(entries + materials)
 
 
-def gmd_strings(path: Path) -> list[str]:
-    raw = path.read_bytes()
-    if len(raw) < 41 or raw[:4] != b"GMD\0":
-        raise ValueError(f"{path}: invalid GMD header")
-    offset = 41 + struct.unpack_from("<I", raw, 36)[0]
-    if offset > len(raw) or raw[-1:] != b"\0":
-        raise ValueError(f"{path}: invalid string payload")
-    return [value.decode("utf-8") for value in raw[offset:-1].split(b"\0")]
-
-
-def names_catalog(table_dir: Path, result: dict) -> str:
-    """Name-only native strings; TSV columns kind, ID, slot, display name."""
-    english = table_dir.parent / "eng" / "table"
-    armor_names = gmd_strings(english / "armorSeriesData_eng.gmd")
-    item_names = gmd_strings(english / "itemData_eng.gmd")
-    category_names = gmd_strings(english / "itemCategoryTypeData_eng.gmd")
-    lines = []
-    def put(kind, ident, slot, value):
-        value = " ".join(value.replace("\t", " ").replace("\r", " ").replace("\n", " ").split())
-        if value and value != "(None)":
-            lines.append(f"{kind}\t{ident}\t{slot}\t{value}\n")
-    for row in result["armor"]:
-        for slot in range(5):
-            if row["slot_mask"] & (1 << slot):
-                offset = row["armor_id"] * 10 + slot
-                if offset >= len(armor_names):
-                    raise ValueError("armor names: missing series/slot")
-                put("A", row["armor_id"], slot + 1, armor_names[offset])
-    for offset in range(0, len(item_names), 2):
-        put("I", offset // 2, 0, item_names[offset])
-    for row in result["categories"]:
-        ident = row["category_id"]
-        if ident >= len(category_names):
-            raise ValueError("category names: missing ID")
-        put("C", ident, 0, row["material_rank"] + " " + category_names[ident])
-    return "".join(lines)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("table_dir", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--binary", type=Path)
-    parser.add_argument("--names", type=Path)
     args = parser.parse_args()
     result = audit({name: (args.table_dir / name).read_bytes() for name in FORMATS})
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     if args.binary:
         args.binary.write_bytes(binary_catalog(result))
-    if args.names:
-        args.names.write_text(names_catalog(args.table_dir, result), encoding="utf-8")
     ready = sum(any(r["category_id"] for r in a["rank_recipes"]) for a in result["armor"])
     base_only = sum(bool(a["rank_recipes"]) and not any(r["category_id"] for r in a["rank_recipes"])
                     for a in result["armor"])

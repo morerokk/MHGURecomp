@@ -82,7 +82,6 @@ void android_unpack_assets(void) {
     mkdir(android_path("bonus"), 0777);
     unpack("pipelines.list", true);
     unpack("armor-fusion.afus", true);
-    unpack("armor-fusion.names", true);
     unpack("bonus/system", false);
 }
 

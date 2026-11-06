@@ -39,11 +39,10 @@ def files(build, platform):
     if not os.path.isfile(pl):
         sys.exit(f'dist: {pl} is missing (make first)')
     out.append(('pipelines.list', pl, False))
-    for name in ('armor-fusion.afus', 'armor-fusion.names'):
-        path = os.path.join(build, name)
-        if not os.path.isfile(path):
-            sys.exit(f'dist: {path} is missing (make fusion-catalog first)')
-        out.append((name, path, False))
+    catalog = os.path.join(build, 'armor-fusion.afus')
+    if not os.path.isfile(catalog):
+        sys.exit(f'dist: {catalog} is missing (make fusion-catalog first)')
+    out.append(('armor-fusion.afus', catalog, False))
     lic = os.path.join(build, 'licenses')
     if not os.path.isdir(lic):
         sys.exit(f'dist: {lic} is missing (make first)')

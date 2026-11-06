@@ -558,13 +558,14 @@ test-settings-panel: $(O)/rt/settings_panel.o $(O)/rt/modorder.o $(O)/rt/arcmerg
 test-settings-locale:
 	$(PY) tests/test_settings_locale.py
 
-# Derive fusion recipes and localized labels from the builder's own game dump.
+# Derive fusion recipes from the builder's own game dump.
 .PHONY: fusion-catalog test-armor-fusion
-fusion-catalog: $(B)/armor-fusion.afus $(B)/armor-fusion.names
-$(B)/armor-fusion.afus $(B)/armor-fusion.names &: tools/fusion_materials.py $(wildcard $(GAME)/romfs/nativeNX/table/armorCreateA0*.acrd) $(wildcard $(GAME)/romfs/nativeNX/table/armorProcessA00.apd) $(wildcard $(GAME)/romfs/nativeNX/table/armorSeriesData.asd) $(wildcard $(GAME)/romfs/nativeNX/table/itemData.itm) $(wildcard $(GAME)/romfs/nativeNX/table/itemCategoryTypeData.ict) $(wildcard $(GAME)/romfs/nativeNX/eng/table/*Data_eng.gmd)
+fusion-catalog: $(B)/armor-fusion.afus
+$(B)/armor-fusion.afus: tools/fusion_materials.py $(wildcard $(GAME)/romfs/nativeNX/table/armorCreateA0*.acrd) $(wildcard $(GAME)/romfs/nativeNX/table/armorProcessA00.apd) $(wildcard $(GAME)/romfs/nativeNX/table/armorSeriesData.asd) $(wildcard $(GAME)/romfs/nativeNX/table/itemData.itm) $(wildcard $(GAME)/romfs/nativeNX/table/itemCategoryTypeData.ict)
 	@mkdir -p $(B) $(O)
-	$(PY) tools/fusion_materials.py $(GAME)/romfs/nativeNX/table --output $(O)/fusion-audit.json --binary $(B)/armor-fusion.afus --names $(B)/armor-fusion.names
+	$(PY) tools/fusion_materials.py $(GAME)/romfs/nativeNX/table --output $(O)/fusion-audit.json --binary $(B)/armor-fusion.afus
 $(EXE): | fusion-catalog
+$(O)/rt/hle/armorfusion.o $(O)/rt/hle/fusion_materials.o: runtime/hle/guest_call.h
 
 test-armor-fusion:
 	@mkdir -p $(O)/fusion-test
@@ -572,4 +573,8 @@ test-armor-fusion:
 	$(O)/fusion-test/policy
 	$(CC) -std=c11 -Wall -Wextra -Werror -Iruntime tests/test_armor_fusion_catalog.c runtime/armor_fusion_catalog.c -o $(O)/fusion-test/catalog
 	cd $(O)/fusion-test && ./catalog && ./catalog extra
-	$(PY) -m unittest discover -s tools -p test_fusion_materials.py -v
+	$(CC) -std=c11 -Wall -Wextra -Werror -Iruntime tests/test_guest_call.c -o $(O)/fusion-test/guest-call
+	$(O)/fusion-test/guest-call
+	$(CC) -std=c11 -Wall -Wextra -Werror -Iruntime tests/test_native_armor_fusion.c runtime/hle/armorfusion.c runtime/hle/fusion_materials.c runtime/armor_fusion_policy.c -o $(O)/fusion-test/native
+	$(O)/fusion-test/native
+	$(PY) -m unittest discover -s tools -p 'test_fusion*.py' -v

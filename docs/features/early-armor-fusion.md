@@ -85,14 +85,14 @@ base-only representation for incomplete or unsupported input data.
 ## Implementation and catalog format
 
 - `tools/fusion_materials.py` reads the builder's own native armor, crafting,
-  category, and item tables. It writes the audit JSON, binary catalog, and
-  English name sidecar. Source tables and generated game-data artifacts stay
-  outside git.
-- `runtime/armor_fusion_catalog.c` loads `armor-fusion.afus` and
-  `armor-fusion.names` beside the executable on desktop and from the unpacked
-  app folder on Android. It looks up an armor's tier by
-  series ID, slot, and displayed level, then supplies the appearance recipe
-  and names. Missing or unsupported lookups fail closed.
+  category, and item tables. It writes the audit JSON and binary catalog.
+  Source tables and generated game-data artifacts stay outside git.
+- `runtime/armor_fusion_catalog.c` loads `armor-fusion.afus` beside the
+  executable on desktop and from the unpacked app folder on Android. It looks
+  up an armor's tier by series ID, slot, and displayed level, then supplies
+  the appearance recipe. Material categories index immutable slices built
+  while loading the sorted records; queries do not scan or copy the whole
+  material table. Missing or unsupported lookups fail closed.
 - `runtime/armor_fusion_policy.c` checks matching known tiers, slot compatibility,
   the native validator result, recipe ownership, distinct selected items,
   current inventory, and the 10-point minimum. It builds a read-only deduction
@@ -107,6 +107,10 @@ base-only representation for incomplete or unsupported input data.
   deductions at the native token-consumption call, then lets the native equipped
   handling and equipment commit continue. Closing the child UI restores the
   suspended forge's facility flags when the scene still matches.
+- Confirmation uses explicit material-selection, button-release, final-question
+  and approved-payment phases. Approval is consumed by the synchronous native
+  transaction. Both adapters share `runtime/hle/guest_call.h` to preserve the
+  caller's sixteen general registers while returning the guest result.
 
 AFUS version 2 uses little-endian records:
 
@@ -119,14 +123,14 @@ AFUS version 2 uses little-endian records:
 Armor entries sort by armor ID and minimum level; intervals do not overlap.
 An entry with category and required points both zero is base-only. Appearance
 entries require ten points. Category members sort by category and item ID.
-The UTF-8 name sidecar uses TSV columns: kind (`A`, `I`, `C`), ID, slot, name.
-Armor slots are 1..5; item and category rows use slot zero. The header fingerprint
-records build provenance; the runtime loader currently validates format and
-bounds rather than comparing that fingerprint with the loaded game's tables.
+Armor slot bits correspond to slots 1..5. The header fingerprint records build
+provenance; the runtime loader currently validates format and bounds rather
+than comparing that fingerprint with the loaded game's tables.
 
-The grouped Makefile outputs regenerate both sidecars if either is missing or
-the source tables/name GMDs change. Desktop release archives include both files.
-Android packages them as assets and unpacks them into the app folder at startup.
+The Makefile regenerates the catalog if it is missing or the source tables
+change. Desktop release archives include it. Android packages it as an asset
+and unpacks it into the app folder at startup. The retired English names file
+is no longer required or packaged; the game supplies the native UI's labels.
 
 ## Native material picker
 
@@ -134,8 +138,7 @@ The point picker reuses the native forge widgets that normal weapon upgrades use
 `cUIOShopSmithCategory` (child 14), `cUIOShopSmithCategoryList` (child 15),
 the item grid (child 16), and quantity popup (child 17). The game renders item
 icons, localized names, native point values, owned counts, selected provisions
-and the required-point indicator. English catalog labels are not used to draw
-these widgets.
+and the required-point indicator. No host presentation buffer is needed.
 
 The forge is suspended beneath the native fusion task. A synthetic recipe row
 contains the appearance category and ten required points, with no fixed crafting
@@ -193,17 +196,23 @@ From the repository root:
 make test-armor-fusion
 make fusion-catalog GAME=/path/to/your/game
 python3 tools/fusion_materials.py /path/to/your/game/romfs/nativeNX/table \
-  --output /tmp/mhgu-fusion-audit.json \
-  --binary /tmp/armor-fusion.afus --names /tmp/armor-fusion.names
+  --output /tmp/mhgu-fusion-audit.json --binary /tmp/armor-fusion.afus
 ```
 
 The 15 Python metadata tests and the C checks exercise policy failures,
 native rejection, changed inventory, malformed tables, paired series IDs,
 conventional and Special Permit tiers, AFUS layout, and base-only entries.
-The distribution check covers the generated sidecars. Existing settings and
+The distribution check covers the generated catalog. Existing settings and
 settings-panel checks remain separate from the native fusion UI.
 
-For a runtime smoke test, keep the executable and generated catalog sidecars
+The native adapter host test enters through the real registered hooks and runs
+the real deduction policy against stubbed guest functions and a guest-memory
+fixture. It covers cancellation, held-button release, stale quotes/equipment/
+inventory, scope guards, teardown, single-refresh partial selections and native
+point rounding. The guest-call test checks register preservation, including
+nested calls. These host tests do not replace interactive game verification.
+
+For a runtime smoke test, keep the executable and generated catalog
 together, use a disposable copy of the save, and point only the game-data path
 at the original dump:
 
@@ -254,16 +263,24 @@ Verified in the native Linux game on a copied HR1 save:
   resistances remain unchanged. Saving and restarting preserves the fused
   decorated arms and the paid inventory.
 - Two Linux clients join a private direct Local Play hub. The observer runs
-  the same runtime with the early-fusion hooks disabled by omitting the catalog
-  sidecars. It sees the host's Jaggi Helm and Bherna Braces appearances while
+  the same runtime with the early-fusion hooks disabled by omitting the catalog.
+  It sees the host's Jaggi Helm and Bherna Braces appearances while
   keeping its own unfused equipment. All seven received equipment records
   match the host's stable fields, decorations and derived skill points;
   received stats and active skills match too. Guest pointers are compared by
   their contents, rather than by their addresses in the two processes.
 
-These live checks used the feature build before rebasing onto upstream
-`81d5a93`; the fusion adapter and native material picker sources are unchanged
-by that rebase. Build and automated checks are repeated on the rebased branch.
+These live checks used the feature build before the catalog and confirmation
+cleanup. Post-cleanup checks cover the catalog, deduction policy, preserved
+guest-call registers, native control transitions and the full Linux build;
+the interactive forge transactions above have not been repeated after cleanup.
+
+A post-cleanup native Linux smoke test used a separate executable folder with
+only the binary catalog and a copied save. Bherna's forge opens the fusion
+menu and the localized material picker; a partial selection updates the points,
+undoing it restores the pool, and holding Confirm across the transition leaves
+the native 2,000z question open. Cancelling returns to a usable forge, and the
+fusion menu opens again. No payment was confirmed in this smoke test.
 
 The copied character has LR equipment. HR/G and Special Permit tier boundaries,
 mixed-tier rejection, and changed-inventory rejection are covered by metadata
