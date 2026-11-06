@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -92,10 +93,12 @@ static int merge(Dir *dst, Dir *src) {
             File *d = dst->files[k];
             size_t nl = strlen(f->name);
             char merged[1200];
-            if (d->orig && nl > 4 && !strcasecmp(f->name + nl - 4, ".arc") &&
-                arc_merge(d->orig, d->path, f->path, merged, sizeof merged)) {  // (two mods' archives: both's changes)
+            // (two mods' archives: both's changes. One with only some of the game's entries: those over the rest)
+            if (nl > 4 && !strcasecmp(f->name + nl - 4, ".arc") && (d->orig || arc_partial(d->path, f->path)) &&
+                arc_merge(d->orig ? d->orig : d->path, d->path, f->path, merged, sizeof merged)) {
                 struct stat st;
                 if (!stat(merged, &st)) {
+                    if (!d->orig) d->orig = strdup(d->path);
                     free(d->path);
                     d->path = strdup(merged);
                     d->size = (uint64_t)st.st_size;
@@ -187,6 +190,15 @@ static char *rel_path(File *f) {
 bool romfs_open(const char *base_dir, const char *const *overlays, int noverlays) {
     Dir *root = scan(base_dir, "", 0);
     if (!root) { LOG("[romfs] cannot read %s\n", base_dir); return false; }
+    // The game looks its files up by their exact names, and some dump tools (yuzu's) spell the top folder NativeNX:
+    // the image calls it nativeNX whatever its spelling on disk (issue #147; main.c's game_files_problem catches
+    // wrong capitals further in)
+    for (int i = 0; i < root->ndirs; i++)
+        if (!strcasecmp(root->dirs[i]->name, "nativeNX") && strcmp(root->dirs[i]->name, "nativeNX")) {
+            LOG("[romfs] the game files' %s folder is used as nativeNX\n", root->dirs[i]->name);
+            free(root->dirs[i]->name);
+            root->dirs[i]->name = strdup("nativeNX");
+        }
     for (int i = 0; i < noverlays; i++) {
         Dir *o = scan(overlays[i], "", 0);
         if (!o) continue;

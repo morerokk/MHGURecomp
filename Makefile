@@ -127,7 +127,7 @@ OSFLAGS  := -D_FILE_OFFSET_BITS=64 -DWIN32_LEAN_AND_MEAN -DNOMINMAX -D_CRT_RAND_
 GENFLAGS += -D_FILE_OFFSET_BITS=64
 # (the GCC runtime - libstdc++, libgcc, winpthreads - linked in: three DLLs fewer to ship, and their licenses ask no
 # more than their notices then; build/licenses has those)
-LDFLAGS  := -fuse-ld=lld -Wl,--stack,16777216 $(SDL_LIBS) $(AV_LIBS) -lvulkan-1 $(SHADERC_LIBS) -lwinmm -lversion -lole32 -lshell32 -luuid -lws2_32 \
+LDFLAGS  := -fuse-ld=lld -Wl,--stack,268435456 $(SDL_LIBS) $(AV_LIBS) -lvulkan-1 $(SHADERC_LIBS) -lwinmm -lversion -lole32 -lshell32 -luuid -lws2_32 \
             -lbcrypt -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic \
             -Wl,--export-all-symbols -Wl,--out-implib,$(O)/mhgurecomp.dll.a
 GAMELIB  := $(B)/mhgugame.dll
@@ -135,6 +135,11 @@ GAMELIB_LDFLAGS := -shared -fuse-ld=lld -static-libgcc $(O)/mhgurecomp.dll.a
 UPDATER  := $(B)/mhgurecomp-updater.exe
 # (a window program; zlib linked in, WinHTTP is Windows')
 UPD_LDFLAGS := -fuse-ld=lld -mwindows $(SDL_LIBS) -lwinhttp -Wl,-Bstatic -lz -Wl,-Bdynamic -static-libgcc
+# the executables' icons (extras/icon/mhgurecomp.rc, mhgurecomp-updater.rc); llvm-windres comes with MSYS2's llvm-tools,
+# which not every setup has: binutils' windres makes them too
+WINDRES  ?= $(if $(shell command -v llvm-windres 2>/dev/null),llvm-windres,windres)
+ICON_RES := $(O)/icon.res.o
+UPD_ICON_RES := $(O)/updater-icon.res.o
 else ifeq ($(PLATFORM),darwin)
 # Built for macOS $(MACOS_MIN) and newer, against SDL3, ffmpeg, shaderc and the Vulkan loader that tools/macos_deps.sh
 # built for it in $(DEPS) (make macos-deps; Homebrew's load only on the macOS they were installed on). From Homebrew:
@@ -192,13 +197,23 @@ endif
 GAMELIB_SRCS := tools/gen.py tools/lifter.py tools/neon.py tools/nso.py tools/gamelib_entry.c \
                 runtime/hle/hle_symbols.txt runtime/cpu.h runtime/vfp.h runtime/neon_rt.h runtime/gamelib.h
 GAMELIB_ID := $(shell (cat $(GAMELIB_SRCS); echo '$(GENFLAGS)') | sha256sum | cut -c1-16)
+# GEN_ID: what decides the code in generated/. make gen records it there and make dist refuses a release without a match:
+# neither make nor the game notices stale game code, GAMELIB_ID hashes the sources above and not what they generated.
+# (Line endings ignored: Windows and WSL builds share one generated/.)
+GEN_SRCS := tools/gen.py tools/lifter.py tools/neon.py tools/nso.py runtime/hle/hle_symbols.txt
+GEN_ID    = $(shell cat $(GEN_SRCS) | tr -d '\r' | sha256sum | cut -c1-16)
+ifneq ($(filter dist,$(MAKECMDGOALS)),)
+ifneq ($(shell cat $(GEN)/gen.id 2>/dev/null),$(GEN_ID))
+$(error dist: $(GEN)/ was not made from the current $(GEN_SRCS): run make gen GAME=<the game files> first)
+endif
+endif
 # VERSION: this build's release (git describe: 0.10.3 on a release's tag, 0.10.3-4-gabc1234 after it), in the log and
 # the updater's (updater/updater.c: only a build of exactly a release updates itself). make dist VERSION=0.10.4 for a
 # release built before its tag is made.
 VERSION ?= $(shell git describe --tags 2>/dev/null || echo unknown)
 
 RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(patsubst runtime/%.m,$(O)/rt/%.o,$(RT_OBJC)) $(RT_CXX) \
-           $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(IMGUI_OBJ) $(O)/updater/sha256.o
+           $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(IMGUI_OBJ) $(O)/updater/sha256.o $(ICON_RES)
 # (updater/sha256.c: runtime/net/ldn.c hashes the matchmaking key with it)
 # Dear ImGui with cimgui's C API (third_party/cimgui: Forge plugins' ImGui, runtime/forge_imgui.c, overlay.cpp)
 IMGUI    := third_party/cimgui
@@ -252,6 +267,48 @@ test-settings: $(LIB_STAMPS)
 	$(CC) $(RTFLAGS) tests/test_settings.c runtime/config.c runtime/config_store.c $(TEST_LDFLAGS) $(SDL_LIBS) -lm -o $(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe)
 	$(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe) $(O)/settings-test/settings.ini
 
+# Engine modules (docs/ENGINE-MODULES.md). example-engine-module builds the example into the folder layout engine_modules/
+# expects; test-engine-modules builds the loader (runtime/engine_module.c) into a host program and checks it against test
+# modules - one that loads, and the ways one can fail - without the game files.
+ENGMOD_EXT  := $(if $(filter windows,$(PLATFORM)),dll,$(if $(filter darwin,$(PLATFORM)),dylib,so))
+ENGMOD_CC   := $(CC) -O2 -Wall -fPIC -shared $(if $(filter darwin,$(PLATFORM)),$(MINFLAG),-fuse-ld=lld)
+ENGMOD_TEST := $(O)/engine-module-test
+ENGMOD_SRC  := extras/example-engine-module/example_engine_module.c
+.PHONY: example-engine-module test-engine-modules
+example-engine-module:
+	@mkdir -p $(ENGMOD_TEST)/engine_modules/example
+	$(ENGMOD_CC) $(ENGMOD_SRC) -o $(ENGMOD_TEST)/engine_modules/example/example.$(ENGMOD_EXT)
+	@echo "built $(ENGMOD_TEST)/engine_modules/example: copy the folder to engine_modules/ and add the line 'example' to engine_modules/enabled.txt"
+
+test-engine-modules: $(LIB_STAMPS)
+	@rm -rf $(ENGMOD_TEST)/t && mkdir -p $(ENGMOD_TEST)/t/good $(ENGMOD_TEST)/t/hidden $(ENGMOD_TEST)/t/badapi $(ENGMOD_TEST)/t/noapi $(ENGMOD_TEST)/t/declines $(ENGMOD_TEST)/t/notamodule
+	$(ENGMOD_CC) $(ENGMOD_SRC) -o $(ENGMOD_TEST)/t/good/good.$(ENGMOD_EXT)
+	cp $(ENGMOD_TEST)/t/good/good.$(ENGMOD_EXT) $(ENGMOD_TEST)/t/hidden/hidden.$(ENGMOD_EXT)
+	$(ENGMOD_CC) -DEXAMPLE_API=99 $(ENGMOD_SRC) -o $(ENGMOD_TEST)/t/badapi/badapi.$(ENGMOD_EXT)
+	$(ENGMOD_CC) -DEXAMPLE_NO_API $(ENGMOD_SRC) -o $(ENGMOD_TEST)/t/noapi/noapi.$(ENGMOD_EXT)
+	$(ENGMOD_CC) -DEXAMPLE_DECLINE $(ENGMOD_SRC) -o $(ENGMOD_TEST)/t/declines/declines.$(ENGMOD_EXT)
+	printf 'int unrelated;\n' > $(ENGMOD_TEST)/t/notamodule.c
+	$(ENGMOD_CC) $(ENGMOD_TEST)/t/notamodule.c -o $(ENGMOD_TEST)/t/notamodule/notamodule.$(ENGMOD_EXT)
+	printf '\357\273\277good\n# the loader test\n  badapi  \nnoapi\ndeclines\nnotamodule\nnosuch\n../evil\ngood\n' > $(ENGMOD_TEST)/t/enabled.txt
+	$(CC) $(RTFLAGS) tests/test_engine_module.c runtime/engine_module.c runtime/config.c runtime/config_store.c $(TEST_LDFLAGS) $(SDL_LIBS) -lm -o $(ENGMOD_TEST)/test-engine-module$(if $(filter windows,$(PLATFORM)),.exe)
+	MHGU_ENGINE_MODULES_DIR=$(ENGMOD_TEST)/t $(ENGMOD_TEST)/test-engine-module$(if $(filter windows,$(PLATFORM)),.exe) > $(ENGMOD_TEST)/t/out.txt 2>&1 || { cat $(ENGMOD_TEST)/t/out.txt; exit 1; }
+	@cat $(ENGMOD_TEST)/t/out.txt
+	@for want in 'good: starting' 'good: loaded (Example' '\[example\] port test-version' 'badapi: built for engine module API 99' \
+	             'noapi: no mhgu_engine_module_api' 'declines: the module declined' 'notamodule: no mhgu_engine_module_api' \
+	             'nosuch: no such folder' '"../evil" is not a folder name' 'engine modules loaded .*: Example' '\[example\] shutdown'; do \
+	    grep -q "$$want" $(ENGMOD_TEST)/t/out.txt || { echo "missing in the log: $$want"; exit 1; }; done
+	@! grep -q 'hidden' $(ENGMOD_TEST)/t/out.txt || { echo "a module enabled.txt does not list was loaded"; exit 1; }
+	@! grep -Eq 'folder .*/(badapi|noapi)' $(ENGMOD_TEST)/t/out.txt || { echo "the entry of a refused module was called"; exit 1; }
+	@test "$$(grep -c 'good: loaded' $(ENGMOD_TEST)/t/out.txt)" = 1 || { echo "good loaded twice"; exit 1; }
+	@echo "test-engine-modules: OK"
+
+# Host-only test of the cheats folder being read again: no game dump or generated code required.
+.PHONY: test-cheats
+test-cheats: $(LIB_STAMPS)
+	@mkdir -p $(O)/settings-test
+	$(CC) $(RTFLAGS) tests/test_cheats.c runtime/cheats.c -lpthread -o $(O)/settings-test/test-cheats$(if $(filter windows,$(PLATFORM)),.exe)
+	cd $(O)/settings-test && ./test-cheats$(if $(filter windows,$(PLATFORM)),.exe)
+
 $(O)/gen/%.o: $(GEN)/%.c runtime/cpu.h runtime/vfp.h runtime/neon_rt.h
 	@mkdir -p $(dir $@)
 	@$(CC) $(GENFLAGS) -c $< -o $@
@@ -268,6 +325,7 @@ $(O)/rt/gamelib.o: $(O)/gamelib.id
 $(O)/rt/gamelib.o: RTFLAGS += -DGAMELIB_ID='"$(GAMELIB_ID)"'
 $(O)/version.id: FORCE
 	@mkdir -p $(O); [ "$$(cat $@ 2>/dev/null)" = '$(VERSION)' ] || echo '$(VERSION)' > $@
+$(O)/rt/ui.o: extras/icon/mhgurecomp-128.png
 $(O)/rt/main.o: $(O)/version.id
 $(O)/rt/main.o: RTFLAGS += -DMHGU_VERSION='"$(VERSION)"'
 
@@ -331,6 +389,14 @@ $(O)/updater/%.o: updater/%.c updater/updater.h $(O)/version.id
 	$(CC) -O2 -g -Wall $(OSFLAGS) $(LIB_INC) -DMHGU_VERSION='"$(VERSION)"' -c $< -o $@
 # (SDL3 / shaderc: their headers before anything is compiled, their archives in LDFLAGS / UPD_LDFLAGS)
 $(RT_OBJ) $(UPD_OBJ): $(LIB_STAMPS)
+$(ICON_RES): extras/icon/mhgurecomp.rc extras/icon/mhgurecomp.ico
+	@mkdir -p $(dir $@)
+	$(WINDRES) -I extras/icon -O coff -o $@ $<
+$(UPD_ICON_RES): extras/icon/mhgurecomp-updater.rc extras/icon/mhgurecomp-updater.ico
+	@mkdir -p $(dir $@)
+	$(WINDRES) -I extras/icon -O coff -o $@ $<
+$(O)/updater/updater.o: extras/icon/mhgurecomp-updater-128.png
+UPD_OBJ  += $(UPD_ICON_RES)
 $(UPDATER): $(UPD_OBJ)
 	@mkdir -p $(dir $@)
 	$(CC) -o $@ $^ $(UPD_LDFLAGS)
@@ -490,6 +556,7 @@ $(B)/data/.complete:
 gen:
 	cd tools && ../$(PY) gen.py sdk ../$(GAME)/exefs/sdk 0x02400000 ../$(GEN)/sdk --hle ../runtime/hle/hle_symbols.txt
 	cd tools && ../$(PY) gen.py main ../$(GAME)/exefs/main 0x00200000 ../$(GEN)/main
+	echo '$(GEN_ID)' > $(GEN)/gen.id
 
 # macOS: a self-contained app of the build (tools/make_app.py): runtime, game code, game files (APFS clones), the
 # Homebrew libraries and MoltenVK; it writes to ~/Library/Application Support/MHGURecomp. For you only: never share it.

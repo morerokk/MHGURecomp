@@ -1179,6 +1179,7 @@ _Static_assert(offsetof(ImVec4, w) == 12, "ImVec4.w");
 
 HLE_FUNC("ImBitVector_Clear", ig_ImBitVector_Clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImBitVector_Clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 0);
     ImBitVector_Clear(ha0);
@@ -1189,6 +1190,7 @@ HLE_FUNC("ImBitVector_Clear", ig_ImBitVector_Clear) {
 HLE_FUNC("ImBitVector_ClearBit", ig_ImBitVector_ClearBit) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImBitVector_ClearBit", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 0);
     ImBitVector_ClearBit(ha0, a1);
@@ -1199,6 +1201,7 @@ HLE_FUNC("ImBitVector_ClearBit", ig_ImBitVector_ClearBit) {
 HLE_FUNC("ImBitVector_Create", ig_ImBitVector_Create) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImBitVector_Create", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 0);
     ImBitVector_Create(ha0, a1);
@@ -1209,6 +1212,7 @@ HLE_FUNC("ImBitVector_Create", ig_ImBitVector_Create) {
 HLE_FUNC("ImBitVector_SetBit", ig_ImBitVector_SetBit) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImBitVector_SetBit", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 0);
     ImBitVector_SetBit(ha0, a1);
@@ -1219,6 +1223,7 @@ HLE_FUNC("ImBitVector_SetBit", ig_ImBitVector_SetBit) {
 HLE_FUNC("ImBitVector_TestBit", ig_ImBitVector_TestBit) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImBitVector_TestBit", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 0);
     __auto_type r_ = ImBitVector_TestBit(ha0, a1);
@@ -1290,6 +1295,7 @@ HLE_FUNC("ImColor_SetHSV", ig_ImColor_SetHSV) {
     float a2 = ig_f(c->r[2]);
     float a3 = ig_f(c->r[3]);
     float a4 = ig_f(STK(0));
+    if (!a0) { ig_null_self(c, "ImColor_SetHSV", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 1);
     ImColor_SetHSV(ha0, a1, a2, a3, a4);
@@ -1299,6 +1305,7 @@ HLE_FUNC("ImColor_SetHSV", ig_ImColor_SetHSV) {
 
 HLE_FUNC("ImColor_destroy", ig_ImColor_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImColor_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 1);
     ImColor_destroy(ha0);
@@ -1308,6 +1315,7 @@ HLE_FUNC("ImColor_destroy", ig_ImColor_destroy) {
 
 HLE_FUNC("ImDrawCmd_GetTexID", ig_ImDrawCmd_GetTexID) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawCmd_GetTexID", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 3);
     __auto_type r_ = ImDrawCmd_GetTexID(ha0);
@@ -1325,6 +1333,7 @@ HLE_FUNC("ImDrawCmd_ImDrawCmd", ig_ImDrawCmd_ImDrawCmd) {
 
 HLE_FUNC("ImDrawCmd_destroy", ig_ImDrawCmd_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawCmd_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 3);
     ImDrawCmd_destroy(ha0);
@@ -1341,6 +1350,7 @@ HLE_FUNC("ImDrawDataBuilder_ImDrawDataBuilder", ig_ImDrawDataBuilder_ImDrawDataB
 
 HLE_FUNC("ImDrawDataBuilder_destroy", ig_ImDrawDataBuilder_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawDataBuilder_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 6);
     ImDrawDataBuilder_destroy(ha0);
@@ -1351,6 +1361,7 @@ HLE_FUNC("ImDrawDataBuilder_destroy", ig_ImDrawDataBuilder_destroy) {
 HLE_FUNC("ImDrawData_AddDrawList", ig_ImDrawData_AddDrawList) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImDrawData_AddDrawList", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 5);
     void *ha1 = m_in(a1, 7);
@@ -1362,6 +1373,7 @@ HLE_FUNC("ImDrawData_AddDrawList", ig_ImDrawData_AddDrawList) {
 
 HLE_FUNC("ImDrawData_Clear", ig_ImDrawData_Clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawData_Clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 5);
     ImDrawData_Clear(ha0);
@@ -1371,6 +1383,7 @@ HLE_FUNC("ImDrawData_Clear", ig_ImDrawData_Clear) {
 
 HLE_FUNC("ImDrawData_DeIndexAllBuffers", ig_ImDrawData_DeIndexAllBuffers) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawData_DeIndexAllBuffers", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 5);
     ImDrawData_DeIndexAllBuffers(ha0);
@@ -1387,6 +1400,7 @@ HLE_FUNC("ImDrawData_ImDrawData", ig_ImDrawData_ImDrawData) {
 
 HLE_FUNC("ImDrawData_ScaleClipRects", ig_ImDrawData_ScaleClipRects) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawData_ScaleClipRects", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 5);
     ImDrawData_ScaleClipRects(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])});
@@ -1396,6 +1410,7 @@ HLE_FUNC("ImDrawData_ScaleClipRects", ig_ImDrawData_ScaleClipRects) {
 
 HLE_FUNC("ImDrawData_destroy", ig_ImDrawData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 5);
     ImDrawData_destroy(ha0);
@@ -1413,6 +1428,7 @@ HLE_FUNC("ImDrawListSharedData_ImDrawListSharedData", ig_ImDrawListSharedData_Im
 HLE_FUNC("ImDrawListSharedData_SetCircleTessellationMaxError", ig_ImDrawListSharedData_SetCircleTessellationMaxError) {
     uint32_t a0 = c->r[0];
     float a1 = ig_f(c->r[1]);
+    if (!a0) { ig_null_self(c, "ImDrawListSharedData_SetCircleTessellationMaxError", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 8);
     ImDrawListSharedData_SetCircleTessellationMaxError(ha0, a1);
@@ -1422,6 +1438,7 @@ HLE_FUNC("ImDrawListSharedData_SetCircleTessellationMaxError", ig_ImDrawListShar
 
 HLE_FUNC("ImDrawListSharedData_destroy", ig_ImDrawListSharedData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawListSharedData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 8);
     ImDrawListSharedData_destroy(ha0);
@@ -1431,6 +1448,7 @@ HLE_FUNC("ImDrawListSharedData_destroy", ig_ImDrawListSharedData_destroy) {
 
 HLE_FUNC("ImDrawListSplitter_Clear", ig_ImDrawListSplitter_Clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawListSplitter_Clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 9);
     ImDrawListSplitter_Clear(ha0);
@@ -1440,6 +1458,7 @@ HLE_FUNC("ImDrawListSplitter_Clear", ig_ImDrawListSplitter_Clear) {
 
 HLE_FUNC("ImDrawListSplitter_ClearFreeMemory", ig_ImDrawListSplitter_ClearFreeMemory) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawListSplitter_ClearFreeMemory", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 9);
     ImDrawListSplitter_ClearFreeMemory(ha0);
@@ -1457,6 +1476,7 @@ HLE_FUNC("ImDrawListSplitter_ImDrawListSplitter", ig_ImDrawListSplitter_ImDrawLi
 HLE_FUNC("ImDrawListSplitter_Merge", ig_ImDrawListSplitter_Merge) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImDrawListSplitter_Merge", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 9);
     void *ha1 = m_in(a1, 7);
@@ -1470,6 +1490,7 @@ HLE_FUNC("ImDrawListSplitter_SetCurrentChannel", ig_ImDrawListSplitter_SetCurren
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImDrawListSplitter_SetCurrentChannel", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 9);
     void *ha1 = m_in(a1, 7);
@@ -1483,6 +1504,7 @@ HLE_FUNC("ImDrawListSplitter_Split", ig_ImDrawListSplitter_Split) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImDrawListSplitter_Split", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 9);
     void *ha1 = m_in(a1, 7);
@@ -1494,6 +1516,7 @@ HLE_FUNC("ImDrawListSplitter_Split", ig_ImDrawListSplitter_Split) {
 
 HLE_FUNC("ImDrawListSplitter_destroy", ig_ImDrawListSplitter_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawListSplitter_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 9);
     ImDrawListSplitter_destroy(ha0);
@@ -1506,6 +1529,7 @@ HLE_FUNC("ImDrawList_AddBezierCubic", ig_ImDrawList_AddBezierCubic) {
     uint32_t a5 = STK(5);
     float a6 = ig_f(STK(6));
     uint32_t a7 = STK(7);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddBezierCubic", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddBezierCubic(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, (ImVec2_c){ig_f(STK(1)), ig_f(STK(2))}, (ImVec2_c){ig_f(STK(3)), ig_f(STK(4))}, a5, a6, a7);
@@ -1518,6 +1542,7 @@ HLE_FUNC("ImDrawList_AddBezierQuadratic", ig_ImDrawList_AddBezierQuadratic) {
     uint32_t a4 = STK(3);
     float a5 = ig_f(STK(4));
     uint32_t a6 = STK(5);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddBezierQuadratic", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddBezierQuadratic(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, (ImVec2_c){ig_f(STK(1)), ig_f(STK(2))}, a4, a5, a6);
@@ -1531,6 +1556,7 @@ HLE_FUNC("ImDrawList_AddCircle", ig_ImDrawList_AddCircle) {
     uint32_t a3 = STK(0);
     uint32_t a4 = STK(1);
     float a5 = ig_f(STK(2));
+    if (!a0) { ig_null_self(c, "ImDrawList_AddCircle", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddCircle(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, a2, a3, a4, a5);
@@ -1543,6 +1569,7 @@ HLE_FUNC("ImDrawList_AddCircleFilled", ig_ImDrawList_AddCircleFilled) {
     float a2 = ig_f(c->r[3]);
     uint32_t a3 = STK(0);
     uint32_t a4 = STK(1);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddCircleFilled", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddCircleFilled(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, a2, a3, a4);
@@ -1552,6 +1579,7 @@ HLE_FUNC("ImDrawList_AddCircleFilled", ig_ImDrawList_AddCircleFilled) {
 
 HLE_FUNC("ImDrawList_AddDrawCmd", ig_ImDrawList_AddDrawCmd) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList_AddDrawCmd", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddDrawCmd(ha0);
@@ -1565,6 +1593,7 @@ HLE_FUNC("ImDrawList_AddEllipse", ig_ImDrawList_AddEllipse) {
     float a4 = ig_f(STK(2));
     uint32_t a5 = STK(3);
     float a6 = ig_f(STK(4));
+    if (!a0) { ig_null_self(c, "ImDrawList_AddEllipse", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddEllipse(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, a3, a4, a5, a6);
@@ -1577,6 +1606,7 @@ HLE_FUNC("ImDrawList_AddEllipseFilled", ig_ImDrawList_AddEllipseFilled) {
     uint32_t a3 = STK(1);
     float a4 = ig_f(STK(2));
     uint32_t a5 = STK(3);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddEllipseFilled", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddEllipseFilled(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, a3, a4, a5);
@@ -1588,6 +1618,7 @@ HLE_FUNC("ImDrawList_AddImage", ig_ImDrawList_AddImage) {
     uint32_t a0 = c->r[0];
     uint32_t a1[4] = {c->r[2], c->r[3], STK(0), STK(1)};
     uint32_t a6 = STK(10);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddImage", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImTextureRef_c ha1; memset(&ha1, 0, sizeof ha1);
@@ -1602,6 +1633,7 @@ HLE_FUNC("ImDrawList_AddImageQuad", ig_ImDrawList_AddImageQuad) {
     uint32_t a0 = c->r[0];
     uint32_t a1[4] = {c->r[2], c->r[3], STK(0), STK(1)};
     uint32_t a10 = STK(18);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddImageQuad", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImTextureRef_c ha1; memset(&ha1, 0, sizeof ha1);
@@ -1618,6 +1650,7 @@ HLE_FUNC("ImDrawList_AddImageRounded", ig_ImDrawList_AddImageRounded) {
     uint32_t a6 = STK(10);
     float a7 = ig_f(STK(11));
     uint32_t a8 = STK(12);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddImageRounded", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImTextureRef_c ha1; memset(&ha1, 0, sizeof ha1);
@@ -1632,6 +1665,7 @@ HLE_FUNC("ImDrawList_AddLine", ig_ImDrawList_AddLine) {
     uint32_t a0 = c->r[0];
     uint32_t a3 = STK(1);
     float a4 = ig_f(STK(2));
+    if (!a0) { ig_null_self(c, "ImDrawList_AddLine", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddLine(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, a3, a4);
@@ -1646,6 +1680,7 @@ HLE_FUNC("ImDrawList_AddLineH", ig_ImDrawList_AddLineH) {
     float a3 = ig_f(c->r[3]);
     uint32_t a4 = STK(0);
     float a5 = ig_f(STK(1));
+    if (!a0) { ig_null_self(c, "ImDrawList_AddLineH", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddLineH(ha0, a1, a2, a3, a4, a5);
@@ -1660,6 +1695,7 @@ HLE_FUNC("ImDrawList_AddLineV", ig_ImDrawList_AddLineV) {
     float a3 = ig_f(c->r[3]);
     uint32_t a4 = STK(0);
     float a5 = ig_f(STK(1));
+    if (!a0) { ig_null_self(c, "ImDrawList_AddLineV", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddLineV(ha0, a1, a2, a3, a4, a5);
@@ -1673,6 +1709,7 @@ HLE_FUNC("ImDrawList_AddNgon", ig_ImDrawList_AddNgon) {
     uint32_t a3 = STK(0);
     uint32_t a4 = STK(1);
     float a5 = ig_f(STK(2));
+    if (!a0) { ig_null_self(c, "ImDrawList_AddNgon", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddNgon(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, a2, a3, a4, a5);
@@ -1685,6 +1722,7 @@ HLE_FUNC("ImDrawList_AddNgonFilled", ig_ImDrawList_AddNgonFilled) {
     float a2 = ig_f(c->r[3]);
     uint32_t a3 = STK(0);
     uint32_t a4 = STK(1);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddNgonFilled", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddNgonFilled(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, a2, a3, a4);
@@ -1696,6 +1734,7 @@ HLE_FUNC("ImDrawList_AddQuad", ig_ImDrawList_AddQuad) {
     uint32_t a0 = c->r[0];
     uint32_t a5 = STK(5);
     float a6 = ig_f(STK(6));
+    if (!a0) { ig_null_self(c, "ImDrawList_AddQuad", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddQuad(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, (ImVec2_c){ig_f(STK(1)), ig_f(STK(2))}, (ImVec2_c){ig_f(STK(3)), ig_f(STK(4))}, a5, a6);
@@ -1706,6 +1745,7 @@ HLE_FUNC("ImDrawList_AddQuad", ig_ImDrawList_AddQuad) {
 HLE_FUNC("ImDrawList_AddQuadFilled", ig_ImDrawList_AddQuadFilled) {
     uint32_t a0 = c->r[0];
     uint32_t a5 = STK(5);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddQuadFilled", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddQuadFilled(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, (ImVec2_c){ig_f(STK(1)), ig_f(STK(2))}, (ImVec2_c){ig_f(STK(3)), ig_f(STK(4))}, a5);
@@ -1719,6 +1759,7 @@ HLE_FUNC("ImDrawList_AddRect", ig_ImDrawList_AddRect) {
     float a4 = ig_f(STK(2));
     float a5 = ig_f(STK(3));
     uint32_t a6 = STK(4);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddRect", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddRect(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, a3, a4, a5, a6);
@@ -1731,6 +1772,7 @@ HLE_FUNC("ImDrawList_AddRectFilled", ig_ImDrawList_AddRectFilled) {
     uint32_t a3 = STK(1);
     float a4 = ig_f(STK(2));
     uint32_t a5 = STK(3);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddRectFilled", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddRectFilled(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, a3, a4, a5);
@@ -1744,6 +1786,7 @@ HLE_FUNC("ImDrawList_AddRectFilledMultiColor", ig_ImDrawList_AddRectFilledMultiC
     uint32_t a4 = STK(2);
     uint32_t a5 = STK(3);
     uint32_t a6 = STK(4);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddRectFilledMultiColor", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddRectFilledMultiColor(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, a3, a4, a5, a6);
@@ -1756,6 +1799,7 @@ HLE_FUNC("ImDrawList_AddText_Vec2", ig_ImDrawList_AddText_Vec2) {
     uint32_t a2 = c->r[3];
     uint32_t a3 = STK(0);
     uint32_t a4 = STK(1);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddText_Vec2", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddText_Vec2(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, a2, GP(a3), GP(a4));
@@ -1772,6 +1816,7 @@ HLE_FUNC("ImDrawList_AddText_FontPtr", ig_ImDrawList_AddText_FontPtr) {
     uint32_t a6 = STK(3);
     float a7 = ig_f(STK(4));
     uint32_t a8 = STK(5);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddText_FontPtr", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     void *ha1 = m_in(a1, 11);
@@ -1787,6 +1832,7 @@ HLE_FUNC("ImDrawList_AddTriangle", ig_ImDrawList_AddTriangle) {
     uint32_t a0 = c->r[0];
     uint32_t a4 = STK(3);
     float a5 = ig_f(STK(4));
+    if (!a0) { ig_null_self(c, "ImDrawList_AddTriangle", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddTriangle(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, (ImVec2_c){ig_f(STK(1)), ig_f(STK(2))}, a4, a5);
@@ -1797,6 +1843,7 @@ HLE_FUNC("ImDrawList_AddTriangle", ig_ImDrawList_AddTriangle) {
 HLE_FUNC("ImDrawList_AddTriangleFilled", ig_ImDrawList_AddTriangleFilled) {
     uint32_t a0 = c->r[0];
     uint32_t a4 = STK(3);
+    if (!a0) { ig_null_self(c, "ImDrawList_AddTriangleFilled", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_AddTriangleFilled(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, (ImVec2_c){ig_f(STK(1)), ig_f(STK(2))}, a4);
@@ -1806,6 +1853,7 @@ HLE_FUNC("ImDrawList_AddTriangleFilled", ig_ImDrawList_AddTriangleFilled) {
 
 HLE_FUNC("ImDrawList_ChannelsMerge", ig_ImDrawList_ChannelsMerge) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList_ChannelsMerge", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_ChannelsMerge(ha0);
@@ -1816,6 +1864,7 @@ HLE_FUNC("ImDrawList_ChannelsMerge", ig_ImDrawList_ChannelsMerge) {
 HLE_FUNC("ImDrawList_ChannelsSetCurrent", ig_ImDrawList_ChannelsSetCurrent) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImDrawList_ChannelsSetCurrent", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_ChannelsSetCurrent(ha0, a1);
@@ -1826,6 +1875,7 @@ HLE_FUNC("ImDrawList_ChannelsSetCurrent", ig_ImDrawList_ChannelsSetCurrent) {
 HLE_FUNC("ImDrawList_ChannelsSplit", ig_ImDrawList_ChannelsSplit) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImDrawList_ChannelsSplit", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_ChannelsSplit(ha0, a1);
@@ -1835,6 +1885,7 @@ HLE_FUNC("ImDrawList_ChannelsSplit", ig_ImDrawList_ChannelsSplit) {
 
 HLE_FUNC("ImDrawList_CloneOutput", ig_ImDrawList_CloneOutput) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList_CloneOutput", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     __auto_type r_ = ImDrawList_CloneOutput(ha0);
@@ -1845,6 +1896,7 @@ HLE_FUNC("ImDrawList_CloneOutput", ig_ImDrawList_CloneOutput) {
 
 HLE_FUNC("ImDrawList_GetClipRectMax", ig_ImDrawList_GetClipRectMax) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImDrawList_GetClipRectMax", 8); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
@@ -1857,6 +1909,7 @@ HLE_FUNC("ImDrawList_GetClipRectMax", ig_ImDrawList_GetClipRectMax) {
 
 HLE_FUNC("ImDrawList_GetClipRectMin", ig_ImDrawList_GetClipRectMin) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImDrawList_GetClipRectMin", 8); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
@@ -1883,6 +1936,7 @@ HLE_FUNC("ImDrawList_PathArcTo", ig_ImDrawList_PathArcTo) {
     float a3 = ig_f(STK(0));
     float a4 = ig_f(STK(1));
     uint32_t a5 = STK(2);
+    if (!a0) { ig_null_self(c, "ImDrawList_PathArcTo", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PathArcTo(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, a2, a3, a4, a5);
@@ -1895,6 +1949,7 @@ HLE_FUNC("ImDrawList_PathArcToFast", ig_ImDrawList_PathArcToFast) {
     float a2 = ig_f(c->r[3]);
     uint32_t a3 = STK(0);
     uint32_t a4 = STK(1);
+    if (!a0) { ig_null_self(c, "ImDrawList_PathArcToFast", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PathArcToFast(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, a2, a3, a4);
@@ -1905,6 +1960,7 @@ HLE_FUNC("ImDrawList_PathArcToFast", ig_ImDrawList_PathArcToFast) {
 HLE_FUNC("ImDrawList_PathBezierCubicCurveTo", ig_ImDrawList_PathBezierCubicCurveTo) {
     uint32_t a0 = c->r[0];
     uint32_t a4 = STK(3);
+    if (!a0) { ig_null_self(c, "ImDrawList_PathBezierCubicCurveTo", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PathBezierCubicCurveTo(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, (ImVec2_c){ig_f(STK(1)), ig_f(STK(2))}, a4);
@@ -1915,6 +1971,7 @@ HLE_FUNC("ImDrawList_PathBezierCubicCurveTo", ig_ImDrawList_PathBezierCubicCurve
 HLE_FUNC("ImDrawList_PathBezierQuadraticCurveTo", ig_ImDrawList_PathBezierQuadraticCurveTo) {
     uint32_t a0 = c->r[0];
     uint32_t a3 = STK(1);
+    if (!a0) { ig_null_self(c, "ImDrawList_PathBezierQuadraticCurveTo", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PathBezierQuadraticCurveTo(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, a3);
@@ -1924,6 +1981,7 @@ HLE_FUNC("ImDrawList_PathBezierQuadraticCurveTo", ig_ImDrawList_PathBezierQuadra
 
 HLE_FUNC("ImDrawList_PathClear", ig_ImDrawList_PathClear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList_PathClear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PathClear(ha0);
@@ -1937,6 +1995,7 @@ HLE_FUNC("ImDrawList_PathEllipticalArcTo", ig_ImDrawList_PathEllipticalArcTo) {
     float a4 = ig_f(STK(2));
     float a5 = ig_f(STK(3));
     uint32_t a6 = STK(4);
+    if (!a0) { ig_null_self(c, "ImDrawList_PathEllipticalArcTo", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PathEllipticalArcTo(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, a3, a4, a5, a6);
@@ -1947,6 +2006,7 @@ HLE_FUNC("ImDrawList_PathEllipticalArcTo", ig_ImDrawList_PathEllipticalArcTo) {
 HLE_FUNC("ImDrawList_PathFillConcave", ig_ImDrawList_PathFillConcave) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImDrawList_PathFillConcave", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PathFillConcave(ha0, a1);
@@ -1957,6 +2017,7 @@ HLE_FUNC("ImDrawList_PathFillConcave", ig_ImDrawList_PathFillConcave) {
 HLE_FUNC("ImDrawList_PathFillConvex", ig_ImDrawList_PathFillConvex) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImDrawList_PathFillConvex", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PathFillConvex(ha0, a1);
@@ -1966,6 +2027,7 @@ HLE_FUNC("ImDrawList_PathFillConvex", ig_ImDrawList_PathFillConvex) {
 
 HLE_FUNC("ImDrawList_PathLineTo", ig_ImDrawList_PathLineTo) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList_PathLineTo", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PathLineTo(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])});
@@ -1975,6 +2037,7 @@ HLE_FUNC("ImDrawList_PathLineTo", ig_ImDrawList_PathLineTo) {
 
 HLE_FUNC("ImDrawList_PathLineToMergeDuplicate", ig_ImDrawList_PathLineToMergeDuplicate) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList_PathLineToMergeDuplicate", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PathLineToMergeDuplicate(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])});
@@ -1986,6 +2049,7 @@ HLE_FUNC("ImDrawList_PathRect", ig_ImDrawList_PathRect) {
     uint32_t a0 = c->r[0];
     float a3 = ig_f(STK(1));
     uint32_t a4 = STK(2);
+    if (!a0) { ig_null_self(c, "ImDrawList_PathRect", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PathRect(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, a3, a4);
@@ -1998,6 +2062,7 @@ HLE_FUNC("ImDrawList_PathStroke", ig_ImDrawList_PathStroke) {
     uint32_t a1 = c->r[1];
     float a2 = ig_f(c->r[2]);
     uint32_t a3 = c->r[3];
+    if (!a0) { ig_null_self(c, "ImDrawList_PathStroke", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PathStroke(ha0, a1, a2, a3);
@@ -2007,6 +2072,7 @@ HLE_FUNC("ImDrawList_PathStroke", ig_ImDrawList_PathStroke) {
 
 HLE_FUNC("ImDrawList_PopClipRect", ig_ImDrawList_PopClipRect) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList_PopClipRect", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PopClipRect(ha0);
@@ -2016,6 +2082,7 @@ HLE_FUNC("ImDrawList_PopClipRect", ig_ImDrawList_PopClipRect) {
 
 HLE_FUNC("ImDrawList_PopTexture", ig_ImDrawList_PopTexture) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList_PopTexture", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PopTexture(ha0);
@@ -2026,6 +2093,7 @@ HLE_FUNC("ImDrawList_PopTexture", ig_ImDrawList_PopTexture) {
 HLE_FUNC("ImDrawList_PrimQuadUV", ig_ImDrawList_PrimQuadUV) {
     uint32_t a0 = c->r[0];
     uint32_t a9 = STK(13);
+    if (!a0) { ig_null_self(c, "ImDrawList_PrimQuadUV", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PrimQuadUV(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, (ImVec2_c){ig_f(STK(1)), ig_f(STK(2))}, (ImVec2_c){ig_f(STK(3)), ig_f(STK(4))}, (ImVec2_c){ig_f(STK(5)), ig_f(STK(6))}, (ImVec2_c){ig_f(STK(7)), ig_f(STK(8))}, (ImVec2_c){ig_f(STK(9)), ig_f(STK(10))}, (ImVec2_c){ig_f(STK(11)), ig_f(STK(12))}, a9);
@@ -2036,6 +2104,7 @@ HLE_FUNC("ImDrawList_PrimQuadUV", ig_ImDrawList_PrimQuadUV) {
 HLE_FUNC("ImDrawList_PrimRect", ig_ImDrawList_PrimRect) {
     uint32_t a0 = c->r[0];
     uint32_t a3 = STK(1);
+    if (!a0) { ig_null_self(c, "ImDrawList_PrimRect", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PrimRect(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, a3);
@@ -2046,6 +2115,7 @@ HLE_FUNC("ImDrawList_PrimRect", ig_ImDrawList_PrimRect) {
 HLE_FUNC("ImDrawList_PrimRectUV", ig_ImDrawList_PrimRectUV) {
     uint32_t a0 = c->r[0];
     uint32_t a5 = STK(5);
+    if (!a0) { ig_null_self(c, "ImDrawList_PrimRectUV", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PrimRectUV(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, (ImVec2_c){ig_f(STK(1)), ig_f(STK(2))}, (ImVec2_c){ig_f(STK(3)), ig_f(STK(4))}, a5);
@@ -2057,6 +2127,7 @@ HLE_FUNC("ImDrawList_PrimReserve", ig_ImDrawList_PrimReserve) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImDrawList_PrimReserve", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PrimReserve(ha0, a1, a2);
@@ -2068,6 +2139,7 @@ HLE_FUNC("ImDrawList_PrimUnreserve", ig_ImDrawList_PrimUnreserve) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImDrawList_PrimUnreserve", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PrimUnreserve(ha0, a1, a2);
@@ -2078,6 +2150,7 @@ HLE_FUNC("ImDrawList_PrimUnreserve", ig_ImDrawList_PrimUnreserve) {
 HLE_FUNC("ImDrawList_PrimVtx", ig_ImDrawList_PrimVtx) {
     uint32_t a0 = c->r[0];
     uint32_t a3 = STK(1);
+    if (!a0) { ig_null_self(c, "ImDrawList_PrimVtx", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PrimVtx(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, a3);
@@ -2088,6 +2161,7 @@ HLE_FUNC("ImDrawList_PrimVtx", ig_ImDrawList_PrimVtx) {
 HLE_FUNC("ImDrawList_PrimWriteIdx", ig_ImDrawList_PrimWriteIdx) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImDrawList_PrimWriteIdx", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PrimWriteIdx(ha0, a1);
@@ -2098,6 +2172,7 @@ HLE_FUNC("ImDrawList_PrimWriteIdx", ig_ImDrawList_PrimWriteIdx) {
 HLE_FUNC("ImDrawList_PrimWriteVtx", ig_ImDrawList_PrimWriteVtx) {
     uint32_t a0 = c->r[0];
     uint32_t a3 = STK(1);
+    if (!a0) { ig_null_self(c, "ImDrawList_PrimWriteVtx", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PrimWriteVtx(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, a3);
@@ -2108,6 +2183,7 @@ HLE_FUNC("ImDrawList_PrimWriteVtx", ig_ImDrawList_PrimWriteVtx) {
 HLE_FUNC("ImDrawList_PushClipRect", ig_ImDrawList_PushClipRect) {
     uint32_t a0 = c->r[0];
     uint32_t a3 = STK(1);
+    if (!a0) { ig_null_self(c, "ImDrawList_PushClipRect", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PushClipRect(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))}, (a3 != 0));
@@ -2117,6 +2193,7 @@ HLE_FUNC("ImDrawList_PushClipRect", ig_ImDrawList_PushClipRect) {
 
 HLE_FUNC("ImDrawList_PushClipRectFullScreen", ig_ImDrawList_PushClipRectFullScreen) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList_PushClipRectFullScreen", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_PushClipRectFullScreen(ha0);
@@ -2127,6 +2204,7 @@ HLE_FUNC("ImDrawList_PushClipRectFullScreen", ig_ImDrawList_PushClipRectFullScre
 HLE_FUNC("ImDrawList_PushTexture", ig_ImDrawList_PushTexture) {
     uint32_t a0 = c->r[0];
     uint32_t a1[4] = {c->r[2], c->r[3], STK(0), STK(1)};
+    if (!a0) { ig_null_self(c, "ImDrawList_PushTexture", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImTextureRef_c ha1; memset(&ha1, 0, sizeof ha1);
@@ -2140,6 +2218,7 @@ HLE_FUNC("ImDrawList_PushTexture", ig_ImDrawList_PushTexture) {
 HLE_FUNC("ImDrawList__CalcCircleAutoSegmentCount", ig_ImDrawList__CalcCircleAutoSegmentCount) {
     uint32_t a0 = c->r[0];
     float a1 = ig_f(c->r[1]);
+    if (!a0) { ig_null_self(c, "ImDrawList__CalcCircleAutoSegmentCount", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     __auto_type r_ = ImDrawList__CalcCircleAutoSegmentCount(ha0, a1);
@@ -2150,6 +2229,7 @@ HLE_FUNC("ImDrawList__CalcCircleAutoSegmentCount", ig_ImDrawList__CalcCircleAuto
 
 HLE_FUNC("ImDrawList__ClearFreeMemory", ig_ImDrawList__ClearFreeMemory) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList__ClearFreeMemory", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList__ClearFreeMemory(ha0);
@@ -2159,6 +2239,7 @@ HLE_FUNC("ImDrawList__ClearFreeMemory", ig_ImDrawList__ClearFreeMemory) {
 
 HLE_FUNC("ImDrawList__OnChangedClipRect", ig_ImDrawList__OnChangedClipRect) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList__OnChangedClipRect", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList__OnChangedClipRect(ha0);
@@ -2168,6 +2249,7 @@ HLE_FUNC("ImDrawList__OnChangedClipRect", ig_ImDrawList__OnChangedClipRect) {
 
 HLE_FUNC("ImDrawList__OnChangedTexture", ig_ImDrawList__OnChangedTexture) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList__OnChangedTexture", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList__OnChangedTexture(ha0);
@@ -2177,6 +2259,7 @@ HLE_FUNC("ImDrawList__OnChangedTexture", ig_ImDrawList__OnChangedTexture) {
 
 HLE_FUNC("ImDrawList__OnChangedVtxOffset", ig_ImDrawList__OnChangedVtxOffset) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList__OnChangedVtxOffset", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList__OnChangedVtxOffset(ha0);
@@ -2190,6 +2273,7 @@ HLE_FUNC("ImDrawList__PathArcToFastEx", ig_ImDrawList__PathArcToFastEx) {
     uint32_t a3 = STK(0);
     uint32_t a4 = STK(1);
     uint32_t a5 = STK(2);
+    if (!a0) { ig_null_self(c, "ImDrawList__PathArcToFastEx", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList__PathArcToFastEx(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, a2, a3, a4, a5);
@@ -2203,6 +2287,7 @@ HLE_FUNC("ImDrawList__PathArcToN", ig_ImDrawList__PathArcToN) {
     float a3 = ig_f(STK(0));
     float a4 = ig_f(STK(1));
     uint32_t a5 = STK(2);
+    if (!a0) { ig_null_self(c, "ImDrawList__PathArcToN", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList__PathArcToN(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, a2, a3, a4, a5);
@@ -2212,6 +2297,7 @@ HLE_FUNC("ImDrawList__PathArcToN", ig_ImDrawList__PathArcToN) {
 
 HLE_FUNC("ImDrawList__PopUnusedDrawCmd", ig_ImDrawList__PopUnusedDrawCmd) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList__PopUnusedDrawCmd", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList__PopUnusedDrawCmd(ha0);
@@ -2221,6 +2307,7 @@ HLE_FUNC("ImDrawList__PopUnusedDrawCmd", ig_ImDrawList__PopUnusedDrawCmd) {
 
 HLE_FUNC("ImDrawList__ResetForNewFrame", ig_ImDrawList__ResetForNewFrame) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList__ResetForNewFrame", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList__ResetForNewFrame(ha0);
@@ -2231,6 +2318,7 @@ HLE_FUNC("ImDrawList__ResetForNewFrame", ig_ImDrawList__ResetForNewFrame) {
 HLE_FUNC("ImDrawList__SetDrawListSharedData", ig_ImDrawList__SetDrawListSharedData) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImDrawList__SetDrawListSharedData", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     void *ha1 = m_in(a1, 8);
@@ -2243,6 +2331,7 @@ HLE_FUNC("ImDrawList__SetDrawListSharedData", ig_ImDrawList__SetDrawListSharedDa
 HLE_FUNC("ImDrawList__SetTexture", ig_ImDrawList__SetTexture) {
     uint32_t a0 = c->r[0];
     uint32_t a1[4] = {c->r[2], c->r[3], STK(0), STK(1)};
+    if (!a0) { ig_null_self(c, "ImDrawList__SetTexture", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImTextureRef_c ha1; memset(&ha1, 0, sizeof ha1);
@@ -2255,6 +2344,7 @@ HLE_FUNC("ImDrawList__SetTexture", ig_ImDrawList__SetTexture) {
 
 HLE_FUNC("ImDrawList__TryMergeDrawCmds", ig_ImDrawList__TryMergeDrawCmds) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList__TryMergeDrawCmds", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList__TryMergeDrawCmds(ha0);
@@ -2264,6 +2354,7 @@ HLE_FUNC("ImDrawList__TryMergeDrawCmds", ig_ImDrawList__TryMergeDrawCmds) {
 
 HLE_FUNC("ImDrawList_destroy", ig_ImDrawList_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImDrawList_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 7);
     ImDrawList_destroy(ha0);
@@ -2280,6 +2371,7 @@ HLE_FUNC("ImFontAtlasBuilder_ImFontAtlasBuilder", ig_ImFontAtlasBuilder_ImFontAt
 
 HLE_FUNC("ImFontAtlasBuilder_destroy", ig_ImFontAtlasBuilder_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontAtlasBuilder_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 13);
     ImFontAtlasBuilder_destroy(ha0);
@@ -2296,6 +2388,7 @@ HLE_FUNC("ImFontAtlasRect_ImFontAtlasRect", ig_ImFontAtlasRect_ImFontAtlasRect) 
 
 HLE_FUNC("ImFontAtlasRect_destroy", ig_ImFontAtlasRect_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontAtlasRect_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 15);
     ImFontAtlasRect_destroy(ha0);
@@ -2308,6 +2401,7 @@ HLE_FUNC("ImFontAtlas_AddCustomRect", ig_ImFontAtlas_AddCustomRect) {
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
     uint32_t a3 = c->r[3];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_AddCustomRect", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     void *ha3 = m_in(a3, 15);
@@ -2321,6 +2415,7 @@ HLE_FUNC("ImFontAtlas_AddCustomRect", ig_ImFontAtlas_AddCustomRect) {
 HLE_FUNC("ImFontAtlas_AddFont", ig_ImFontAtlas_AddFont) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_AddFont", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     void *ha1 = m_in(a1, 18);
@@ -2334,6 +2429,7 @@ HLE_FUNC("ImFontAtlas_AddFont", ig_ImFontAtlas_AddFont) {
 HLE_FUNC("ImFontAtlas_AddFontDefault", ig_ImFontAtlas_AddFontDefault) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_AddFontDefault", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     void *ha1 = m_in(a1, 18);
@@ -2347,6 +2443,7 @@ HLE_FUNC("ImFontAtlas_AddFontDefault", ig_ImFontAtlas_AddFontDefault) {
 HLE_FUNC("ImFontAtlas_AddFontDefaultBitmap", ig_ImFontAtlas_AddFontDefaultBitmap) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_AddFontDefaultBitmap", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     void *ha1 = m_in(a1, 18);
@@ -2360,6 +2457,7 @@ HLE_FUNC("ImFontAtlas_AddFontDefaultBitmap", ig_ImFontAtlas_AddFontDefaultBitmap
 HLE_FUNC("ImFontAtlas_AddFontDefaultVector", ig_ImFontAtlas_AddFontDefaultVector) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_AddFontDefaultVector", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     void *ha1 = m_in(a1, 18);
@@ -2376,6 +2474,7 @@ HLE_FUNC("ImFontAtlas_AddFontFromFileTTF", ig_ImFontAtlas_AddFontFromFileTTF) {
     float a2 = ig_f(c->r[2]);
     uint32_t a3 = c->r[3];
     uint32_t a4 = STK(0);
+    if (!a0) { ig_null_self(c, "ImFontAtlas_AddFontFromFileTTF", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     void *ha3 = m_in(a3, 18);
@@ -2392,6 +2491,7 @@ HLE_FUNC("ImFontAtlas_AddFontFromMemoryCompressedBase85TTF", ig_ImFontAtlas_AddF
     float a2 = ig_f(c->r[2]);
     uint32_t a3 = c->r[3];
     uint32_t a4 = STK(0);
+    if (!a0) { ig_null_self(c, "ImFontAtlas_AddFontFromMemoryCompressedBase85TTF", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     void *ha3 = m_in(a3, 18);
@@ -2409,6 +2509,7 @@ HLE_FUNC("ImFontAtlas_AddFontFromMemoryCompressedTTF", ig_ImFontAtlas_AddFontFro
     float a3 = ig_f(c->r[3]);
     uint32_t a4 = STK(0);
     uint32_t a5 = STK(1);
+    if (!a0) { ig_null_self(c, "ImFontAtlas_AddFontFromMemoryCompressedTTF", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     void *ha4 = m_in(a4, 18);
@@ -2426,6 +2527,7 @@ HLE_FUNC("ImFontAtlas_AddFontFromMemoryTTF", ig_ImFontAtlas_AddFontFromMemoryTTF
     float a3 = ig_f(c->r[3]);
     uint32_t a4 = STK(0);
     uint32_t a5 = STK(1);
+    if (!a0) { ig_null_self(c, "ImFontAtlas_AddFontFromMemoryTTF", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     void *ha4 = m_in(a4, 18);
@@ -2438,6 +2540,7 @@ HLE_FUNC("ImFontAtlas_AddFontFromMemoryTTF", ig_ImFontAtlas_AddFontFromMemoryTTF
 
 HLE_FUNC("ImFontAtlas_Clear", ig_ImFontAtlas_Clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_Clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     ImFontAtlas_Clear(ha0);
@@ -2447,6 +2550,7 @@ HLE_FUNC("ImFontAtlas_Clear", ig_ImFontAtlas_Clear) {
 
 HLE_FUNC("ImFontAtlas_ClearFonts", ig_ImFontAtlas_ClearFonts) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_ClearFonts", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     ImFontAtlas_ClearFonts(ha0);
@@ -2456,6 +2560,7 @@ HLE_FUNC("ImFontAtlas_ClearFonts", ig_ImFontAtlas_ClearFonts) {
 
 HLE_FUNC("ImFontAtlas_ClearInputData", ig_ImFontAtlas_ClearInputData) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_ClearInputData", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     ImFontAtlas_ClearInputData(ha0);
@@ -2465,6 +2570,7 @@ HLE_FUNC("ImFontAtlas_ClearInputData", ig_ImFontAtlas_ClearInputData) {
 
 HLE_FUNC("ImFontAtlas_ClearTexData", ig_ImFontAtlas_ClearTexData) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_ClearTexData", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     ImFontAtlas_ClearTexData(ha0);
@@ -2474,6 +2580,7 @@ HLE_FUNC("ImFontAtlas_ClearTexData", ig_ImFontAtlas_ClearTexData) {
 
 HLE_FUNC("ImFontAtlas_CompactCache", ig_ImFontAtlas_CompactCache) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_CompactCache", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     ImFontAtlas_CompactCache(ha0);
@@ -2485,6 +2592,7 @@ HLE_FUNC("ImFontAtlas_GetCustomRect", ig_ImFontAtlas_GetCustomRect) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_GetCustomRect", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     void *ha2 = m_in(a2, 15);
@@ -2505,6 +2613,7 @@ HLE_FUNC("ImFontAtlas_ImFontAtlas", ig_ImFontAtlas_ImFontAtlas) {
 HLE_FUNC("ImFontAtlas_RemoveCustomRect", ig_ImFontAtlas_RemoveCustomRect) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_RemoveCustomRect", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     ImFontAtlas_RemoveCustomRect(ha0, a1);
@@ -2515,6 +2624,7 @@ HLE_FUNC("ImFontAtlas_RemoveCustomRect", ig_ImFontAtlas_RemoveCustomRect) {
 HLE_FUNC("ImFontAtlas_RemoveFont", ig_ImFontAtlas_RemoveFont) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_RemoveFont", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     void *ha1 = m_in(a1, 11);
@@ -2527,6 +2637,7 @@ HLE_FUNC("ImFontAtlas_RemoveFont", ig_ImFontAtlas_RemoveFont) {
 HLE_FUNC("ImFontAtlas_SetFontLoader", ig_ImFontAtlas_SetFontLoader) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_SetFontLoader", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     void *ha1 = m_in(a1, 21);
@@ -2538,6 +2649,7 @@ HLE_FUNC("ImFontAtlas_SetFontLoader", ig_ImFontAtlas_SetFontLoader) {
 
 HLE_FUNC("ImFontAtlas_destroy", ig_ImFontAtlas_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontAtlas_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 12);
     ImFontAtlas_destroy(ha0);
@@ -2547,6 +2659,7 @@ HLE_FUNC("ImFontAtlas_destroy", ig_ImFontAtlas_destroy) {
 
 HLE_FUNC("ImFontBaked_ClearOutputData", ig_ImFontBaked_ClearOutputData) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontBaked_ClearOutputData", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 17);
     ImFontBaked_ClearOutputData(ha0);
@@ -2557,6 +2670,7 @@ HLE_FUNC("ImFontBaked_ClearOutputData", ig_ImFontBaked_ClearOutputData) {
 HLE_FUNC("ImFontBaked_FindGlyph", ig_ImFontBaked_FindGlyph) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontBaked_FindGlyph", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 17);
     __auto_type r_ = ImFontBaked_FindGlyph(ha0, a1);
@@ -2568,6 +2682,7 @@ HLE_FUNC("ImFontBaked_FindGlyph", ig_ImFontBaked_FindGlyph) {
 HLE_FUNC("ImFontBaked_FindGlyphNoFallback", ig_ImFontBaked_FindGlyphNoFallback) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontBaked_FindGlyphNoFallback", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 17);
     __auto_type r_ = ImFontBaked_FindGlyphNoFallback(ha0, a1);
@@ -2579,6 +2694,7 @@ HLE_FUNC("ImFontBaked_FindGlyphNoFallback", ig_ImFontBaked_FindGlyphNoFallback) 
 HLE_FUNC("ImFontBaked_GetCharAdvance", ig_ImFontBaked_GetCharAdvance) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontBaked_GetCharAdvance", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 17);
     __auto_type r_ = ImFontBaked_GetCharAdvance(ha0, a1);
@@ -2597,6 +2713,7 @@ HLE_FUNC("ImFontBaked_ImFontBaked", ig_ImFontBaked_ImFontBaked) {
 HLE_FUNC("ImFontBaked_IsGlyphLoaded", ig_ImFontBaked_IsGlyphLoaded) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontBaked_IsGlyphLoaded", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 17);
     __auto_type r_ = ImFontBaked_IsGlyphLoaded(ha0, a1);
@@ -2607,6 +2724,7 @@ HLE_FUNC("ImFontBaked_IsGlyphLoaded", ig_ImFontBaked_IsGlyphLoaded) {
 
 HLE_FUNC("ImFontBaked_destroy", ig_ImFontBaked_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontBaked_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 17);
     ImFontBaked_destroy(ha0);
@@ -2623,6 +2741,7 @@ HLE_FUNC("ImFontConfig_ImFontConfig", ig_ImFontConfig_ImFontConfig) {
 
 HLE_FUNC("ImFontConfig_destroy", ig_ImFontConfig_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontConfig_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 18);
     ImFontConfig_destroy(ha0);
@@ -2633,6 +2752,7 @@ HLE_FUNC("ImFontConfig_destroy", ig_ImFontConfig_destroy) {
 HLE_FUNC("ImFontGlyphRangesBuilder_AddChar", ig_ImFontGlyphRangesBuilder_AddChar) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontGlyphRangesBuilder_AddChar", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 20);
     ImFontGlyphRangesBuilder_AddChar(ha0, a1);
@@ -2643,6 +2763,7 @@ HLE_FUNC("ImFontGlyphRangesBuilder_AddChar", ig_ImFontGlyphRangesBuilder_AddChar
 HLE_FUNC("ImFontGlyphRangesBuilder_AddRanges", ig_ImFontGlyphRangesBuilder_AddRanges) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontGlyphRangesBuilder_AddRanges", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 20);
     ImFontGlyphRangesBuilder_AddRanges(ha0, GP(a1));
@@ -2654,6 +2775,7 @@ HLE_FUNC("ImFontGlyphRangesBuilder_AddText", ig_ImFontGlyphRangesBuilder_AddText
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImFontGlyphRangesBuilder_AddText", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 20);
     ImFontGlyphRangesBuilder_AddText(ha0, GP(a1), GP(a2));
@@ -2663,6 +2785,7 @@ HLE_FUNC("ImFontGlyphRangesBuilder_AddText", ig_ImFontGlyphRangesBuilder_AddText
 
 HLE_FUNC("ImFontGlyphRangesBuilder_Clear", ig_ImFontGlyphRangesBuilder_Clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontGlyphRangesBuilder_Clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 20);
     ImFontGlyphRangesBuilder_Clear(ha0);
@@ -2673,6 +2796,7 @@ HLE_FUNC("ImFontGlyphRangesBuilder_Clear", ig_ImFontGlyphRangesBuilder_Clear) {
 HLE_FUNC("ImFontGlyphRangesBuilder_GetBit", ig_ImFontGlyphRangesBuilder_GetBit) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontGlyphRangesBuilder_GetBit", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 20);
     __auto_type r_ = ImFontGlyphRangesBuilder_GetBit(ha0, (size_t)a1);
@@ -2691,6 +2815,7 @@ HLE_FUNC("ImFontGlyphRangesBuilder_ImFontGlyphRangesBuilder", ig_ImFontGlyphRang
 HLE_FUNC("ImFontGlyphRangesBuilder_SetBit", ig_ImFontGlyphRangesBuilder_SetBit) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFontGlyphRangesBuilder_SetBit", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 20);
     ImFontGlyphRangesBuilder_SetBit(ha0, (size_t)a1);
@@ -2700,6 +2825,7 @@ HLE_FUNC("ImFontGlyphRangesBuilder_SetBit", ig_ImFontGlyphRangesBuilder_SetBit) 
 
 HLE_FUNC("ImFontGlyphRangesBuilder_destroy", ig_ImFontGlyphRangesBuilder_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontGlyphRangesBuilder_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 20);
     ImFontGlyphRangesBuilder_destroy(ha0);
@@ -2716,6 +2842,7 @@ HLE_FUNC("ImFontGlyph_ImFontGlyph", ig_ImFontGlyph_ImFontGlyph) {
 
 HLE_FUNC("ImFontGlyph_destroy", ig_ImFontGlyph_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontGlyph_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 19);
     ImFontGlyph_destroy(ha0);
@@ -2732,6 +2859,7 @@ HLE_FUNC("ImFontLoader_ImFontLoader", ig_ImFontLoader_ImFontLoader) {
 
 HLE_FUNC("ImFontLoader_destroy", ig_ImFontLoader_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFontLoader_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 21);
     ImFontLoader_destroy(ha0);
@@ -2743,6 +2871,7 @@ HLE_FUNC("ImFont_AddRemapChar", ig_ImFont_AddRemapChar) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImFont_AddRemapChar", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 11);
     ImFont_AddRemapChar(ha0, a1, a2);
@@ -2756,6 +2885,7 @@ HLE_FUNC("ImFont_CalcWordWrapPosition", ig_ImFont_CalcWordWrapPosition) {
     uint32_t a2 = c->r[2];
     uint32_t a3 = c->r[3];
     float a4 = ig_f(STK(0));
+    if (!a0) { ig_null_self(c, "ImFont_CalcWordWrapPosition", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 11);
     __auto_type r_ = ImFont_CalcWordWrapPosition(ha0, a1, GP(a2), GP(a3), a4);
@@ -2766,6 +2896,7 @@ HLE_FUNC("ImFont_CalcWordWrapPosition", ig_ImFont_CalcWordWrapPosition) {
 
 HLE_FUNC("ImFont_ClearOutputData", ig_ImFont_ClearOutputData) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFont_ClearOutputData", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 11);
     ImFont_ClearOutputData(ha0);
@@ -2775,6 +2906,7 @@ HLE_FUNC("ImFont_ClearOutputData", ig_ImFont_ClearOutputData) {
 
 HLE_FUNC("ImFont_GetDebugName", ig_ImFont_GetDebugName) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFont_GetDebugName", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 11);
     __auto_type r_ = ImFont_GetDebugName(ha0);
@@ -2787,6 +2919,7 @@ HLE_FUNC("ImFont_GetFontBaked", ig_ImFont_GetFontBaked) {
     uint32_t a0 = c->r[0];
     float a1 = ig_f(c->r[1]);
     float a2 = ig_f(c->r[2]);
+    if (!a0) { ig_null_self(c, "ImFont_GetFontBaked", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 11);
     __auto_type r_ = ImFont_GetFontBaked(ha0, a1, a2);
@@ -2805,6 +2938,7 @@ HLE_FUNC("ImFont_ImFont", ig_ImFont_ImFont) {
 HLE_FUNC("ImFont_IsGlyphInFont", ig_ImFont_IsGlyphInFont) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImFont_IsGlyphInFont", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 11);
     __auto_type r_ = ImFont_IsGlyphInFont(ha0, a1);
@@ -2817,6 +2951,7 @@ HLE_FUNC("ImFont_IsGlyphRangeUnused", ig_ImFont_IsGlyphRangeUnused) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImFont_IsGlyphRangeUnused", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 11);
     __auto_type r_ = ImFont_IsGlyphRangeUnused(ha0, a1, a2);
@@ -2827,6 +2962,7 @@ HLE_FUNC("ImFont_IsGlyphRangeUnused", ig_ImFont_IsGlyphRangeUnused) {
 
 HLE_FUNC("ImFont_IsLoaded", ig_ImFont_IsLoaded) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFont_IsLoaded", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 11);
     __auto_type r_ = ImFont_IsLoaded(ha0);
@@ -2842,6 +2978,7 @@ HLE_FUNC("ImFont_RenderChar", ig_ImFont_RenderChar) {
     uint32_t a4 = STK(1);
     uint32_t a5 = STK(2);
     uint32_t a6 = STK(3);
+    if (!a0) { ig_null_self(c, "ImFont_RenderChar", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 11);
     void *ha1 = m_in(a1, 7);
@@ -2862,6 +2999,7 @@ HLE_FUNC("ImFont_RenderText", ig_ImFont_RenderText) {
     uint32_t a7 = STK(7);
     float a8 = ig_f(STK(8));
     uint32_t a9 = STK(9);
+    if (!a0) { ig_null_self(c, "ImFont_RenderText", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 11);
     void *ha1 = m_in(a1, 7);
@@ -2873,6 +3011,7 @@ HLE_FUNC("ImFont_RenderText", ig_ImFont_RenderText) {
 
 HLE_FUNC("ImFont_destroy", ig_ImFont_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImFont_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 11);
     ImFont_destroy(ha0);
@@ -2889,6 +3028,7 @@ HLE_FUNC("ImGuiBoxSelectState_ImGuiBoxSelectState", ig_ImGuiBoxSelectState_ImGui
 
 HLE_FUNC("ImGuiBoxSelectState_destroy", ig_ImGuiBoxSelectState_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiBoxSelectState_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 23);
     ImGuiBoxSelectState_destroy(ha0);
@@ -2905,6 +3045,7 @@ HLE_FUNC("ImGuiComboPreviewData_ImGuiComboPreviewData", ig_ImGuiComboPreviewData
 
 HLE_FUNC("ImGuiComboPreviewData_destroy", ig_ImGuiComboPreviewData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiComboPreviewData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 25);
     ImGuiComboPreviewData_destroy(ha0);
@@ -2921,6 +3062,7 @@ HLE_FUNC("ImGuiContextHook_ImGuiContextHook", ig_ImGuiContextHook_ImGuiContextHo
 
 HLE_FUNC("ImGuiContextHook_destroy", ig_ImGuiContextHook_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiContextHook_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 27);
     ImGuiContextHook_destroy(ha0);
@@ -2940,6 +3082,7 @@ HLE_FUNC("ImGuiContext_ImGuiContext", ig_ImGuiContext_ImGuiContext) {
 
 HLE_FUNC("ImGuiContext_destroy", ig_ImGuiContext_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiContext_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 26);
     ImGuiContext_destroy(ha0);
@@ -2956,6 +3099,7 @@ HLE_FUNC("ImGuiDebugAllocInfo_ImGuiDebugAllocInfo", ig_ImGuiDebugAllocInfo_ImGui
 
 HLE_FUNC("ImGuiDebugAllocInfo_destroy", ig_ImGuiDebugAllocInfo_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiDebugAllocInfo_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 32);
     ImGuiDebugAllocInfo_destroy(ha0);
@@ -2972,6 +3116,7 @@ HLE_FUNC("ImGuiDebugItemPathQuery_ImGuiDebugItemPathQuery", ig_ImGuiDebugItemPat
 
 HLE_FUNC("ImGuiDebugItemPathQuery_destroy", ig_ImGuiDebugItemPathQuery_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiDebugItemPathQuery_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 33);
     ImGuiDebugItemPathQuery_destroy(ha0);
@@ -2988,6 +3133,7 @@ HLE_FUNC("ImGuiErrorRecoveryState_ImGuiErrorRecoveryState", ig_ImGuiErrorRecover
 
 HLE_FUNC("ImGuiErrorRecoveryState_destroy", ig_ImGuiErrorRecoveryState_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiErrorRecoveryState_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 34);
     ImGuiErrorRecoveryState_destroy(ha0);
@@ -3004,6 +3150,7 @@ HLE_FUNC("ImGuiIDStackTool_ImGuiIDStackTool", ig_ImGuiIDStackTool_ImGuiIDStackTo
 
 HLE_FUNC("ImGuiIDStackTool_destroy", ig_ImGuiIDStackTool_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiIDStackTool_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 37);
     ImGuiIDStackTool_destroy(ha0);
@@ -3014,6 +3161,7 @@ HLE_FUNC("ImGuiIDStackTool_destroy", ig_ImGuiIDStackTool_destroy) {
 HLE_FUNC("ImGuiIO_AddFocusEvent", ig_ImGuiIO_AddFocusEvent) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiIO_AddFocusEvent", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_AddFocusEvent(ha0, (a1 != 0));
@@ -3024,6 +3172,7 @@ HLE_FUNC("ImGuiIO_AddFocusEvent", ig_ImGuiIO_AddFocusEvent) {
 HLE_FUNC("ImGuiIO_AddInputCharacter", ig_ImGuiIO_AddInputCharacter) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiIO_AddInputCharacter", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_AddInputCharacter(ha0, a1);
@@ -3034,6 +3183,7 @@ HLE_FUNC("ImGuiIO_AddInputCharacter", ig_ImGuiIO_AddInputCharacter) {
 HLE_FUNC("ImGuiIO_AddInputCharacterUTF16", ig_ImGuiIO_AddInputCharacterUTF16) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiIO_AddInputCharacterUTF16", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_AddInputCharacterUTF16(ha0, a1);
@@ -3044,6 +3194,7 @@ HLE_FUNC("ImGuiIO_AddInputCharacterUTF16", ig_ImGuiIO_AddInputCharacterUTF16) {
 HLE_FUNC("ImGuiIO_AddInputCharactersUTF8", ig_ImGuiIO_AddInputCharactersUTF8) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiIO_AddInputCharactersUTF8", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_AddInputCharactersUTF8(ha0, GP(a1));
@@ -3056,6 +3207,7 @@ HLE_FUNC("ImGuiIO_AddKeyAnalogEvent", ig_ImGuiIO_AddKeyAnalogEvent) {
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
     float a3 = ig_f(c->r[3]);
+    if (!a0) { ig_null_self(c, "ImGuiIO_AddKeyAnalogEvent", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_AddKeyAnalogEvent(ha0, a1, (a2 != 0), a3);
@@ -3067,6 +3219,7 @@ HLE_FUNC("ImGuiIO_AddKeyEvent", ig_ImGuiIO_AddKeyEvent) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiIO_AddKeyEvent", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_AddKeyEvent(ha0, a1, (a2 != 0));
@@ -3078,6 +3231,7 @@ HLE_FUNC("ImGuiIO_AddMouseButtonEvent", ig_ImGuiIO_AddMouseButtonEvent) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiIO_AddMouseButtonEvent", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_AddMouseButtonEvent(ha0, a1, (a2 != 0));
@@ -3089,6 +3243,7 @@ HLE_FUNC("ImGuiIO_AddMousePosEvent", ig_ImGuiIO_AddMousePosEvent) {
     uint32_t a0 = c->r[0];
     float a1 = ig_f(c->r[1]);
     float a2 = ig_f(c->r[2]);
+    if (!a0) { ig_null_self(c, "ImGuiIO_AddMousePosEvent", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_AddMousePosEvent(ha0, a1, a2);
@@ -3099,6 +3254,7 @@ HLE_FUNC("ImGuiIO_AddMousePosEvent", ig_ImGuiIO_AddMousePosEvent) {
 HLE_FUNC("ImGuiIO_AddMouseSourceEvent", ig_ImGuiIO_AddMouseSourceEvent) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiIO_AddMouseSourceEvent", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_AddMouseSourceEvent(ha0, a1);
@@ -3110,6 +3266,7 @@ HLE_FUNC("ImGuiIO_AddMouseWheelEvent", ig_ImGuiIO_AddMouseWheelEvent) {
     uint32_t a0 = c->r[0];
     float a1 = ig_f(c->r[1]);
     float a2 = ig_f(c->r[2]);
+    if (!a0) { ig_null_self(c, "ImGuiIO_AddMouseWheelEvent", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_AddMouseWheelEvent(ha0, a1, a2);
@@ -3119,6 +3276,7 @@ HLE_FUNC("ImGuiIO_AddMouseWheelEvent", ig_ImGuiIO_AddMouseWheelEvent) {
 
 HLE_FUNC("ImGuiIO_ClearEventsQueue", ig_ImGuiIO_ClearEventsQueue) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiIO_ClearEventsQueue", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_ClearEventsQueue(ha0);
@@ -3128,6 +3286,7 @@ HLE_FUNC("ImGuiIO_ClearEventsQueue", ig_ImGuiIO_ClearEventsQueue) {
 
 HLE_FUNC("ImGuiIO_ClearInputKeys", ig_ImGuiIO_ClearInputKeys) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiIO_ClearInputKeys", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_ClearInputKeys(ha0);
@@ -3137,6 +3296,7 @@ HLE_FUNC("ImGuiIO_ClearInputKeys", ig_ImGuiIO_ClearInputKeys) {
 
 HLE_FUNC("ImGuiIO_ClearInputMouse", ig_ImGuiIO_ClearInputMouse) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiIO_ClearInputMouse", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_ClearInputMouse(ha0);
@@ -3154,6 +3314,7 @@ HLE_FUNC("ImGuiIO_ImGuiIO", ig_ImGuiIO_ImGuiIO) {
 HLE_FUNC("ImGuiIO_SetAppAcceptingEvents", ig_ImGuiIO_SetAppAcceptingEvents) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiIO_SetAppAcceptingEvents", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_SetAppAcceptingEvents(ha0, (a1 != 0));
@@ -3167,6 +3328,7 @@ HLE_FUNC("ImGuiIO_SetKeyEventNativeData", ig_ImGuiIO_SetKeyEventNativeData) {
     uint32_t a2 = c->r[2];
     uint32_t a3 = c->r[3];
     uint32_t a4 = STK(0);
+    if (!a0) { ig_null_self(c, "ImGuiIO_SetKeyEventNativeData", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_SetKeyEventNativeData(ha0, a1, a2, a3, a4);
@@ -3176,6 +3338,7 @@ HLE_FUNC("ImGuiIO_SetKeyEventNativeData", ig_ImGuiIO_SetKeyEventNativeData) {
 
 HLE_FUNC("ImGuiIO_destroy", ig_ImGuiIO_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiIO_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 38);
     ImGuiIO_destroy(ha0);
@@ -3192,6 +3355,7 @@ HLE_FUNC("ImGuiInputEvent_ImGuiInputEvent", ig_ImGuiInputEvent_ImGuiInputEvent) 
 
 HLE_FUNC("ImGuiInputEvent_destroy", ig_ImGuiInputEvent_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputEvent_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 39);
     ImGuiInputEvent_destroy(ha0);
@@ -3201,6 +3365,7 @@ HLE_FUNC("ImGuiInputEvent_destroy", ig_ImGuiInputEvent_destroy) {
 
 HLE_FUNC("ImGuiInputTextCallbackData_ClearSelection", ig_ImGuiInputTextCallbackData_ClearSelection) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextCallbackData_ClearSelection", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 46);
     ImGuiInputTextCallbackData_ClearSelection(ha0);
@@ -3212,6 +3377,7 @@ HLE_FUNC("ImGuiInputTextCallbackData_DeleteChars", ig_ImGuiInputTextCallbackData
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextCallbackData_DeleteChars", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 46);
     ImGuiInputTextCallbackData_DeleteChars(ha0, a1, a2);
@@ -3221,6 +3387,7 @@ HLE_FUNC("ImGuiInputTextCallbackData_DeleteChars", ig_ImGuiInputTextCallbackData
 
 HLE_FUNC("ImGuiInputTextCallbackData_HasSelection", ig_ImGuiInputTextCallbackData_HasSelection) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextCallbackData_HasSelection", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 46);
     __auto_type r_ = ImGuiInputTextCallbackData_HasSelection(ha0);
@@ -3241,6 +3408,7 @@ HLE_FUNC("ImGuiInputTextCallbackData_InsertChars", ig_ImGuiInputTextCallbackData
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
     uint32_t a3 = c->r[3];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextCallbackData_InsertChars", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 46);
     ImGuiInputTextCallbackData_InsertChars(ha0, a1, GP(a2), GP(a3));
@@ -3250,6 +3418,7 @@ HLE_FUNC("ImGuiInputTextCallbackData_InsertChars", ig_ImGuiInputTextCallbackData
 
 HLE_FUNC("ImGuiInputTextCallbackData_SelectAll", ig_ImGuiInputTextCallbackData_SelectAll) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextCallbackData_SelectAll", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 46);
     ImGuiInputTextCallbackData_SelectAll(ha0);
@@ -3261,6 +3430,7 @@ HLE_FUNC("ImGuiInputTextCallbackData_SetSelection", ig_ImGuiInputTextCallbackDat
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextCallbackData_SetSelection", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 46);
     ImGuiInputTextCallbackData_SetSelection(ha0, a1, a2);
@@ -3270,6 +3440,7 @@ HLE_FUNC("ImGuiInputTextCallbackData_SetSelection", ig_ImGuiInputTextCallbackDat
 
 HLE_FUNC("ImGuiInputTextCallbackData_destroy", ig_ImGuiInputTextCallbackData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextCallbackData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 46);
     ImGuiInputTextCallbackData_destroy(ha0);
@@ -3279,6 +3450,7 @@ HLE_FUNC("ImGuiInputTextCallbackData_destroy", ig_ImGuiInputTextCallbackData_des
 
 HLE_FUNC("ImGuiInputTextDeactivatedState_ClearFreeMemory", ig_ImGuiInputTextDeactivatedState_ClearFreeMemory) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextDeactivatedState_ClearFreeMemory", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 47);
     ImGuiInputTextDeactivatedState_ClearFreeMemory(ha0);
@@ -3295,6 +3467,7 @@ HLE_FUNC("ImGuiInputTextDeactivatedState_ImGuiInputTextDeactivatedState", ig_ImG
 
 HLE_FUNC("ImGuiInputTextDeactivatedState_destroy", ig_ImGuiInputTextDeactivatedState_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextDeactivatedState_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 47);
     ImGuiInputTextDeactivatedState_destroy(ha0);
@@ -3304,6 +3477,7 @@ HLE_FUNC("ImGuiInputTextDeactivatedState_destroy", ig_ImGuiInputTextDeactivatedS
 
 HLE_FUNC("ImGuiInputTextState_ClearFreeMemory", ig_ImGuiInputTextState_ClearFreeMemory) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_ClearFreeMemory", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     ImGuiInputTextState_ClearFreeMemory(ha0);
@@ -3313,6 +3487,7 @@ HLE_FUNC("ImGuiInputTextState_ClearFreeMemory", ig_ImGuiInputTextState_ClearFree
 
 HLE_FUNC("ImGuiInputTextState_ClearSelection", ig_ImGuiInputTextState_ClearSelection) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_ClearSelection", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     ImGuiInputTextState_ClearSelection(ha0);
@@ -3322,6 +3497,7 @@ HLE_FUNC("ImGuiInputTextState_ClearSelection", ig_ImGuiInputTextState_ClearSelec
 
 HLE_FUNC("ImGuiInputTextState_ClearText", ig_ImGuiInputTextState_ClearText) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_ClearText", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     ImGuiInputTextState_ClearText(ha0);
@@ -3331,6 +3507,7 @@ HLE_FUNC("ImGuiInputTextState_ClearText", ig_ImGuiInputTextState_ClearText) {
 
 HLE_FUNC("ImGuiInputTextState_CursorAnimReset", ig_ImGuiInputTextState_CursorAnimReset) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_CursorAnimReset", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     ImGuiInputTextState_CursorAnimReset(ha0);
@@ -3340,6 +3517,7 @@ HLE_FUNC("ImGuiInputTextState_CursorAnimReset", ig_ImGuiInputTextState_CursorAni
 
 HLE_FUNC("ImGuiInputTextState_CursorClamp", ig_ImGuiInputTextState_CursorClamp) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_CursorClamp", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     ImGuiInputTextState_CursorClamp(ha0);
@@ -3349,6 +3527,7 @@ HLE_FUNC("ImGuiInputTextState_CursorClamp", ig_ImGuiInputTextState_CursorClamp) 
 
 HLE_FUNC("ImGuiInputTextState_GetCursorPos", ig_ImGuiInputTextState_GetCursorPos) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_GetCursorPos", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     __auto_type r_ = ImGuiInputTextState_GetCursorPos(ha0);
@@ -3359,6 +3538,7 @@ HLE_FUNC("ImGuiInputTextState_GetCursorPos", ig_ImGuiInputTextState_GetCursorPos
 
 HLE_FUNC("ImGuiInputTextState_GetPreferredOffsetX", ig_ImGuiInputTextState_GetPreferredOffsetX) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_GetPreferredOffsetX", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     __auto_type r_ = ImGuiInputTextState_GetPreferredOffsetX(ha0);
@@ -3369,6 +3549,7 @@ HLE_FUNC("ImGuiInputTextState_GetPreferredOffsetX", ig_ImGuiInputTextState_GetPr
 
 HLE_FUNC("ImGuiInputTextState_GetSelectionEnd", ig_ImGuiInputTextState_GetSelectionEnd) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_GetSelectionEnd", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     __auto_type r_ = ImGuiInputTextState_GetSelectionEnd(ha0);
@@ -3379,6 +3560,7 @@ HLE_FUNC("ImGuiInputTextState_GetSelectionEnd", ig_ImGuiInputTextState_GetSelect
 
 HLE_FUNC("ImGuiInputTextState_GetSelectionStart", ig_ImGuiInputTextState_GetSelectionStart) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_GetSelectionStart", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     __auto_type r_ = ImGuiInputTextState_GetSelectionStart(ha0);
@@ -3389,6 +3571,7 @@ HLE_FUNC("ImGuiInputTextState_GetSelectionStart", ig_ImGuiInputTextState_GetSele
 
 HLE_FUNC("ImGuiInputTextState_GetText", ig_ImGuiInputTextState_GetText) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_GetText", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     __auto_type r_ = ImGuiInputTextState_GetText(ha0);
@@ -3399,6 +3582,7 @@ HLE_FUNC("ImGuiInputTextState_GetText", ig_ImGuiInputTextState_GetText) {
 
 HLE_FUNC("ImGuiInputTextState_HasSelection", ig_ImGuiInputTextState_HasSelection) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_HasSelection", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     __auto_type r_ = ImGuiInputTextState_HasSelection(ha0);
@@ -3417,6 +3601,7 @@ HLE_FUNC("ImGuiInputTextState_ImGuiInputTextState", ig_ImGuiInputTextState_ImGui
 HLE_FUNC("ImGuiInputTextState_OnCharPressed", ig_ImGuiInputTextState_OnCharPressed) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_OnCharPressed", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     ImGuiInputTextState_OnCharPressed(ha0, a1);
@@ -3427,6 +3612,7 @@ HLE_FUNC("ImGuiInputTextState_OnCharPressed", ig_ImGuiInputTextState_OnCharPress
 HLE_FUNC("ImGuiInputTextState_OnKeyPressed", ig_ImGuiInputTextState_OnKeyPressed) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_OnKeyPressed", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     ImGuiInputTextState_OnKeyPressed(ha0, a1);
@@ -3436,6 +3622,7 @@ HLE_FUNC("ImGuiInputTextState_OnKeyPressed", ig_ImGuiInputTextState_OnKeyPressed
 
 HLE_FUNC("ImGuiInputTextState_ReloadUserBufAndKeepSelection", ig_ImGuiInputTextState_ReloadUserBufAndKeepSelection) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_ReloadUserBufAndKeepSelection", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     ImGuiInputTextState_ReloadUserBufAndKeepSelection(ha0);
@@ -3445,6 +3632,7 @@ HLE_FUNC("ImGuiInputTextState_ReloadUserBufAndKeepSelection", ig_ImGuiInputTextS
 
 HLE_FUNC("ImGuiInputTextState_ReloadUserBufAndMoveToEnd", ig_ImGuiInputTextState_ReloadUserBufAndMoveToEnd) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_ReloadUserBufAndMoveToEnd", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     ImGuiInputTextState_ReloadUserBufAndMoveToEnd(ha0);
@@ -3454,6 +3642,7 @@ HLE_FUNC("ImGuiInputTextState_ReloadUserBufAndMoveToEnd", ig_ImGuiInputTextState
 
 HLE_FUNC("ImGuiInputTextState_ReloadUserBufAndSelectAll", ig_ImGuiInputTextState_ReloadUserBufAndSelectAll) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_ReloadUserBufAndSelectAll", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     ImGuiInputTextState_ReloadUserBufAndSelectAll(ha0);
@@ -3463,6 +3652,7 @@ HLE_FUNC("ImGuiInputTextState_ReloadUserBufAndSelectAll", ig_ImGuiInputTextState
 
 HLE_FUNC("ImGuiInputTextState_SelectAll", ig_ImGuiInputTextState_SelectAll) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_SelectAll", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     ImGuiInputTextState_SelectAll(ha0);
@@ -3474,6 +3664,7 @@ HLE_FUNC("ImGuiInputTextState_SetSelection", ig_ImGuiInputTextState_SetSelection
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_SetSelection", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     ImGuiInputTextState_SetSelection(ha0, a1, a2);
@@ -3483,6 +3674,7 @@ HLE_FUNC("ImGuiInputTextState_SetSelection", ig_ImGuiInputTextState_SetSelection
 
 HLE_FUNC("ImGuiInputTextState_destroy", ig_ImGuiInputTextState_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiInputTextState_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 48);
     ImGuiInputTextState_destroy(ha0);
@@ -3499,6 +3691,7 @@ HLE_FUNC("ImGuiKeyOwnerData_ImGuiKeyOwnerData", ig_ImGuiKeyOwnerData_ImGuiKeyOwn
 
 HLE_FUNC("ImGuiKeyOwnerData_destroy", ig_ImGuiKeyOwnerData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiKeyOwnerData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 50);
     ImGuiKeyOwnerData_destroy(ha0);
@@ -3515,6 +3708,7 @@ HLE_FUNC("ImGuiKeyRoutingData_ImGuiKeyRoutingData", ig_ImGuiKeyRoutingData_ImGui
 
 HLE_FUNC("ImGuiKeyRoutingData_destroy", ig_ImGuiKeyRoutingData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiKeyRoutingData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 51);
     ImGuiKeyRoutingData_destroy(ha0);
@@ -3524,6 +3718,7 @@ HLE_FUNC("ImGuiKeyRoutingData_destroy", ig_ImGuiKeyRoutingData_destroy) {
 
 HLE_FUNC("ImGuiKeyRoutingTable_Clear", ig_ImGuiKeyRoutingTable_Clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiKeyRoutingTable_Clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 52);
     ImGuiKeyRoutingTable_Clear(ha0);
@@ -3540,6 +3735,7 @@ HLE_FUNC("ImGuiKeyRoutingTable_ImGuiKeyRoutingTable", ig_ImGuiKeyRoutingTable_Im
 
 HLE_FUNC("ImGuiKeyRoutingTable_destroy", ig_ImGuiKeyRoutingTable_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiKeyRoutingTable_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 52);
     ImGuiKeyRoutingTable_destroy(ha0);
@@ -3556,6 +3752,7 @@ HLE_FUNC("ImGuiLastItemData_ImGuiLastItemData", ig_ImGuiLastItemData_ImGuiLastIt
 
 HLE_FUNC("ImGuiLastItemData_destroy", ig_ImGuiLastItemData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiLastItemData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 53);
     ImGuiLastItemData_destroy(ha0);
@@ -3573,6 +3770,7 @@ HLE_FUNC("ImGuiListClipperData_ImGuiListClipperData", ig_ImGuiListClipperData_Im
 HLE_FUNC("ImGuiListClipperData_Reset", ig_ImGuiListClipperData_Reset) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiListClipperData_Reset", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 55);
     void *ha1 = m_in(a1, 54);
@@ -3584,6 +3782,7 @@ HLE_FUNC("ImGuiListClipperData_Reset", ig_ImGuiListClipperData_Reset) {
 
 HLE_FUNC("ImGuiListClipperData_destroy", ig_ImGuiListClipperData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiListClipperData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 55);
     ImGuiListClipperData_destroy(ha0);
@@ -3619,6 +3818,7 @@ HLE_FUNC("ImGuiListClipper_Begin", ig_ImGuiListClipper_Begin) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     float a2 = ig_f(c->r[2]);
+    if (!a0) { ig_null_self(c, "ImGuiListClipper_Begin", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 54);
     ImGuiListClipper_Begin(ha0, a1, a2);
@@ -3628,6 +3828,7 @@ HLE_FUNC("ImGuiListClipper_Begin", ig_ImGuiListClipper_Begin) {
 
 HLE_FUNC("ImGuiListClipper_End", ig_ImGuiListClipper_End) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiListClipper_End", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 54);
     ImGuiListClipper_End(ha0);
@@ -3645,6 +3846,7 @@ HLE_FUNC("ImGuiListClipper_ImGuiListClipper", ig_ImGuiListClipper_ImGuiListClipp
 HLE_FUNC("ImGuiListClipper_IncludeItemByIndex", ig_ImGuiListClipper_IncludeItemByIndex) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiListClipper_IncludeItemByIndex", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 54);
     ImGuiListClipper_IncludeItemByIndex(ha0, a1);
@@ -3656,6 +3858,7 @@ HLE_FUNC("ImGuiListClipper_IncludeItemsByIndex", ig_ImGuiListClipper_IncludeItem
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiListClipper_IncludeItemsByIndex", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 54);
     ImGuiListClipper_IncludeItemsByIndex(ha0, a1, a2);
@@ -3666,6 +3869,7 @@ HLE_FUNC("ImGuiListClipper_IncludeItemsByIndex", ig_ImGuiListClipper_IncludeItem
 HLE_FUNC("ImGuiListClipper_SeekCursorForItem", ig_ImGuiListClipper_SeekCursorForItem) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiListClipper_SeekCursorForItem", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 54);
     ImGuiListClipper_SeekCursorForItem(ha0, a1);
@@ -3675,6 +3879,7 @@ HLE_FUNC("ImGuiListClipper_SeekCursorForItem", ig_ImGuiListClipper_SeekCursorFor
 
 HLE_FUNC("ImGuiListClipper_Step", ig_ImGuiListClipper_Step) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiListClipper_Step", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 54);
     __auto_type r_ = ImGuiListClipper_Step(ha0);
@@ -3685,6 +3890,7 @@ HLE_FUNC("ImGuiListClipper_Step", ig_ImGuiListClipper_Step) {
 
 HLE_FUNC("ImGuiListClipper_destroy", ig_ImGuiListClipper_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiListClipper_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 54);
     ImGuiListClipper_destroy(ha0);
@@ -3695,6 +3901,7 @@ HLE_FUNC("ImGuiListClipper_destroy", ig_ImGuiListClipper_destroy) {
 HLE_FUNC("ImGuiMenuColumns_CalcNextTotalWidth", ig_ImGuiMenuColumns_CalcNextTotalWidth) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiMenuColumns_CalcNextTotalWidth", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 58);
     ImGuiMenuColumns_CalcNextTotalWidth(ha0, (a1 != 0));
@@ -3708,6 +3915,7 @@ HLE_FUNC("ImGuiMenuColumns_DeclColumns", ig_ImGuiMenuColumns_DeclColumns) {
     float a2 = ig_f(c->r[2]);
     float a3 = ig_f(c->r[3]);
     float a4 = ig_f(STK(0));
+    if (!a0) { ig_null_self(c, "ImGuiMenuColumns_DeclColumns", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 58);
     __auto_type r_ = ImGuiMenuColumns_DeclColumns(ha0, a1, a2, a3, a4);
@@ -3727,6 +3935,7 @@ HLE_FUNC("ImGuiMenuColumns_Update", ig_ImGuiMenuColumns_Update) {
     uint32_t a0 = c->r[0];
     float a1 = ig_f(c->r[1]);
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiMenuColumns_Update", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 58);
     ImGuiMenuColumns_Update(ha0, a1, (a2 != 0));
@@ -3736,6 +3945,7 @@ HLE_FUNC("ImGuiMenuColumns_Update", ig_ImGuiMenuColumns_Update) {
 
 HLE_FUNC("ImGuiMenuColumns_destroy", ig_ImGuiMenuColumns_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiMenuColumns_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 58);
     ImGuiMenuColumns_destroy(ha0);
@@ -3752,6 +3962,7 @@ HLE_FUNC("ImGuiMultiSelectState_ImGuiMultiSelectState", ig_ImGuiMultiSelectState
 
 HLE_FUNC("ImGuiMultiSelectState_destroy", ig_ImGuiMultiSelectState_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiMultiSelectState_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 61);
     ImGuiMultiSelectState_destroy(ha0);
@@ -3761,6 +3972,7 @@ HLE_FUNC("ImGuiMultiSelectState_destroy", ig_ImGuiMultiSelectState_destroy) {
 
 HLE_FUNC("ImGuiMultiSelectTempData_Clear", ig_ImGuiMultiSelectTempData_Clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiMultiSelectTempData_Clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 62);
     ImGuiMultiSelectTempData_Clear(ha0);
@@ -3770,6 +3982,7 @@ HLE_FUNC("ImGuiMultiSelectTempData_Clear", ig_ImGuiMultiSelectTempData_Clear) {
 
 HLE_FUNC("ImGuiMultiSelectTempData_ClearIO", ig_ImGuiMultiSelectTempData_ClearIO) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiMultiSelectTempData_ClearIO", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 62);
     ImGuiMultiSelectTempData_ClearIO(ha0);
@@ -3786,6 +3999,7 @@ HLE_FUNC("ImGuiMultiSelectTempData_ImGuiMultiSelectTempData", ig_ImGuiMultiSelec
 
 HLE_FUNC("ImGuiMultiSelectTempData_destroy", ig_ImGuiMultiSelectTempData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiMultiSelectTempData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 62);
     ImGuiMultiSelectTempData_destroy(ha0);
@@ -3795,6 +4009,7 @@ HLE_FUNC("ImGuiMultiSelectTempData_destroy", ig_ImGuiMultiSelectTempData_destroy
 
 HLE_FUNC("ImGuiNavItemData_Clear", ig_ImGuiNavItemData_Clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiNavItemData_Clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 63);
     ImGuiNavItemData_Clear(ha0);
@@ -3811,6 +4026,7 @@ HLE_FUNC("ImGuiNavItemData_ImGuiNavItemData", ig_ImGuiNavItemData_ImGuiNavItemDa
 
 HLE_FUNC("ImGuiNavItemData_destroy", ig_ImGuiNavItemData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiNavItemData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 63);
     ImGuiNavItemData_destroy(ha0);
@@ -3820,6 +4036,7 @@ HLE_FUNC("ImGuiNavItemData_destroy", ig_ImGuiNavItemData_destroy) {
 
 HLE_FUNC("ImGuiNextItemData_ClearFlags", ig_ImGuiNextItemData_ClearFlags) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiNextItemData_ClearFlags", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 64);
     ImGuiNextItemData_ClearFlags(ha0);
@@ -3836,6 +4053,7 @@ HLE_FUNC("ImGuiNextItemData_ImGuiNextItemData", ig_ImGuiNextItemData_ImGuiNextIt
 
 HLE_FUNC("ImGuiNextItemData_destroy", ig_ImGuiNextItemData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiNextItemData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 64);
     ImGuiNextItemData_destroy(ha0);
@@ -3845,6 +4063,7 @@ HLE_FUNC("ImGuiNextItemData_destroy", ig_ImGuiNextItemData_destroy) {
 
 HLE_FUNC("ImGuiNextWindowData_ClearFlags", ig_ImGuiNextWindowData_ClearFlags) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiNextWindowData_ClearFlags", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 65);
     ImGuiNextWindowData_ClearFlags(ha0);
@@ -3861,6 +4080,7 @@ HLE_FUNC("ImGuiNextWindowData_ImGuiNextWindowData", ig_ImGuiNextWindowData_ImGui
 
 HLE_FUNC("ImGuiNextWindowData_destroy", ig_ImGuiNextWindowData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiNextWindowData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 65);
     ImGuiNextWindowData_destroy(ha0);
@@ -3877,6 +4097,7 @@ HLE_FUNC("ImGuiOldColumnData_ImGuiOldColumnData", ig_ImGuiOldColumnData_ImGuiOld
 
 HLE_FUNC("ImGuiOldColumnData_destroy", ig_ImGuiOldColumnData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiOldColumnData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 66);
     ImGuiOldColumnData_destroy(ha0);
@@ -3893,6 +4114,7 @@ HLE_FUNC("ImGuiOldColumns_ImGuiOldColumns", ig_ImGuiOldColumns_ImGuiOldColumns) 
 
 HLE_FUNC("ImGuiOldColumns_destroy", ig_ImGuiOldColumns_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiOldColumns_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 67);
     ImGuiOldColumns_destroy(ha0);
@@ -3909,6 +4131,7 @@ HLE_FUNC("ImGuiOnceUponAFrame_ImGuiOnceUponAFrame", ig_ImGuiOnceUponAFrame_ImGui
 
 HLE_FUNC("ImGuiOnceUponAFrame_destroy", ig_ImGuiOnceUponAFrame_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiOnceUponAFrame_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 68);
     ImGuiOnceUponAFrame_destroy(ha0);
@@ -3918,6 +4141,7 @@ HLE_FUNC("ImGuiOnceUponAFrame_destroy", ig_ImGuiOnceUponAFrame_destroy) {
 
 HLE_FUNC("ImGuiPayload_Clear", ig_ImGuiPayload_Clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiPayload_Clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 69);
     ImGuiPayload_Clear(ha0);
@@ -3935,6 +4159,7 @@ HLE_FUNC("ImGuiPayload_ImGuiPayload", ig_ImGuiPayload_ImGuiPayload) {
 HLE_FUNC("ImGuiPayload_IsDataType", ig_ImGuiPayload_IsDataType) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiPayload_IsDataType", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 69);
     __auto_type r_ = ImGuiPayload_IsDataType(ha0, GP(a1));
@@ -3945,6 +4170,7 @@ HLE_FUNC("ImGuiPayload_IsDataType", ig_ImGuiPayload_IsDataType) {
 
 HLE_FUNC("ImGuiPayload_IsDelivery", ig_ImGuiPayload_IsDelivery) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiPayload_IsDelivery", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 69);
     __auto_type r_ = ImGuiPayload_IsDelivery(ha0);
@@ -3955,6 +4181,7 @@ HLE_FUNC("ImGuiPayload_IsDelivery", ig_ImGuiPayload_IsDelivery) {
 
 HLE_FUNC("ImGuiPayload_IsPreview", ig_ImGuiPayload_IsPreview) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiPayload_IsPreview", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 69);
     __auto_type r_ = ImGuiPayload_IsPreview(ha0);
@@ -3965,6 +4192,7 @@ HLE_FUNC("ImGuiPayload_IsPreview", ig_ImGuiPayload_IsPreview) {
 
 HLE_FUNC("ImGuiPayload_destroy", ig_ImGuiPayload_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiPayload_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 69);
     ImGuiPayload_destroy(ha0);
@@ -3974,6 +4202,7 @@ HLE_FUNC("ImGuiPayload_destroy", ig_ImGuiPayload_destroy) {
 
 HLE_FUNC("ImGuiPlatformIO_ClearPlatformHandlers", ig_ImGuiPlatformIO_ClearPlatformHandlers) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiPlatformIO_ClearPlatformHandlers", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 70);
     ImGuiPlatformIO_ClearPlatformHandlers(ha0);
@@ -3983,6 +4212,7 @@ HLE_FUNC("ImGuiPlatformIO_ClearPlatformHandlers", ig_ImGuiPlatformIO_ClearPlatfo
 
 HLE_FUNC("ImGuiPlatformIO_ClearRendererHandlers", ig_ImGuiPlatformIO_ClearRendererHandlers) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiPlatformIO_ClearRendererHandlers", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 70);
     ImGuiPlatformIO_ClearRendererHandlers(ha0);
@@ -3999,6 +4229,7 @@ HLE_FUNC("ImGuiPlatformIO_ImGuiPlatformIO", ig_ImGuiPlatformIO_ImGuiPlatformIO) 
 
 HLE_FUNC("ImGuiPlatformIO_destroy", ig_ImGuiPlatformIO_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiPlatformIO_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 70);
     ImGuiPlatformIO_destroy(ha0);
@@ -4015,6 +4246,7 @@ HLE_FUNC("ImGuiPlatformImeData_ImGuiPlatformImeData", ig_ImGuiPlatformImeData_Im
 
 HLE_FUNC("ImGuiPlatformImeData_destroy", ig_ImGuiPlatformImeData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiPlatformImeData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 71);
     ImGuiPlatformImeData_destroy(ha0);
@@ -4031,6 +4263,7 @@ HLE_FUNC("ImGuiPopupData_ImGuiPopupData", ig_ImGuiPopupData_ImGuiPopupData) {
 
 HLE_FUNC("ImGuiPopupData_destroy", ig_ImGuiPopupData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiPopupData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 72);
     ImGuiPopupData_destroy(ha0);
@@ -4056,6 +4289,7 @@ HLE_FUNC("ImGuiPtrOrIndex_ImGuiPtrOrIndex_Int", ig_ImGuiPtrOrIndex_ImGuiPtrOrInd
 
 HLE_FUNC("ImGuiPtrOrIndex_destroy", ig_ImGuiPtrOrIndex_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiPtrOrIndex_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 73);
     ImGuiPtrOrIndex_destroy(ha0);
@@ -4066,6 +4300,7 @@ HLE_FUNC("ImGuiPtrOrIndex_destroy", ig_ImGuiPtrOrIndex_destroy) {
 HLE_FUNC("ImGuiSelectionBasicStorage_ApplyRequests", ig_ImGuiSelectionBasicStorage_ApplyRequests) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiSelectionBasicStorage_ApplyRequests", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 74);
     void *ha1 = m_in(a1, 60);
@@ -4077,6 +4312,7 @@ HLE_FUNC("ImGuiSelectionBasicStorage_ApplyRequests", ig_ImGuiSelectionBasicStora
 
 HLE_FUNC("ImGuiSelectionBasicStorage_Clear", ig_ImGuiSelectionBasicStorage_Clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiSelectionBasicStorage_Clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 74);
     ImGuiSelectionBasicStorage_Clear(ha0);
@@ -4087,6 +4323,7 @@ HLE_FUNC("ImGuiSelectionBasicStorage_Clear", ig_ImGuiSelectionBasicStorage_Clear
 HLE_FUNC("ImGuiSelectionBasicStorage_Contains", ig_ImGuiSelectionBasicStorage_Contains) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiSelectionBasicStorage_Contains", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 74);
     __auto_type r_ = ImGuiSelectionBasicStorage_Contains(ha0, a1);
@@ -4098,6 +4335,7 @@ HLE_FUNC("ImGuiSelectionBasicStorage_Contains", ig_ImGuiSelectionBasicStorage_Co
 HLE_FUNC("ImGuiSelectionBasicStorage_GetStorageIdFromIndex", ig_ImGuiSelectionBasicStorage_GetStorageIdFromIndex) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiSelectionBasicStorage_GetStorageIdFromIndex", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 74);
     __auto_type r_ = ImGuiSelectionBasicStorage_GetStorageIdFromIndex(ha0, a1);
@@ -4117,6 +4355,7 @@ HLE_FUNC("ImGuiSelectionBasicStorage_SetItemSelected", ig_ImGuiSelectionBasicSto
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiSelectionBasicStorage_SetItemSelected", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 74);
     ImGuiSelectionBasicStorage_SetItemSelected(ha0, a1, (a2 != 0));
@@ -4127,6 +4366,7 @@ HLE_FUNC("ImGuiSelectionBasicStorage_SetItemSelected", ig_ImGuiSelectionBasicSto
 HLE_FUNC("ImGuiSelectionBasicStorage_Swap", ig_ImGuiSelectionBasicStorage_Swap) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiSelectionBasicStorage_Swap", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 74);
     void *ha1 = m_in(a1, 74);
@@ -4138,6 +4378,7 @@ HLE_FUNC("ImGuiSelectionBasicStorage_Swap", ig_ImGuiSelectionBasicStorage_Swap) 
 
 HLE_FUNC("ImGuiSelectionBasicStorage_destroy", ig_ImGuiSelectionBasicStorage_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiSelectionBasicStorage_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 74);
     ImGuiSelectionBasicStorage_destroy(ha0);
@@ -4148,6 +4389,7 @@ HLE_FUNC("ImGuiSelectionBasicStorage_destroy", ig_ImGuiSelectionBasicStorage_des
 HLE_FUNC("ImGuiSelectionExternalStorage_ApplyRequests", ig_ImGuiSelectionExternalStorage_ApplyRequests) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiSelectionExternalStorage_ApplyRequests", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 75);
     void *ha1 = m_in(a1, 60);
@@ -4166,6 +4408,7 @@ HLE_FUNC("ImGuiSelectionExternalStorage_ImGuiSelectionExternalStorage", ig_ImGui
 
 HLE_FUNC("ImGuiSelectionExternalStorage_destroy", ig_ImGuiSelectionExternalStorage_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiSelectionExternalStorage_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 75);
     ImGuiSelectionExternalStorage_destroy(ha0);
@@ -4182,6 +4425,7 @@ HLE_FUNC("ImGuiSettingsHandler_ImGuiSettingsHandler", ig_ImGuiSettingsHandler_Im
 
 HLE_FUNC("ImGuiSettingsHandler_destroy", ig_ImGuiSettingsHandler_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiSettingsHandler_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 77);
     ImGuiSettingsHandler_destroy(ha0);
@@ -4198,6 +4442,7 @@ HLE_FUNC("ImGuiStackLevelInfo_ImGuiStackLevelInfo", ig_ImGuiStackLevelInfo_ImGui
 
 HLE_FUNC("ImGuiStackLevelInfo_destroy", ig_ImGuiStackLevelInfo_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiStackLevelInfo_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 80);
     ImGuiStackLevelInfo_destroy(ha0);
@@ -4234,6 +4479,7 @@ HLE_FUNC("ImGuiStoragePair_ImGuiStoragePair_Ptr", ig_ImGuiStoragePair_ImGuiStora
 
 HLE_FUNC("ImGuiStoragePair_destroy", ig_ImGuiStoragePair_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiStoragePair_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 82);
     ImGuiStoragePair_destroy(ha0);
@@ -4243,6 +4489,7 @@ HLE_FUNC("ImGuiStoragePair_destroy", ig_ImGuiStoragePair_destroy) {
 
 HLE_FUNC("ImGuiStorage_BuildSortByKey", ig_ImGuiStorage_BuildSortByKey) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiStorage_BuildSortByKey", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 81);
     ImGuiStorage_BuildSortByKey(ha0);
@@ -4252,6 +4499,7 @@ HLE_FUNC("ImGuiStorage_BuildSortByKey", ig_ImGuiStorage_BuildSortByKey) {
 
 HLE_FUNC("ImGuiStorage_Clear", ig_ImGuiStorage_Clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiStorage_Clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 81);
     ImGuiStorage_Clear(ha0);
@@ -4263,6 +4511,7 @@ HLE_FUNC("ImGuiStorage_GetBool", ig_ImGuiStorage_GetBool) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiStorage_GetBool", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 81);
     __auto_type r_ = ImGuiStorage_GetBool(ha0, a1, (a2 != 0));
@@ -4275,6 +4524,7 @@ HLE_FUNC("ImGuiStorage_GetBoolRef", ig_ImGuiStorage_GetBoolRef) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiStorage_GetBoolRef", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 81);
     __auto_type r_ = ImGuiStorage_GetBoolRef(ha0, a1, (a2 != 0));
@@ -4287,6 +4537,7 @@ HLE_FUNC("ImGuiStorage_GetFloat", ig_ImGuiStorage_GetFloat) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     float a2 = ig_f(c->r[2]);
+    if (!a0) { ig_null_self(c, "ImGuiStorage_GetFloat", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 81);
     __auto_type r_ = ImGuiStorage_GetFloat(ha0, a1, a2);
@@ -4299,6 +4550,7 @@ HLE_FUNC("ImGuiStorage_GetFloatRef", ig_ImGuiStorage_GetFloatRef) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     float a2 = ig_f(c->r[2]);
+    if (!a0) { ig_null_self(c, "ImGuiStorage_GetFloatRef", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 81);
     __auto_type r_ = ImGuiStorage_GetFloatRef(ha0, a1, a2);
@@ -4311,6 +4563,7 @@ HLE_FUNC("ImGuiStorage_GetInt", ig_ImGuiStorage_GetInt) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiStorage_GetInt", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 81);
     __auto_type r_ = ImGuiStorage_GetInt(ha0, a1, a2);
@@ -4323,6 +4576,7 @@ HLE_FUNC("ImGuiStorage_GetIntRef", ig_ImGuiStorage_GetIntRef) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiStorage_GetIntRef", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 81);
     __auto_type r_ = ImGuiStorage_GetIntRef(ha0, a1, a2);
@@ -4334,6 +4588,7 @@ HLE_FUNC("ImGuiStorage_GetIntRef", ig_ImGuiStorage_GetIntRef) {
 HLE_FUNC("ImGuiStorage_GetVoidPtr", ig_ImGuiStorage_GetVoidPtr) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiStorage_GetVoidPtr", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 81);
     __auto_type r_ = ImGuiStorage_GetVoidPtr(ha0, a1);
@@ -4345,6 +4600,7 @@ HLE_FUNC("ImGuiStorage_GetVoidPtr", ig_ImGuiStorage_GetVoidPtr) {
 HLE_FUNC("ImGuiStorage_SetAllInt", ig_ImGuiStorage_SetAllInt) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiStorage_SetAllInt", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 81);
     ImGuiStorage_SetAllInt(ha0, a1);
@@ -4356,6 +4612,7 @@ HLE_FUNC("ImGuiStorage_SetBool", ig_ImGuiStorage_SetBool) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiStorage_SetBool", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 81);
     ImGuiStorage_SetBool(ha0, a1, (a2 != 0));
@@ -4367,6 +4624,7 @@ HLE_FUNC("ImGuiStorage_SetFloat", ig_ImGuiStorage_SetFloat) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     float a2 = ig_f(c->r[2]);
+    if (!a0) { ig_null_self(c, "ImGuiStorage_SetFloat", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 81);
     ImGuiStorage_SetFloat(ha0, a1, a2);
@@ -4378,6 +4636,7 @@ HLE_FUNC("ImGuiStorage_SetInt", ig_ImGuiStorage_SetInt) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiStorage_SetInt", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 81);
     ImGuiStorage_SetInt(ha0, a1, a2);
@@ -4389,6 +4648,7 @@ HLE_FUNC("ImGuiStorage_SetVoidPtr", ig_ImGuiStorage_SetVoidPtr) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiStorage_SetVoidPtr", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 81);
     ImGuiStorage_SetVoidPtr(ha0, a1, GP(a2));
@@ -4424,6 +4684,7 @@ HLE_FUNC("ImGuiStyleMod_ImGuiStyleMod_Vec2", ig_ImGuiStyleMod_ImGuiStyleMod_Vec2
 
 HLE_FUNC("ImGuiStyleMod_destroy", ig_ImGuiStyleMod_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiStyleMod_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 84);
     ImGuiStyleMod_destroy(ha0);
@@ -4434,6 +4695,7 @@ HLE_FUNC("ImGuiStyleMod_destroy", ig_ImGuiStyleMod_destroy) {
 HLE_FUNC("ImGuiStyleVarInfo_GetVarPtr", ig_ImGuiStyleVarInfo_GetVarPtr) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiStyleVarInfo_GetVarPtr", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 85);
     __auto_type r_ = ImGuiStyleVarInfo_GetVarPtr(ha0, GP(a1));
@@ -4452,6 +4714,7 @@ HLE_FUNC("ImGuiStyle_ImGuiStyle", ig_ImGuiStyle_ImGuiStyle) {
 HLE_FUNC("ImGuiStyle_ScaleAllSizes", ig_ImGuiStyle_ScaleAllSizes) {
     uint32_t a0 = c->r[0];
     float a1 = ig_f(c->r[1]);
+    if (!a0) { ig_null_self(c, "ImGuiStyle_ScaleAllSizes", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 83);
     ImGuiStyle_ScaleAllSizes(ha0, a1);
@@ -4461,6 +4724,7 @@ HLE_FUNC("ImGuiStyle_ScaleAllSizes", ig_ImGuiStyle_ScaleAllSizes) {
 
 HLE_FUNC("ImGuiStyle_destroy", ig_ImGuiStyle_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiStyle_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 83);
     ImGuiStyle_destroy(ha0);
@@ -4477,6 +4741,7 @@ HLE_FUNC("ImGuiTabBar_ImGuiTabBar", ig_ImGuiTabBar_ImGuiTabBar) {
 
 HLE_FUNC("ImGuiTabBar_destroy", ig_ImGuiTabBar_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTabBar_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 86);
     ImGuiTabBar_destroy(ha0);
@@ -4493,6 +4758,7 @@ HLE_FUNC("ImGuiTabItem_ImGuiTabItem", ig_ImGuiTabItem_ImGuiTabItem) {
 
 HLE_FUNC("ImGuiTabItem_destroy", ig_ImGuiTabItem_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTabItem_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 87);
     ImGuiTabItem_destroy(ha0);
@@ -4509,6 +4775,7 @@ HLE_FUNC("ImGuiTableColumnSettings_ImGuiTableColumnSettings", ig_ImGuiTableColum
 
 HLE_FUNC("ImGuiTableColumnSettings_destroy", ig_ImGuiTableColumnSettings_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTableColumnSettings_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 91);
     ImGuiTableColumnSettings_destroy(ha0);
@@ -4525,6 +4792,7 @@ HLE_FUNC("ImGuiTableColumnSortSpecs_ImGuiTableColumnSortSpecs", ig_ImGuiTableCol
 
 HLE_FUNC("ImGuiTableColumnSortSpecs_destroy", ig_ImGuiTableColumnSortSpecs_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTableColumnSortSpecs_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 92);
     ImGuiTableColumnSortSpecs_destroy(ha0);
@@ -4541,6 +4809,7 @@ HLE_FUNC("ImGuiTableColumn_ImGuiTableColumn", ig_ImGuiTableColumn_ImGuiTableColu
 
 HLE_FUNC("ImGuiTableColumn_destroy", ig_ImGuiTableColumn_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTableColumn_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 90);
     ImGuiTableColumn_destroy(ha0);
@@ -4557,6 +4826,7 @@ HLE_FUNC("ImGuiTableInstanceData_ImGuiTableInstanceData", ig_ImGuiTableInstanceD
 
 HLE_FUNC("ImGuiTableInstanceData_destroy", ig_ImGuiTableInstanceData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTableInstanceData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 94);
     ImGuiTableInstanceData_destroy(ha0);
@@ -4566,6 +4836,7 @@ HLE_FUNC("ImGuiTableInstanceData_destroy", ig_ImGuiTableInstanceData_destroy) {
 
 HLE_FUNC("ImGuiTableSettings_GetColumnSettings", ig_ImGuiTableSettings_GetColumnSettings) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTableSettings_GetColumnSettings", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 95);
     __auto_type r_ = ImGuiTableSettings_GetColumnSettings(ha0);
@@ -4583,6 +4854,7 @@ HLE_FUNC("ImGuiTableSettings_ImGuiTableSettings", ig_ImGuiTableSettings_ImGuiTab
 
 HLE_FUNC("ImGuiTableSettings_destroy", ig_ImGuiTableSettings_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTableSettings_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 95);
     ImGuiTableSettings_destroy(ha0);
@@ -4599,6 +4871,7 @@ HLE_FUNC("ImGuiTableSortSpecs_ImGuiTableSortSpecs", ig_ImGuiTableSortSpecs_ImGui
 
 HLE_FUNC("ImGuiTableSortSpecs_destroy", ig_ImGuiTableSortSpecs_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTableSortSpecs_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 96);
     ImGuiTableSortSpecs_destroy(ha0);
@@ -4615,6 +4888,7 @@ HLE_FUNC("ImGuiTableTempData_ImGuiTableTempData", ig_ImGuiTableTempData_ImGuiTab
 
 HLE_FUNC("ImGuiTableTempData_destroy", ig_ImGuiTableTempData_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTableTempData_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 97);
     ImGuiTableTempData_destroy(ha0);
@@ -4631,6 +4905,7 @@ HLE_FUNC("ImGuiTable_ImGuiTable", ig_ImGuiTable_ImGuiTable) {
 
 HLE_FUNC("ImGuiTable_destroy", ig_ImGuiTable_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTable_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 88);
     ImGuiTable_destroy(ha0);
@@ -4649,6 +4924,7 @@ HLE_FUNC("ImGuiTextBuffer_append", ig_ImGuiTextBuffer_append) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiTextBuffer_append", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 98);
     ImGuiTextBuffer_append(ha0, GP(a1), GP(a2));
@@ -4659,6 +4935,7 @@ HLE_FUNC("ImGuiTextBuffer_append", ig_ImGuiTextBuffer_append) {
 HLE_FUNC("ImGuiTextBuffer_appendf", ig_ImGuiTextBuffer_appendf) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiTextBuffer_appendf", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 98);
     const char *s_ = ig_fmt(c, a1, 2, 0);
@@ -4672,6 +4949,7 @@ HLE_FUNC("ImGuiTextBuffer_appendfv", ig_ImGuiTextBuffer_appendfv) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiTextBuffer_appendfv", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 98);
     const char *s_ = ig_vfmt(c, a1, a2);
@@ -4682,6 +4960,7 @@ HLE_FUNC("ImGuiTextBuffer_appendfv", ig_ImGuiTextBuffer_appendfv) {
 
 HLE_FUNC("ImGuiTextBuffer_begin", ig_ImGuiTextBuffer_begin) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextBuffer_begin", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 98);
     __auto_type r_ = ImGuiTextBuffer_begin(ha0);
@@ -4692,6 +4971,7 @@ HLE_FUNC("ImGuiTextBuffer_begin", ig_ImGuiTextBuffer_begin) {
 
 HLE_FUNC("ImGuiTextBuffer_c_str", ig_ImGuiTextBuffer_c_str) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextBuffer_c_str", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 98);
     __auto_type r_ = ImGuiTextBuffer_c_str(ha0);
@@ -4702,6 +4982,7 @@ HLE_FUNC("ImGuiTextBuffer_c_str", ig_ImGuiTextBuffer_c_str) {
 
 HLE_FUNC("ImGuiTextBuffer_clear", ig_ImGuiTextBuffer_clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextBuffer_clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 98);
     ImGuiTextBuffer_clear(ha0);
@@ -4711,6 +4992,7 @@ HLE_FUNC("ImGuiTextBuffer_clear", ig_ImGuiTextBuffer_clear) {
 
 HLE_FUNC("ImGuiTextBuffer_destroy", ig_ImGuiTextBuffer_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextBuffer_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 98);
     ImGuiTextBuffer_destroy(ha0);
@@ -4720,6 +5002,7 @@ HLE_FUNC("ImGuiTextBuffer_destroy", ig_ImGuiTextBuffer_destroy) {
 
 HLE_FUNC("ImGuiTextBuffer_empty", ig_ImGuiTextBuffer_empty) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextBuffer_empty", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 98);
     __auto_type r_ = ImGuiTextBuffer_empty(ha0);
@@ -4730,6 +5013,7 @@ HLE_FUNC("ImGuiTextBuffer_empty", ig_ImGuiTextBuffer_empty) {
 
 HLE_FUNC("ImGuiTextBuffer_end", ig_ImGuiTextBuffer_end) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextBuffer_end", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 98);
     __auto_type r_ = ImGuiTextBuffer_end(ha0);
@@ -4741,6 +5025,7 @@ HLE_FUNC("ImGuiTextBuffer_end", ig_ImGuiTextBuffer_end) {
 HLE_FUNC("ImGuiTextBuffer_reserve", ig_ImGuiTextBuffer_reserve) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiTextBuffer_reserve", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 98);
     ImGuiTextBuffer_reserve(ha0, a1);
@@ -4751,6 +5036,7 @@ HLE_FUNC("ImGuiTextBuffer_reserve", ig_ImGuiTextBuffer_reserve) {
 HLE_FUNC("ImGuiTextBuffer_resize", ig_ImGuiTextBuffer_resize) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiTextBuffer_resize", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 98);
     ImGuiTextBuffer_resize(ha0, a1);
@@ -4760,6 +5046,7 @@ HLE_FUNC("ImGuiTextBuffer_resize", ig_ImGuiTextBuffer_resize) {
 
 HLE_FUNC("ImGuiTextBuffer_size", ig_ImGuiTextBuffer_size) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextBuffer_size", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 98);
     __auto_type r_ = ImGuiTextBuffer_size(ha0);
@@ -4770,6 +5057,7 @@ HLE_FUNC("ImGuiTextBuffer_size", ig_ImGuiTextBuffer_size) {
 
 HLE_FUNC("ImGuiTextFilter_Build", ig_ImGuiTextFilter_Build) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextFilter_Build", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 99);
     ImGuiTextFilter_Build(ha0);
@@ -4779,6 +5067,7 @@ HLE_FUNC("ImGuiTextFilter_Build", ig_ImGuiTextFilter_Build) {
 
 HLE_FUNC("ImGuiTextFilter_Clear", ig_ImGuiTextFilter_Clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextFilter_Clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 99);
     ImGuiTextFilter_Clear(ha0);
@@ -4790,6 +5079,7 @@ HLE_FUNC("ImGuiTextFilter_Draw", ig_ImGuiTextFilter_Draw) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     float a2 = ig_f(c->r[2]);
+    if (!a0) { ig_null_self(c, "ImGuiTextFilter_Draw", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 99);
     __auto_type r_ = ImGuiTextFilter_Draw(ha0, GP(a1), a2);
@@ -4808,6 +5098,7 @@ HLE_FUNC("ImGuiTextFilter_ImGuiTextFilter", ig_ImGuiTextFilter_ImGuiTextFilter) 
 
 HLE_FUNC("ImGuiTextFilter_IsActive", ig_ImGuiTextFilter_IsActive) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextFilter_IsActive", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 99);
     __auto_type r_ = ImGuiTextFilter_IsActive(ha0);
@@ -4820,6 +5111,7 @@ HLE_FUNC("ImGuiTextFilter_PassFilter", ig_ImGuiTextFilter_PassFilter) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiTextFilter_PassFilter", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 99);
     __auto_type r_ = ImGuiTextFilter_PassFilter(ha0, GP(a1), GP(a2));
@@ -4830,6 +5122,7 @@ HLE_FUNC("ImGuiTextFilter_PassFilter", ig_ImGuiTextFilter_PassFilter) {
 
 HLE_FUNC("ImGuiTextFilter_destroy", ig_ImGuiTextFilter_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextFilter_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 99);
     ImGuiTextFilter_destroy(ha0);
@@ -4842,6 +5135,7 @@ HLE_FUNC("ImGuiTextIndex_append", ig_ImGuiTextIndex_append) {
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
     uint32_t a3 = c->r[3];
+    if (!a0) { ig_null_self(c, "ImGuiTextIndex_append", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 100);
     ImGuiTextIndex_append(ha0, GP(a1), a2, a3);
@@ -4851,6 +5145,7 @@ HLE_FUNC("ImGuiTextIndex_append", ig_ImGuiTextIndex_append) {
 
 HLE_FUNC("ImGuiTextIndex_clear", ig_ImGuiTextIndex_clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextIndex_clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 100);
     ImGuiTextIndex_clear(ha0);
@@ -4862,6 +5157,7 @@ HLE_FUNC("ImGuiTextIndex_get_line_begin", ig_ImGuiTextIndex_get_line_begin) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiTextIndex_get_line_begin", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 100);
     __auto_type r_ = ImGuiTextIndex_get_line_begin(ha0, GP(a1), a2);
@@ -4874,6 +5170,7 @@ HLE_FUNC("ImGuiTextIndex_get_line_end", ig_ImGuiTextIndex_get_line_end) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiTextIndex_get_line_end", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 100);
     __auto_type r_ = ImGuiTextIndex_get_line_end(ha0, GP(a1), a2);
@@ -4884,6 +5181,7 @@ HLE_FUNC("ImGuiTextIndex_get_line_end", ig_ImGuiTextIndex_get_line_end) {
 
 HLE_FUNC("ImGuiTextIndex_size", ig_ImGuiTextIndex_size) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextIndex_size", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 100);
     __auto_type r_ = ImGuiTextIndex_size(ha0);
@@ -4910,6 +5208,7 @@ HLE_FUNC("ImGuiTextRange_ImGuiTextRange_Str", ig_ImGuiTextRange_ImGuiTextRange_S
 
 HLE_FUNC("ImGuiTextRange_destroy", ig_ImGuiTextRange_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextRange_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 101);
     ImGuiTextRange_destroy(ha0);
@@ -4919,6 +5218,7 @@ HLE_FUNC("ImGuiTextRange_destroy", ig_ImGuiTextRange_destroy) {
 
 HLE_FUNC("ImGuiTextRange_empty", ig_ImGuiTextRange_empty) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTextRange_empty", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 101);
     __auto_type r_ = ImGuiTextRange_empty(ha0);
@@ -4929,6 +5229,7 @@ HLE_FUNC("ImGuiTextRange_empty", ig_ImGuiTextRange_empty) {
 
 HLE_FUNC("ImGuiTypingSelectState_Clear", ig_ImGuiTypingSelectState_Clear) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTypingSelectState_Clear", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 104);
     ImGuiTypingSelectState_Clear(ha0);
@@ -4945,6 +5246,7 @@ HLE_FUNC("ImGuiTypingSelectState_ImGuiTypingSelectState", ig_ImGuiTypingSelectSt
 
 HLE_FUNC("ImGuiTypingSelectState_destroy", ig_ImGuiTypingSelectState_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiTypingSelectState_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 104);
     ImGuiTypingSelectState_destroy(ha0);
@@ -4954,6 +5256,7 @@ HLE_FUNC("ImGuiTypingSelectState_destroy", ig_ImGuiTypingSelectState_destroy) {
 
 HLE_FUNC("ImGuiViewportP_CalcWorkRectPos", ig_ImGuiViewportP_CalcWorkRectPos) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiViewportP_CalcWorkRectPos", 8); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 106);
@@ -4966,6 +5269,7 @@ HLE_FUNC("ImGuiViewportP_CalcWorkRectPos", ig_ImGuiViewportP_CalcWorkRectPos) {
 
 HLE_FUNC("ImGuiViewportP_CalcWorkRectSize", ig_ImGuiViewportP_CalcWorkRectSize) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiViewportP_CalcWorkRectSize", 8); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 106);
@@ -4978,6 +5282,7 @@ HLE_FUNC("ImGuiViewportP_CalcWorkRectSize", ig_ImGuiViewportP_CalcWorkRectSize) 
 
 HLE_FUNC("ImGuiViewportP_GetBuildWorkRect", ig_ImGuiViewportP_GetBuildWorkRect) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiViewportP_GetBuildWorkRect", 16); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 106);
@@ -4990,6 +5295,7 @@ HLE_FUNC("ImGuiViewportP_GetBuildWorkRect", ig_ImGuiViewportP_GetBuildWorkRect) 
 
 HLE_FUNC("ImGuiViewportP_GetMainRect", ig_ImGuiViewportP_GetMainRect) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiViewportP_GetMainRect", 16); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 106);
@@ -5002,6 +5308,7 @@ HLE_FUNC("ImGuiViewportP_GetMainRect", ig_ImGuiViewportP_GetMainRect) {
 
 HLE_FUNC("ImGuiViewportP_GetWorkRect", ig_ImGuiViewportP_GetWorkRect) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiViewportP_GetWorkRect", 16); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 106);
@@ -5021,6 +5328,7 @@ HLE_FUNC("ImGuiViewportP_ImGuiViewportP", ig_ImGuiViewportP_ImGuiViewportP) {
 
 HLE_FUNC("ImGuiViewportP_UpdateWorkRect", ig_ImGuiViewportP_UpdateWorkRect) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiViewportP_UpdateWorkRect", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 106);
     ImGuiViewportP_UpdateWorkRect(ha0);
@@ -5030,6 +5338,7 @@ HLE_FUNC("ImGuiViewportP_UpdateWorkRect", ig_ImGuiViewportP_UpdateWorkRect) {
 
 HLE_FUNC("ImGuiViewportP_destroy", ig_ImGuiViewportP_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiViewportP_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 106);
     ImGuiViewportP_destroy(ha0);
@@ -5039,6 +5348,7 @@ HLE_FUNC("ImGuiViewportP_destroy", ig_ImGuiViewportP_destroy) {
 
 HLE_FUNC("ImGuiViewport_GetCenter", ig_ImGuiViewport_GetCenter) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiViewport_GetCenter", 8); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 105);
@@ -5051,6 +5361,7 @@ HLE_FUNC("ImGuiViewport_GetCenter", ig_ImGuiViewport_GetCenter) {
 
 HLE_FUNC("ImGuiViewport_GetWorkCenter", ig_ImGuiViewport_GetWorkCenter) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiViewport_GetWorkCenter", 8); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 105);
@@ -5070,6 +5381,7 @@ HLE_FUNC("ImGuiViewport_ImGuiViewport", ig_ImGuiViewport_ImGuiViewport) {
 
 HLE_FUNC("ImGuiViewport_destroy", ig_ImGuiViewport_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiViewport_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 105);
     ImGuiViewport_destroy(ha0);
@@ -5079,6 +5391,7 @@ HLE_FUNC("ImGuiViewport_destroy", ig_ImGuiViewport_destroy) {
 
 HLE_FUNC("ImGuiWindowSettings_GetName", ig_ImGuiWindowSettings_GetName) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiWindowSettings_GetName", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 108);
     __auto_type r_ = ImGuiWindowSettings_GetName(ha0);
@@ -5096,6 +5409,7 @@ HLE_FUNC("ImGuiWindowSettings_ImGuiWindowSettings", ig_ImGuiWindowSettings_ImGui
 
 HLE_FUNC("ImGuiWindowSettings_destroy", ig_ImGuiWindowSettings_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiWindowSettings_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 108);
     ImGuiWindowSettings_destroy(ha0);
@@ -5107,6 +5421,7 @@ HLE_FUNC("ImGuiWindow_GetID_Str", ig_ImGuiWindow_GetID_Str) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
+    if (!a0) { ig_null_self(c, "ImGuiWindow_GetID_Str", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 107);
     __auto_type r_ = ImGuiWindow_GetID_Str(ha0, GP(a1), GP(a2));
@@ -5118,6 +5433,7 @@ HLE_FUNC("ImGuiWindow_GetID_Str", ig_ImGuiWindow_GetID_Str) {
 HLE_FUNC("ImGuiWindow_GetID_Ptr", ig_ImGuiWindow_GetID_Ptr) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiWindow_GetID_Ptr", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 107);
     __auto_type r_ = ImGuiWindow_GetID_Ptr(ha0, GP(a1));
@@ -5129,6 +5445,7 @@ HLE_FUNC("ImGuiWindow_GetID_Ptr", ig_ImGuiWindow_GetID_Ptr) {
 HLE_FUNC("ImGuiWindow_GetID_Int", ig_ImGuiWindow_GetID_Int) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiWindow_GetID_Int", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 107);
     __auto_type r_ = ImGuiWindow_GetID_Int(ha0, a1);
@@ -5139,6 +5456,7 @@ HLE_FUNC("ImGuiWindow_GetID_Int", ig_ImGuiWindow_GetID_Int) {
 
 HLE_FUNC("ImGuiWindow_GetIDFromPos", ig_ImGuiWindow_GetIDFromPos) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiWindow_GetIDFromPos", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 107);
     __auto_type r_ = ImGuiWindow_GetIDFromPos(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])});
@@ -5149,6 +5467,7 @@ HLE_FUNC("ImGuiWindow_GetIDFromPos", ig_ImGuiWindow_GetIDFromPos) {
 
 HLE_FUNC("ImGuiWindow_GetIDFromRectangle", ig_ImGuiWindow_GetIDFromRectangle) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiWindow_GetIDFromRectangle", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 107);
     __auto_type r_ = ImGuiWindow_GetIDFromRectangle(ha0, (ImRect_c){ig_f(c->r[1]), ig_f(c->r[2]), ig_f(c->r[3]), ig_f(STK(0))});
@@ -5170,6 +5489,7 @@ HLE_FUNC("ImGuiWindow_ImGuiWindow", ig_ImGuiWindow_ImGuiWindow) {
 
 HLE_FUNC("ImGuiWindow_MenuBarRect", ig_ImGuiWindow_MenuBarRect) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiWindow_MenuBarRect", 16); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 107);
@@ -5182,6 +5502,7 @@ HLE_FUNC("ImGuiWindow_MenuBarRect", ig_ImGuiWindow_MenuBarRect) {
 
 HLE_FUNC("ImGuiWindow_Rect", ig_ImGuiWindow_Rect) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiWindow_Rect", 16); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 107);
@@ -5194,6 +5515,7 @@ HLE_FUNC("ImGuiWindow_Rect", ig_ImGuiWindow_Rect) {
 
 HLE_FUNC("ImGuiWindow_TitleBarRect", ig_ImGuiWindow_TitleBarRect) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImGuiWindow_TitleBarRect", 16); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 107);
@@ -5206,6 +5528,7 @@ HLE_FUNC("ImGuiWindow_TitleBarRect", ig_ImGuiWindow_TitleBarRect) {
 
 HLE_FUNC("ImGuiWindow_destroy", ig_ImGuiWindow_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImGuiWindow_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 107);
     ImGuiWindow_destroy(ha0);
@@ -5215,6 +5538,7 @@ HLE_FUNC("ImGuiWindow_destroy", ig_ImGuiWindow_destroy) {
 
 HLE_FUNC("ImRect_Add_Vec2", ig_ImRect_Add_Vec2) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_Add_Vec2", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     ImRect_Add_Vec2(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])});
@@ -5224,6 +5548,7 @@ HLE_FUNC("ImRect_Add_Vec2", ig_ImRect_Add_Vec2) {
 
 HLE_FUNC("ImRect_Add_Rect", ig_ImRect_Add_Rect) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_Add_Rect", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     ImRect_Add_Rect(ha0, (ImRect_c){ig_f(c->r[1]), ig_f(c->r[2]), ig_f(c->r[3]), ig_f(STK(0))});
@@ -5234,6 +5559,7 @@ HLE_FUNC("ImRect_Add_Rect", ig_ImRect_Add_Rect) {
 HLE_FUNC("ImRect_AddX", ig_ImRect_AddX) {
     uint32_t a0 = c->r[0];
     float a1 = ig_f(c->r[1]);
+    if (!a0) { ig_null_self(c, "ImRect_AddX", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     ImRect_AddX(ha0, a1);
@@ -5244,6 +5570,7 @@ HLE_FUNC("ImRect_AddX", ig_ImRect_AddX) {
 HLE_FUNC("ImRect_AddY", ig_ImRect_AddY) {
     uint32_t a0 = c->r[0];
     float a1 = ig_f(c->r[1]);
+    if (!a0) { ig_null_self(c, "ImRect_AddY", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     ImRect_AddY(ha0, a1);
@@ -5253,6 +5580,7 @@ HLE_FUNC("ImRect_AddY", ig_ImRect_AddY) {
 
 HLE_FUNC("ImRect_AsVec4", ig_ImRect_AsVec4) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_AsVec4", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     __auto_type r_ = ImRect_AsVec4(ha0);
@@ -5263,6 +5591,7 @@ HLE_FUNC("ImRect_AsVec4", ig_ImRect_AsVec4) {
 
 HLE_FUNC("ImRect_ClipWith", ig_ImRect_ClipWith) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_ClipWith", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     ImRect_ClipWith(ha0, (ImRect_c){ig_f(c->r[1]), ig_f(c->r[2]), ig_f(c->r[3]), ig_f(STK(0))});
@@ -5272,6 +5601,7 @@ HLE_FUNC("ImRect_ClipWith", ig_ImRect_ClipWith) {
 
 HLE_FUNC("ImRect_ClipWithFull", ig_ImRect_ClipWithFull) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_ClipWithFull", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     ImRect_ClipWithFull(ha0, (ImRect_c){ig_f(c->r[1]), ig_f(c->r[2]), ig_f(c->r[3]), ig_f(STK(0))});
@@ -5281,6 +5611,7 @@ HLE_FUNC("ImRect_ClipWithFull", ig_ImRect_ClipWithFull) {
 
 HLE_FUNC("ImRect_Contains_Vec2", ig_ImRect_Contains_Vec2) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_Contains_Vec2", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     __auto_type r_ = ImRect_Contains_Vec2(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])});
@@ -5291,6 +5622,7 @@ HLE_FUNC("ImRect_Contains_Vec2", ig_ImRect_Contains_Vec2) {
 
 HLE_FUNC("ImRect_Contains_Rect", ig_ImRect_Contains_Rect) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_Contains_Rect", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     __auto_type r_ = ImRect_Contains_Rect(ha0, (ImRect_c){ig_f(c->r[1]), ig_f(c->r[2]), ig_f(c->r[3]), ig_f(STK(0))});
@@ -5301,6 +5633,7 @@ HLE_FUNC("ImRect_Contains_Rect", ig_ImRect_Contains_Rect) {
 
 HLE_FUNC("ImRect_ContainsWithPad", ig_ImRect_ContainsWithPad) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_ContainsWithPad", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     __auto_type r_ = ImRect_ContainsWithPad(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])}, (ImVec2_c){ig_f(c->r[3]), ig_f(STK(0))});
@@ -5312,6 +5645,7 @@ HLE_FUNC("ImRect_ContainsWithPad", ig_ImRect_ContainsWithPad) {
 HLE_FUNC("ImRect_Expand_Float", ig_ImRect_Expand_Float) {
     uint32_t a0 = c->r[0];
     float a1 = ig_f(c->r[1]);
+    if (!a0) { ig_null_self(c, "ImRect_Expand_Float", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     ImRect_Expand_Float(ha0, a1);
@@ -5321,6 +5655,7 @@ HLE_FUNC("ImRect_Expand_Float", ig_ImRect_Expand_Float) {
 
 HLE_FUNC("ImRect_Expand_Vec2", ig_ImRect_Expand_Vec2) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_Expand_Vec2", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     ImRect_Expand_Vec2(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])});
@@ -5330,6 +5665,7 @@ HLE_FUNC("ImRect_Expand_Vec2", ig_ImRect_Expand_Vec2) {
 
 HLE_FUNC("ImRect_GetArea", ig_ImRect_GetArea) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_GetArea", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     __auto_type r_ = ImRect_GetArea(ha0);
@@ -5340,6 +5676,7 @@ HLE_FUNC("ImRect_GetArea", ig_ImRect_GetArea) {
 
 HLE_FUNC("ImRect_GetBL", ig_ImRect_GetBL) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImRect_GetBL", 8); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
@@ -5352,6 +5689,7 @@ HLE_FUNC("ImRect_GetBL", ig_ImRect_GetBL) {
 
 HLE_FUNC("ImRect_GetBR", ig_ImRect_GetBR) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImRect_GetBR", 8); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
@@ -5364,6 +5702,7 @@ HLE_FUNC("ImRect_GetBR", ig_ImRect_GetBR) {
 
 HLE_FUNC("ImRect_GetCenter", ig_ImRect_GetCenter) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImRect_GetCenter", 8); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
@@ -5376,6 +5715,7 @@ HLE_FUNC("ImRect_GetCenter", ig_ImRect_GetCenter) {
 
 HLE_FUNC("ImRect_GetHeight", ig_ImRect_GetHeight) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_GetHeight", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     __auto_type r_ = ImRect_GetHeight(ha0);
@@ -5386,6 +5726,7 @@ HLE_FUNC("ImRect_GetHeight", ig_ImRect_GetHeight) {
 
 HLE_FUNC("ImRect_GetSize", ig_ImRect_GetSize) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImRect_GetSize", 8); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
@@ -5398,6 +5739,7 @@ HLE_FUNC("ImRect_GetSize", ig_ImRect_GetSize) {
 
 HLE_FUNC("ImRect_GetTL", ig_ImRect_GetTL) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImRect_GetTL", 8); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
@@ -5410,6 +5752,7 @@ HLE_FUNC("ImRect_GetTL", ig_ImRect_GetTL) {
 
 HLE_FUNC("ImRect_GetTR", ig_ImRect_GetTR) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImRect_GetTR", 8); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
@@ -5422,6 +5765,7 @@ HLE_FUNC("ImRect_GetTR", ig_ImRect_GetTR) {
 
 HLE_FUNC("ImRect_GetWidth", ig_ImRect_GetWidth) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_GetWidth", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     __auto_type r_ = ImRect_GetWidth(ha0);
@@ -5464,6 +5808,7 @@ HLE_FUNC("ImRect_ImRect_Float", ig_ImRect_ImRect_Float) {
 
 HLE_FUNC("ImRect_IsInverted", ig_ImRect_IsInverted) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_IsInverted", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     __auto_type r_ = ImRect_IsInverted(ha0);
@@ -5474,6 +5819,7 @@ HLE_FUNC("ImRect_IsInverted", ig_ImRect_IsInverted) {
 
 HLE_FUNC("ImRect_Overlaps", ig_ImRect_Overlaps) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_Overlaps", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     __auto_type r_ = ImRect_Overlaps(ha0, (ImRect_c){ig_f(c->r[1]), ig_f(c->r[2]), ig_f(c->r[3]), ig_f(STK(0))});
@@ -5484,6 +5830,7 @@ HLE_FUNC("ImRect_Overlaps", ig_ImRect_Overlaps) {
 
 HLE_FUNC("ImRect_ToVec4", ig_ImRect_ToVec4) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImRect_ToVec4", 16); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
@@ -5496,6 +5843,7 @@ HLE_FUNC("ImRect_ToVec4", ig_ImRect_ToVec4) {
 
 HLE_FUNC("ImRect_Translate", ig_ImRect_Translate) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_Translate", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     ImRect_Translate(ha0, (ImVec2_c){ig_f(c->r[1]), ig_f(c->r[2])});
@@ -5506,6 +5854,7 @@ HLE_FUNC("ImRect_Translate", ig_ImRect_Translate) {
 HLE_FUNC("ImRect_TranslateX", ig_ImRect_TranslateX) {
     uint32_t a0 = c->r[0];
     float a1 = ig_f(c->r[1]);
+    if (!a0) { ig_null_self(c, "ImRect_TranslateX", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     ImRect_TranslateX(ha0, a1);
@@ -5516,6 +5865,7 @@ HLE_FUNC("ImRect_TranslateX", ig_ImRect_TranslateX) {
 HLE_FUNC("ImRect_TranslateY", ig_ImRect_TranslateY) {
     uint32_t a0 = c->r[0];
     float a1 = ig_f(c->r[1]);
+    if (!a0) { ig_null_self(c, "ImRect_TranslateY", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     ImRect_TranslateY(ha0, a1);
@@ -5525,6 +5875,7 @@ HLE_FUNC("ImRect_TranslateY", ig_ImRect_TranslateY) {
 
 HLE_FUNC("ImRect_destroy", ig_ImRect_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImRect_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 111);
     ImRect_destroy(ha0);
@@ -5537,6 +5888,7 @@ HLE_FUNC("ImTextureData_Create", ig_ImTextureData_Create) {
     uint32_t a1 = c->r[1];
     uint32_t a2 = c->r[2];
     uint32_t a3 = c->r[3];
+    if (!a0) { ig_null_self(c, "ImTextureData_Create", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 112);
     ImTextureData_Create(ha0, a1, a2, a3);
@@ -5546,6 +5898,7 @@ HLE_FUNC("ImTextureData_Create", ig_ImTextureData_Create) {
 
 HLE_FUNC("ImTextureData_DestroyPixels", ig_ImTextureData_DestroyPixels) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImTextureData_DestroyPixels", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 112);
     ImTextureData_DestroyPixels(ha0);
@@ -5555,6 +5908,7 @@ HLE_FUNC("ImTextureData_DestroyPixels", ig_ImTextureData_DestroyPixels) {
 
 HLE_FUNC("ImTextureData_GetPitch", ig_ImTextureData_GetPitch) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImTextureData_GetPitch", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 112);
     __auto_type r_ = ImTextureData_GetPitch(ha0);
@@ -5565,6 +5919,7 @@ HLE_FUNC("ImTextureData_GetPitch", ig_ImTextureData_GetPitch) {
 
 HLE_FUNC("ImTextureData_GetSizeInBytes", ig_ImTextureData_GetSizeInBytes) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImTextureData_GetSizeInBytes", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 112);
     __auto_type r_ = ImTextureData_GetSizeInBytes(ha0);
@@ -5575,6 +5930,7 @@ HLE_FUNC("ImTextureData_GetSizeInBytes", ig_ImTextureData_GetSizeInBytes) {
 
 HLE_FUNC("ImTextureData_GetTexID", ig_ImTextureData_GetTexID) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImTextureData_GetTexID", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 112);
     __auto_type r_ = ImTextureData_GetTexID(ha0);
@@ -5585,6 +5941,7 @@ HLE_FUNC("ImTextureData_GetTexID", ig_ImTextureData_GetTexID) {
 
 HLE_FUNC("ImTextureData_GetTexRef", ig_ImTextureData_GetTexRef) {
     uint32_t a0 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImTextureData_GetTexRef", 16); return; }
     uint32_t ret_ = c->r[0];
     IG_ENTER(c);
     void *ha0 = m_in(a0, 112);
@@ -5607,6 +5964,7 @@ HLE_FUNC("ImTextureData_ImTextureData", ig_ImTextureData_ImTextureData) {
 HLE_FUNC("ImTextureData_SetStatus", ig_ImTextureData_SetStatus) {
     uint32_t a0 = c->r[0];
     uint32_t a1 = c->r[1];
+    if (!a0) { ig_null_self(c, "ImTextureData_SetStatus", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 112);
     ImTextureData_SetStatus(ha0, a1);
@@ -5617,6 +5975,7 @@ HLE_FUNC("ImTextureData_SetStatus", ig_ImTextureData_SetStatus) {
 HLE_FUNC("ImTextureData_SetTexID", ig_ImTextureData_SetTexID) {
     uint32_t a0 = c->r[0];
     uint64_t a1 = (uint64_t)c->r[2] | (uint64_t)c->r[3] << 32;
+    if (!a0) { ig_null_self(c, "ImTextureData_SetTexID", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 112);
     ImTextureData_SetTexID(ha0, a1);
@@ -5626,6 +5985,7 @@ HLE_FUNC("ImTextureData_SetTexID", ig_ImTextureData_SetTexID) {
 
 HLE_FUNC("ImTextureRef_GetTexID", ig_ImTextureRef_GetTexID) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImTextureRef_GetTexID", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 114);
     __auto_type r_ = ImTextureRef_GetTexID(ha0);
@@ -5651,6 +6011,7 @@ HLE_FUNC("ImTextureRef_ImTextureRef_TextureID", ig_ImTextureRef_ImTextureRef_Tex
 
 HLE_FUNC("ImTextureRef_destroy", ig_ImTextureRef_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImTextureRef_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 114);
     ImTextureRef_destroy(ha0);
@@ -5675,6 +6036,7 @@ HLE_FUNC("ImVec1_ImVec1_Float", ig_ImVec1_ImVec1_Float) {
 
 HLE_FUNC("ImVec1_destroy", ig_ImVec1_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImVec1_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 115);
     ImVec1_destroy(ha0);
@@ -5700,6 +6062,7 @@ HLE_FUNC("ImVec2_ImVec2_Float", ig_ImVec2_ImVec2_Float) {
 
 HLE_FUNC("ImVec2_destroy", ig_ImVec2_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImVec2_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 116);
     ImVec2_destroy(ha0);
@@ -5725,6 +6088,7 @@ HLE_FUNC("ImVec2i_ImVec2i_Int", ig_ImVec2i_ImVec2i_Int) {
 
 HLE_FUNC("ImVec2i_destroy", ig_ImVec2i_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImVec2i_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 117);
     ImVec2i_destroy(ha0);
@@ -5757,6 +6121,7 @@ HLE_FUNC("ImVec2ih_ImVec2ih_Vec2", ig_ImVec2ih_ImVec2ih_Vec2) {
 
 HLE_FUNC("ImVec2ih_destroy", ig_ImVec2ih_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImVec2ih_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 118);
     ImVec2ih_destroy(ha0);
@@ -5784,6 +6149,7 @@ HLE_FUNC("ImVec4_ImVec4_Float", ig_ImVec4_ImVec4_Float) {
 
 HLE_FUNC("ImVec4_destroy", ig_ImVec4_destroy) {
     uint32_t a0 = c->r[0];
+    if (!a0) { ig_null_self(c, "ImVec4_destroy", 0); return; }
     IG_ENTER(c);
     void *ha0 = m_in(a0, 119);
     ImVec4_destroy(ha0);

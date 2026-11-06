@@ -349,7 +349,8 @@ static const char *builtin_src(const char *name, int *stage) {
                "#else\n"
                "#define LUMA(c) (c).a\n"
                "#endif\n"
-               "const float STEP[12] = float[](1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 4.0, 8.0);\n"
+               // (the search's steps; as a constant array, read by index, the pass took 10% longer on a Radeon iGPU)
+               "float stepOf(int i) { return i < 5 ? 1.0 : i == 5 ? 1.5 : i < 10 ? 2.0 : i == 10 ? 4.0 : 8.0; }\n"
                "float luma(vec2 uv) { return LUMA(textureLod(t, uv, 0.0)); }\n"
                "#define AT(x, y) LUMA(textureLodOffset(t, pos, 0.0, ivec2(x, y)))\n"
                "void main() {\n"
@@ -364,12 +365,21 @@ static const char *builtin_src(const char *name, int *stage) {
                "  if (!changed) discard;\n"
                "#endif\n"
                "  vec2 rcp = 1.0 / vec2(textureSize(t, 0)), pos = gl_FragCoord.xy * rcp;\n"
-               "  vec4 rgbyM = textureLod(t, pos, 0.0);\n"
-               "  float lumaM = LUMA(rgbyM), lumaN = AT(0, -1), lumaS = AT(0, 1), lumaW = AT(-1, 0), lumaE = AT(1, 0);\n"
+               "#ifdef MODELS\n"
+               "  float lumaM = AT(0, 0), lumaN = AT(0, -1), lumaS = AT(0, 1), lumaW = AT(-1, 0), lumaE = AT(1, 0);\n"
+               "#else\n"  // (luma is alpha: two gathers instead of five reads for the pixels that end at the next test)
+               "  vec4 se = textureGather(t, pos + 0.5 * rcp, 3), nw = textureGather(t, pos - 0.5 * rcp, 3);\n"
+               "  float lumaM = se.w, lumaN = nw.z, lumaS = se.x, lumaW = nw.x, lumaE = se.z;\n"
+               "#endif\n"
                "  float rangeMax = max(max(max(lumaN, lumaW), max(lumaE, lumaS)), lumaM);\n"
                "  float range = rangeMax - min(min(min(lumaN, lumaW), min(lumaE, lumaS)), lumaM);\n"
-               "  if (range < max(0.0312, rangeMax * 0.063)) { o = rgbyM; return; }\n"
-               "  float lumaNW = AT(-1, -1), lumaNE = AT(1, -1), lumaSW = AT(-1, 1), lumaSE = AT(1, 1);\n"
+               "  if (range < max(0.0312, rangeMax * 0.063)) { o = textureLod(t, pos, 0.0); return; }\n"
+               "#ifdef MODELS\n"
+               "  float lumaNW = AT(-1, -1), lumaSE = AT(1, 1);\n"
+               "#else\n"
+               "  float lumaNW = nw.w, lumaSE = se.y;\n"
+               "#endif\n"
+               "  float lumaNE = AT(1, -1), lumaSW = AT(-1, 1);\n"
                "  float lumaNS = lumaN + lumaS, lumaWE = lumaW + lumaE;\n"
                "  float edgeHorz = abs(lumaNW + lumaSW - 2.0 * lumaW) + 2.0 * abs(lumaNS - 2.0 * lumaM) + abs(lumaNE + lumaSE - 2.0 * lumaE);\n"
                "  float edgeVert = abs(lumaSW + lumaSE - 2.0 * lumaS) + 2.0 * abs(lumaWE - 2.0 * lumaM) + abs(lumaNW + lumaNE - 2.0 * lumaN);\n"
@@ -383,12 +393,12 @@ static const char *builtin_src(const char *name, int *stage) {
                "  float lumaHalf = ((pairN ? lumaN : lumaS) + lumaM) * 0.5;\n"
                "  vec2 posB = pos + (horzSpan ? vec2(0.0, lengthSign) : vec2(lengthSign, 0.0)) * 0.5;\n"
                "  vec2 off = horzSpan ? vec2(rcp.x, 0.0) : vec2(0.0, rcp.y);\n"
-               "  vec2 posN = posB - off * STEP[0], posP = posB + off * STEP[0];\n"
+               "  vec2 posN = posB - off * stepOf(0), posP = posB + off * stepOf(0);\n"
                "  float endN = luma(posN) - lumaHalf, endP = luma(posP) - lumaHalf;\n"
                "  bool doneN = abs(endN) >= gradientScaled, doneP = abs(endP) >= gradientScaled;\n"
                "  for (int i = 1; i < 12 && !(doneN && doneP); i++) {  // the last step is taken without a look\n"
-               "    if (!doneN) posN -= off * STEP[i];\n"
-               "    if (!doneP) posP += off * STEP[i];\n"
+               "    if (!doneN) posN -= off * stepOf(i);\n"
+               "    if (!doneP) posP += off * stepOf(i);\n"
                "    if (i == 11) break;\n"
                "    if (!doneN) { endN = luma(posN) - lumaHalf; doneN = abs(endN) >= gradientScaled; }\n"
                "    if (!doneP) { endP = luma(posP) - lumaHalf; doneP = abs(endP) >= gradientScaled; }\n"
@@ -399,6 +409,74 @@ static const char *builtin_src(const char *name, int *stage) {
                "  o = vec4(textureLod(t, pos + (horzSpan ? vec2(0.0, offset) : vec2(offset, 0.0)), 0.0).rgb, lumaM);\n"
                "}\n");
         return buf;
+    }
+    // The game's own FXAA (FXAAMode = Original) as readable code, drawn in place of its translation (exec.c
+    // compile_program): the same bindings and the same picture, bit for bit, at half the GPU time of the translation,
+    // which runs a loop over a switch (one case per jump target), with 24 registers and a stack, for every pixel.
+    // It is FXAA 3.11 with the game's own search and sub-pixel blur. The fma()s and the order of the sums are the
+    // game's: its picture depends on them, as exact ties (dstN == dstP, edgeHorz == edgeVert) are common and go by rounding.
+    if (!strcmp(name, "fxaa.frag.game")) {
+        *stage = STAGE_FRAGMENT;
+        return "#version 450\n"
+               "layout(std140, set = 1, binding = 1) uniform CB1 { vec4 p; };\n"  // x edge threshold, y blur bias, zw G, B in luma
+               "layout(std140, set = 1, binding = 3) uniform CB3 { vec4 sys[2]; };\n"  // [1].zw: 1 / the picture's size
+               "layout(set = 1, binding = 32) uniform sampler2D t;\n"
+               "layout(location = 1) in vec4 uv;\n"
+               "layout(location = 0) out vec4 o;\n"
+               "#define LUMA(at) textureLod(t, at, 0.0).a\n"
+               "#define LUMA_AT(x, y) textureLodOffset(t, pos, 0.0, ivec2(x, y)).a\n"
+               "void main() {\n"
+               "  vec2 pos = uv.xy, rcp = sys[1].zw, half_texel = 0.5 / vec2(textureSize(t, 0));\n"
+               // (most pixels end at the range test: two gathers instead of five reads)
+               "  vec4 se = textureGather(t, pos + half_texel, 3), nw = textureGather(t, pos - half_texel, 3);\n"
+               "  float lumaM = se.w, lumaN = nw.z, lumaW = nw.x, lumaS = se.x, lumaE = se.z;\n"
+               "  float rangeMax = max(lumaM, max(max(lumaN, lumaW), max(lumaS, lumaE)));\n"
+               "  float range = rangeMax - min(lumaM, min(min(lumaN, lumaW), min(lumaS, lumaE)));\n"
+               "  if (range < max(rangeMax * 0.16666667, p.x)) { o = vec4(textureLod(t, pos, 0.0).rgb, lumaM); return; }\n"
+               "  float lumaNW = nw.w, lumaSE = se.y, lumaNE = LUMA_AT(1, -1), lumaSW = LUMA_AT(-1, 1);\n"
+               "  float edgeHorz = abs(lumaSE + fma(lumaE, -2.0, lumaNE)) +\n"
+               "                   fma(abs(lumaS + fma(lumaM, -2.0, lumaN)), 2.0, abs(lumaSW + fma(lumaW, -2.0, lumaNW)));\n"
+               "  float edgeVert = fma(abs(lumaE + fma(lumaM, -2.0, lumaW)), 2.0, abs(lumaNE + fma(lumaN, -2.0, lumaNW))) +\n"
+               "                   abs(lumaSE + fma(lumaS, -2.0, lumaSW));\n"
+               "  bool horz = edgeHorz >= edgeVert;\n"
+               "  float neighN = horz ? lumaN : lumaW, neighS = horz ? lumaS : lumaE;\n"
+               "  float gradN = abs(neighN - lumaM), gradS = abs(neighS - lumaM);\n"
+               "  bool pairS = gradN < gradS;\n"
+               "  float lengthSign = horz ? rcp.y : rcp.x;\n"
+               "  if (!pairS) lengthSign = -lengthSign;\n"
+               "  vec2 off = horz ? vec2(rcp.x, 0.0) : vec2(0.0, rcp.y);\n"
+               "  vec2 posB = pos + (horz ? vec2(0.0, lengthSign) : vec2(lengthSign, 0.0)) * 0.5;\n"
+               "  vec2 posN = fma(off, vec2(-1.5), posB), posP = fma(off, vec2(1.5), posB);\n"
+               "  float lumaNN = (lumaM + (pairS ? neighS : neighN)) * 0.5, gradScaled = (pairS ? gradS : gradN) * 0.25;\n"
+               "  float sum = lumaS + (lumaE + (lumaN + lumaW));\n"
+               "  float sub = fma(1.0 / range, abs(fma(sum, 0.25, -lumaM)), p.y);\n"
+               "  sub = min((isnan(sub) ? 0.0 : clamp(sub, 0.0, 1.0)) * 1.3333334, 0.75);\n"
+               "  float endN = LUMA(posN), endP = LUMA(posP);\n"
+               "  bool doneN = abs(endN - lumaNN) >= gradScaled, doneP = abs(endP - lumaNN) >= gradScaled;\n"
+               "  if (doneN) posN += off;\n"
+               "  if (doneP) posP -= off;\n"
+               // (a side that found its end goes back half a step and looks again from there. Not looking again when a
+               // side hasn't moved gives the same picture, but was slower on a Radeon iGPU. The last step is without a look)
+               "  for (int i = 0; i < 6 && !(doneN && doneP); i++) {\n"
+               "    bool wasN = doneN, wasP = doneP;\n"
+               "    if (!wasN) posN = fma(off, vec2(-2.0), posN);\n"
+               "    if (!wasP) posP = fma(off, vec2(2.0), posP);\n"
+               "    if (i == 5) break;\n"
+               "    endN = LUMA(posN);\n"
+               "    endP = LUMA(posP);\n"
+               "    doneN = abs(endN - lumaNN) >= gradScaled;\n"
+               "    doneP = abs(endP - lumaNN) >= gradScaled;\n"
+               "    if (!wasN && doneN) posN += off;\n"
+               "    if (!wasP && doneP) posP -= off;\n"
+               "  }\n"
+               "  float dstN = horz ? pos.x - posN.x : pos.y - posN.y, dstP = horz ? posP.x - pos.x : posP.y - pos.y;\n"
+               "  bool nearN = dstN < dstP;\n"
+               "  bool goodSpan = (lumaM < lumaNN) != ((nearN ? endN : endP) < lumaNN);\n"
+               "  float offset = (goodSpan ? lengthSign : 0.0) * (fma(1.0 / (dstN + dstP), -(nearN ? dstN : dstP), sub * 0.125) + 0.5);\n"
+               "  vec3 rgb = textureLod(t, pos + (horz ? vec2(0.0, offset) : vec2(offset, 0.0)), 0.0).rgb;\n"
+               "  float luma = fma(rgb.b, p.w, fma(rgb.g, p.z, rgb.r * 0.29899999)) + 5.9604645e-8;\n"
+               "  o = vec4(rgb * min(fma(sub, fma(sum, 0.25, -luma), luma) * (1.0 / luma), 4.0), lumaM);\n"
+               "}\n";
     }
     if (!strcmp(name, "resolve.frag.depth") || !strcmp(name, "resolve.frag.depth.s")) {
         *stage = STAGE_FRAGMENT;
@@ -440,6 +518,11 @@ static const char *builtin_src(const char *name, int *stage) {
                "void main() { gl_FragDepth = texelFetch(d, ivec2(gl_FragCoord.xy), 0).r; }\n";
     }
     return NULL;
+}
+
+const char *vk_builtin_source(const char *name) {
+    int stage;
+    return builtin_src(name, &stage);
 }
 
 VkShaderModule vk_builtin_shader(const char *name) {

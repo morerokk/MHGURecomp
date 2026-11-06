@@ -8,15 +8,16 @@
 The app holds the runtime and the game code library of <build dir>, the game files (<game dir>/exefs and /romfs as APFS
 clones: no extra space on the same disk), the libraries they load from outside macOS (those make macos-deps built in
 --libs, found also through the build's rpath; rewritten to load from the app), Homebrew's MoltenVK with its Vulkan
-driver manifest, and the game's own icon when the extraction left one (<game dir>/icon.jpg). It is signed ad hoc for
-this Mac.
+driver manifest, and the game's own icon when the extraction left one (<game dir>/icon.jpg; else the port's, below). It
+is signed ad hoc for this Mac.
 
 Everything the game writes goes to ~/Library/Application Support/MHGURecomp (runtime/platform/darwin.c): settings,
 caches, mods/, cheats/, log.txt and the saves.
 
 The app contains game code and data made from your own dump: it is for you, never for sharing.
 
---release makes the app a release is (make release): no game code, game files or game icon in it. Players put their
+--release makes the app a release is (make release): no game code, game files or game icon in it (the port's icon:
+tools/mac_icon.py, from extras/icon/mhgurecomp.ico). Players put their
 own exefs/ and romfs/ in ~/Library/Application Support/MHGURecomp/data (runtime/main.c), and the app builds the game
 code from them on their Mac at its first start (runtime/platform/darwin_gamecode.m), with what it carries in
 Contents/Resources/gamecode: tools/build_gamecode.py, the code generator, the runtime headers the code includes and
@@ -301,10 +302,13 @@ def main():
     if missing and a.release:
         sys.exit(f"make_app: no license files for {', '.join(missing)}: make macos-deps keeps them")
 
-    # icon (the game's own: not in a release) and Info.plist
+    # icon (the game's own: not in a release; else the port's, tools/mac_icon.py) and Info.plist
     icon = game and os.path.join(game, "icon.jpg")
     if icon and os.path.isfile(icon):
         make_icon(icon, resources)
+    else:
+        run(sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "mac_icon.py"),
+            os.path.join(resources, "AppIcon.icns"))
     plist = {
         "CFBundleIdentifier": "local.mhgurecomp.game",
         "CFBundleName": "MHGU Recomp",

@@ -5,6 +5,7 @@
 #include "settings_icons.h"
 #include "app_actions.h"
 #include "cheats.h"
+#include "forge.h"
 #include "overlay.h"
 #include "keymap.h"
 #include "modorder.h"
@@ -97,6 +98,7 @@ struct State {
 std::atomic<bool> request_exit, request_back, is_dirty, is_confirming, is_capturing, capture_mouse, capture_wheel;
 // (the key pressed while a key is being chosen, or KEY_MOUSE + a mouse button; -1: none yet)
 std::atomic<int> captured_key{-1};
+bool forge_requested;  // the Mods tab's "Open the Forge menu" (game thread, as the rest of the panel)
 const char *tr(const char *text) { return settings_text(s.draft.language, text); }
 std::string fmt(const char *text, ...) {
     char buffer[512];
@@ -304,6 +306,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(menu_confirm);
     SAME(confirm_exit);
     SAME(show_fps);
+    SAME(menu_chord);
     SAME(show_battery);
     SAME(updates);
     SAME(hp.village);
@@ -312,7 +315,7 @@ bool equal(const Config &a, const Config &b) {
     if (memcmp(a.binds, b.binds, sizeof a.binds))
         return false;
     if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key) ||
-        strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.game_dir, b.game_dir))
+        strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.save_location, b.save_location) || strcmp(a.game_dir, b.game_dir))
         return false;
     for (int n = 0; n < 4; ++n)
         if (a.hp.scale[n] != b.hp.scale[n])
@@ -759,6 +762,7 @@ void reset_section() {
     case 2:
         c.face_buttons = f.face_buttons;
         c.background_input = f.background_input;
+        c.menu_chord = f.menu_chord;
         c.combo_window = f.combo_window;
         c.mouse_sensitivity = f.mouse_sensitivity;
         SDL_strlcpy(c.chat_key, f.chat_key, sizeof c.chat_key);
@@ -798,6 +802,7 @@ void reset_section() {
         c.menu_theme = f.menu_theme;
         c.menu_scale = f.menu_scale;
         c.menu_confirm = f.menu_confirm;
+        SDL_strlcpy(c.save_location, f.save_location, sizeof c.save_location);
         c.button_icons = f.button_icons;
         c.confirm_exit = f.confirm_exit;
         c.updates = f.updates;
@@ -1014,6 +1019,13 @@ void mods_rows(std::vector<Row> &r) {
             }
         mods.scan.reset();
     });
+    // Forge's menu (its plugins' settings) opens with a key (Insert): with a controller alone (an Android TV box) this
+    // row is the way in. It opens over this menu, which waits under it; closing it comes back here (runtime/overlay.cpp).
+    const char *names[1];
+    bool plugins = forge_plugin_titles(names, 1) > 0 || forge_plugins_have(FORGE_IMGUI_RENDER);
+    header(r, "mods.forge.header", tr("Forge plugins"));
+    action(r, "mods.forge", tr("Open the Forge menu"), []() { forge_requested = true; }, plugins);
+    r.back().help = tr("The Forge plugins' own settings, over this menu. Cancel (the button that goes back in the game's menus) or Start + Back closes it and comes back here. On a keyboard the Forge menu key (Insert) opens and closes it.");
 }
 std::vector<Row> main_rows() {
     std::vector<Row> r;
@@ -1144,6 +1156,8 @@ std::vector<Row> main_rows() {
         number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, ini("MouseSensitivity"));
         action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
         r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons, for moving and for the item bar, and the chat key.");
+        add_bool(r, "menu.chord", "Plus + Minus opens this menu", &c.menu_chord, ini("MenuChord"));
+        r.back().help = tr("Pressing Plus and Minus together (Start + Back on a controller) opens this menu. Turn it off to keep that combination for the game or a cheat, for example when you play with a keyboard and mouse. F1 still opens the menu.");
         break;
     case 3:
         number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, ini("Port"));
@@ -1272,6 +1286,17 @@ std::vector<Row> main_rows() {
         add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
                    [](int v) { c.updates = v; }, ini("Updates"));
         add_bool(r, "bonus", "Bonus content", &c.bonus_content, ini("BonusContent"));
+#ifndef __ANDROID__  // (Android: its own tab's Save folder)
+        header(r, "save.header", tr("Save data"));
+        text(r, "save.location", "Save folder", c.save_location, sizeof c.save_location,
+             *c.save_location ? c.save_location : tr("Default folder"), ini("SaveLocation"));
+        r.back().help = tr("Where the save is kept (the folder that holds save_0), for example on another drive or in a folder you sync. Type a path, or use Choose folder. Press Save, then restart the game. Your current save is not moved: copy the save_0 folder there first.");
+        action(r, "save.location.pick", tr("Choose folder"), []() { ui_request_import(4); });
+        r.back().help = tr("Opens your system's folder picker to choose the save folder.");
+        action(r, "save.location.reset", tr("Use the default folder"), []() { s.draft.save_location[0] = 0; },
+               *c.save_location != 0);
+        r.back().help = tr("Keeps the save in the default folder again (%APPDATA%\\MHGURecomp\\save on Windows, ~/.local/share/MHGURecomp/save on Linux) after Save and a restart. The save in the other folder is left where it is.");
+#endif
         break;
 #ifdef __ANDROID__
     case ANDROID_PAGE:  // (Android/data can't be written by the player's file managers: the app copies files in and out)
@@ -1812,6 +1837,11 @@ void mouse_drag(ImGuiViewport *vp, float width) {
 } // namespace
 void settings_panel_request_close() { request_exit.store(true); }
 void settings_panel_request_back() { request_back.store(true); }
+bool settings_panel_take_forge() {
+    bool was = forge_requested;
+    forge_requested = false;
+    return was;
+}
 bool settings_panel_dirty() { return is_dirty.load(); }
 int settings_panel_theme() { return s.editing ? s.draft.menu_theme : config_editable().menu_theme; }
 bool settings_panel_confirming() { return is_confirming.load() || request_exit.load(); }
@@ -1889,6 +1919,7 @@ void settings_panel(bool *open) {
         s.help_row.clear();
         quest_keys();
         load_mods();
+        cheats_rescan();  // (files added, edited or removed since the last time count from now)
         load_cheats();
     }
     if (request_exit.exchange(false) && s.view != View::Exit)
@@ -2161,14 +2192,19 @@ void settings_panel(bool *open) {
     }
     if (!equal(before, s.draft) && dirty())
         s.saved_notice = false;
-#ifdef __ANDROID__
     {  // (the folder Save folder's or Game files folder's picker chose: the picker ran on the window's thread)
         char folder[sizeof s.draft.save_dir];
         int which = ui_take_picked_folder(folder, sizeof folder);
+#ifdef __ANDROID__
         if (which == 4) SDL_strlcpy(s.draft.save_dir, folder, sizeof s.draft.save_dir);
         if (which == 7) SDL_strlcpy(s.draft.game_dir, folder, sizeof s.draft.game_dir);
-    }
+#else
+        Config temp = s.draft;  // (a folder whose path the settings file can't hold, with ';' or '#', is not taken)
+        if (which == 4 && SDL_strlcpy(temp.save_location, folder, sizeof temp.save_location) < sizeof temp.save_location &&
+            config_validate(&temp, nullptr, 0))
+            s.draft = temp;
 #endif
+    }
     if (ui_action_failed())
         s.error = tr("Restart failed. The game is still running.");
     if (!s.error.empty()) {
@@ -2186,7 +2222,7 @@ void settings_panel(bool *open) {
             ImGui::PushStyleColor(ImGuiCol_Text, vec(theme().warn));
             ImGui::TextWrapped("%s", tr("Online: only use cheats when everyone in the lobby agrees to it."));
             ImGui::PopStyleColor();
-            ImGui::TextWrapped("%s", tr("Cheats turn on and off when you press Save, no restart needed. Turning one off undoes its changes to the game's code; values it already changed (money, items) stay. Cheats added with Add a cheat work right away; new cheat files in the folder show up after a restart."));
+            ImGui::TextWrapped("%s", tr("Cheats turn on and off when you press Save, no restart needed. Turning one off undoes its changes to the game's code; values it already changed (money, items) stay. Cheats added with Add a cheat work right away; cheat files added or edited in the folder show up the next time this menu opens."));
         }
         if (std::any_of(rows.begin(), rows.end(), [](const Row &r) { return r.cold; }))  // (the rows with " *")
             ImGui::TextUnformatted(tr("* Restart required"));

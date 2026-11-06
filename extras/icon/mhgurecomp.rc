@@ -1,0 +1,4 @@
+// The game's icon on Windows (Makefile: windres, linked into mhgurecomp.exe; the updater has its own). SDL takes
+// the window's icon from the exe's first one. mhgurecomp.ico: 16 to 256 px, fan-made pixel art (a greatsword, used with
+// permission) scaled without filtering; 24, 48, 128 and 256 px are whole multiples of its pixels.
+1 ICON "mhgurecomp.ico"

@@ -5,7 +5,7 @@
 // - Only GitHub's "latest" release: never a draft, a pre-release or an older version than this one (MHGU_VERSION, the
 //   build's tag; a build that is not exactly a tag, e.g. 0.10.3-4-gabc or -dirty, is left alone: --update-force).
 // - The archive must match its asset's size and SHA-256 (the digest GitHub keeps for every upload).
-// - Never written: data/, mods/, cheats/, bonus/, cache/, shots/, save/, mhgurecomp.ini and log.txt (the player's), only
+// - Never written: data/, mods/, engine_modules/, cheats/, bonus/, cache/, shots/, save/, mhgurecomp.ini and log.txt (the player's), only
 //   the files the release carries besides those. Each file replaced is kept in update/backup/ until the next start, and
 //   put back if the install stops halfway.
 // - No connection, GitHub's rate limit (60 checks an hour per address; an unchanged release is answered "304" from its
@@ -42,7 +42,7 @@
 #define LATEST_URL "https://api.github.com/repos/morerokk/MHGURecomp/releases/latest"
 
 // what the archive must never write (first path component, any case): the player's
-static const char *const KEEP[] = {"data", "mods", "cheats", "bonus", "cache", "shots", "save", "update",
+static const char *const KEEP[] = {"data", "mods", "engine_modules", "cheats", "bonus", "cache", "shots", "save", "update",
                                    "mhgurecomp.ini", "log.txt"};
 
 static char root[1024];  // the game folder (this executable's), with the separator at its end
@@ -590,13 +590,37 @@ static int act(int st, int action) {
     return st == ST_FAILED;
 }
 
+// The window's icon: a Palico, the game's is a greatsword. Windows takes it from the exe (extras/icon/mhgurecomp-updater.rc),
+// Linux from extras/icon/mhgurecomp-updater-128.png, built in here (the path is relative to the repo, where make runs).
+#ifndef _WIN32
+__asm__(".pushsection .rodata\n.globl mhgu_updater_icon_png\nmhgu_updater_icon_png:\n"
+        ".incbin \"extras/icon/mhgurecomp-updater-128.png\"\n"
+        ".globl mhgu_updater_icon_png_end\nmhgu_updater_icon_png_end:\n.popsection");
+extern const unsigned char mhgu_updater_icon_png[], mhgu_updater_icon_png_end[];
+
+static void set_window_icon(SDL_Window *win) {
+    size_t n = (size_t)(mhgu_updater_icon_png_end - mhgu_updater_icon_png);
+    SDL_Surface *s = SDL_LoadPNG_IO(SDL_IOFromConstMem(mhgu_updater_icon_png, n), true);
+    if (s) SDL_SetWindowIcon(win, s);
+    SDL_DestroySurface(s);
+}
+#else
+static void set_window_icon(SDL_Window *win) { (void)win; }
+#endif
+
 // The window, while the worker runs: false when the worker is left behind (skipped while checking)
 static bool run_window(SDL_Thread *th) {
     SDL_Window *win = NULL;
     SDL_Renderer *rd = NULL;
+#ifndef _WIN32
+    // (the game's app id, so the window goes with the game's app menu launcher: runtime/ui.c, install_launcher)
+    SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_IDENTIFIER_STRING, "mhgurecomp");
+#endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD) &&
-        SDL_CreateWindowAndRenderer("MHGU Recomp updater", W, H, SDL_WINDOW_HIDDEN, &win, &rd))
+        SDL_CreateWindowAndRenderer("MHGU Recomp updater", W, H, SDL_WINDOW_HIDDEN, &win, &rd)) {
         SDL_SetRenderVSync(rd, 1);
+        set_window_icon(win);
+    }
     else
         ulog("[update] no window (%s)%s\n", SDL_GetError(), mode == MODE_ASK ? ": not asking" : "");
     if (!rd && mode == MODE_ASK) SDL_SetAtomicInt(&answer, 2);

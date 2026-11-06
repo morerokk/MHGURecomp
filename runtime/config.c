@@ -25,7 +25,75 @@
     {SDL_SCANCODE_Q}, {SDL_SCANCODE_E}, {SDL_SCANCODE_TAB}, {SDL_SCANCODE_T}, {SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER}, \
     {SDL_SCANCODE_BACKSPACE}, {SDL_SCANCODE_UP}, {SDL_SCANCODE_DOWN}, {SDL_SCANCODE_LEFT}, {SDL_SCANCODE_RIGHT},          \
     {SDL_SCANCODE_LCTRL, SDL_SCANCODE_RCTRL}, {SDL_SCANCODE_LALT, SDL_SCANCODE_RALT}, {KEY_WHEEL_UP}, {KEY_WHEEL_DOWN}}
-#define CONFIG_DEFAULT_VALUES DISPLAY_BORDERLESS, 1920, 1080, 0, 0, 60, 1, 1, 1, FACE_POSITION, 39500, "", 0, 1, 1, 1, {{1, 1, 1, 1}, 2}, 1.0f, 0.0f, 1.0f, UI_CENTER, 1, 100, 0, 0, 100, MENU_CONFIRM_ORIGINAL, 1, 0, FSR_NATIVE, 0.8f, 1, 0.9f, 1, UPDATES_ASK, 1, 1.0f, 0, COMBO_LENIENT, "", "", "/", FXAA_ORIGINAL, 0, DEFAULT_BINDS, THEME_HUNTER, 1, 1, 0, BATTERY_OFF, ""
+#define CONFIG_DEFAULT_VALUES                                                                       \
+    /* [Display] */                                                                                 \
+    .display_mode = DISPLAY_BORDERLESS,                                                             \
+    .width = 1920,                                                                                  \
+    .height = 1080,                                                                                 \
+    .render_w = 0,                                                                                  \
+    .render_h = 0,                                                                                  \
+    .aspect_ratio = 0.0f,                                                                           \
+    .fov = 1.0f,                                                                                    \
+    .ui_anchor = UI_CENTER,                                                                         \
+    /* [Anti-aliasing] */                                                                           \
+    .msaa = 1,                                                                                      \
+    .fxaa = 1,                                                                                      \
+    .fxaa_mode = FXAA_ORIGINAL,                                                                     \
+    /* [Upscaler] */                                                                                \
+    .fsr = 0,                                                                                       \
+    .fsr_quality = FSR_NATIVE,                                                                      \
+    .fsr_sharpness = 0.8f,                                                                          \
+    .fsr_objmotion = 1,                                                                             \
+    .fsr_reactive = 0.9f,                                                                           \
+    .fsr_animsurf = 1,                                                                              \
+    /* [Graphics] */                                                                                \
+    .draw_distance = 1.0f,                                                                          \
+    .smooth_gradients = 0,                                                                          \
+    /* [Performance] */                                                                             \
+    .show_fps = 0,                                                                                  \
+    .show_battery = BATTERY_OFF,                                                                    \
+    .fps = 60,                                                                                      \
+    .vsync = 1,                                                                                     \
+    .shader_prewarm = 1,                                                                            \
+    .loading_indicator = 1,                                                                         \
+    /* [Controls] */                                                                                \
+    .face_buttons = FACE_POSITION,                                                                  \
+    .menu_confirm = MENU_CONFIRM_ORIGINAL,                                                          \
+    .background_input = 1,                                                                          \
+    .combo_window = COMBO_LENIENT,                                                                  \
+    .chat_key = "/",                                                                                \
+    .menu_chord = 1,                                                                                \
+    /* [Mouse] */                                                                                   \
+    .mouse_sensitivity = 1.0f,                                                                      \
+    /* [Keybinds] */                                                                                \
+    .binds = DEFAULT_BINDS,                                                                         \
+    /* [Multiplayer] */                                                                             \
+    .ldn_port = 39500,                                                                              \
+    .ldn_join = "",                                                                                 \
+    .ldn_server = "",                                                                               \
+    .ldn_key = "",                                                                                  \
+    .sync_small_monsters = 1,                                                                       \
+    .share_urgent = 1,                                                                              \
+    /* [Monster HP, Village Quests] */                                                              \
+    .hp = {{1, 1, 1, 1}, 2},                                                                        \
+    .village_in_hub = 1,                                                                            \
+    /* [Discord] */                                                                                 \
+    .discord = 1,                                                                                   \
+    .discord_hunter = 1,                                                                            \
+    /* [Bonus Content] */                                                                           \
+    .bonus_content = 1,                                                                             \
+    /* [Audio] */                                                                                   \
+    .volume = 100,                                                                                  \
+    .mute_in_background = 0,                                                                        \
+    /* [Application] */                                                                             \
+    .confirm_exit = 1,                                                                              \
+    .language = 0,                                                                                  \
+    .button_icons = 0,                                                                              \
+    .menu_theme = THEME_HUNTER,                                                                     \
+    .menu_scale = 100,                                                                              \
+    .updates = UPDATES_ASK,                                                                         \
+    .save_location = "",                                                                            \
+
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
@@ -146,6 +214,11 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "ShaderPrewarm = On\n"
     "\n"
+    "; A \"Loading\" box in the bottom right corner while the game starts up and prepares its shaders. Not in the\n"
+    "; settings menu: turn it off here if it stays on screen or gets in the way.\n"
+    "; Default: On\n"
+    "LoadingIndicator = On\n"
+    "\n"
     "[Controls]\n"
     "; Controller face button layout. Set to \"Label\" to reverse A/B and X/Y on XBox controllers to match the button prompts (not recommended)\n"
     "; Position, Label\n"
@@ -167,6 +240,11 @@ static const char DEFAULT_INI[] =
     "; Lenient, Strict\n"
     "; Default: Lenient\n"
     "ComboInputWindow = Lenient\n"
+    "\n"
+    "; Plus and Minus pressed together (Start + Back on a controller, Enter + Backspace on a keyboard by default) open\n"
+    "; the settings menu. Turn it off to keep that combination for the game or a cheat: F1 still opens the menu\n"
+    "; Default: On\n"
+    "MenuChord = On\n"
     "\n"
     "; The key that opens a line of chat, anywhere (in a quest too): a key's name as the settings menu shows it, or\n"
     "; nothing for none\n"
@@ -209,7 +287,7 @@ static const char DEFAULT_INI[] =
     "ItemRight = Wheel Down\n"
     "\n"
     "[Multiplayer]\n"
-    "; Which port to host/join hubs on (TCP and UDP)\n"
+    "; Which port to host/join hubs on (TCP and UDP). A change counts from the next hub you host or search for\n"
     "; Default: 39500\n"
     "Port = 39500\n"
     "\n"
@@ -230,10 +308,9 @@ static const char DEFAULT_INI[] =
     "; Default:\n"
     "Key =\n"
     "\n"
-    "; Sync small monsters between players in multiplayer.\n"
-    "; (Currently off by default, pending a bug investigation where small monsters may refuse to attack players)\n"
-    "; Default: Off\n"
-    "SyncSmallMonsters = Off\n"
+    "; Sync small monsters between players in multiplayer. Everyone in the hunt should use the same setting.\n"
+    "; Default: On\n"
+    "SyncSmallMonsters = On\n"
     "\n"
     "; Clearing an Urgent quest posted by someone else also counts for you, if you have unlocked it yourself. The\n"
     "; original game only counts it for the hunter who posted it. This only changes your own save, the others in the\n"
@@ -276,7 +353,8 @@ static const char DEFAULT_INI[] =
     "\n"
     "[Bonus Content]\n"
     "; If enabled, the free online downloadable content (Event Quests, item packs, Palicoes) are automatically copied from the provided savegame inside the `bonus/` folder into your own savegame.\n"
-    "; This only happens if your savegame hasn't received any downloadable content yet.\n"
+    "; This only happens if your savegame hasn't received any downloadable content yet. A change counts the next time\n"
+    "; the game opens the save file.\n"
     "; Default: On\n"
     "BonusContent = On\n"
     "\n"
@@ -320,6 +398,12 @@ static const char DEFAULT_INI[] =
     "; Ask, Auto, Off\n"
     "; Default: Ask\n"
     "Updates = Ask\n"
+    "\n"
+    "; PC only. The folder the save is kept in (the one that holds save_0), for example on another drive or in a synced\n"
+    "; folder. Empty: the default (%APPDATA%\\MHGURecomp\\save on Windows, ~/.local/share/MHGURecomp/save on Linux,\n"
+    "; ~/Library/Application Support/MHGURecomp/save on macOS).\n"
+    "; Your save is not moved: copy save_0 there yourself. Takes effect at the next start\n"
+    "SaveLocation =\n"
     "\n"
     "[Android]\n"
     "; Android only. The folder the save is kept in, so syncing software can keep it in step: the one that holds save_0. Empty: the app's own\n"
@@ -366,11 +450,13 @@ const SettingRow g_setting_rows[] = {
     {"Graphics", "Performance", "FPS", "Frame Rate Cap", SETTING_VALUE, "30|60|90|120|144|240", NULL, true, true},
     {"Graphics", "Performance", "VSync", "VSync", SETTING_CHOICE, ONOFF, NULL, true, true},
     {"Graphics", "Performance", "ShaderPrewarm", "Shader Prewarm", SETTING_CHOICE, ONOFF, NULL, false, true},
+    {"Graphics", "Performance", "LoadingIndicator", "Loading Indicator", SETTING_CHOICE, ONOFF, NULL, false, false},
     {"Controls", "Controls", "FaceButtons", "Face Buttons", SETTING_CHOICE, "Position|Label",
      "By Position (Switch layout)|By Label", true, true},
     {"Controls", "Controls", "MenuConfirm", "Confirm in the F1 Menu", SETTING_CHOICE, "Original|South|East",
      "As in the Game|South (bottom button)|East (right button)", true, false},
     {"Controls", "Controls", "BackgroundInput", "Controller in the Background", SETTING_CHOICE, ONOFF, NULL, true, true},
+    {"Controls", "Controls", "MenuChord", "Plus + Minus Opens the F1 Menu", SETTING_CHOICE, ONOFF, NULL, true, false},
     {"Controls", "Controls", "ComboInputWindow", "Two-Button Inputs", SETTING_CHOICE, "Lenient|Strict", NULL, true, false},
     {"Controls", "Controls", "ChatKey", "Chat Key", SETTING_VALUE, "/|T|Y|Return", NULL, true, false},
     {"Controls", "Mouse", "MouseSensitivity", "Mouse Sensitivity", SETTING_VALUE, "0.5|0.75|1.0|1.5|2.0|3.0", NULL, true, true},
@@ -420,6 +506,7 @@ const SettingRow g_setting_rows[] = {
      false},
     {"Extras", "Application", "Theme", "F1 Menu Theme", SETTING_CHOICE, "Gold|Blue|Hunter", NULL, true, false},
     {"Extras", "Application", "MenuScale", "F1 Menu Size (%)", SETTING_VALUE, "50|75|100|125|150|175|200", NULL, true, false},
+    {"Extras", "Application", "SaveLocation", "Save Folder", SETTING_TEXT, NULL, NULL, false, false},
 };
 const int g_nsetting_rows = (int)(sizeof g_setting_rows / sizeof g_setting_rows[0]);
 // The per-quest Monster HP entries (Quest<number> = factors): set, listed and removed through config_set / config_quests
@@ -542,9 +629,9 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Upscaler", "FSR", fsr, true),
     {"Upscaler", "FSRQuality", SET_CHOICE, F(fsr_quality), 0, 0, 0,
      "NativeAA|native|aa,Quality,Balanced,Performance,UltraPerformance|ultraperf", NULL, true, ERR_FSR},
-    {"Upscaler", "Sharpness", SET_FLOAT, F(fsr_sharpness), 0, 0.0f, 1.0f, NULL, NULL, true, ERR_FSR},
+    {"Upscaler", "Sharpness", SET_FLOAT, F(fsr_sharpness), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_FSR},
     ON_OFF("Upscaler", "ObjectMotion", fsr_objmotion, true),
-    {"Upscaler", "Reactive", SET_FLOAT, F(fsr_reactive), 0, 0.0f, 1.0f, NULL, NULL, true, ERR_FSR},
+    {"Upscaler", "Reactive", SET_FLOAT, F(fsr_reactive), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_FSR},
     ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
@@ -553,10 +640,12 @@ const ConfigSetting g_settings[] = {
     {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, 30, 240, NULL, NULL, false, ERR_MISC},
     ON_OFF("Performance", "VSync", vsync, false),
     ON_OFF("Performance", "ShaderPrewarm", shader_prewarm, true),
+    ON_OFF("Performance", "LoadingIndicator", loading_indicator, true),  // (ini only: not in the settings menu)
     {"Controls", "FaceButtons", SET_CHOICE, F(face_buttons), 0, 0, 0, "Position|positional|nintendo,Label|labels|xbox",
      NULL, false, ERR_MISC},
     {"Controls", "MenuConfirm", SET_CHOICE, F(menu_confirm), 0, 0, 0, "Original,South,East", NULL, false, ERR_CONFIRM},
     ON_OFF("Controls", "BackgroundInput", background_input, false),
+    ON_OFF("Controls", "MenuChord", menu_chord, false),
     {"Controls", "ComboInputWindow", SET_CHOICE, F(combo_window), 0, 0, 0, "Lenient,Strict", NULL, false, ERR_MISC},
     {"Controls", "ChatKey", SET_TEXT, F(chat_key), sizeof g_config.chat_key, 0, 0, NULL, NULL, false, ERR_MISC},
     {"Mouse", "MouseSensitivity", SET_FLOAT, F(mouse_sensitivity), 0, 0.1f, 10.0f, NULL, NULL, false, ERR_VIEW},
@@ -566,23 +655,23 @@ const ConfigSetting g_settings[] = {
     KEYS("Plus", BIND_PLUS), KEYS("Minus", BIND_MINUS), KEYS("DpadUp", BIND_DPAD_UP), KEYS("DpadDown", BIND_DPAD_DOWN),
     KEYS("DpadLeft", BIND_DPAD_LEFT), KEYS("DpadRight", BIND_DPAD_RIGHT), KEYS("LeftStickClick", BIND_LSTICK),
     KEYS("RightStickClick", BIND_RSTICK), KEYS("ItemLeft", BIND_ITEM_LEFT), KEYS("ItemRight", BIND_ITEM_RIGHT),
-    {"Multiplayer", "Port", SET_INT, F(ldn_port), 0, 1, 65535, NULL, NULL, true, ERR_NET},
+    {"Multiplayer", "Port", SET_INT, F(ldn_port), 0, 1, 65535, NULL, NULL, false, ERR_NET},
     {"Android", "SaveFolder", SET_TEXT, F(save_dir), sizeof g_config.save_dir, 0, 0, NULL, NULL, true, ERR_FOLDER},
     {"Android", "GameFolder", SET_TEXT, F(game_dir), sizeof g_config.game_dir, 0, 0, NULL, NULL, true, ERR_GAME_FOLDER},
-    {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, true, ERR_NET},
+    {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, false, ERR_NET},
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},
-    ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, true),
+    ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, false),
     ON_OFF("Multiplayer", "ShareUrgentCredit", share_urgent, false),
-    {"Monster HP", "1Player|1Players", SET_FACTOR, F(hp.scale[0]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
-    {"Monster HP", "2Players|2Player", SET_FACTOR, F(hp.scale[1]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
-    {"Monster HP", "3Players|3Player", SET_FACTOR, F(hp.scale[2]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
-    {"Monster HP", "4Players|4Player", SET_FACTOR, F(hp.scale[3]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_HP},
-    ON_OFF("Village Quests", "VillageQuestsInHub", village_in_hub, true),
-    {"Village Quests", "HubHP", SET_FACTOR, F(hp.village), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, true, ERR_VILLAGE},
+    {"Monster HP", "1Player|1Players", SET_FACTOR, F(hp.scale[0]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
+    {"Monster HP", "2Players|2Player", SET_FACTOR, F(hp.scale[1]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
+    {"Monster HP", "3Players|3Player", SET_FACTOR, F(hp.scale[2]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
+    {"Monster HP", "4Players|4Player", SET_FACTOR, F(hp.scale[3]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
+    ON_OFF("Village Quests", "VillageQuestsInHub", village_in_hub, false),
+    {"Village Quests", "HubHP", SET_FACTOR, F(hp.village), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_VILLAGE},
     ON_OFF("Discord", "RichPresence", discord, false),
     ON_OFF("Discord", "ShowHunter", discord_hunter, false),
-    ON_OFF("Bonus Content", "BonusContent", bonus_content, true),
+    ON_OFF("Bonus Content", "BonusContent", bonus_content, false),
     {"Audio", "Volume", SET_INT, F(volume), 0, 0, 100, NULL, NULL, false, ERR_MISC},
     ON_OFF("Audio", "MuteInBackground", mute_in_background, false),
     ON_OFF("Application", "ConfirmExit", confirm_exit, false),
@@ -591,6 +680,7 @@ const ConfigSetting g_settings[] = {
     {"Application", "Theme", SET_CHOICE, F(menu_theme), 0, 0, 0, "Gold,Blue,Hunter", NULL, false, ERR_MISC},
     {"Application", "MenuScale", SET_INT, F(menu_scale), 0, 50, 200, NULL, NULL, false, ERR_SCALE},
     {"Application", "Updates", SET_CHOICE, F(updates), 0, 0, 0, "Ask,Auto|automatic,Off|never", NULL, false, ERR_UPDATES},
+    {"Application", "SaveLocation", SET_TEXT, F(save_location), sizeof g_config.save_location, 0, 0, NULL, NULL, true, ERR_FOLDER},
 };
 #undef ON_OFF
 #undef KEYS

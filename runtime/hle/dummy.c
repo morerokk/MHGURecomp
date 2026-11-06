@@ -54,8 +54,56 @@ static void hold(Cpu *c) {
     g_dummy = en;
 }
 
+// MHGU_SUMMON=<cm>: the same placing, and the monster stays free: for testing how it fights without looking for it. It is
+// placed once, and again after 15 s apart (it changed areas, or the hunter was knocked into another: logged, to count them).
+static float g_summon;
+static bool g_summoned;
+static uint64_t g_apart_since;
+
+static void summon_once(void) {
+    uint32_t pl = local_player(), sen = LD32(G_SENEMY), en = 0;
+    if (!pl || !sen || !LD8(pl + OBJ_ZONE)) return;
+    for (int k = 0; k < MAX_EN && !en; k++) {
+        uint32_t e = LD32(sen + 0x1c + 4u * (uint32_t)k), info = e ? LD32(e + EN_INFO) : 0;
+        if (info && LD16(info + 0x1b6) < 10000) en = e;
+    }
+    if (!en) return;
+    if (g_summoned) {
+        uint64_t now = plat_now_ns();
+        if (LD8(en + OBJ_ZONE) == LD8(pl + OBJ_ZONE)) { g_apart_since = 0; return; }
+        if (!g_apart_since) {
+            g_apart_since = now;
+            LOG("[dummy] apart: monster in zone %u, hunter in zone %u\n", LD8(en + OBJ_ZONE), LD8(pl + OBJ_ZONE));
+        }
+        if (now - g_apart_since < 15000000000ull) return;
+        g_apart_since = 0;
+    }
+    float qx = LDF(pl + OBJ_ROT), qy = LDF(pl + OBJ_ROT + 4), qz = LDF(pl + OBJ_ROT + 8), qw = LDF(pl + OBJ_ROT + 12);
+    float fx = 2 * (qx * qz + qw * qy), fz = 1 - 2 * (qx * qx + qy * qy);
+    uint32_t pos = LD32(en + EN_INFO) + 0x40;
+    STF(pos, LDF(pl + OBJ_POS) + fx * g_summon);
+    STF(pos + 4, LDF(pl + OBJ_POS + 4));
+    STF(pos + 8, LDF(pl + OBJ_POS + 8) + fz * g_summon);
+    ST8(en + OBJ_ZONE, LD8(pl + OBJ_ZONE));
+    g_summoned = true;
+    LOG("[dummy] summoned the large monster %.0f cm in front of the hunter, zone %u\n", (double)g_summon, LD8(pl + OBJ_ZONE));
+}
+
 static void collision(Cpu *c) {
-    hold(c);
+    if (g_summon > 0) {
+        uint32_t pl = local_player();
+        if (pl) ST16(pl + 0x13d6, 5000), ST16(pl + 0x13da, 5000);  // (the hunter's HP and its red part, above any one hit: it lasts as long as the test)
+        summon_once();
+        // The hunter stays where the first summon found it: knocked out of the area it would be put back in the camp.
+        static uint32_t pin_pl;
+        static float pin[3];
+        if (pl && g_summoned) {
+            if (pin_pl != pl) pin_pl = pl, pin[0] = LDF(pl + OBJ_POS), pin[1] = LDF(pl + OBJ_POS + 4), pin[2] = LDF(pl + OBJ_POS + 8);
+            STF(pl + OBJ_POS, pin[0]), STF(pl + OBJ_POS + 4, pin[1]), STF(pl + OBJ_POS + 8, pin[2]);
+        }
+    } else {
+        hold(c);
+    }
     fnhook_call_original(c, FN_COLLISION);
 }
 
@@ -68,7 +116,13 @@ static void damage(Cpu *c) {
 }
 
 void dummy_init(void) {
-    const char *e = getenv("MHGU_DUMMY");
+    const char *e = getenv("MHGU_SUMMON");
+    if (e && *e && atoi(e) > 0) {
+        g_summon = (float)atoi(e);
+        fnhook_set(FN_COLLISION, hle_register("dummy:collision", collision));
+        return;
+    }
+    e = getenv("MHGU_DUMMY");
     if (!e || !*e || !atoi(e)) return;
     if (atoi(e) > 1) g_dist = (float)atoi(e);
     fnhook_set(FN_COLLISION, hle_register("dummy:collision", collision));
