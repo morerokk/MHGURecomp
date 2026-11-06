@@ -173,6 +173,7 @@ void backend_init(void);
 void backend_quit(void);  // the window is closing: wind the renderer down and leave (returns only without a renderer)
 void backend_loading_screen(void);  // until the game's first frame, a thread presents the overlay's loading indicator
 bool shader_prewarm_progress(uint64_t *done, uint64_t *total);  // (the indicator's count; false: nothing left)
+bool shader_warmup_progress(uint64_t *done, uint64_t *total);   // (its Metal warm-up line, MoltenVK; false: none left)
 void backend_execute(uint64_t handle);            // run a recorded command list (guest address of its first record)
 void backend_present(NvnTexture *tex);            // show a texture in the window
 void backend_texture_destroyed(NvnTexture *tex);

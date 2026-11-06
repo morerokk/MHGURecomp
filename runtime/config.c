@@ -209,7 +209,7 @@ static const char DEFAULT_INI[] =
     "; Translate all of the game's shaders in the background at startup, so fewer things are drawn black the first time\n"
     "; they appear. The first start does this in about 20 seconds while the logos play; it needs about 340 MB in the cache folder.\n"
 #ifdef __APPLE__
-    "; On the Mac each shader is also prepared for Metal, a few minutes on the first start (\"Preparing shaders\" in the window).\n"
+    "; On the Mac each shader is also prepared for Metal, a few minutes on the first start (\"Building Metal shaders\" in the Loading box).\n"
 #endif
     "; Default: On\n"
     "ShaderPrewarm = On\n"

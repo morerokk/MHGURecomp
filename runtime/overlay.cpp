@@ -48,6 +48,7 @@ void vk_lock(void);
 void vk_unlock(void);
 SDL_Window *ui_window(void);
 bool shader_prewarm_progress(uint64_t *done, uint64_t *total);  // (runtime/nvn/vulkan/exec.c)
+bool shader_warmup_progress(uint64_t *done, uint64_t *total);   // (the same: MoltenVK's Metal warm-up)
 }
 
 static std::atomic<bool> g_enabled, g_ready, g_open, g_wants_text;
@@ -629,10 +630,11 @@ static void draw_fps(uint64_t now) {
 }
 
 // ------------------------------------------------------------------ loading indicator
-// A spinner and "Loading" in the bottom right corner, with the shader prewarm's count while it runs: on the black
-// window until the game's first frame (overlay_loading: device.c's loading screen), then over the game while the
-// prewarm still has programs left, and for the game's first second at least (its own first frames are black too).
-// Then it fades and stays gone. (Under g_frame_lock: the loading screen's thread and the game's both draw it.)
+// A spinner and "Loading" in the bottom right corner, with the shader prewarm's count while it runs (and on macOS the
+// Metal warm-up's under it): on the black window until the game's first frame (overlay_loading: device.c's loading
+// screen), then over the game while either still has programs left, and for the game's first second at least (its
+// own first frames are black too). Then it fades and stays gone. (Under g_frame_lock: the loading screen's thread and
+// the game's both draw it.)
 static const uint64_t LOADING_HOLD_NS = 1000000000ull, LOADING_FADE_NS = 400000000ull;
 static uint64_t g_loading_t0, g_loading_fade;  // the game's first overlay frame; when the fade began (0: not yet)
 static bool g_loading_over;
@@ -641,7 +643,8 @@ static float loading_alpha(uint64_t now) {  // (the game's frames)
     if (!g_config.loading_indicator) g_loading_over = true;  // ([Performance] LoadingIndicator = Off: never)
     if (g_loading_over) return 0;
     if (!g_loading_t0) g_loading_t0 = now;
-    if (!g_loading_fade && now - g_loading_t0 >= LOADING_HOLD_NS && !shader_prewarm_progress(nullptr, nullptr))
+    if (!g_loading_fade && now - g_loading_t0 >= LOADING_HOLD_NS && !shader_prewarm_progress(nullptr, nullptr) &&
+        !shader_warmup_progress(nullptr, nullptr))
         g_loading_fade = now;
     if (!g_loading_fade) return 1;
     float a = 1 - (now - g_loading_fade) / (float)LOADING_FADE_NS;
@@ -655,20 +658,27 @@ static void draw_loading(uint64_t now, float scale, float alpha) {
     };
     int language = config_language();
     const char *title = settings_text(language, "Loading");
-    uint64_t done, total;
-    char line[128] = "", widest[128] = "";
-    if (shader_prewarm_progress(&done, &total) && total) {
-        const char *what = settings_text(language, "Compiling shaders");
-        snprintf(line, sizeof line, "%s  %llu / %llu", what, (unsigned long long)done, (unsigned long long)total);
-        snprintf(widest, sizeof widest, "%s  %llu / %llu", what, (unsigned long long)total, (unsigned long long)total);
-    }
-    ImGuiViewport *vp = ImGui::GetMainViewport();
+    // the counts under the title: the prewarm's, then the Metal warm-up's (macOS), each while it has work
+    char line[2][128], widest[128];
+    int nlines = 0;
     ImFont *font = ImGui::GetFont();
     float size = ImGui::GetFontSize() * 1.25f, small = ImGui::GetFontSize(), pad = 10 * scale, gap = 3 * scale;
+    ImVec2 ls(0, 0);
+    auto count = [&](bool (*progress)(uint64_t *, uint64_t *), const char *label) {
+        uint64_t done, total;
+        if (!progress(&done, &total) || !total) return;
+        const char *what = settings_text(language, label);
+        snprintf(line[nlines++], sizeof line[0], "%s  %llu / %llu", what, (unsigned long long)done, (unsigned long long)total);
+        snprintf(widest, sizeof widest, "%s  %llu / %llu", what, (unsigned long long)total, (unsigned long long)total);
+        ImVec2 s = font->CalcTextSizeA(small, FLT_MAX, 0, widest);  // (no jitter as it counts)
+        ls = ImVec2(std::max(ls.x, s.x), ls.y + gap + s.y);
+    };
+    count(shader_prewarm_progress, "Compiling shaders");
+    count(shader_warmup_progress, "Building Metal shaders");
+    ImGuiViewport *vp = ImGui::GetMainViewport();
     float r = size * 0.55f, margin = 24 * scale;
     ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0, title);
-    ImVec2 ls = line[0] ? font->CalcTextSizeA(small, FLT_MAX, 0, widest) : ImVec2(0, 0);  // (no jitter as it counts)
-    float w = pad + 2 * r + pad + std::max(ts.x, ls.x) + pad, h = pad + ts.y + (line[0] ? gap + ls.y : 0) + pad;
+    float w = pad + 2 * r + pad + std::max(ts.x, ls.x) + pad, h = pad + ts.y + ls.y + pad;
     ImVec2 p1(vp->WorkPos.x + vp->WorkSize.x - margin, vp->WorkPos.y + vp->WorkSize.y - margin), p0(p1.x - w, p1.y - h);
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     dl->AddRectFilled(p0, p1, color(.025f, .04f, .065f, .85f), 6 * scale);
@@ -679,7 +689,11 @@ static void draw_loading(uint64_t now, float scale, float alpha) {
     dl->PathStroke(color(1, .72f, .3f, 1), ImDrawFlags_None, 3 * scale);
     ImVec2 at(c.x + r + pad, p0.y + pad);
     dl->AddText(font, size, at, color(.96f, .97f, 1, 1), title);
-    if (line[0]) dl->AddText(font, small, ImVec2(at.x, at.y + ts.y + gap), color(.72f, .76f, .84f, 1), line);
+    float y = at.y + ts.y;
+    for (int i = 0; i < nlines; i++, y += small) {
+        y += gap;
+        dl->AddText(font, small, ImVec2(at.x, y), color(.72f, .76f, .84f, 1), line[i]);
+    }
 }
 
 // ------------------------------------------------------------------ frames (game thread)

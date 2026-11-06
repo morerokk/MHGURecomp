@@ -57,6 +57,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Shader prewarm", "Precarga de shaders"},
         {"Loading", "Cargando"},  // (the loading indicator: runtime/overlay.cpp)
         {"Compiling shaders", "Compilando shaders"},
+        {"Building Metal shaders", "Generando shaders de Metal"},  // (macOS: the warm-up after it)
         {"FXAA mode", "Modo de FXAA"},
         {"Application audio", "Audio de la aplicación"},
         {"Master volume", "Volumen general"},

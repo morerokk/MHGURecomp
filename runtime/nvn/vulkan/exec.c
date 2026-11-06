@@ -31,7 +31,6 @@
 #endif
 
 #include "../../kernel.h"
-#include "../../overlay.h"
 #include "fsr.h"
 #include "shaders.h"
 #include "vk.h"
@@ -3349,23 +3348,15 @@ static void prebuild_report(void) {
     LOG("[shader] warm-up: %llu programs set up, %d warmed of %d to warm\n", (unsigned long long)seen, warmed, queued);
 }
 
-// (the window) how far the warm-up is while it has work, as the overlay's status line (runtime/overlay.h); gone when
-// everything queued is warm. (The count to warm grows while the game's programs are still being translated.)
-static void prebuild_status(void) {
-    static uint64_t last;
-    static bool shown;
-    uint64_t now = plat_now_ns();
-    if (now - last < 250000000ull) return;
-    last = now;
-    int warmed = atomic_load(&stat_warmed), queued = atomic_load(&stat_warm_queued);
-    if (warmed >= queued) {
-        if (shown) overlay_status(NULL), shown = false;
-        return;
-    }
-    char s[96];
-    snprintf(s, sizeof s, "Preparing shaders: %d%% (%d of %d)", warmed * 100 / queued, warmed, queued);
-    overlay_status(s);
-    shown = true;
+// The Metal warm-up's progress for the loading indicator (runtime/overlay.cpp), a line under the prewarm's: programs
+// warm of those queued so far; false once everything queued is warm (or there is no warm-up: prebuild_on). The count
+// to warm grows while the prewarm is still compiling; a program is queued before the prewarm counts it done
+// (prewarm_compile), so the two are never both idle while work is left. Any thread.
+bool shader_warmup_progress(uint64_t *done, uint64_t *total) {
+    int warmed = atomic_load(&stat_warmed), queued = atomic_load(&stat_warm_queued);  // (warmed first: queued >= it)
+    if (done) *done = warmed > 0 ? (uint64_t)warmed : 0;
+    if (total) *total = queued > 0 ? (uint64_t)queued : 0;
+    return warmed < queued;
 }
 
 // ================================================================== feedback: sampling a texture that is an attachment
@@ -4922,10 +4913,7 @@ static void exec_list(uint64_t handle, int depth) {
 void backend_execute(uint64_t handle) {
     vk_lock();
     plist_drain();  // (the pipeline list's programs the prewarm met)
-    if (prebuild_on()) {
-        prebuild_report();
-        prebuild_status();
-    }
+    if (prebuild_on()) prebuild_report();
     uint64_t t0 = plat_now_ns();
     exec_list(handle, 0);
     stat_exec_ns += plat_now_ns() - t0;
