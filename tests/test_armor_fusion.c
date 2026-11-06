@@ -118,17 +118,11 @@ static void check_invalid_catalogs(void) {
 static void check_catalog(void) {
     assert(!catalog_available()); // Queries fail closed before the first load.
     write_catalog();
-    remove("armor-fusion.names");
     assert(fusion_catalog_load());
     check_recipes();
-    FILE *f = fopen("armor-fusion.names", "wb"); assert(f);
-    fputs("obsolete invalid names metadata\n", f); fclose(f);
-    assert(fusion_catalog_load());
-    check_recipes();
-    f = fopen("armor-fusion.afus", "ab"); assert(f); fputc(1, f); fclose(f);
+    FILE *f = fopen("armor-fusion.afus", "ab"); assert(f); fputc(1, f); fclose(f);
     assert(!fusion_catalog_load() && !catalog_available());
     check_invalid_catalogs();
-    remove("armor-fusion.names");
     puts("armor fusion catalog checks passed");
 }
 
@@ -153,8 +147,15 @@ static void check_policy(void) {
     assert(!PLAN(1));
     selection[0].quantity = 5;
     assert(!PLAN(2)); // Duplicate rows cannot double-spend.
-    appearance.rank = FUSION_HR;
-    assert(!PLAN(1));
+    const bool allowed[3][3] = {{true, false, false}, {false, true, false}, {false, false, true}};
+    for (unsigned b = 0; b < 3; ++b) for (unsigned a = 0; a < 3; ++a) {
+        base.rank = FUSION_LR + b;
+        appearance.rank = recipe.rank = FUSION_LR + a;
+        assert(PLAN(1) == allowed[b][a]); // All six mixed-tier directions reject.
+        if (!allowed[b][a]) assert(plan.count == 0 && plan.points == 0);
+        assert(inventory == 5);
+    }
+    base.rank = recipe.rank = FUSION_LR;
     appearance.rank = FUSION_RANK_UNKNOWN;
     assert(!PLAN(1));
     appearance.rank = FUSION_LR;

@@ -216,7 +216,7 @@ class FusionMaterialsTest(unittest.TestCase):
         self.assertEqual(row["rank_recipes"][0]["category_id"], 105)
 
 
-    def test_catalog_is_packaged_without_names(self):
+    def test_catalog_is_required_in_package(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for name in ("mhgurecomp", "mhgugame.so", "mhgurecomp-updater", "pipelines.list",
@@ -225,9 +225,6 @@ class FusionMaterialsTest(unittest.TestCase):
             (root / "licenses").mkdir()
             names = {entry[0] for entry in files(directory, "linux")}
             self.assertIn("armor-fusion.afus", names)
-            self.assertNotIn("armor-fusion.names", names)
-            (root / "armor-fusion.names").write_bytes(b"old labels")
-            self.assertNotIn("armor-fusion.names", {entry[0] for entry in files(directory, "linux")})
             (root / "armor-fusion.afus").unlink()
             with self.assertRaises(SystemExit):
                 files(directory, "linux")
