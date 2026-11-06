@@ -89,13 +89,17 @@ type Config struct {
 	HandshakeTime time.Duration // for the first frame, and a joining player's wait for the host
 	PingEvery     time.Duration
 	MinProto      uint16 // the oldest link protocol (PROTO_VERSION) served; older games get errVersion (0: any)
-	Verbose       bool
+	// Android's public hubs (the game sends the key "public-phone" when it has none) in a room of their own, as the
+	// game asks; false: that room is the public room, so phones and PCs without a key see each other's hubs
+	SeparatePhones bool
+	Verbose        bool
 }
 
 func DefaultConfig() Config {
 	return Config{
 		Addr: ":39510", MaxConns: 4000, MaxConnsPerIP: 24, MaxHubs: 2000, MaxHubsPerIP: 4, ListMax: 18,
 		ReqRate: 2, ReqBurst: 15, Bandwidth: 1 << 20, HandshakeTime: 10 * time.Second, PingEvery: 15 * time.Second,
+		SeparatePhones: true,
 	}
 }
 
@@ -352,6 +356,10 @@ func (s *Server) handle(c *net.TCPConn) {
 		sendError(c, errVersion)
 		return
 	}
+	phone := room == phoneRoom
+	if phone && !s.cfg.SeparatePhones { // (for every request: hubs, searches and joins all meet in the public room)
+		room = [16]byte{}
+	}
 	body := p[headerSize:]
 	switch t {
 	case tList:
@@ -365,7 +373,7 @@ func (s *Server) handle(c *net.TCPConn) {
 			sendError(c, errBadReq)
 			return
 		}
-		s.host(c, ip, proto, room, body)
+		s.host(c, ip, proto, room, phone, body)
 	case tAttach:
 		if len(body) != 8 {
 			return
@@ -425,7 +433,8 @@ func (s *Server) list(c *net.TCPConn, proto uint16, room [16]byte) {
 	writeFrame(c, frame(tHubs, out))
 }
 
-func (s *Server) host(c *net.TCPConn, ip string, proto uint16, room [16]byte, info []byte) {
+// phone: the game sent Android's public room (room: where the hub is listed, the public room without SeparatePhones)
+func (s *Server) host(c *net.TCPConn, ip string, proto uint16, room [16]byte, phone bool, info []byte) {
 	h := &hub{room: room, proto: proto, created: time.Now(), ip: ip, out: make(chan []byte, 16),
 		done: make(chan struct{})}
 	copy(h.info[:], info)
@@ -442,7 +451,11 @@ func (s *Server) host(c *net.TCPConn, ip string, proto uint16, room [16]byte, in
 	s.hubs[h.id] = h
 	st.hubs++
 	s.mu.Unlock()
-	s.vlog("hub %016x up (%d players, protocol %d, %s)", h.id, h.info[niNodeCount], proto, roomName(room))
+	name := roomName(room)
+	if phone && room != phoneRoom {
+		name = "public, from a phone"
+	}
+	s.vlog("hub %016x up (%d players, protocol %d, %s)", h.id, h.info[niNodeCount], proto, name)
 	defer func() {
 		s.mu.Lock()
 		delete(s.hubs, h.id)

@@ -15,6 +15,7 @@ func main() {
 	flag.IntVar(&cfg.ListMax, "list-max", cfg.ListMax, "hubs in one search answer (a random choice when there are more)")
 	flag.Float64Var(&cfg.Bandwidth, "bandwidth", cfg.Bandwidth, "bytes a second per player link and direction")
 	minProto := flag.Uint("min-proto", uint(cfg.MinProto), "oldest link protocol (the game's PROTO_VERSION) served; older games are refused (0: any)")
+	flag.BoolVar(&cfg.SeparatePhones, "separate-phones", cfg.SeparatePhones, "public hubs of Android players among Android players only, as the game asks (-separate-phones=false: one public room for all)")
 	flag.BoolVar(&cfg.Verbose, "v", false, "log hubs and joins (never IP addresses)")
 	flag.Parse()
 	if *minProto > 0xFFFF {
@@ -28,6 +29,9 @@ func main() {
 	log.Printf("MHGURecomp hub server on %s (TCP and UDP)", s.Addr())
 	if cfg.MinProto > 0 {
 		log.Printf("refusing games older than link protocol %d", cfg.MinProto)
+	}
+	if !cfg.SeparatePhones {
+		log.Printf("one public room: Android players' public hubs are listed with everyone's")
 	}
 	log.Fatal(s.Serve())
 }

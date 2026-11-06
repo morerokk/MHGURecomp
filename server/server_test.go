@@ -140,6 +140,61 @@ func TestMinProto(t *testing.T) {
 	}
 }
 
+// SeparatePhones: Android's public room (key "public-phone") is a room of its own by default; turned off, it is the
+// public room for hosting, searching and joining alike, and keyed rooms stay apart.
+func TestSeparatePhones(t *testing.T) {
+	headerRoom := func(proto uint16, room [16]byte) []byte {
+		h := header(proto, 0)
+		copy(h[8:24], room[:])
+		return h
+	}
+	hostIn := func(s *Server, room [16]byte) uint64 {
+		c := dial(t, s)
+		send(t, c, tHost, headerRoom(3, room), testInfo(1))
+		return binary.LittleEndian.Uint64(expect(t, c, tHosted))
+	}
+	listIn := func(s *Server, room [16]byte) map[uint64]bool {
+		c := dial(t, s)
+		send(t, c, tList, headerRoom(3, room))
+		p := expect(t, c, tHubs)
+		out := map[uint64]bool{}
+		for i := 0; i < int(binary.LittleEndian.Uint32(p)); i++ {
+			out[binary.LittleEndian.Uint64(p[4+i*(8+netInfoSize):])] = true
+		}
+		return out
+	}
+	var keyed [16]byte
+	keyed[0] = 7
+
+	apart := start(t, nil)
+	pc, ph := hostIn(apart, [16]byte{}), hostIn(apart, phoneRoom)
+	if l := listIn(apart, [16]byte{}); len(l) != 1 || !l[pc] {
+		t.Fatalf("separate: PCs see %v", l)
+	}
+	if l := listIn(apart, phoneRoom); len(l) != 1 || !l[ph] {
+		t.Fatalf("separate: phones see %v", l)
+	}
+
+	one := start(t, func(c *Config) { c.SeparatePhones = false })
+	pc, ph = hostIn(one, [16]byte{}), hostIn(one, phoneRoom)
+	friends := hostIn(one, keyed)
+	for _, r := range [][16]byte{{}, phoneRoom} {
+		if l := listIn(one, r); len(l) != 2 || !l[pc] || !l[ph] {
+			t.Fatalf("one room: %s sees %v", roomName(r), l)
+		}
+	}
+	if l := listIn(one, keyed); len(l) != 1 || !l[friends] {
+		t.Fatalf("one room: keyed room sees %v", l)
+	}
+	// a phone joins a PC's hub: the server asks the host (no "not found")
+	c := dial(t, one)
+	h := dial(t, one)
+	send(t, h, tHost, headerRoom(3, [16]byte{}), testInfo(1))
+	id := binary.LittleEndian.Uint64(expect(t, h, tHosted))
+	send(t, c, tJoin, headerRoom(3, phoneRoom), u64(id))
+	expect(t, h, tIncoming)
+}
+
 // The log's room names: the public room, Android's public room (the same hash as the game's), any other key.
 func TestRoomName(t *testing.T) {
 	var keyed [16]byte
