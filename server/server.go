@@ -32,6 +32,7 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -88,7 +89,8 @@ type Config struct {
 	Bandwidth     float64       // bytes a second per pair and direction (TCP), and per pair (UDP)
 	HandshakeTime time.Duration // for the first frame, and a joining player's wait for the host
 	PingEvery     time.Duration
-	MinProto      uint16 // the oldest link protocol (PROTO_VERSION) served; older games get errVersion (0: any)
+	// The two settings that can change while the server runs (Server.Apply): their values at the start.
+	MinProto uint16 // the oldest link protocol (PROTO_VERSION) served; older games get errVersion (0: any)
 	// Android's public hubs (the game sends the key "public-phone" when it has none) in a room of their own, as the
 	// game asks; false: that room is the public room, so phones and PCs without a key see each other's hubs
 	SeparatePhones bool
@@ -105,8 +107,9 @@ func DefaultConfig() Config {
 
 type hub struct {
 	id      uint64
-	room    [16]byte
+	room    [16]byte // as the host sent it (Android's public room too: whether it is the public room is decided per request)
 	proto   uint16
+	conn    *net.TCPConn      // the host's connection (Apply closes it when the hub's protocol is no longer served)
 	info    [netInfoSize]byte // guarded by Server.mu
 	created time.Time
 	ip      string
@@ -145,11 +148,62 @@ type Server struct {
 	conns   int
 	ln      *net.TCPListener
 	udp     *net.UDPConn
+	// the live settings (Apply): cfg.MinProto and cfg.SeparatePhones are only their first values
+	minProto atomic.Uint32
+	separate atomic.Bool
 }
 
 func NewServer(cfg Config) *Server {
-	return &Server{cfg: cfg, hubs: map[uint64]*hub{}, pending: map[uint64]*pending{}, pairs: map[uint32]*pair{},
+	s := &Server{cfg: cfg, hubs: map[uint64]*hub{}, pending: map[uint64]*pending{}, pairs: map[uint32]*pair{},
 		ips: map[string]*ipState{}}
+	s.minProto.Store(uint32(cfg.MinProto))
+	s.separate.Store(cfg.SeparatePhones)
+	return s
+}
+
+// Settings: what can change while the server runs.
+type Settings struct {
+	MinProto       uint16
+	SeparatePhones bool
+}
+
+func (s *Server) Settings() Settings {
+	return Settings{uint16(s.minProto.Load()), s.separate.Load()}
+}
+
+// Apply changes the settings without a restart; open connections stay. A higher MinProto refuses older games from the
+// next request on and takes their hubs off the list: their hosts' connections here are closed (the game tries again
+// and is told the server runs another version), while players already in such a hub play on through the relay until
+// they leave. SeparatePhones applies to every search and join from now on, to the hubs already listed too (no host
+// has to reconnect). Returns how many hubs were taken off.
+func (s *Server) Apply(n Settings) int {
+	old := s.Settings()
+	s.minProto.Store(uint32(n.MinProto))
+	s.separate.Store(n.SeparatePhones)
+	var gone []*net.TCPConn
+	s.mu.Lock()
+	for _, h := range s.hubs {
+		if h.proto < n.MinProto {
+			gone = append(gone, h.conn)
+		}
+	}
+	s.mu.Unlock()
+	for _, c := range gone {
+		c.Close()
+	}
+	if old != n {
+		log.Printf("settings: min-proto %d -> %d, separate-phones %v -> %v (%d hub(s) of older games taken off)",
+			old.MinProto, n.MinProto, old.SeparatePhones, n.SeparatePhones, len(gone))
+	}
+	return len(gone)
+}
+
+// The room a hub or request is in: Android's public room is the public room unless phones are kept apart.
+func meet(r [16]byte, separate bool) [16]byte {
+	if r == phoneRoom && !separate {
+		return [16]byte{}
+	}
+	return r
 }
 
 func (s *Server) vlog(format string, args ...any) {
@@ -349,16 +403,12 @@ func (s *Server) handle(c *net.TCPConn) {
 	proto := binary.LittleEndian.Uint16(p[6:])
 	var room [16]byte
 	copy(room[:], p[8:24])
-	if proto < s.cfg.MinProto { // (the game: "the hub server runs another version", LAN / Join hubs only)
+	if uint32(proto) < s.minProto.Load() { // (the game: "the hub server runs another version", LAN / Join hubs only)
 		if t == tHost {
 			s.vlog("hub refused (protocol %d, %s)", proto, roomName(room))
 		}
 		sendError(c, errVersion)
 		return
-	}
-	phone := room == phoneRoom
-	if phone && !s.cfg.SeparatePhones { // (for every request: hubs, searches and joins all meet in the public room)
-		room = [16]byte{}
 	}
 	body := p[headerSize:]
 	switch t {
@@ -373,7 +423,7 @@ func (s *Server) handle(c *net.TCPConn) {
 			sendError(c, errBadReq)
 			return
 		}
-		s.host(c, ip, proto, room, phone, body)
+		s.host(c, ip, proto, room, body)
 	case tAttach:
 		if len(body) != 8 {
 			return
@@ -400,9 +450,11 @@ func (s *Server) list(c *net.TCPConn, proto uint16, room [16]byte) {
 		created time.Time
 	}
 	var es []entry
+	sep := s.separate.Load()
+	room = meet(room, sep)
 	s.mu.Lock()
 	for _, h := range s.hubs {
-		if h.proto == proto && h.room == room {
+		if h.proto == proto && meet(h.room, sep) == room {
 			es = append(es, entry{h.id, h.info, h.created})
 		}
 	}
@@ -433,12 +485,16 @@ func (s *Server) list(c *net.TCPConn, proto uint16, room [16]byte) {
 	writeFrame(c, frame(tHubs, out))
 }
 
-// phone: the game sent Android's public room (room: where the hub is listed, the public room without SeparatePhones)
-func (s *Server) host(c *net.TCPConn, ip string, proto uint16, room [16]byte, phone bool, info []byte) {
-	h := &hub{room: room, proto: proto, created: time.Now(), ip: ip, out: make(chan []byte, 16),
+func (s *Server) host(c *net.TCPConn, ip string, proto uint16, room [16]byte, info []byte) {
+	h := &hub{room: room, proto: proto, conn: c, created: time.Now(), ip: ip, out: make(chan []byte, 16),
 		done: make(chan struct{})}
 	copy(h.info[:], info)
 	s.mu.Lock()
+	if uint32(proto) < s.minProto.Load() { // (Apply raised it since handle checked: Apply's sweep may have run already)
+		s.mu.Unlock()
+		sendError(c, errVersion)
+		return
+	}
 	st := s.ips[ip]
 	if len(s.hubs) >= s.cfg.MaxHubs || st.hubs >= s.cfg.MaxHubsPerIP {
 		s.mu.Unlock()
@@ -451,11 +507,7 @@ func (s *Server) host(c *net.TCPConn, ip string, proto uint16, room [16]byte, ph
 	s.hubs[h.id] = h
 	st.hubs++
 	s.mu.Unlock()
-	name := roomName(room)
-	if phone && room != phoneRoom {
-		name = "public, from a phone"
-	}
-	s.vlog("hub %016x up (%d players, protocol %d, %s)", h.id, h.info[niNodeCount], proto, name)
+	s.vlog("hub %016x up (%d players, protocol %d, %s)", h.id, h.info[niNodeCount], proto, roomName(room))
 	defer func() {
 		s.mu.Lock()
 		delete(s.hubs, h.id)
@@ -512,7 +564,8 @@ func (s *Server) host(c *net.TCPConn, ip string, proto uint16, room [16]byte, ph
 func (s *Server) join(c *net.TCPConn, proto uint16, room [16]byte, id uint64) {
 	s.mu.Lock()
 	h := s.hubs[id]
-	if h == nil || h.room != room || h.proto != proto {
+	sep := s.separate.Load()
+	if h == nil || meet(h.room, sep) != meet(room, sep) || h.proto != proto {
 		s.mu.Unlock()
 		sendError(c, errNotFound)
 		return
