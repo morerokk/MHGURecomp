@@ -24,6 +24,7 @@ void xb_lobby(const uint8_t *info);  // the server pushed the hub's NetworkInfo 
 
 // The room's LDN packets and game packets while xb_active() (ldn.c hands them over instead of handling them).
 void xb_room_ldn(uint8_t type, const uint8_t lip[4], const uint8_t rip[4], bool bc, const void *data, uint32_t len);
+void xb_room_members(const uint8_t (*ips)[4], int n);  // the room's member list: players that left it are let go
 void xb_room_proxy(const uint8_t sip[4], uint16_t sport, const uint8_t dip[4], uint16_t dport, uint8_t proto, bool bc,
                    const void *data, uint32_t len);
 

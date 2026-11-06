@@ -45,6 +45,7 @@
 #include "ryuldn.h"
 #include "xbridge.h"
 #include "ryusrv.h"
+#include "roomsrv.h"
 
 #ifdef _WIN32
 typedef SOCKET hsock;
@@ -1285,7 +1286,9 @@ static void ryu_lobby_changed(const uint8_t *info) {
     pthread_mutex_lock(&L.mu);
     if (!L.ryu) { pthread_mutex_unlock(&L.mu); return; }
     if (info) {
-        if (info_sane((uint8_t *)info)) memcpy(L.info, info, NETINFO_SIZE);
+        bool ok = info_sane((uint8_t *)info);
+        if (ok) memcpy(L.info, info, NETINFO_SIZE);
+        LOG("[ldn] Ryujinx lobby update: %d of %d players%s\n", info[NI_NODE_COUNT], info[NI_NODE_MAX], ok ? "" : " (rejected as malformed)");
     } else if (L.state == ST_AP_CREATED) {  // the server dropped our lobby
         L.state = ST_ACCESS_POINT, L.reason = DR_DESTROYED_BY_SYSTEM;
         LOG("[ldn] the Ryujinx server closed the hub\n");
@@ -1464,6 +1467,7 @@ static void room_proxy_received(const uint8_t sip[4], uint16_t sport, const uint
     vsock_deliver(&p, data, len);
 }
 
+static void room_members_changed(const uint8_t (*ips)[4], int n) { if (xb_active()) xb_room_members(ips, n); }
 static void room_lost(void) {
     LOG("[room] the room connection ended\n");
     xb_end();
@@ -1488,8 +1492,7 @@ static void *room_keeper(void *arg) {
         if (now >= next && room_enabled() && !room_connected()) {
             uint8_t ip[4];
             char err[96];
-            const char *nick = g_config.ldn_room_nick[0] ? g_config.ldn_room_nick : "MHGU Player";
-            if (!room_join(g_config.ldn_room_server, nick, g_config.ldn_room_pass, ip, err, sizeof err)) next = now + 15000000000ull;
+            if (!room_join(room_server(), room_nick(), g_config.ldn_room_pass, ip, err, sizeof err)) next = now + 15000000000ull;
         }
         plat_sleep_until_ns(plat_now_ns() + 500000000ull);
     }
@@ -1498,7 +1501,7 @@ static void *room_keeper(void *arg) {
 static void room_start(void) {
     if (!room_enabled()) return;
     static bool hooked;
-    if (!hooked) { hooked = true; room_set_hooks(&(RoomHooks){room_ldn_received, room_proxy_received, room_lost}); }
+    if (!hooked) { hooked = true; room_set_hooks(&(RoomHooks){room_ldn_received, room_proxy_received, room_lost, room_members_changed}); }
     pthread_t t;
     room_keep_gen++;
     if (!pthread_create(&t, NULL, room_keeper, (void *)(intptr_t)room_keep_gen)) pthread_detach(t);
@@ -1520,6 +1523,22 @@ static void ryusrv_wanted(void) {
     ryu_set_self(addr);
     LOG("[ldn] Ryujinx players can use this PC as their LDN server (port %d); hubs you create are made on it\n", port);
 }
+// ---- crossplay: the suyu-style room this game runs itself (ini RoomServe): joined as the host member, hubs are shared
+static void roomsrv_wanted(void) {
+    if (!g_config.ldn_room_serve || roomsrv_running()) return;
+    int port = g_config.ldn_room_serve_port > 0 ? g_config.ldn_room_serve_port : 24872;
+    char err[96] = "";
+    if (!roomsrv_start(port, "MHGU", g_config.ldn_room_pass, "MHGU Host", err, sizeof err)) { LOG("[ldn] can't run the room on port %d: %s\n", port, err); return; }
+    char addr[32];
+    snprintf(addr, sizeof addr, "127.0.0.1:%d", port);
+    room_set_self(addr);
+    LOG("[ldn] suyu-family players can join this PC's room (port %d); hubs you create are shared with it\n", port);
+}
+static void roomsrv_unwanted(void) {
+    if (!roomsrv_running()) return;
+    room_set_self(NULL);
+    roomsrv_stop();
+}
 static void ryusrv_unwanted(void) {
     if (!ryusrv_running()) return;
     ryu_set_self(NULL);
@@ -1535,6 +1554,7 @@ HLE_FUNC("_ZN2nn3ldn10InitializeEv", ldn_initialize) { NTRACE();
     if (!hooked) { hooked = true; ryu_set_hooks(&(RyuHooks){ryu_lobby_changed, ryu_data_received}); }
     if (L.state == ST_NONE) {
         ryusrv_wanted();
+        roomsrv_wanted();
         room_start();
         L.state = ST_INITIALIZED, L.reason = DR_NONE;
         rand_bytes(L.mac, 6);
@@ -1565,6 +1585,7 @@ static void to_initialized(void) {
 HLE_FUNC("_ZN2nn3ldn8FinalizeEv", ldn_finalize) { NTRACE();
     to_initialized();
     room_shutdown();
+    roomsrv_unwanted();
     ryusrv_unwanted();
     L.state = ST_NONE;
     (void)c;
@@ -1592,7 +1613,7 @@ HLE_FUNC("_ZN2nn3ldn14GetNetworkInfoEPNS0_11NetworkInfoE", ldn_get_network_info)
 HLE_FUNC("_ZN2nn3ldn14GetIpv4AddressEPNS0_11Ipv4AddressEPNS0_10SubnetMaskE", ldn_get_ipv4) { NTRACE();
     if (!ldn_net_up()) { RET(R_INVALID_STATE); return; }
     if (ARG(0)) ST32(ARG(0), L.own_ip);
-    if (ARG(1)) ST32(ARG(1), 0xFFFFFF00u);
+    if (ARG(1)) ST32(ARG(1), L.ryu && L.ryu_mask ? L.ryu_mask : 0xFFFFFF00u);  // (the server's own mask: the game works its broadcast address out from it)
     RET(0);
 }
 
@@ -1642,7 +1663,7 @@ static uint32_t create_ryu(const uint8_t *cfg, const uint8_t *sec, const uint8_t
     L.state = ST_AP_CREATED, L.reason = DR_NONE;
     pthread_mutex_unlock(&L.mu);
     LOG("[ldn] hub created on the Ryujinx server: %s, up to %d players\n", ipstr(L.own_ip), L.info[NI_NODE_MAX]);
-    if (g_config.ldn_room_host && room_connected()) xb_begin(info, ip, mask);  // room players may join it too
+    if (room_hosting() && room_connected()) xb_begin(info, ip, mask);  // room players may join it too
     signal_change();
     return 0;
 }
@@ -1650,7 +1671,7 @@ static uint32_t create_ryu(const uint8_t *cfg, const uint8_t *sec, const uint8_t
 static uint32_t create_network(const uint8_t *cfg, const uint8_t *sec, const uint8_t *sec_param, const uint8_t *user) {
     if (L.state != ST_ACCESS_POINT) return R_INVALID_STATE;
     if (ryu_host_addr()[0]) return create_ryu(cfg, sec, user);
-    bool via_room = g_config.ldn_room_host && room_connected();
+    bool via_room = room_hosting() && room_connected();
     if (via_room) room_mac(L.mac);
     pthread_mutex_lock(&L.mu);
     memset(L.info, 0, NETINFO_SIZE);

@@ -4,6 +4,7 @@
 #include <enet/enet.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zstd.h>
 
 #include "../config.h"
 #include "../hle.h"
@@ -18,6 +19,32 @@ enum {
 #define DEFAULT_PORT 24872
 #define CONNECT_MS 5000
 #define MAX_MESSAGE 0x20000
+
+
+// Room builds zstd-compress every proxy payload. We compress what we send, and open what arrives; a sender whose payloads
+// came uncompressed (an older or other build) is answered the same way.
+#define RAW_MAX 32
+static struct { uint8_t ip[4]; bool raw; bool used; } raw_peers[RAW_MAX];
+static pthread_mutex_t raw_mu = PTHREAD_MUTEX_INITIALIZER;
+static void raw_note(const uint8_t ip[4], bool raw) {
+    pthread_mutex_lock(&raw_mu);
+    int free_i = -1;
+    for (int i = 0; i < RAW_MAX; i++) {
+        if (raw_peers[i].used && !memcmp(raw_peers[i].ip, ip, 4)) { raw_peers[i].raw = raw; pthread_mutex_unlock(&raw_mu); return; }
+        if (!raw_peers[i].used && free_i < 0) free_i = i;
+    }
+    if (free_i < 0) free_i = (int)(ip[3] % RAW_MAX);
+    memcpy(raw_peers[free_i].ip, ip, 4), raw_peers[free_i].raw = raw, raw_peers[free_i].used = true;
+    pthread_mutex_unlock(&raw_mu);
+}
+static bool raw_is(const uint8_t ip[4]) {
+    bool r = false;
+    pthread_mutex_lock(&raw_mu);
+    for (int i = 0; i < RAW_MAX; i++) if (raw_peers[i].used && !memcmp(raw_peers[i].ip, ip, 4)) r = raw_peers[i].raw;
+    pthread_mutex_unlock(&raw_mu);
+    return r;
+}
+static bool is_zstd(const uint8_t *d, uint32_t n) { return n >= 4 && d[0] == 0x28 && d[1] == 0xB5 && d[2] == 0x2F && d[3] == 0xFD; }
 
 typedef struct Out { struct Out *next; uint32_t len; uint8_t data[]; } Out;
 
@@ -37,7 +64,13 @@ static RoomHooks g_hooks;
 static volatile bool g_leaving;  // room_leave() is ending the thread: not a lost connection
 
 void room_set_hooks(const RoomHooks *h) { g_hooks = *h; }
-bool room_enabled(void) { return g_config.ldn_room_server[0] != 0; }
+static char s_self[48];
+#define SELF_NICK "MHGU Host"
+void room_set_self(const char *addr) { snprintf(s_self, sizeof s_self, "%s", addr ? addr : ""); }
+const char *room_server(void) { return s_self[0] ? s_self : g_config.ldn_room_server; }
+const char *room_nick(void) { return s_self[0] ? SELF_NICK : g_config.ldn_room_nick[0] ? g_config.ldn_room_nick : "MHGU Player"; }
+bool room_hosting(void) { return s_self[0] || g_config.ldn_room_host; }
+bool room_enabled(void) { return room_server()[0] != 0; }
 bool room_connected(void) { return R.state == 2; }
 void room_own_ip(uint8_t ip[4]) { memcpy(ip, R.ip, 4); }
 
@@ -68,6 +101,8 @@ static uint32_t rd_u32(Rd *r) {
     const uint8_t *q = rd_bytes(r, 4);
     return q ? (uint32_t)q[0] << 24 | (uint32_t)q[1] << 16 | (uint32_t)q[2] << 8 | q[3] : 0;
 }
+static void rd_u64_skip(Rd *r) { rd_bytes(r, 8); }
+static void rd_skip_str(Rd *r) { uint32_t n = rd_u32(r); rd_bytes(r, n); }
 
 // Queues a message for the room's thread (ENet is used from one thread only).
 static void queue(const uint8_t *d, uint32_t n) {
@@ -97,8 +132,18 @@ void room_send_ldn(uint8_t type, const uint8_t local_ip[4], const uint8_t remote
 void room_send_proxy(const uint8_t src_ip[4], uint16_t src_port, const uint8_t dst_ip[4], uint16_t dst_port,
                      uint8_t proto, bool broadcast, const void *data, uint32_t len) {
     if (R.state != 2 || len > MAX_MESSAGE) return;
+    uint8_t *z = NULL;
+    if (len && (broadcast || !raw_is(dst_ip))) {
+        size_t cap = ZSTD_compressBound(len);
+        z = malloc(cap);
+        if (!z) return;
+        size_t zn = ZSTD_compress(z, cap, data, len, ZSTD_CLEVEL_DEFAULT);
+        if (ZSTD_isError(zn)) { free(z); return; }
+        data = z, len = (uint32_t)zn;
+        if (len > MAX_MESSAGE) { free(z); return; }
+    }
     uint8_t *buf = malloc(len + 48);
-    if (!buf) return;
+    if (!buf) { free(z); return; }
     Wr w = {buf, 0, len + 48, false};
     wr_u8(&w, M_PROXY_PACKET);
     wr_u8(&w, 1), wr_bytes(&w, src_ip, 4), wr_u16(&w, src_port);  // Domain::INET = 1
@@ -106,6 +151,7 @@ void room_send_proxy(const uint8_t src_ip[4], uint16_t src_port, const uint8_t d
     wr_u8(&w, proto), wr_u8(&w, broadcast), wr_vec(&w, data, len);
     if (!w.bad) queue(buf, w.n);
     free(buf);
+    free(z);
 }
 
 // ---- receiving
@@ -116,6 +162,23 @@ static void got(const uint8_t *d, uint32_t n) {
     case M_JOIN_SUCCESS_AS_MOD: {
         const uint8_t *ip = rd_bytes(&r, 4);
         if (ip) { memcpy(R.ip, ip, 4); R.state = 2; }
+        break;
+    }
+    case M_ROOM_INFO: {  // name, description, slots, port, preferred game name, host, then the members
+        rd_skip_str(&r), rd_skip_str(&r), rd_u32(&r), rd_u16(&r), rd_skip_str(&r), rd_skip_str(&r);
+        uint32_t n = rd_u32(&r);
+        if (r.bad || n > 256 || !g_hooks.members) break;
+        uint8_t (*ips)[4] = malloc(n * 4 + 4);
+        if (!ips) break;
+        uint32_t k = 0;
+        for (; k < n && !r.bad; k++) {
+            rd_skip_str(&r);  // nickname
+            const uint8_t *ip = rd_bytes(&r, 4);
+            rd_skip_str(&r), rd_u64_skip(&r), rd_skip_str(&r), rd_skip_str(&r), rd_skip_str(&r), rd_skip_str(&r);  // game, user
+            if (ip && !r.bad) memcpy(ips[k], ip, 4);
+        }
+        if (!r.bad) g_hooks.members((const uint8_t (*)[4])ips, (int)n);
+        free(ips);
         break;
     }
     case M_LDN_PACKET: {
@@ -138,7 +201,23 @@ static void got(const uint8_t *d, uint32_t n) {
         bool bc = rd_u8(&r) != 0;
         uint32_t len = rd_u32(&r);
         const uint8_t *data = rd_bytes(&r, len);
-        if (sip && dip && (data || !len) && g_hooks.proxy) g_hooks.proxy(sip, sport, dip, dport, proto, bc, data, len);
+        if (sip && dip && (data || !len) && g_hooks.proxy) {
+            if (len && is_zstd(data, len)) {
+                unsigned long long n = ZSTD_getFrameContentSize(data, len);
+                if (n == ZSTD_CONTENTSIZE_ERROR || n == ZSTD_CONTENTSIZE_UNKNOWN || n > MAX_MESSAGE) break;
+                uint8_t *o = malloc(n ? (size_t)n : 1);
+                if (!o) break;
+                size_t got_n = ZSTD_decompress(o, (size_t)n, data, len);
+                if (!ZSTD_isError(got_n)) {
+                    raw_note(sip, false);
+                    g_hooks.proxy(sip, sport, dip, dport, proto, bc, o, (uint32_t)got_n);
+                }
+                free(o);
+            } else {
+                raw_note(sip, true);
+                g_hooks.proxy(sip, sport, dip, dport, proto, bc, data, len);
+            }
+        }
         break;
     }
     case M_NAME_COLLISION: case M_IP_COLLISION: case M_VERSION_MISMATCH: case M_WRONG_PASSWORD: case M_ROOM_IS_FULL:

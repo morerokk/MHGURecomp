@@ -186,7 +186,9 @@ static void *join_worker(void *arg) {
     memcpy(sec, j->netinfo + NI_SEC_MODE, 2);
     memcpy(user, p->node + NODE_NAME, 0x20);
     uint32_t ip = 0, mask = 0, res = 0;
-    RyuPeer *rp = ryu_peer_join(j->netinfo, sec, user, rd16(p->node + NODE_LCV), &(RyuPeerHooks){peer_lobby, peer_data}, p, out, &ip, &mask, &res);
+    uint16_t lcv = rd16(p->node + NODE_LCV);
+    if (!lcv) lcv = rd16(NODE(j->netinfo, 0) + NODE_LCV);  // (older suyu builds send 0: the host's version, as their own hubs take them)
+    RyuPeer *rp = ryu_peer_join(j->netinfo, sec, user, lcv, &(RyuPeerHooks){peer_lobby, peer_data}, p, out, &ip, &mask, &res);
     pthread_mutex_lock(&mu);
     bool keep = rp && active && !p->dead;
     if (keep) {
@@ -299,15 +301,17 @@ void xb_room_ldn(uint8_t type, const uint8_t lip[4], const uint8_t rip[4], bool 
     (void)bc, (void)rip;
     switch (type) {
     case RLDN_SCAN: {
+        LOG("[xbridge] a room player scans (%u.%u.%u.%u)\n", lip[0], lip[1], lip[2], lip[3]);
         uint8_t view[NETINFO_SIZE];
         pthread_mutex_lock(&mu);
-        bool ok = active;
+        bool ok = active && lobby[NI_NODE_COUNT] && lobby[NI_NODE_COUNT] < lobby[NI_NODE_MAX] && lobby[0x62] != 1;  // (a closed or full hub is not offered)
         if (ok) room_view(view);
         pthread_mutex_unlock(&mu);
         if (ok) send_ldn(RLDN_SCAN_RESP, lip, view, NETINFO_SIZE);
         break;
     }
     case RLDN_CONNECT: {
+        LOG("[xbridge] a room player wants to join (%u.%u.%u.%u, %u bytes)\n", lip[0], lip[1], lip[2], lip[3], len);
         if (len < NODE_SIZE) break;
         pthread_mutex_lock(&mu);
         Peer *p = peer_by_room(lip);
@@ -318,7 +322,11 @@ void xb_room_ldn(uint8_t type, const uint8_t lip[4], const uint8_t rip[4], bool 
         }
         int k = 0;
         while (k < MAXP && peers[k].used) k++;
-        if (!active || k == MAXP || lobby[NI_NODE_COUNT] >= lobby[NI_NODE_MAX]) { pthread_mutex_unlock(&mu); break; }
+        if (!active || k == MAXP || lobby[NI_NODE_COUNT] >= lobby[NI_NODE_MAX]) {
+            pthread_mutex_unlock(&mu);
+            send_ldn(RLDN_DESTROY_NETWORK, lip, NULL, 0);  // (as the emulators' own hubs refuse: the player is not left waiting)
+            break;
+        }
         p = &peers[k];
         memset(p, 0, sizeof *p);
         p->used = true;
@@ -347,14 +355,38 @@ void xb_room_ldn(uint8_t type, const uint8_t lip[4], const uint8_t rip[4], bool 
     }
 }
 
+void xb_room_members(const uint8_t (*ips)[4], int n) {
+    for (int i = 0; i < MAXP; i++) {
+        pthread_mutex_lock(&mu);
+        Peer *p = active && peers[i].used && !peers[i].dead ? &peers[i] : NULL;
+        bool here = false;
+        for (int k = 0; p && k < n && !here; k++) here = memcmp(ips[k], p->room_ip, 4) == 0;
+        pthread_mutex_unlock(&mu);
+        if (p && !here) {
+            LOG("[xbridge] room player %u.%u.%u.%u left the room: let go of its place in the hub\n", p->room_ip[0], p->room_ip[1], p->room_ip[2], p->room_ip[3]);
+            retire(p, false);
+        }
+    }
+}
+
 void xb_room_proxy(const uint8_t sip[4], uint16_t sport, const uint8_t dip[4], uint16_t dport, uint8_t proto, bool bc, const void *data,
                    uint32_t len) {
+    static int seen;
+    if (seen < 40) {
+        seen++;
+        LOG("[xbridge] room packet %u.%u.%u.%u:%u -> %u.%u.%u.%u:%u proto %u%s, %u bytes\n", sip[0], sip[1], sip[2], sip[3], sport, dip[0], dip[1],
+            dip[2], dip[3], dport, proto, bc ? " (broadcast)" : "", len);
+    }
     if (proto != 4 || len > 0x10000) return;
     uint8_t buf[0x10000], own[4];
     Sub subs[MAXSUB];
     pthread_mutex_lock(&mu);
     Peer *p = active ? peer_by_room(sip) : NULL;
-    if (!p || !p->joined || !p->rp) { pthread_mutex_unlock(&mu); return; }
+    if (!p || !p->joined || !p->rp) {
+        pthread_mutex_unlock(&mu);
+        if (seen < 40) LOG("[xbridge]   (not from a joined room player: dropped)\n");
+        return;
+    }
     room_own_ip(own);
     uint32_t d = ip_u32(dip), dst = 0;
     if (bc || d == 0xFFFFFFFFu || (d & 0xFF) == 0xFF) dst = (host_ip & host_mask) | ~host_mask;
@@ -366,7 +398,11 @@ void xb_room_proxy(const uint8_t sip[4], uint16_t sport, const uint8_t dip[4], u
         Peer *o = peer_by_room(dip);  // another room player: the room delivers those itself
         (void)o;
     }
-    if (!dst) { pthread_mutex_unlock(&mu); return; }
+    if (!dst) {
+        pthread_mutex_unlock(&mu);
+        if (seen < 40) LOG("[xbridge]   (no hub address for it: dropped)\n");
+        return;
+    }
     RyuProxy r = {p->ryu_ip, dst, sport, dport, 17};
     RyuPeer *rp = p->rp;
     int ns = build_subs(subs);

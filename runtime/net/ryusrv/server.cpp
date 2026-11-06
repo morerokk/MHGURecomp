@@ -83,6 +83,7 @@ struct Server::Impl {
 
     struct Session {
         u64 serial = 0;
+        int logged = 0, logged_bc = 0, logged_uni = 0, logged_rx = 0;
         std::uintptr_t sock = kInvalidSocket;
 
         // Below: under Impl::lock.
@@ -281,6 +282,7 @@ struct Server::Impl {
         BroadcastInfo(*game); // the others learn about the new node
         s.game = game;
         game->players.push_back(&s);
+        LOG_INFO(Network, "ryuldn server: client #{} joined as node {} ({})", s.serial, slot, s.ip);
         Send(s, Encode(PacketId::Connected, game->info));
         return true;
     }
@@ -621,21 +623,27 @@ struct Server::Impl {
         if (info.source_ip == 0) {
             info.source_ip = s.ip; // sent from a socket bound to 0.0.0.0
         } else if (info.source_ip != s.ip) {
+            LOG_INFO(Network, "ryuldn server: client #{} (ip {}) sent a game packet as {}: dropped", s.serial, s.ip, info.source_ip);
             return; // can't pretend to be someone else
         }
         u32 dest = info.dest_ip;
         if (dest == kAltBroadcast || dest == 0xFFFFFFFFu) {
             dest = kBroadcast;
         }
-        static int logged = 0;
-        if (logged < 40) {
-            logged++;
+        int& seen = dest == kBroadcast ? s.logged_bc : s.logged_uni;
+        if (seen < (dest == kBroadcast ? 10 : 100)) {
+            seen++;
             LOG_INFO(Network, "ryuldn server: game packet from {} to {} ({} -> {}, {} bytes)", info.source_ip, info.dest_ip, info.source_port,
                      info.dest_port, data.size());
         }
         const auto bytes = Encode(type, *msg, Trailing<T>(data));
         for (Session* p : s.game->players) {
             if (dest == kBroadcast || p->ip == dest) {
+                if (p != &s && p->logged_rx < 10) {
+                    p->logged_rx++;
+                    LOG_INFO(Network, "ryuldn server: relayed {} bytes (to {}:{}) to client #{} ({})", bytes.size(), info.dest_ip, info.dest_port,
+                             p->serial, p->ip);
+                }
                 Send(*p, bytes);
             }
         }

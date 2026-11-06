@@ -331,6 +331,13 @@ static const char DEFAULT_INI[] =
     "RyuServe = Off\n"
     "RyuServePort = 30456\n"
     "\n"
+    "; RoomServe = On: this game also runs a small suyu-style room itself while local play is open, so suyu, yuzu, Eden and\n"
+    "; Citron players join it (their multiplayer room address = this PC, port RoomServePort, default 24872; forward it\n"
+    "; for the internet) and play in the same hubs as Ryujinx players. Hubs you create are shared with the room. The room\n"
+    "; password is RoomPassword.\n"
+    "RoomServe = Off\n"
+    "RoomServePort = 24872\n"
+    "\n"
     "; Crossplay with suyu, yuzu and the forks that kept their multiplayer rooms (Eden, Citron, ...). RoomServer: the\n"
     "; room's address (host or host:port, default port 24872); this game joins it while local play is open, and the\n"
     "; emulators' hubs show up in Search Hubs. RoomHost = On: a hub you create lives in the room, so their players can\n"
@@ -605,6 +612,8 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Multiplayer", "RoomHost", ldn_room_host, false),
     ON_OFF("Multiplayer", "RyuServe", ldn_ryu_serve, false),
     {"Multiplayer", "RyuServePort", SET_INT, F(ldn_ryu_serve_port), 0, 0, 65535, NULL, NULL, false, ERR_NET},
+    ON_OFF("Multiplayer", "RoomServe", ldn_room_serve, false),
+    {"Multiplayer", "RoomServePort", SET_INT, F(ldn_room_serve_port), 0, 0, 65535, NULL, NULL, false, ERR_NET},
     ON_OFF("Discord", "RichPresence", discord, false),
     ON_OFF("Discord", "ShowHunter", discord_hunter, false),
     ON_OFF("Bonus Content", "BonusContent", bonus_content, false),
