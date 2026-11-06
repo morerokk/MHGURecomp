@@ -842,11 +842,13 @@ static bool ui_relax_scissor;  // the draw being set up moved a HUD piece out fr
 static int ui_scissor_v = -1;  // 16:10: the draw being set up is a HUD piece anchored so (0 top, 1 centre, 2 bottom),
                                // and its scissor moves with it
 static bool ui_menu_pass;  // this pass drew a layer 97 menu before (the windows of layer 100 then sit beside Top-anchored ones)
-// The HUD quads this pass drew last (16:9 canvas place, vertical anchor 0 top / 1 centre / 2 bottom, horizontal 0 left /
-// 1 right / 2 centre): a model preview follows the window drawn over it (ui_preview_map)
+// The HUD quads drawn last (16:9 canvas place, vertical anchor 0 top / 1 centre / 2 bottom, horizontal 0 left / 1 right /
+// 2 centre): a model preview follows the window drawn over it (ui_preview_map). Kept across passes: the Smithy's model
+// is drawn in a pass of its own, after the parchment it sits in.
 #define UI_RECENT 256
 static struct { float x, y; uint8_t vanchor, hanchor; } ui_recent[UI_RECENT];
-static uint32_t ui_nrecent;  // (quads recorded this pass; the slot is the count modulo UI_RECENT)
+static uint32_t ui_nrecent, ui_pass_recent;  // (quads recorded so far, the slot is the count modulo UI_RECENT; and when
+                                             // this pass began)
 static bool ui_loading_pass;  // this pass draws the loading screen (its backdrop, layer 110, came first)
 static bool ui_title_pass;  // this pass draws the title screen (its layout, layer 108 at the canvas centre, came first)
 static bool ui_frontend_pass;  // this pass draws a front-end screen (Main Menu, Character Select: its 16:9 backdrop, layer
@@ -1196,7 +1198,7 @@ static bool models_2d_in_samples(void) { return mr_frame == g_present_count && m
 void vk_end_pass(void) {
     if (!in_pass) return;
     ui_group_end();
-    if (ui_nrecent) ui_results_last = ui_results_pass;
+    if (ui_nrecent != ui_pass_recent) ui_results_last = ui_results_pass;
     vkCmdEndRenderPass(vk_cmd());
     in_pass = false;
     if (gp_active) {
@@ -1637,7 +1639,7 @@ static void begin_pass(void) {
     ui_results_pass = false;
     ui_meownster_pass = false;
     ui_menu_pass = false;
-    ui_nrecent = 0;
+    ui_pass_recent = ui_nrecent;
     pass_msaa = false;
     // (MSAA: a colour target 3D models were drawn into lately (ms_expand), while they are; once they are not, it is like
     // any other target again)
@@ -1759,8 +1761,9 @@ static bool ui_preview_map(PreviewMap *pm) {
     if (w < 8.0f || w > 0.9f * pw || h > 0.98f * ph) return false;  // (the scene itself: the whole picture)
     *pm = (PreviewMap){0, 1, 0, 1};
     // The window it is drawn in: the last quad over the viewport (inside it sideways, not below it). The last quad of all
-    // can be a button prompt under the window ("Rotate" under the Palico Scout preview), anchored apart from it.
-    int vanchor = ui_nrecent ? ui_recent[(ui_nrecent - 1) % UI_RECENT].vanchor : 1, hanchor = -1;
+    // can be a button prompt under the window ("Rotate" under the Palico Scout preview), anchored apart from it; with
+    // no quad over it, the last one of this pass, or the centre.
+    int vanchor = ui_nrecent != ui_pass_recent ? ui_recent[(ui_nrecent - 1) % UI_RECENT].vanchor : 1, hanchor = -1;
     {
         float x0 = vp[0] / pw * 1280.0f, x1 = (vp[0] + w) / pw * 1280.0f, y1 = (fminf(vp[1], vp[1] + vp[3]) + h) / ph * 720.0f;
         for (uint32_t i = ui_nrecent; i > 0 && ui_nrecent - i < UI_RECENT; i--) {
