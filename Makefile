@@ -181,7 +181,7 @@ VERSION ?= $(shell git describe --tags 2>/dev/null || echo unknown)
 
 RT_OBJ   = $(patsubst runtime/%.c,$(O)/rt/%.o,$(RT_SRC)) $(RYUSRV_OBJ) $(RT_CXX) $(O)/rt/overlay.o $(O)/rt/settings_panel.o $(IMGUI_OBJ) \
            $(O)/updater/sha256.o $(ICON_RES) $(ENET_OBJ)
-# The Ryujinx LDN server this game can run itself (runtime/net/ryusrv/: C++, from the earlier suyu-based recompiler)
+# The Ryujinx LDN server this game can run itself (runtime/net/ryusrv/: C++)
 RYUSRV_OBJ := $(patsubst runtime/net/ryusrv/%.cpp,$(O)/rt/net/ryusrv/%.o,$(wildcard runtime/net/ryusrv/*.cpp))
 $(O)/rt/net/ryusrv/%.o: runtime/net/ryusrv/%.cpp $(wildcard runtime/net/ryusrv/*.h) runtime/net/ryusrv.h
 	@mkdir -p $(dir $@)

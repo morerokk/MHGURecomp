@@ -1,4 +1,4 @@
-// A small Ryujinx-LDN-compatible server inside the game (runtime/net/ryusrv/, from the earlier suyu-based recompiler): friends
+// A small Ryujinx-LDN-compatible server inside the game (runtime/net/ryusrv/): friends
 // connect their Ryujinx (LDN server = this PC's address) or this game (RyuServers) to it, nobody needs a separate LdnServer.
 // ini [Multiplayer] RyuServe = On, RyuServePort.
 #pragma once
