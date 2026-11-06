@@ -14,12 +14,20 @@ func main() {
 	flag.IntVar(&cfg.MaxHubsPerIP, "max-hubs-per-ip", cfg.MaxHubsPerIP, "hubs at once from one IP address")
 	flag.IntVar(&cfg.ListMax, "list-max", cfg.ListMax, "hubs in one search answer (a random choice when there are more)")
 	flag.Float64Var(&cfg.Bandwidth, "bandwidth", cfg.Bandwidth, "bytes a second per player link and direction")
+	minProto := flag.Uint("min-proto", uint(cfg.MinProto), "oldest link protocol (the game's PROTO_VERSION) served; older games are refused (0: any)")
 	flag.BoolVar(&cfg.Verbose, "v", false, "log hubs and joins (never IP addresses)")
 	flag.Parse()
+	if *minProto > 0xFFFF {
+		log.Fatalf("-min-proto %d: at most 65535", *minProto)
+	}
+	cfg.MinProto = uint16(*minProto)
 	s := NewServer(cfg)
 	if err := s.Listen(); err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("MHGURecomp hub server on %s (TCP and UDP)", s.Addr())
+	if cfg.MinProto > 0 {
+		log.Printf("refusing games older than link protocol %d", cfg.MinProto)
+	}
 	log.Fatal(s.Serve())
 }

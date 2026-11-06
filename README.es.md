@@ -344,6 +344,62 @@ correspondiente (39500 TCP/UDP por defecto), y todos los demás tienen que poner
 Elige las opciones multijugador de "Local Wireless", ya que este port se hace pasar por una Switch cercana con conexión
 inalámbrica. Las opciones en línea no están disponibles y no hacen falta.
 
+### Juego cruzado con emuladores (experimental)
+
+También puedes jugar con gente en Ryujinx / Ryubing, y en suyu, yuzu, Eden, Citron y los demás forks que conservaron
+sus salas multijugador. Todavía es experimental: se ha probado con el software de servidor de los emuladores, pero aún
+no en cacerías reales con jugadores reales de emuladores. Si algo falla, [abre un
+issue](https://github.com/morerokk/MHGURecomp/issues/new/choose) con tu `log.txt`.
+
+Antes de nada:
+- El juego cruzado se configura en `mhgurecomp.ini`, en `[Multiplayer]`, no en el menú F1. Si tu .ini es de una versión
+  anterior y aún no tiene los ajustes de abajo, añádelos tú.
+- Todos necesitan la versión 1.4.0 del juego, también los jugadores de emuladores.
+- Los extras de este port (sincronizar monstruos pequeños, escalar la vida) se desactivan en una sala con jugadores de
+  emuladores: solo los jugadores de este port los entienden.
+
+**La forma fácil: un jugador de este port lo aloja todo.** El anfitrión activa los servidores que vienen dentro del
+juego:
+
+```ini
+RyuServe = On        ; para jugadores de Ryujinx / Ryubing (puerto TCP 30456)
+RoomServe = On       ; para jugadores de suyu, yuzu, Eden, Citron... (puerto UDP 24872)
+RoomPassword =       ; opcional: una contraseña para la sala multijugador
+```
+
+Solo funcionan mientras el juego local inalámbrico está abierto, así que el anfitrión crea una sala como siempre. Para
+jugar por internet, el anfitrión abre esos puertos, o todos usan una VPN como Radmin. Después:
+- **Los jugadores de Ryujinx** ponen como servidor LDN la dirección del anfitrión (puerto 30456) y buscan salas en
+  Local Play.
+- **Los jugadores de suyu / Eden / Citron** se conectan a una sala multijugador en la IP del anfitrión, puerto 24872
+  (con la contraseña, si la hay).
+- **Los demás jugadores de este port** ponen `RyuServers = <la dirección del anfitrión>`, para que la sala aparezca en
+  su búsqueda de salas.
+
+Con los dos servidores activos, los jugadores de Ryujinx y los de las salas multijugador juegan todos en la misma sala.
+
+**Usar un servidor que ya existe:**
+- `RyuServers = host[:puerto], ...`: servidores LDN de Ryujinx cuyas salas aparecen en la búsqueda de salas (puerto
+  por defecto 30456).
+- `RyuHost = host`: las salas que crees se hacen en ese servidor, para que los jugadores de Ryujinx que estén en él
+  puedan entrar.
+- `RoomServer = host[:puerto]` y `RoomHost = On`: lo mismo para una sala multijugador al estilo de suyu (puerto por
+  defecto 24872). `RoomName` es tu nombre en ella, `RoomPassword` su contraseña.
+- `RyuHost` y `RoomHost` a la vez crean una sola sala a la que pueden entrar tanto jugadores de Ryujinx como de salas
+  multijugador.
+- Por favor, no uses para esto el servidor LDN público de Ryujinx: es para usuarios de Ryujinx. Monta tu propio
+  LdnServer de Ryujinx, o simplemente usa `RyuServe`.
+
+**Conviene saber:**
+- Para un grupo privado con jugadores de Ryujinx, pon en `RyuPassphrase` `Ryujinx-` seguido de exactamente 8 dígitos
+  hexadecimales (por ejemplo `Ryujinx-1a2b3c4d`), y que los jugadores de Ryujinx pongan la misma. Cualquier otra cosa
+  (también una errata) cuenta como sin contraseña, es decir, tu sala es **pública**. Ryujinx hace lo mismo.
+- Las salas con jugadores de Ryujinx y de salas multijugador a la vez son las menos probadas. Si ahí pasa algo raro
+  (jugadores que no se ven en una misión, por ejemplo), prueba con una sala solo de jugadores de Ryujinx o solo de
+  salas multijugador.
+- Si las cosas van raras después de que alguien saliera y volviera a entrar en una sala de juego cruzado, crea una sala
+  nueva.
+
 ## Contenido extra
 
 Por defecto, la subcarpeta `bonus` de las versiones contiene una partida con todo el contenido gratuito en línea

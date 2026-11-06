@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -112,6 +113,48 @@ func TestKeysAndVersions(t *testing.T) {
 	send(t, c, tJoin, header(2, 8), u64(friends))
 	if code := binary.LittleEndian.Uint32(expect(t, c, tError)); code != errNotFound {
 		t.Fatalf("error %d", code)
+	}
+}
+
+// MinProto: older games are refused for every request (errVersion); that version and newer ones are served.
+func TestMinProto(t *testing.T) {
+	s := start(t, func(c *Config) { c.MinProto = 3 })
+	for _, r := range []struct {
+		typ  byte
+		body []byte
+	}{{tList, nil}, {tHost, testInfo(1)}, {tJoin, u64(1)}, {tAttach, u64(1)}} {
+		c := dial(t, s)
+		send(t, c, r.typ, header(2, 0), r.body)
+		if code := binary.LittleEndian.Uint32(expect(t, c, tError)); code != errVersion {
+			t.Fatalf("request %d: error %d", r.typ, code)
+		}
+	}
+	c := dial(t, s)
+	send(t, c, tHost, header(3, 0), testInfo(1))
+	id := binary.LittleEndian.Uint64(expect(t, c, tHosted))
+	if l := list(t, s, 3, 0); len(l) != 1 || l[id] == nil {
+		t.Fatalf("protocol 3 list %v", l)
+	}
+	if l := list(t, s, 4, 0); len(l) != 0 {
+		t.Fatal("protocol 4 sees a protocol 3 hub")
+	}
+}
+
+// The log's room names: the public room, Android's public room (the same hash as the game's), any other key.
+func TestRoomName(t *testing.T) {
+	var keyed [16]byte
+	keyed[0], keyed[3] = 0xab, 0x01
+	for _, c := range []struct {
+		room [16]byte
+		want string
+	}{{[16]byte{}, "public"}, {phoneRoom, "phone"}, {keyed, "key ab000001000000000000000000000000"}} {
+		if got := roomName(c.room); got != c.want {
+			t.Errorf("roomName(%x) = %q, want %q", c.room, got, c.want)
+		}
+	}
+	// runtime/net/ldn.c: the first 16 bytes of SHA-256("MHGURecomp matchmaking key:public-phone")
+	if got := fmt.Sprintf("%x", phoneRoom[:4]); got != "4efa8642" {
+		t.Errorf("phone room %s", got)
 	}
 }
 

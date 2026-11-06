@@ -95,7 +95,8 @@ struct State {
     int capture_bind = -1;     // the keybind (BIND_*) a key is being chosen for; -1: the chat key
     bool capture_add = false;  // the key chosen is that keybind's second, else its only one
 } s;
-std::atomic<bool> request_exit, request_back, is_dirty, is_confirming, is_capturing, capture_mouse, capture_wheel;
+std::atomic<bool> request_exit, request_back, is_dirty, is_confirming, is_capturing, capture_mouse, capture_wheel,
+    capture_pointing;
 // (the key pressed while a key is being chosen, or KEY_MOUSE + a mouse button; -1: none yet)
 std::atomic<int> captured_key{-1};
 bool forge_requested;  // the Mods tab's "Open the Forge menu" (game thread, as the rest of the panel)
@@ -1852,7 +1853,8 @@ bool settings_panel_key(int scancode) {
     return true;
 }
 bool settings_panel_mouse(int button) {
-    if (!capture_mouse.load() || button < 1 || button > SDL_BUTTON_X2)
+    if (!capture_mouse.load() || button < 1 || button > SDL_BUTTON_X2 ||
+        (button == SDL_BUTTON_LEFT && capture_pointing.load()))
         return false;
     captured_key = KEY_MOUSE + button;
     return true;
@@ -2257,8 +2259,10 @@ void settings_panel(bool *open) {
     is_dirty = *open && (dirty() || pending_text());
     is_confirming = *open && confirmation();
     is_capturing = *open && s.view == View::KeyCapture;
-    // (a click on the capture view's buttons is theirs; anywhere else it is the mouse button chosen)
-    capture_mouse = is_capturing && s.capture_bind >= 0 && !s.pointing;
+    // (a left click on the capture view's buttons is theirs; any other button, or a left click anywhere else, is the
+    // mouse button chosen)
+    capture_mouse = is_capturing && s.capture_bind >= 0;
+    capture_pointing = s.pointing;
     capture_wheel = is_capturing && s.capture_bind >= 0;  // (the capture view doesn't scroll)
     if (!*open)
         s.editing = false;

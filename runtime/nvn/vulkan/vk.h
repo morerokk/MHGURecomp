@@ -24,6 +24,10 @@
 #include "../nvn.h"
 #include "../maxwell/shader.h"
 
+// The most window images a swapchain may have. Android's swapchain makes more than asked for (it adds the compositor's
+// spare buffers to minImageCount): 8 was too few on a Mali-G57 (Helio G100), whose image 8 then had no framebuffer.
+#define SC_MAX 16
+
 #define VK_CHECK(x) do { VkResult r_ = (x); if (r_ != VK_SUCCESS) FATAL("%s failed: %d (%s:%d)\n", #x, r_, __FILE__, __LINE__); } while (0)
 
 typedef struct {
@@ -63,8 +67,8 @@ typedef struct {
     VkFormat sc_format;
     VkExtent2D sc_extent;
     uint32_t sc_count;
-    VkImage sc_images[8];
-    VkImageView sc_views[8];
+    VkImage sc_images[SC_MAX];
+    VkImageView sc_views[SC_MAX];
 } VkG;
 extern VkG g_vk;
 

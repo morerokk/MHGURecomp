@@ -403,7 +403,7 @@ static VkPresentModeKHR present_mode(void) {
 }
 
 static VkRenderPass sc_pass;
-static VkFramebuffer sc_fb[8];
+static VkFramebuffer sc_fb[SC_MAX];
 
 // Android takes the app's window away when it leaves the screen (minimised, a file picker over it) and makes a new one
 // when it comes back. A surface dies with its window: everything on it says VK_ERROR_SURFACE_LOST_KHR from then on, so
@@ -438,7 +438,7 @@ static void create_swapchain(void) {
         if (fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM && fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) { sf = fmts[i]; break; }
     uint32_t count = caps.minImageCount + 1 < 3 ? 3 : caps.minImageCount + 1;
     if (caps.maxImageCount && count > caps.maxImageCount) count = caps.maxImageCount;
-    if (count > 8) count = 8;
+    if (count > SC_MAX) count = SC_MAX;
     // The window image is drawn upright and the system turns it to the screen (a phone's screen is portrait at
     // heart: in landscape currentTransform is a quarter turn, which would show the upright image squashed).
     VkSurfaceTransformFlagBitsKHR xf = caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
@@ -485,7 +485,11 @@ static void create_swapchain(void) {
                                      .subpassCount = 1, .pSubpasses = &sp, .dependencyCount = 1, .pDependencies = &dep};
         VK_CHECK(vkCreateRenderPass(g_vk.dev, &rp, NULL, &sc_pass));
     }
-    g_vk.sc_count = 8;
+    // (all of them: a capped list leaves images the swapchain can still hand out, with no framebuffer)
+    uint32_t n = 0;
+    vkGetSwapchainImagesKHR(g_vk.dev, g_vk.swapchain, &n, NULL);
+    if (n > SC_MAX) FATAL("the window's swapchain has %u images (asked for %u): at most %d are supported\n", n, count, SC_MAX);
+    g_vk.sc_count = n;
     vkGetSwapchainImagesKHR(g_vk.dev, g_vk.swapchain, &g_vk.sc_count, g_vk.sc_images);
     for (uint32_t i = 0; i < g_vk.sc_count; i++) {
         VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = g_vk.sc_images[i],
@@ -496,7 +500,7 @@ static void create_swapchain(void) {
                                       .pAttachments = &g_vk.sc_views[i], .width = ext.width, .height = ext.height, .layers = 1};
         VK_CHECK(vkCreateFramebuffer(g_vk.dev, &fi, NULL, &sc_fb[i]));
     }
-    LOG("[vk] swapchain %ux%u, %u images, format %d\n", ext.width, ext.height, g_vk.sc_count, sf.format);
+    LOG("[vk] swapchain %ux%u, %u images (asked for %u), format %d\n", ext.width, ext.height, g_vk.sc_count, count, sf.format);
 }
 
 static void recreate_swapchain(void) {
@@ -510,7 +514,7 @@ VkRenderPass vk_window_pass(void) { return sc_pass; }
 // ================================================================== frames
 // Acquire semaphores rotate per frame in flight; a slot is reused once the submission that waited on it is done.
 #define FRAMES 3
-static VkSemaphore acquire_sem[FRAMES], done_sem[8];
+static VkSemaphore acquire_sem[FRAMES], done_sem[SC_MAX];
 static uint64_t slot_seq[FRAMES];
 static int slot;
 
@@ -536,7 +540,7 @@ static void surface_destroy(void) {
         vkDestroyImageView(g_vk.dev, g_vk.sc_views[i], NULL);
     }
     g_vk.sc_count = 0;
-    for (int i = 0; i < 8; i++) {  // (a present that failed may have left these signalled)
+    for (int i = 0; i < SC_MAX; i++) {  // (a present that failed may have left these signalled)
         if (done_sem[i]) vkDestroySemaphore(g_vk.dev, done_sem[i], NULL);
         done_sem[i] = VK_NULL_HANDLE;
     }
