@@ -841,11 +841,18 @@ static void vk_check(VkResult r) {
 static bool backend_ready(const OverlayTarget *t) {
     if (!g_enabled) return false;
     g_disp_w = t->width, g_disp_h = t->height;
-    if (t->pass != g_pass) {  // (the window's render pass: made once, again only if the window's format changes)
-        if (g_pass) {
-            g_ready = false;
-            ImGui_ImplVulkan_Shutdown();
-        }
+    if (g_pass && t->pass != g_pass) {
+        // The window's format changed (HDR turned on or off: its render pass draws into the RGBA16F composition image
+        // instead). Only the pipeline is made again: shutting the backend down freed the textures' descriptor sets
+        // that the frame already built on the game's thread still named, and the game crashed drawing it.
+        ImGui_ImplVulkan_PipelineInfo pi = {};
+        pi.RenderPass = t->pass;
+        pi.Subpass = 0;
+        pi.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        ImGui_ImplVulkan_CreateMainPipeline(&pi);
+        g_pass = t->pass;
+    }
+    if (t->pass != g_pass) {  // (the window's render pass: the backend made once)
         ImGui_ImplVulkan_InitInfo info = {};
         info.ApiVersion = VK_API_VERSION_1_2;
         info.Instance = t->inst;

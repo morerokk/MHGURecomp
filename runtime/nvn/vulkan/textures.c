@@ -293,7 +293,7 @@ static void create_image(NvnTexture *t, TexBackend *b) {
             vf = VK_FORMAT_R8G8B8A8_UNORM;
         }
     }
-    if (b->wide) vf = VK_FORMAT_R16G16B16A16_UNORM;
+    if (b->wide) vf = vk_wide_format(b->wide);
     bool depthfmt = renderer_format_is_depth(t->format);
     VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (depthfmt) usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
@@ -619,19 +619,19 @@ TexBackend *vk_tex(NvnTexture *t, bool for_render) {
 
 // (exec.c begin_pass, outside a render pass, before t is rendered to) An RGBA8 2D target re-made wide or back to
 // RGBA8 (SmoothGradients turned off, or it turns out to be FSR's input), its contents blitted over.
-void vk_rt_widen(NvnTexture *t, bool on) {
+void vk_rt_widen(NvnTexture *t, int on) {
     if (t->format != 0x25 || t->target != 1) return;
     TexBackend *b = tex_backend(t);
-    if (b->wide == on || b->format != (b->wide ? VK_FORMAT_R16G16B16A16_UNORM : VK_FORMAT_R8G8B8A8_UNORM)) return;
+    if (b->wide == on || b->format != vk_wide_format(b->wide)) return;
     if (b->pending_rgba) upload_pending(b);
     vk_ms_resolve(b);
     if (b->ms) { destroy_image(b->ms); free(b->ms); b->ms = NULL; }
     b->ms_valid = b->ms_dirty = false;
     views_forget(b);
     TexBackend old = *b;
-    b->wide = on;
+    b->wide = (uint8_t)on;
     create_image(t, b);
-    b->wide = b->format == VK_FORMAT_R16G16B16A16_UNORM;  // (creation failed: RGBA8 after all)
+    if (b->format != vk_wide_format(on)) b->wide = WIDE_NONE;  // (creation failed: RGBA8 after all)
     VkCommandBuffer cb = vk_cmd();
     vk_full_barrier(cb);
     VkImageBlit r[16];
@@ -645,7 +645,9 @@ void vk_rt_widen(NvnTexture *t, bool on) {
     vk_full_barrier(cb);
     defer((Dead){.img = old.image, .mem = old.mem});
     static int nlog;
-    if (nlog++ < 40) LOG("[vk] render target %ux%u (%u levels) %s\n", b->width, b->height, b->levels, b->wide ? "wide" : "RGBA8");
+    if (nlog++ < 40)
+        LOG("[vk] render target %ux%u (%u levels) %s\n", b->width, b->height, b->levels,
+            b->wide == WIDE_FLOAT16 ? "RGBA16F (HDR)" : b->wide ? "wide" : "RGBA8");
 }
 
 void renderer_mark_gpu_owned(NvnTexture *t) { tex_backend(t)->gpu_owned = true; }
