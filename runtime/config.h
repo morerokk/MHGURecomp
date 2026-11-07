@@ -104,6 +104,7 @@ typedef struct {
     float hdr_bloom;          // [HDR] Bloom: the game's bloom strength, 0 .. 100 %
     int hdr_scene;            // [HDR] UnclampedScene: the render-size scene targets as RGBA16F too (not only the post chain)
     int hdr_format;           // [HDR] HDRFormat: HDR_FORMAT_*, the window image's format (ini only)
+    int hdr_analysis;         // [HDR] Analysis: the HDR analysis overlay (nvn/vulkan/hdr.c, overlay.cpp)
     int binds[BINDS][BIND_KEYS];  // [Keybinds]: BIND_* -> its keys (an SDL scancode or KEY_MOUSE + button; 0 none)
     int menu_theme;           // [Application] Theme: THEME_*, the settings menu's colours (runtime/settings_panel.cpp)
     int discord;              // [Discord] RichPresence: what you play, on your Discord profile (runtime/net/discord.c)
@@ -222,6 +223,7 @@ float config_live_hdr_ui(void);
 int config_live_hdr_tonemap(void);
 int config_live_hdr_gamma(void);
 int config_live_hdr_scene(void);
+int config_live_hdr_analysis(void);
 float config_live_hdr_exposure(void);
 float config_live_hdr_highlights(void);
 float config_live_hdr_shadows(void);

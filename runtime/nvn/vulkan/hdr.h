@@ -24,4 +24,6 @@ void vk_hdr_variant_used(int pass, bool ready, int state);  // (exec.c draw: log
 // device.c, inside the HDR render pass on the window image: the composition (the game's picture in the intermediate
 // encoding + the overlay) -> HDR10 / scRGB.
 void vk_hdr_encode(VkCommandBuffer cb, VkRenderPass rp, TexBackend *compose);
-void vk_hdr_metadata_values(float *peak_nits, float *frame_avg_nits);  // VK_EXT_hdr_metadata, from the settings now
+void vk_hdr_metadata_values(float *peak_nits, float *frame_avg_nits);
+// device.c backend_present, outside a render pass: the HDR analysis of the presented picture ([HDR] Analysis: hdr_stats.h)
+void vk_hdr_analyze(VkCommandBuffer cb, TexBackend *presented);  // VK_EXT_hdr_metadata, from the settings now

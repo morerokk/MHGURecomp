@@ -80,6 +80,17 @@ rendering into RGBA8 (HDR off) it changes nothing.
 FSR is off while HDR is on (config.c; the settings menu shows "Off (HDR)"): FSR's input stays RGBA8, so the picture
 would be SDR-bright. Turning HDR on while FSR runs applies fully at the next start (HDR's row is marked " *").
 
+## HDR analysis
+
+`[HDR] Analysis = On` (the settings menu: HDR analysis) draws, over the game, what the display gets - roughly what
+Lilium's HDR analysis shows with ReShade, on every platform (also Android, where there is no ReShade): in the top left
+the picture's luminance in nits (max / avg / min, and the middle of the screen, marked by a small cross) and its
+brightest channel (CLL), the share of pixels within BT.709, DCI-P3 and BT.2020, and the settings; in the bottom right
+a waveform (brightness by screen column, 0.01 - 10000 nits on a log scale; red: PeakBrightness, yellow:
+GameBrightness). A compute pass measures the presented picture (every other pixel each way) with the window image's
+own maths, before the overlay is drawn over it (`hdr.c vk_hdr_analyze`, read back without waiting); the overlay draws
+it (`overlay.cpp draw_hdr_analysis`). Off: nothing of it runs.
+
 ## Limits
 
 - FSR: off while HDR is on (FSR's input, H, stays RGBA8: FSR 3/4 take no other format here).

@@ -27,6 +27,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <SDL3/SDL.h>
+
+#include "../../hdr_stats.h"
 #include "../../kernel.h"
 #include "hdr.h"
 #include "shaders.h"
@@ -441,4 +444,208 @@ void vk_hdr_encode(VkCommandBuffer cb, VkRenderPass rp, TexBackend *compose) {
                    (float)config_live_hdr_tonemap(), gamma_value(), 0, 0};
     vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pc, pc);
     vkCmdDraw(cb, 3, 1, 0, 0);
+}
+
+// ---- the HDR analysis ([HDR] Analysis, hdr_stats.h): the presented picture measured by a compute pass before it is
+// drawn into the window (device.c backend_present), every other pixel in each direction, with the window image's own
+// maths (vk_hdr_encode); read back a frame or two later, without waiting. Its buffer (uints): [0] max Y, [1] min Y,
+// [2] max CLL (float bits), [3..4] sum Y, [5..6] sum CLL (quarter nits, low / high), [7] pixels, [8..11] gamut counts
+// (BT.709, P3, BT.2020, outside), [12] centre Y, [13] centre CLL, [16..] the waveform (HDR_WF_H x HDR_WF_W).
+#define AN_WORDS (16 + HDR_WF_W * HDR_WF_H)
+#define AN_SLOTS 3
+static const char *const analysis_comp =
+    "#version 450\n"
+    "layout(local_size_x = 16, local_size_y = 16) in;\n"
+    "layout(set = 0, binding = 0) uniform sampler2D src;\n"
+    "layout(std430, set = 0, binding = 1) buffer Out { uint w[]; };\n"
+    "layout(push_constant) uniform P { vec4 lum; vec4 opt; } pc;\n"  // (as encode_frag's)
+    "shared uint s_max, s_min, s_cll, s_sum, s_csum, s_n, s_g[4];\n"
+    "vec3 spow(vec3 c, float e) { return sign(c) * pow(abs(c), vec3(e)); }\n"
+    "vec3 srgb_dec(vec3 c) {\n"
+    "  vec3 a = abs(c);\n"
+    "  return sign(c) * mix(a / 12.92, pow((a + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), a));\n"
+    "}\n"
+    "vec3 to_bt2020(vec3 c) {\n"
+    "  return vec3(dot(vec3(0.6274040, 0.3292820, 0.0433136), c), dot(vec3(0.0690970, 0.9195400, 0.0113612), c),\n"
+    "              dot(vec3(0.0163916, 0.0880132, 0.8955950), c));\n"
+    "}\n"
+    "vec3 to_p3(vec3 c) {\n"
+    "  return vec3(dot(vec3(0.8224621, 0.1775380, 0.0), c), dot(vec3(0.0331941, 0.9668058, 0.0), c),\n"
+    "              dot(vec3(0.0170827, 0.0723974, 0.9105199), c));\n"
+    "}\n"
+    "void add64(uint at, uint v) { uint old = atomicAdd(w[at], v); if (old + v < old) atomicAdd(w[at + 1], 1u); }\n"
+    "void main() {\n"
+    "  bool first = gl_LocalInvocationIndex == 0u;\n"
+    "  if (first) { s_max = 0u; s_min = 0x7f7fffffu; s_cll = 0u; s_sum = 0u; s_csum = 0u; s_n = 0u;\n"
+    "               s_g[0] = 0u; s_g[1] = 0u; s_g[2] = 0u; s_g[3] = 0u; }\n"
+    "  barrier();\n"
+    "  ivec2 size = textureSize(src, 0);\n"
+    "  ivec2 p = ivec2(gl_GlobalInvocationID.xy) * 2;\n"
+    "  if (p.x < size.x && p.y < size.y) {\n"
+    "    vec3 c = texelFetch(src, p, 0).rgb;\n"
+    "    c = vec3(isnan(c.x) ? 0.0 : c.x, isnan(c.y) ? 0.0 : c.y, isnan(c.z) ? 0.0 : c.z);\n"
+    "    bool vanilla = pc.opt.x < 0.5;\n"
+    "    if (vanilla) c = clamp(c, 0.0, 1.0);\n"
+    "    vec3 lin = pc.opt.y > 0.0 ? spow(c, pc.opt.y) : srgb_dec(c);\n"
+    "    vec3 n2020 = to_bt2020(lin);\n"
+    "    const float e = -1e-4;\n"
+    "    int g = all(greaterThanEqual(lin, vec3(e))) ? 0 : all(greaterThanEqual(to_p3(lin), vec3(e))) ? 1 :\n"
+    "            all(greaterThanEqual(n2020, vec3(e))) ? 2 : 3;\n"
+    "    vec3 nits = clamp(n2020 * (vanilla ? pc.lum.x : pc.lum.y), 0.0, pc.lum.z);\n"
+    "    float y = dot(nits, vec3(0.2627, 0.6780, 0.0593));\n"
+    "    float cll = max(nits.r, max(nits.g, nits.b));\n"
+    "    atomicMax(s_max, floatBitsToUint(y));\n"
+    "    atomicMin(s_min, floatBitsToUint(y));\n"
+    "    atomicMax(s_cll, floatBitsToUint(cll));\n"
+    "    atomicAdd(s_sum, uint(y * 4.0 + 0.5));\n"
+    "    atomicAdd(s_csum, uint(cll * 4.0 + 0.5));\n"
+    "    atomicAdd(s_n, 1u);\n"
+    "    atomicAdd(s_g[g], 1u);\n"
+    "    int col = min(p.x * " "%d" " / size.x, " "%d" ");\n"
+    "    float v = (log2(max(y, 1e-6)) * 0.30103 - (" "%f" ")) / (" "%f" ");\n"
+    "    int row = clamp(int(v * " "%d" ".0), 0, " "%d" ");\n"
+    "    atomicAdd(w[16 + row * " "%d" " + col], 1u);\n"
+    "    if (p == (size / 4) * 2) { w[12] = floatBitsToUint(y); w[13] = floatBitsToUint(cll); }\n"
+    "  }\n"
+    "  barrier();\n"
+    "  if (first && s_n > 0u) {\n"
+    "    atomicMax(w[0], s_max); atomicMin(w[1], s_min); atomicMax(w[2], s_cll);\n"
+    "    add64(3u, s_sum); add64(5u, s_csum); atomicAdd(w[7], s_n);\n"
+    "    for (int i = 0; i < 4; i++) atomicAdd(w[8 + i], s_g[i]);\n"
+    "  }\n"
+    "}\n";
+
+static VkDescriptorSetLayout an_set_layout;
+static VkPipelineLayout an_layout;
+static VkPipeline an_pipe;
+static bool an_broken;
+static struct { VkBuffer buf; VmaAllocation mem; uint32_t *ptr; uint64_t seq; bool pending; float set[5]; } an_slot[AN_SLOTS];
+static int an_next;
+static SDL_Mutex *an_lock;
+static HdrStats an_out;     // (an_lock) the latest
+static bool an_have;        // (an_lock)
+static uint64_t an_frame;   // (an_lock) the frame it was measured in
+
+static bool analysis_init(void) {
+    if (an_pipe) return true;
+    if (an_broken) return false;
+    an_broken = true;  // (until it all worked)
+    char src[8192];
+    snprintf(src, sizeof src, analysis_comp, HDR_WF_W, HDR_WF_W - 1, (double)HDR_WF_LO, (double)(HDR_WF_HI - HDR_WF_LO),
+             HDR_WF_H, HDR_WF_H - 1, HDR_WF_W);
+    VkShaderModule m = vk_compile_glsl(src, STAGE_COMPUTE, "hdr_analysis.comp");
+    if (!m) { LOG("[hdr] analysis: its shader did not compile: off\n"); return false; }
+    VkDescriptorSetLayoutBinding b[2] = {{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
+                                         {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL}};
+    VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 2, .pBindings = b};
+    VK_CHECK(vkCreateDescriptorSetLayout(g_vk.dev, &li, NULL, &an_set_layout));
+    VkPushConstantRange r = {VK_SHADER_STAGE_COMPUTE_BIT, 0, 32};
+    VkPipelineLayoutCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
+                                     .pSetLayouts = &an_set_layout, .pushConstantRangeCount = 1, .pPushConstantRanges = &r};
+    VK_CHECK(vkCreatePipelineLayout(g_vk.dev, &ci, NULL, &an_layout));
+    VkComputePipelineCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, .layout = an_layout,
+                                      .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                                .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = m, .pName = "main"}};
+    if (vkCreateComputePipelines(g_vk.dev, g_vk.pcache, 1, &pi, NULL, &an_pipe) != VK_SUCCESS) {
+        LOG("[hdr] analysis: no pipeline: off\n");
+        an_pipe = VK_NULL_HANDLE;
+        return false;
+    }
+    for (int i = 0; i < AN_SLOTS; i++) {
+        VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = AN_WORDS * 4,
+                                 .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+        VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO,
+                                      .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT};
+        VmaAllocationInfo info;
+        if (vmaCreateBuffer(g_vk.vma, &bi, &ai, &an_slot[i].buf, &an_slot[i].mem, &info) != VK_SUCCESS) {
+            LOG("[hdr] analysis: no memory for it: off\n");
+            return false;
+        }
+        an_slot[i].ptr = info.pMappedData;
+    }
+    an_lock = SDL_CreateMutex();
+    an_broken = false;
+    LOG("[hdr] analysis on\n");
+    return true;
+}
+
+
+static void analysis_collect(void) {  // (render thread) the slots the GPU is done with -> an_out
+    for (int k = 1; k <= AN_SLOTS; k++) {
+        int i = (an_next - k + AN_SLOTS) % AN_SLOTS;  // (the newest first)
+        if (!an_slot[i].pending || vk_completed_seq() < an_slot[i].seq) continue;
+        vmaInvalidateAllocation(g_vk.vma, an_slot[i].mem, 0, VK_WHOLE_SIZE);
+        const uint32_t *w = an_slot[i].ptr;
+        for (int j = 0; j < AN_SLOTS; j++)
+            if (an_slot[j].pending && an_slot[j].seq <= an_slot[i].seq) an_slot[j].pending = false;  // (older: dropped)
+        if (!w[7]) return;
+        SDL_LockMutex(an_lock);
+        HdrStats *o = &an_out;
+        double n = w[7];
+        o->max_nits = u2f(w[0]), o->min_nits = u2f(w[1]), o->max_cll = u2f(w[2]);
+        o->avg_nits = (float)(((double)w[4] * 4294967296.0 + w[3]) / 4.0 / n);
+        o->avg_cll = (float)(((double)w[6] * 4294967296.0 + w[5]) / 4.0 / n);
+        o->center_nits = u2f(w[12]), o->center_cll = u2f(w[13]);
+        o->bt709 = (float)(100.0 * w[8] / n), o->p3 = (float)(100.0 * w[9] / n);
+        o->bt2020 = (float)(100.0 * w[10] / n), o->outside = (float)(100.0 * w[11] / n);
+        o->peak = an_slot[i].set[0], o->game = an_slot[i].set[1], o->ui = an_slot[i].set[2], o->pq = (int)an_slot[i].set[3];
+        uint32_t mx = 0;
+        for (int r = 0; r < HDR_WF_H; r++)
+            for (int c = 0; c < HDR_WF_W; c++) {
+                uint32_t v = w[16 + r * HDR_WF_W + c];
+                o->wf[r][c] = v;
+                if (v > mx) mx = v;
+            }
+        o->wf_max = mx;
+        an_have = true;
+        an_frame = g_present_count;
+        SDL_UnlockMutex(an_lock);
+        return;
+    }
+}
+
+void vk_hdr_analyze(VkCommandBuffer cb, TexBackend *src) {
+    if (!g_hdr_out || !config_live_hdr_analysis() || !src || !src->image || src->samples != 1) return;
+    if (!analysis_init()) return;
+    analysis_collect();
+    int i = an_next;
+    if (an_slot[i].pending) return;  // (the GPU is still on it: this frame not measured)
+    VkDescriptorSet ds = vk_alloc_set(an_set_layout);
+    static const VkComponentMapping id = {0};
+    VkDescriptorImageInfo ii = {vk_default_sampler(false),
+                                vk_image_view(src, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_COLOR_BIT),
+                                VK_IMAGE_LAYOUT_GENERAL};
+    VkDescriptorBufferInfo bi = {an_slot[i].buf, 0, AN_WORDS * 4};
+    VkWriteDescriptorSet w[2] = {
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 0, .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii},
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 1, .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &bi}};
+    vkUpdateDescriptorSets(g_vk.dev, 2, w, 0, NULL);
+    vkCmdFillBuffer(cb, an_slot[i].buf, 0, AN_WORDS * 4, 0);
+    vkCmdFillBuffer(cb, an_slot[i].buf, 4, 4, 0x7f7fffffu);  // (the minimum: from the largest float down)
+    vk_full_barrier(cb);  // (the picture finished, the buffer cleared)
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, an_pipe);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, an_layout, 0, 1, &ds, 0, NULL);
+    float pc[8] = {config_live_hdr_game(), config_live_hdr_ui(), config_live_hdr_peak(), (float)g_hdr_out,
+                   (float)config_live_hdr_tonemap(), gamma_value(), 0, 0};
+    vkCmdPushConstants(cb, an_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, pc);
+    uint32_t gx = (src->width / 2 + 15) / 16, gy = (src->height / 2 + 15) / 16;
+    vkCmdDispatch(cb, gx ? gx : 1, gy ? gy : 1, 1);
+    VkMemoryBarrier mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+                          .dstAccessMask = VK_ACCESS_HOST_READ_BIT};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &mb, 0, NULL, 0, NULL);
+    an_slot[i].seq = vk_pending_seq();
+    an_slot[i].pending = true;
+    an_slot[i].set[0] = pc[2], an_slot[i].set[1] = pc[0], an_slot[i].set[2] = pc[1], an_slot[i].set[3] = g_hdr_out == HDR_OUT_PQ;
+    an_next = (i + 1) % AN_SLOTS;
+}
+
+bool vk_hdr_stats(HdrStats *out) {
+    if (!an_lock || !g_hdr_out || !config_live_hdr_analysis()) return false;
+    SDL_LockMutex(an_lock);
+    bool ok = an_have && an_frame + 30 >= g_present_count;  // (not a stale one: HDR went off and on, a menu, ...)
+    if (ok) *out = an_out;
+    SDL_UnlockMutex(an_lock);
+    return ok;
 }

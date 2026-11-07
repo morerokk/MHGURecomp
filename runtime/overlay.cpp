@@ -32,6 +32,7 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #endif
 
 #include "config.h"
+#include "hdr_stats.h"
 #include "forge.h"
 #include "menu_confirm.h"
 #include "overlay.h"
@@ -593,6 +594,69 @@ static void draw_fps(uint64_t now) {
     }
 }
 
+// ------------------------------------------------------------------ HDR analysis ([HDR] Analysis)
+// Lilium's HDR analysis, roughly: the picture's nits and gamut in the top left, a waveform (brightness by screen
+// column, log scale) in the bottom right, from what the GPU measured (nvn/vulkan/hdr.c vk_hdr_analyze). Drawn at UI
+// brightness and not measured itself.
+static HdrStats g_hdr_stats;
+static void draw_hdr_analysis(const HdrStats &st, float scale) {
+    ImGuiIO &io = ImGui::GetIO();
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                             ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs;
+    float top = config_show_fps() ? 50 * scale : 10 * scale;
+    ImGui::SetNextWindowPos(ImVec2(10 * scale, top), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.6f);
+    if (ImGui::Begin("HDR analysis##stats", nullptr, flags)) {
+        ImGui::Text("HDR analysis (%s)", st.pq ? "HDR10" : "scRGB");
+        ImGui::Text("        %10s %10s", "nits", "CLL");
+        ImGui::Text("max     %10.2f %10.2f", st.max_nits, st.max_cll);
+        ImGui::Text("avg     %10.2f %10.2f", st.avg_nits, st.avg_cll);
+        ImGui::Text("min     %10.4f", st.min_nits);
+        ImGui::Text("centre  %10.2f %10.2f", st.center_nits, st.center_cll);
+        ImGui::Text("BT.709  %9.3f%%", st.bt709);
+        ImGui::Text("DCI-P3  %9.3f%%", st.p3);
+        ImGui::Text("BT.2020 %9.3f%%", st.bt2020);
+        if (st.outside > 0) ImGui::Text("outside %9.3f%%", st.outside);
+        ImGui::Text("peak %.0f  game %.0f  UI %.0f", st.peak, st.game, st.ui);
+    }
+    ImGui::End();
+    // the centre's spot
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    ImVec2 c(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f);
+    float r = 6 * scale;
+    dl->AddLine(ImVec2(c.x - r, c.y), ImVec2(c.x + r, c.y), IM_COL32(255, 255, 255, 160), 1.0f);
+    dl->AddLine(ImVec2(c.x, c.y - r), ImVec2(c.x, c.y + r), IM_COL32(255, 255, 255, 160), 1.0f);
+    // the waveform
+    float gw = io.DisplaySize.x * 0.34f, gh = io.DisplaySize.y * 0.30f, label = ImGui::CalcTextSize("10000").x + 8 * scale;
+    ImVec2 p1(io.DisplaySize.x - 10 * scale, io.DisplaySize.y - 10 * scale), p0(p1.x - gw, p1.y - gh);
+    dl->AddRectFilled(ImVec2(p0.x - label, p0.y - 4 * scale), ImVec2(p1.x + 4 * scale, p1.y + 4 * scale), IM_COL32(0, 0, 0, 170));
+    auto y_of = [&](float nits) {
+        float v = (log10f(fmaxf(nits, 1e-6f)) - HDR_WF_LO) / (HDR_WF_HI - HDR_WF_LO);
+        return p1.y - fminf(fmaxf(v, 0.f), 1.f) * gh;
+    };
+    static const float marks[] = {0.01f, 0.05f, 0.25f, 1, 2.5f, 10, 25, 100, 400, 1000, 4000, 10000};
+    for (float m : marks) {
+        float y = y_of(m);
+        dl->AddLine(ImVec2(p0.x, y), ImVec2(p1.x, y), IM_COL32(255, 255, 255, 40));
+        char t[16];
+        snprintf(t, sizeof t, m < 1 ? "%.2f" : m < 10 && m != floorf(m) ? "%.1f" : "%.0f", m);
+        dl->AddText(ImVec2(p0.x - label + 2 * scale, y - ImGui::GetFontSize() * 0.5f), IM_COL32(200, 200, 200, 255), t);
+    }
+    float cw = gw / HDR_WF_W, ch = gh / HDR_WF_H, lmax = logf(1.0f + (float)st.wf_max);
+    for (int row = 0; row < HDR_WF_H; row++)
+        for (int col = 0; col < HDR_WF_W; col++) {
+            uint32_t v = st.wf[row][col];
+            if (!v) continue;
+            float a = lmax > 0 ? logf(1.0f + (float)v) / lmax : 1.0f;
+            int alpha = (int)(60 + 195 * a);
+            ImVec2 q0(p0.x + col * cw, p1.y - (row + 1) * ch);
+            dl->AddRectFilled(q0, ImVec2(q0.x + cw + 0.5f, q0.y + ch + 0.5f), IM_COL32(255, 255, 255, alpha));
+        }
+    float yp = y_of(st.peak), yg = y_of(st.game);  // (the peak: red; the game's white: yellow)
+    dl->AddLine(ImVec2(p0.x, yp), ImVec2(p1.x, yp), IM_COL32(255, 60, 60, 220), 1.5f);
+    dl->AddLine(ImVec2(p0.x, yg), ImVec2(p1.x, yg), IM_COL32(255, 210, 60, 160), 1.0f);
+}
+
 // ------------------------------------------------------------------ loading indicator
 // A spinner and "Loading" in the bottom right corner, with the mods' count while romfs.c layers them and then the
 // shader prewarm's while it runs: on the black
@@ -732,7 +796,12 @@ void overlay_frame(void *cpu) {
     bool fps = config_show_fps();
 #endif
     float loading = loading_alpha(now);
-    if (!open && !free_render && !notice && !chat && !fps && !loading) {  // (nothing to draw)
+#ifndef MHGU_NULL_BACKEND
+    bool hdr_stats = vk_hdr_stats(&g_hdr_stats);
+#else
+    bool hdr_stats = false;
+#endif
+    if (!open && !free_render && !notice && !chat && !fps && !loading && !hdr_stats) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
         apply_input(io);  // (keep the queue short)
@@ -801,6 +870,7 @@ void overlay_frame(void *cpu) {
     if (notice) draw_notice(now, scale);
     if (chat) draw_chat(line, now, scale);
     if (fps) draw_fps(now);
+    if (hdr_stats) draw_hdr_analysis(g_hdr_stats, scale);
     if (loading) draw_loading(now, scale, loading);
     ImGui::Render();
 

@@ -238,6 +238,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Bold text", "Texto en negrita"},
         {"HDR", "HDR"},
         {"BT.1886", "BT.1886"},
+        {"HDR analysis", "Análisis HDR"},
         {"NOT FOR HDR400 DISPLAYS", "NO PARA PANTALLAS HDR400"},
         {"16-bit HDR output for HDR capable monitors/phones (NOT FOR HDR400 DISPLAYS). Smooth gradients and FSR do not work with HDR",
          "Salida HDR de 16 bits para monitores y teléfonos compatibles con HDR (NO PARA PANTALLAS HDR400). Degradados suaves y FSR no funcionan con HDR"},
