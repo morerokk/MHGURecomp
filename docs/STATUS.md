@@ -1287,8 +1287,7 @@ forge_input_getMouseMove(float *dx, float *dy) is the movement since the last fr
 too (counts while captured, window pixels while free, y down; 0 while Forge's menu is open); forge_input_setMouseFree(bool)
 makes the mouse free for a mod's own pointer while true: not captured (let go if it was, captured again after if the
 player had clicked in), shown in full screen, and its clicks only the mod's (not a capture, not the game's buttons).
-Forge's keyboard is 256 HID
-usages.
+Forge's keyboard is 256 HID usages.
 Forge's config.ini ([menu] key, font_size; [log] level) is read as iniparser reads it, from one file: the topmost mod's
 romfs nativeNX/forge/config.ini (files are not merged; a long line, a stray line or an unreadable file means the defaults:
 level info, key Insert, 12 px), key = strtol base 0 (decimal, 0x hex, 0 octal), font_size = atof, a level that is not a
