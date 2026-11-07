@@ -395,6 +395,9 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   use the mouse, keyboard or controller in it. On a controller, the button that cancels in the game's menus (when
   nothing in the Forge window is left to cancel) or Start + Back closes it. While it is open the game gets no controller input. Window positions
   are kept in `forge_imgui.ini`.
+- For mod makers: besides Forge's API, the port gives mods the mouse: `forge_input_getMouse` (the pointer on the
+  1280x720 screen and the buttons), `forge_input_getMouseMove` (the movement, also while the hunt camera has it) and
+  `forge_input_setMouseFree` (no capture while a mod's own menu is open). See `runtime/forge.c`.
 - You do not need any resolution, FPS cap or connection fix mods. These features are included with this port.
 
 **Places to get mods:**

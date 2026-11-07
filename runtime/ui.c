@@ -123,7 +123,7 @@ static void set_fullscreen(bool on) {
         SDL_SetWindowSize(window, win_w, win_h);
         SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     }
-    if (on && !overlay_menu_open() && !chat_active()) SDL_HideCursor(); else SDL_ShowCursor();
+    if (on && !overlay_menu_open() && !chat_active() && !host_input_mouse_free()) SDL_HideCursor(); else SDL_ShowCursor();
 }
 
 // The window's icon. Windows takes it from the exe (extras/icon/mhgurecomp.rc) and Android from the launcher icon, so only

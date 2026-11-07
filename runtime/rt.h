@@ -130,6 +130,16 @@ union SDL_Event;
 void host_input_event(const union SDL_Event *e);
 void host_input_update(void);            // recompute the controller state the game reads (each loop pass)
 bool host_input_press(const char *button, unsigned frames);  // scripted press from the next frame (UI thread)
+// The mouse for mods (runtime/forge.c: forge_input_getMouse, getMouseMove, setMouseFree). Any thread.
+typedef struct {
+    float x, y;        // the pointer in the window (pixels), where it last moved
+    bool inside;       // it is over the window
+    uint32_t buttons;  // held, or pressed since the last take (1 left, 2 middle, 4 right, 8 / 16 the side buttons)
+    float dx, dy;      // moved since the last take (counts while captured, else window pixels; y down)
+} HostMouse;
+void host_input_mouse_take(HostMouse *out);  // (the presses and the movement start again: forge.c, once a frame)
+void host_input_set_mouse_free(bool free);   // a mod's own pointer: the mouse not captured, its clicks the mod's only
+bool host_input_mouse_free(void);
 void quickhunt_poll(void);               // (debug) MHGU_QUICKHUNT's presses (runtime/hle/quickhunt.c; UI thread)
 
 // ---- helpers

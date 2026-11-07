@@ -1279,7 +1279,15 @@ from the first frame (the game's player 1 pad is always there), the sticks are c
 stick-direction bits (16-23) of the game's pad. forge_input_getTouch is the free mouse's left button (not while the
 mouse is captured or Forge's menu is open), as the first touch point in whole 1280x720 screen pixels: the pointer must be
 on the game's picture (fitted in the window by g_render_aspect, centred; outside it: no touch), and the picture's HUD
-canvas (g_ui_anchor_aspect wide at most, centred) spans 0..1279 (beyond it: the edge). Forge's keyboard is 256 HID
+canvas (g_ui_anchor_aspect wide at most, centred) spans 0..1279 (beyond it: the edge). The port adds three calls of its
+own for mods (not Forge's), read at the same time: forge_input_getMouse(float *x, float *y, uint32_t *buttons) is the
+free pointer in the same screen pixels with the buttons held or pressed since the last frame (1 left, 2 middle, 4 right,
+8 / 16 the side buttons), false while the mouse is captured, Forge's menu is open or the pointer is off the picture;
+forge_input_getMouseMove(float *dx, float *dy) is the movement since the last frame wherever it went, the hunt camera
+too (counts while captured, window pixels while free, y down; 0 while Forge's menu is open); forge_input_setMouseFree(bool)
+makes the mouse free for a mod's own pointer while true: not captured (let go if it was, captured again after if the
+player had clicked in), shown in full screen, and its clicks only the mod's (not a capture, not the game's buttons).
+Forge's keyboard is 256 HID
 usages.
 Forge's config.ini ([menu] key, font_size; [log] level) is read as iniparser reads it, from one file: the topmost mod's
 romfs nativeNX/forge/config.ini (files are not merged; a long line, a stray line or an unreadable file means the defaults:
