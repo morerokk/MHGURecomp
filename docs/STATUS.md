@@ -408,6 +408,34 @@ quest 0010216 cleared, posted by someone else: it counts here too"; back in the 
 quests unlocked, and new NPC dialogue. Not checked yet: a joiner who hasn't unlocked the Urgent, in a real hub (only
 through the harness above; the board may refuse them first).
 
+## Quest 713 "Research Team's First Rodeo": black screen after the clear (2026-11-07, not a port bug)
+
+A player's log: black screen right after "quest photo requested", seconds into the quest, with an instant-clear cheat on.
+After the clear, 713's script (sQuest spawn manager 0x5a08e8, +0x55 = post-clear step) spawns Valstrax (em086) only once
+no monster is alive (spawn condition type 6 at 0x5a153c: live count 0 and step 4), then plays its demo event082 (event
+table entry 105, 0x34cad8 / 0x5a8c44: step > 4) and ends the quest. An insta-clear (sQuest +0xec = 0x29) leaves the
+Congalala alive, so step 4 waits forever: the same would happen on a Switch with the cheat. Played through at 60 fps with
+MHGU_KILL_AFTER (carcass gone after ~1 min, "???" Valstrax demo, Quest complete, rewards) and with A skipping the demo
+(evskip): no hang. The emulators' "set 30 fps for the Valstrax quest" issue did not show here; 30 and 120+ fps untested.
+
+## Village quest demos in a session (2026-11-07)
+
+Report: "A Forest Fracas" (329) from the Hub in multiplayer: the Mizutsune cutscene is skipped, the Bulldrome (the
+target) never appears. A quest's monster demos are the event table's type 1 entries (0x17a06fc; 329: entry 49 = event049,
+area 5); the area's update looks one up (0x34cad8) when a hunter enters, and the demo's end calls 0x5a3ecc(sQuest, 1),
+which readies the spawn slots waiting for it (condition type 4, parameter 0). In a session the lookup answers "none"
+(sNetwork +0x63e), so those slots wait forever; Hub quests have none. runtime/hle/villagehub.c (spawn_update, on the
+spawn manager 0x5a08e8) makes that call for a Village quest in a session once any hunter is in a demo's area, on every
+game. Tested alone with MHGU_VQ_DEMO_TEST=1 (skips the session check) and the hunter's zone poked to 5: "[vqhub] ...
+releasing", slot 0 spawned, live monster id 1 = em 0x1e. Two games in a Local Play hub (HR72 test saves, 2026-11-07):
+both read sNetwork +0x63e = 1 in the quest and take it as a Village quest from the Hub, but those saves have cleared
+329, so the counter offers its replay 330 (Bulldrome in slot 0 with condition type 0, no Mizutsune: not affected).
+Forcing 329 (selector +0xd68 on both, depart bit +0xd65) crashed the host at the departure (empty vtable slot, main
+0x2125b8, as MHGU_QUICKHUNT across town types). 329 itself still needs a two-player run from a save that hasn't cleared
+it (and has the Hub counter: run3\st hasn't met the Guild Manager). Possibly the same
+kind of problem: 713 / 906 end with a type 1 Valstrax demo after the clear (see the 713 section); in a session it won't
+play, and whether the quest still ends is untested.
+
 ## Save data safety (2026-10-22)
 
 Reported: saves in a folder symlinked to a NAS (Linux, Proton) were lost. The game saves by DeleteFile(system),
@@ -1442,7 +1470,9 @@ controller, frames = presented frames; e.g. `300:A:10`), `MHGU_NAME` (answers ev
 `fnnew lo hi [learn ms]` = log only the first call of each function in [lo, hi) not seen while learning, to find what an
 event runs; `peek` / `poke` / `memsave` / `find` for guest memory), `MHGU_QUICKHUNT=<quest number>` (from start-up
 straight into that quest: A through the menus to the save's town, then the quest is ordered and departed on;
-runtime/hle/quickhunt.c has how the game departs; `MHGU_QUICKHUNT=town` stops in the town), `vpad` (control file:
+runtime/hle/quickhunt.c has how the game departs; `MHGU_QUICKHUNT=town` stops in the town), `MHGU_KILL_AFTER=<s>`
+(the quest's large monster dies by one real hit that long into the quest), `MHGU_FORCE_EVENT=<n>` (the next quest-demo
+lookup plays event table entry n; both in quickhunt.c), `vpad` (control file:
 attach an SDL virtual controller; `vpad <n> <button> <0|1>` presses its button), `MHGU_LOG_MOVES=1` (the player's actions and command table
 changes, runtime/hle/movelog.c), `MHGU_EMTRACE=1/2/3` (large monster actions with their real-time length, height and
 distance; 2: the position every update; 3: the monster object saved on 4 updates once a forced action is 200 up;

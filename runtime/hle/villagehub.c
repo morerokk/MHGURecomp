@@ -246,9 +246,67 @@ static void supply_deliver(Cpu *c) {
     }
 }
 
+// Quest demos in a session. A quest's monster demo (event table 0x17a06fc, type 1 entries: event ev\NNN, area, quest)
+// plays when a hunter first enters its area (lookup 0x34cad8, from the area's update). When it ends, the game releases
+// the spawn slots that wait for it (0x5a3ecc(sQuest, 1): condition type 4 with parameter 0 -> status 1, spawned by the
+// spawn manager on its next update). In a session the lookup answers "no demo" at once (sNetwork +0x63e), so nothing
+// is released: Hub quests are made without such slots, but Village quests have them. "A Forest Fracas" (329): the
+// Mizutsune demo (event049, area 5) releases the Bulldrome, the quest's target, so the quest couldn't be finished.
+// For a Village quest in a session, every game in it releases those slots once any hunter is in a demo's area (the
+// players' zones are synced), so the monster appears for all of them at about the same time, as after the demo.
+#define FN_SPAWN_UPDATE   0x5a08e8u   // sQuest: the spawn manager's update (every game, every frame in a quest)
+#define FN_SPAWN_RELEASE  0x5a3eccu   // (sQuest, 1): type 4 slots with parameter 0 -> ready (what a demo's end calls)
+#define G_SNETWORK        0x1a843f0u  // sNetwork *: +0x63e in a session
+#define NET_IN_SESSION    0x63eu
+#define G_SPLAYER         0x1a85b58u  // sPlayer *: +0x1c the 4 player slots
+#define PL_ZONE           0x1054u     // player: its area (u8, 0 the camp)
+#define SQ_STATE          0x50u       // sQuest: u8 2 = in the hunt
+#define SQ_QUEST          0xe0u       // sQuest: the quest's number
+#define SQ_SLOT_COND      0x1514u     // sQuest: 5 spawn slots of 12 bytes: u8 condition type, u8 status (0 waiting), ...
+#define SQ_SLOT_PARAM     0x151cu     //   ... u32 the condition's parameter
+#define EVENT_TABLE       0x17a06fcu  // 0x6b x 12 bytes: u8 type, u8 event, u8 stage, u8 area, u32, u32 quest
+#define EVENT_COUNT       0x6bu
+
+static bool g_demo_released;
+static bool g_demo_test;  // (debug) MHGU_VQ_DEMO_TEST=1: also alone and for any quest (to test the release solo)
+
+static bool slots_wait_for_demo(uint32_t sq) {
+    for (uint32_t i = 0; i < 5; i++) {
+        uint32_t s = sq + SQ_SLOT_COND + 12 * i;
+        if (LD8(s) == 4 && LD8(s + 1) == 0 && LD32(sq + SQ_SLOT_PARAM + 12 * i) == 0) return true;
+    }
+    return false;
+}
+
+static void spawn_update(Cpu *c) {
+    uint32_t sq = c->r[0], net = LD32(G_SNETWORK);
+    if (sq && LD8(sq + SQ_STATE) != 2) {
+        g_demo_released = false;  // (between quests)
+    } else if (sq && !g_demo_released &&
+               (g_demo_test || (net && LD8(net + NET_IN_SESSION) && hpscale_village_from_hub(LD32(sq + SQ_QUEST)))) &&
+               slots_wait_for_demo(sq)) {
+        uint32_t q = LD32(sq + SQ_QUEST), spl = LD32(G_SPLAYER);
+        for (uint32_t e = EVENT_TABLE; e < EVENT_TABLE + 12 * EVENT_COUNT && !g_demo_released; e += 12) {
+            if (LD8(e) != 1 || LD32(e + 8) != q) continue;
+            for (uint32_t k = 0; k < 4 && spl; k++) {
+                uint32_t p = LD32(spl + 0x1c + 4 * k);
+                if (!p || LD8(p + PL_ZONE) != LD8(e + 3)) continue;
+                call4(c, FN_SPAWN_RELEASE, sq, 1, 0, 0);
+                g_demo_released = true;
+                LOG("[vqhub] Village quest %07u in a session: no demo online (event%03u, area %u); hunter %u is there, "
+                    "releasing the monsters it would have\n", q, LD8(e + 1), LD8(e + 3), k);
+                break;
+            }
+        }
+    }
+    fnhook_call_original(c, FN_SPAWN_UPDATE);
+}
+
 void villagehub_init(void) {
     g_trace = getenv("MHGU_VQ_TRACE") != NULL;
+    g_demo_test = getenv("MHGU_VQ_DEMO_TEST") != NULL;
     g_path = hle_alloc(64);
+    fnhook_set(FN_SPAWN_UPDATE, hle_register("villagehub:spawn_update", spawn_update));
     fnhook_set(FN_SUPPLY_DELIVER, hle_register("villagehub:supply_deliver", supply_deliver));
     fnhook_set(FN_QUEST_FILTER, hle_register("villagehub:quest_filter", quest_filter));
     fnhook_set(FN_QUEST_LOOKUP, hle_register("villagehub:quest_lookup", quest_lookup));
