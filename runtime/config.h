@@ -87,6 +87,7 @@ typedef struct {
     int smooth_gradients;     // [Graphics] SmoothGradients: the game's RGBA8 render targets as RGBA16 (nvn/vulkan/textures.c)
     int fix_kerning;          // [Graphics] FixKerning: UI text at exact places, even margins, kerning (hle/textlayout.c)
     int bold_text;            // [Graphics] BoldText: UI letters stretched by the texture inset, as the game draws them
+                              // (default on on Android, off elsewhere)
     int binds[BINDS][BIND_KEYS];  // [Keybinds]: BIND_* -> its keys (an SDL scancode or KEY_MOUSE + button; 0 none)
     int menu_theme;           // [Application] Theme: THEME_*, the settings menu's colours (runtime/settings_panel.cpp)
     int discord;              // [Discord] RichPresence: what you play, on your Discord profile (runtime/net/discord.c)

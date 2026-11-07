@@ -27,6 +27,14 @@
     {SDL_SCANCODE_Q}, {SDL_SCANCODE_E}, {SDL_SCANCODE_TAB}, {SDL_SCANCODE_T}, {SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER}, \
     {SDL_SCANCODE_BACKSPACE}, {SDL_SCANCODE_UP}, {SDL_SCANCODE_DOWN}, {SDL_SCANCODE_LEFT}, {SDL_SCANCODE_RIGHT},          \
     {SDL_SCANCODE_LCTRL, SDL_SCANCODE_RCTRL}, {SDL_SCANCODE_LALT, SDL_SCANCODE_RALT}, {KEY_WHEEL_UP}, {KEY_WHEEL_DOWN}}
+// [Graphics] BoldText: on by default on Android (a phone's small screen reads the bolder letters more easily)
+#ifdef __ANDROID__
+#define BOLD_TEXT_DEFAULT 1
+#define BOLD_TEXT_DEFAULT_INI "On"
+#else
+#define BOLD_TEXT_DEFAULT 0
+#define BOLD_TEXT_DEFAULT_INI "Off"
+#endif
 #define CONFIG_DEFAULT_VALUES                                                                       \
     /* [Display] */                                                                                 \
     .display_mode = DISPLAY_BORDERLESS,                                                             \
@@ -52,7 +60,7 @@
     .draw_distance = 1.0f,                                                                          \
     .smooth_gradients = 0,                                                                          \
     .fix_kerning = 1,                                                                               \
-    .bold_text = 0,                                                                                 \
+    .bold_text = BOLD_TEXT_DEFAULT,                                                                 \
     /* [Performance] */                                                                             \
     .show_fps = 0,                                                                                  \
     .show_battery = BATTERY_OFF,                                                                    \
@@ -199,8 +207,8 @@ static const char DEFAULT_INI[] =
     "\n"
     "; Draws letters slightly thicker and wider, as the original game does. Some players, including players with\n"
     "; dyslexia, find this easier to read. Off: letters at their true size, thinner and crisper\n"
-    "; Default: Off\n"
-    "BoldText = Off\n"
+    "; Default: " BOLD_TEXT_DEFAULT_INI "\n"
+    "BoldText = " BOLD_TEXT_DEFAULT_INI "\n"
     "\n"
     "[Performance]\n"
     "; Show the frame rate (FPS) in a small box on the screen. Drag it with the mouse while the settings menu is open\n"

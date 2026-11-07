@@ -1079,7 +1079,8 @@ old way while on.
 - Checked by the user in game (1080p, the style descriptions of the Equipment Box); Linux / Android builds not yet.
   An aside found on the way: a tab whose longest help runs three lines at 640x480 makes End in the settings menu stop
   with the last row partly under the pinned help (test_settings_panel.cpp line 653); FixKerning's help is two lines.
-- [Graphics] BoldText (default Off, live, independent of FixKerning; MHGU_BOLD_TEXT=0|1): the glyph quad writers
+- [Graphics] BoldText (default Off, On on Android for a phone's small screen; live, independent of FixKerning;
+  MHGU_BOLD_TEXT=0|1): the glyph quad writers
   (0xc3f8c4, 0xc55524, 0xea757c: obj, list, glyph node) draw the whole cell but take the texture from half a texel
   inside each edge (list +0x38), so every letter is stretched about one font pixel each way: bolder, wider, 4% taller
   ('l' 25% wider, 'e' 8%; measured in the vertex dump: 'o' texels 926.5-938.5 over a 13-texel quad). Off moves the quad
