@@ -40,7 +40,7 @@ graphics API are reimplemented on Windows, Linux and Android, with Vulkan for re
 
 | Area | What you get |
 | --- | --- |
-| **Graphics** | Resolution, render resolution (supersampling), MSAA, FXAA, FSR 3.1 upscaling, VSync, longer draw distance |
+| **Graphics** | Resolution, render resolution (supersampling), MSAA, FXAA, FSR 3.1 upscaling, HDR output, VSync, longer draw distance |
 | **Screens** | Any widescreen aspect ratio (16:10, 16:9 or anything wider), with HUD adjustment options for ultrawide |
 | **Frame rate** | Framerates anywhere between 30-240 fps, with fixes for bugs that GU normally has on emulators at high frame rates |
 | **Controls** | Almost any controller is supported (SDL), as well as keyboard+mouse |
@@ -268,6 +268,11 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   UltraPerformance), `Sharpness`. FSR replaces MSAA and FXAA while it is on. Details: `docs/FSR-PORT.md`
 - `[Graphics]`: `DrawDistance` (how far away people in the villages and the Hubs are still drawn: 1 = the game's,
   2 = twice as far, 0.5 = half, 0 = no limit; up to 10)
+- `[HDR]`: `HDR` (Off / On, default Off: native HDR10 or scRGB output on an HDR display, a port of the RenoDX HDR mod
+  for this game; turn HDR on in the system's display settings first), `PeakBrightness`, `GameBrightness`,
+  `UIBrightness` (nits), `ToneMapper` (Vanilla / None / RenoDRT), `GammaCorrection` (Off / 2.2 / BT.1886),
+  `Exposure`, `Highlights`, `Shadows`, `Contrast`, `Saturation`, `HighlightSaturation`, `Flare`, `Bloom`,
+  `UnclampedScene`, `HDRFormat` (ini only). Use it with FSR off. Details: [docs/HDR.md](docs/HDR.md)
 - `[Performance]`: `FPS` (30 to 240), `VSync` (On / Off; above your monitor's refresh rate, turn VSync off), `ShaderPrewarm`
   (On / Off: translate all of the game's shaders in the background at startup, so fewer things are drawn black the
   first time they appear; the first start takes about 20 s for it, during the logos, and the cache folder needs about

@@ -25,6 +25,7 @@
 
 #include "../../kernel.h"
 #include "fsr.h"
+#include "hdr.h"
 #include "shaders.h"
 #include "vk.h"
 
@@ -1026,6 +1027,30 @@ static float half_to_float(uint16_t h) {
     float v = e == 0 ? ldexpf((float)m, -24) : e == 31 ? (m ? NAN : INFINITY) : ldexpf((float)(m | 1024), (int)e - 25);
     return s ? -v : v;
 }
+// (HDR: the game's RGBA8 texels into an RGBA16F stand-in) v / 255 as a half float, rounded to nearest
+static uint16_t unorm8_to_half(uint8_t v) {
+    static uint16_t tab[256];
+    static bool made;
+    if (!made) {
+        for (int i = 1; i < 256; i++) {
+            float f = (float)i / 255.0f;
+            int e;
+            float m = frexpf(f, &e);  // f = m * 2^e, m in [0.5, 1)
+            int he = e - 1 + 15;      // half exponent of 2m * 2^(e-1)
+            uint32_t hm;
+            if (he <= 0) {            // subnormal
+                hm = (uint32_t)lrintf(f * 16777216.0f);  // f / 2^-24
+                tab[i] = (uint16_t)hm;
+            } else {
+                hm = (uint32_t)lrintf((m * 2.0f - 1.0f) * 1024.0f);
+                if (hm == 1024) hm = 0, he++;
+                tab[i] = (uint16_t)((he << 10) | hm);
+            }
+        }
+        made = true;
+    }
+    return tab[v];
+}
 static float uf11(uint32_t v, int mbits) {  // unsigned small float: 5-bit exponent, mbits mantissa
     uint32_t e = v >> mbits, m = v & ((1u << mbits) - 1);
     if (e == 0) return ldexpf((float)m, -14 - mbits);
@@ -1042,7 +1067,8 @@ static void dump_pass(void) {
     uint64_t draws = stat_draws - pass_draws_at;
     if (t && t->backend) vk_ms_resolve(t->backend);  // (MSAA: resolved for the dump)
     if (dump_depth && dump_depth->backend) vk_ms_resolve(dump_depth->backend);
-    if ((!t || !t->backend) && dump_depth && dump_depth->backend && ((TexBackend *)dump_depth->backend)->format == VK_FORMAT_D32_SFLOAT) {
+    VkFormat dfmt = dump_depth && dump_depth->backend ? ((TexBackend *)dump_depth->backend)->format : VK_FORMAT_UNDEFINED;
+    if ((!t || !t->backend) && (dfmt == VK_FORMAT_D32_SFLOAT || dfmt == VK_FORMAT_D32_SFLOAT_S8_UINT || dfmt == VK_FORMAT_D24_UNORM_S8_UINT)) {
         // depth-only pass (shadow maps): depth as grey, stretched over its own min..max
         TexBackend *b = dump_depth->backend;
         uint32_t w = b->width, h = b->height;
@@ -1053,7 +1079,9 @@ static void dump_pass(void) {
         vkCmdCopyImageToBuffer(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, out.buf, 1, &c);
         renderer_submit();
         vk_wait_seq(submit_seq);
-        const float *d = out.ptr;
+        float *d = out.ptr;
+        if (dfmt == VK_FORMAT_D24_UNORM_S8_UINT)  // (24-bit depth in the low bits of each word)
+            for (uint64_t i = 0; i < (uint64_t)w * h; i++) d[i] = (float)(((const uint32_t *)out.ptr)[i] & 0xFFFFFF) / 16777215.0f;
         float lo = INFINITY, hi = -INFINITY;
         for (uint64_t i = 0; i < (uint64_t)w * h; i++) if (d[i] < 1.0f) { if (d[i] < lo) lo = d[i]; if (d[i] > hi) hi = d[i]; }
         uint8_t *px = malloc((size_t)w * h * 4);
@@ -1125,6 +1153,15 @@ static void dump_pass(void) {
     }
     char path[128];
     mkdir("shots", 0755);
+    if (b->format == VK_FORMAT_R16G16B16A16_SFLOAT && w >= 4 && h >= 4) {  // (HDR) the real values: every 4th texel, RGBA16F
+        snprintf(path, sizeof path, "%s%03d_rgba16f_%ux%u.raw", dump_prefix(), g_dump_no, w / 4, h / 4);
+        FILE *rf = fopen(path, "wb");
+        if (rf) {
+            for (uint32_t y = 0; y + 4 <= h; y += 4)
+                for (uint32_t x = 0; x + 4 <= w; x += 4) fwrite((const uint8_t *)out.ptr + ((uint64_t)y * w + x) * 8, 8, 1, rf);
+            fclose(rf);
+        }
+    }
     snprintf(path, sizeof path, "%s%03d_f%d_%ux%u.png", dump_prefix(), g_dump_no, b->format, w, h);
     vk_save_png(path, px, w, h);
     snprintf(path, sizeof path, "%s%03d_alpha.png", dump_prefix(), g_dump_no);
@@ -1593,7 +1630,8 @@ static void begin_pass(void) {
         NvnTexture *t = st.rt.color[i];
         pass_color[i] = VK_FORMAT_UNDEFINED;
         if (!t) continue;
-        vk_rt_widen(t, vk_wide_rt_on() && !vk_fsr_input(t));  // (the game's own target: FSR 3 / 4 take no RGBA16 UNORM)
+        // (the game's own target: FSR 3 / 4 take no RGBA16 UNORM. HDR: the post chain and the scene as RGBA16F, hdr.c)
+        vk_rt_widen(t, vk_fsr_input(t) ? WIDE_NONE : vk_hdr_rt_float(t) ? WIDE_FLOAT16 : vk_wide_rt_on() ? WIDE_UNORM16 : WIDE_NONE);
         if (g_fsr_on) {  // FSR: from the start of the HUD on, an output-size stand-in (fsr.c)
             NvnTexture *s = vk_fsr_map(t, false);
             if (s != t) pass_sx = (float)s->width / (float)t->width, pass_sy = (float)s->height / (float)t->height, t = s;
@@ -2202,6 +2240,8 @@ static void compile_program(void *arg) {
     if (prog_fs_hash(p) == FXAA_FS_HASH && !p->fkey.alpha_func && !p->fkey.alpha_coverage && !p->fkey.rt_kind[0] &&
         (p->fkey.vs_out_mask & 2))
         fsrc = vk_builtin_source("fxaa.frag.game");
+    char *hdr_src = p->fkey.hdr ? vk_hdr_wrap_fs(fsrc, p->fkey.hdr) : vk_hdr_guard_fs(fsrc);  // (HDR: main() wrapped, hdr.c)
+    if (hdr_src) fsrc = hdr_src;
     char *over = NULL;
     if (getenv("MHGU_GLSL_OVERRIDE")) {  // (debug) glsl_override/<code address>_fs.glsl replaces the translated shader
         char path[96];
@@ -2217,8 +2257,12 @@ static void compile_program(void *arg) {
             LOG("[shader] using %s\n", path);
         }
     }
-    uint32_t *sf = sv ? vk_glsl_to_spirv(fsrc, STAGE_FRAGMENT, "fs", &nf) : NULL;
+    uint32_t *sf = sv ? vk_glsl_to_spirv(fsrc, STAGE_FRAGMENT, p->fkey.hdr ? "fs_hdr" : "fs", &nf) : NULL;
+    if (p->fkey.hdr)
+        LOG("[hdr] HDR variant of pass %d (fragment program %016llx): %s%s\n", p->fkey.hdr, (unsigned long long)prog_fs_hash(p),
+            sf ? "built" : "FAILED to compile", hdr_src ? "" : " (not wrapped)");
     free(over);
+    free(hdr_src);
     if (!sv || !sf) { free(sv); free(sf); set_state(&p->state, 2, p->t_req); prewarm_pipelines(p); return; }
     p->nbinds = vk_reflect(sv, nv, p->binds, MAX_BIND);
     p->nbinds += vk_reflect(sf, nf, p->binds + p->nbinds, MAX_BIND - p->nbinds);
@@ -2339,6 +2383,7 @@ static uint64_t prog_content_key(const uint64_t chash[2], const ShaderKey *vkey,
     h = hash_words(h, fkey->rt_kind, sizeof fkey->rt_kind);
     h = hash_words(h, &fkey->alpha_func, 1);
     if (fkey->alpha_coverage) h = hash_words(h, &fkey->alpha_coverage, 1);  // (MSAA variant)
+    if (fkey->hdr) h = hash_words(h, &fkey->hdr, 1);  // (HDR variant, hdr.c)
     return h ? h : 1;
 }
 
@@ -2627,6 +2672,7 @@ static Prog *get_program(NvnProgram *np, ShaderKey *vkey, ShaderKey *fkey) {
     h = hash_words(h, fkey->rt_kind, sizeof fkey->rt_kind);
     h = hash_words(h, &fkey->alpha_func, 1);
     if (fkey->alpha_coverage) h = hash_words(h, &fkey->alpha_coverage, 1);  // (MSAA variant)
+    if (fkey->hdr) h = hash_words(h, &fkey->hdr, 1);                        // (HDR variant, hdr.c)
     if (!h) h = 1;
     uint32_t slot = (uint32_t)(h ^ (h >> 31)) & (PROG_TAB - 1);
     while (prog_tab[slot].key && prog_tab[slot].key != h) slot = (slot + 1) & (PROG_TAB - 1);
@@ -3499,6 +3545,11 @@ static VkDescriptorSet stage_set(int nbinds, const VkBindingInfo *binds, VkDescr
             memset(rs[66], 0xFF, 4);  // [66].x: the front-face mask's all-ones word (translate.c)
             bi[n] = ubo_span(vk_transient_copy(rs, sizeof rs, 256), sizeof rs);
             w[n].pBufferInfo = &bi[n];
+        } else if (b->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b->binding == HDR_PARAMS_BINDING) {  // (hdr.c)
+            float hp[HDR_NPARAMS];
+            vk_hdr_params(hp);
+            bi[n] = ubo_span(vk_transient_copy(hp, sizeof hp, 256), sizeof hp);
+            w[n].pBufferInfo = &bi[n];
         } else if (b->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b->binding == ALPHA_REF_BUFFER_INDEX) {
             float ref[4] = {st.alpha_ref, 0, 0, 0};
             bi[n] = ubo_span(vk_transient_copy(ref, sizeof ref, 256), sizeof ref);
@@ -3826,19 +3877,31 @@ static void draw(CmdRec *r, bool indexed) {
     Prog *pr = get_program(st.program, &vkey, &fkey);
     if (!pr) { stat_skipped++; return; }
     if (!await_build(&pr->state, pr, 0)) { skip_draw(&stat_skip_prog); return; }
+    FsrDraw fd = {0};
+    if (g_fsr_on || vk_hdr_tracking()) {  // FSR / HDR: the frame's structure (fsr.c, hdr.c)
+        fd = (FsrDraw){.color0 = st.rt.ncolor ? st.rt.color[0] : NULL, .depth = st.rt.depth, .count = (uint32_t)r->x[2],
+                       .depth_write = st.ds[0] && st.ds[1], .vubuf = &st.ubuf[0][0].addr, .nvubuf = 18,
+                       .vp_w = st.viewport[0][2], .vp_h = st.viewport[0][3]};
+        for (int i = 0; i < pr->fi->ntex && fd.ntex < 16; i++) fd.tex[fd.ntex++] = shader_texture_object(1, &pr->fi->tex[i]);
+    }
+    if (vk_hdr_tracking()) {  // HDR: the game's colour grading / bloom add drawn through their HDR variants (hdr.c)
+        int hk = vk_hdr_draw(&fd, prog_fs_hash(pr));
+        if (hk) {
+            fkey.hdr = (uint8_t)hk;
+            Prog *hp = get_program(st.program, &vkey, &fkey);
+            bool ok = hp && await_build(&hp->state, hp, 0);
+            vk_hdr_variant_used(hk, ok, hp ? atomic_load(&hp->state) : -1);
+            if (ok) pr = hp;
+            else fkey.hdr = 0;  // (not built yet: the game's own shader this frame)
+        }
+    }
     if (fxaa_skipped(pr)) return;
     NvnTexture *movie = movie_picture(pr);
     uint32_t mode = (uint32_t)r->x[0];
     VkPrimitiveTopology topo;
     bool native = topology(mode, &topo);
     if (!native && mode != 6 && mode != 7 && mode != 9) { stat_skipped++; return; }
-    if (g_fsr_on) {  // FSR: the frame's structure; at the start of the HUD FSR runs before this draw (fsr.c)
-        FsrDraw fd = {.color0 = st.rt.ncolor ? st.rt.color[0] : NULL, .depth = st.rt.depth, .count = (uint32_t)r->x[2],
-                      .depth_write = st.ds[0] && st.ds[1], .vubuf = &st.ubuf[0][0].addr, .nvubuf = 18,
-                      .vp_w = st.viewport[0][2], .vp_h = st.viewport[0][3]};
-        for (int i = 0; i < pr->fi->ntex && fd.ntex < 16; i++) fd.tex[fd.ntex++] = shader_texture_object(1, &pr->fi->tex[i]);
-        vk_fsr_draw(&fd);
-    }
+    if (g_fsr_on) vk_fsr_draw(&fd);  // FSR: at the start of the HUD it runs before this draw (fsr.c)
 
     ms_want_depth = st.ds[0] && st.rt.depth;  // (MSAA, a picture 3D models are drawn into: pass_models)
     if (in_pass && pass_models && !pass_msaa && ms_want_depth && !pass_want_depth) st.rt_dirty = true;
@@ -4261,6 +4324,7 @@ static void copy_buffer_to_texture(uint64_t src, const TexRef *dst) {
             const uint8_t *sr = (const uint8_t *)G2H((uint32_t)(src + (uint64_t)z * img + (uint64_t)y * row));
             uint8_t *dr = (uint8_t *)s.ptr + ((uint64_t)z * hb + y) * out_row;
             if (out_bpb == fi->bpb) memcpy(dr, sr, out_row);
+            else if (b->wide == WIDE_FLOAT16) for (uint32_t x = 0; x < wb * 4; x++) ((uint16_t *)dr)[x] = unorm8_to_half(sr[x]);
             else if (b->wide) for (uint32_t x = 0; x < wb * 4; x++) ((uint16_t *)dr)[x] = (uint16_t)(sr[x] * 257);
             else for (uint32_t x = 0; x < wb; x++) { memcpy(dr + x * 4, sr + x * 3, 3); dr[x * 4 + 3] = 255; }
         }
@@ -4304,7 +4368,13 @@ static void copy_texture_to_buffer(const TexRef *src, uint64_t dst) {
     vkCmdCopyImageToBuffer(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, out.buf, 1, &c);
     renderer_submit();  // the CPU may read the result right after the fence
     vk_wait_seq(submit_seq);
-    if (b->wide) {
+    if (b->wide == WIDE_FLOAT16) {  // (HDR: values above 1 clamp, as the game's RGBA8 would have)
+        uint8_t *d = (uint8_t *)G2H((uint32_t)dst);
+        for (uint64_t i = 0; i < total; i++) {
+            float f = half_to_float(((const uint16_t *)out.ptr)[i]);
+            d[i] = (uint8_t)(f <= 0.0f || f != f ? 0 : f >= 1.0f ? 255 : (int)(f * 255.0f + 0.5f));
+        }
+    } else if (b->wide) {
         uint8_t *d = (uint8_t *)G2H((uint32_t)dst);
         for (uint64_t i = 0; i < total; i++) d[i] = (uint8_t)((((const uint16_t *)out.ptr)[i] + 128) / 257);
     } else memcpy(G2H((uint32_t)dst), out.ptr, total);

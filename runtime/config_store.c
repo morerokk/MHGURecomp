@@ -33,6 +33,13 @@ static SDL_AtomicInt live_draw = {0x3f800000};
 static SDL_AtomicInt live_smooth;
 static SDL_AtomicInt live_kerning;
 static SDL_AtomicInt live_bold;
+// [HDR]
+static SDL_AtomicInt live_hdr, live_hdr_format, live_hdr_gamma = {HDR_GAMMA_22}, live_hdr_tonemap = {HDR_TONEMAP_RENODRT};
+static SDL_AtomicInt live_hdr_scene = {1};
+static SDL_AtomicInt live_hdr_peak = {0x447a0000}, live_hdr_game = {0x434b0000}, live_hdr_ui = {0x434b0000};  // 1000, 203
+static SDL_AtomicInt live_hdr_exposure = {0x3f266666}, live_hdr_flare = {0}, live_hdr_bloom = {0x42c80000};  // 0.65, 0, 100
+static SDL_AtomicInt live_hdr_highlights = {0x42700000}, live_hdr_shadows = {0x42480000}, live_hdr_contrast = {0x42480000};  // 60, 50, 50
+static SDL_AtomicInt live_hdr_saturation = {0x42480000}, live_hdr_highlight_saturation = {0x42a40000};  // 50, 82
 // [Performance]
 static SDL_AtomicInt show_fps;
 static SDL_AtomicInt show_battery;
@@ -97,6 +104,23 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->smooth_gradients != saved.smooth_gradients) SDL_SetAtomicInt(&live_smooth, c->smooth_gradients);
     if (all || c->fix_kerning != saved.fix_kerning) SDL_SetAtomicInt(&live_kerning, c->fix_kerning);
     if (all || c->bold_text != saved.bold_text) SDL_SetAtomicInt(&live_bold, c->bold_text);
+    if (all || c->hdr != saved.hdr) SDL_SetAtomicInt(&live_hdr, c->hdr);
+    if (all || c->hdr_format != saved.hdr_format) SDL_SetAtomicInt(&live_hdr_format, c->hdr_format);
+    if (all || c->hdr_gamma != saved.hdr_gamma) SDL_SetAtomicInt(&live_hdr_gamma, c->hdr_gamma);
+    if (all || c->hdr_peak != saved.hdr_peak) set_float(&live_hdr_peak, c->hdr_peak);
+    if (all || c->hdr_game != saved.hdr_game) set_float(&live_hdr_game, c->hdr_game);
+    if (all || c->hdr_ui != saved.hdr_ui) set_float(&live_hdr_ui, c->hdr_ui);
+    if (all || c->hdr_tonemap != saved.hdr_tonemap) SDL_SetAtomicInt(&live_hdr_tonemap, c->hdr_tonemap);
+    if (all || c->hdr_scene != saved.hdr_scene) SDL_SetAtomicInt(&live_hdr_scene, c->hdr_scene);
+    if (all || c->hdr_exposure != saved.hdr_exposure) set_float(&live_hdr_exposure, c->hdr_exposure);
+    if (all || c->hdr_highlights != saved.hdr_highlights) set_float(&live_hdr_highlights, c->hdr_highlights);
+    if (all || c->hdr_shadows != saved.hdr_shadows) set_float(&live_hdr_shadows, c->hdr_shadows);
+    if (all || c->hdr_contrast != saved.hdr_contrast) set_float(&live_hdr_contrast, c->hdr_contrast);
+    if (all || c->hdr_saturation != saved.hdr_saturation) set_float(&live_hdr_saturation, c->hdr_saturation);
+    if (all || c->hdr_highlight_saturation != saved.hdr_highlight_saturation)
+        set_float(&live_hdr_highlight_saturation, c->hdr_highlight_saturation);
+    if (all || c->hdr_flare != saved.hdr_flare) set_float(&live_hdr_flare, c->hdr_flare);
+    if (all || c->hdr_bloom != saved.hdr_bloom) set_float(&live_hdr_bloom, c->hdr_bloom);
     if (all || c->discord != saved.discord) SDL_SetAtomicInt(&live_discord, c->discord);
     if (all || c->discord_hunter != saved.discord_hunter) SDL_SetAtomicInt(&live_discord_hunter, c->discord_hunter);
     if (all || c->share_urgent != saved.share_urgent) SDL_SetAtomicInt(&live_share_urgent, c->share_urgent);
@@ -160,6 +184,22 @@ int config_live_fxaa_mode(void) { return SDL_GetAtomicInt(&live_fxaa_mode); }
 int config_live_smooth_gradients(void) { return SDL_GetAtomicInt(&live_smooth); }
 int config_live_fix_kerning(void) { return SDL_GetAtomicInt(&live_kerning); }
 int config_live_bold_text(void) { return SDL_GetAtomicInt(&live_bold); }
+int config_live_hdr(void) { return SDL_GetAtomicInt(&live_hdr); }
+int config_live_hdr_format(void) { return SDL_GetAtomicInt(&live_hdr_format); }
+int config_live_hdr_gamma(void) { return SDL_GetAtomicInt(&live_hdr_gamma); }
+float config_live_hdr_peak(void) { return get_float(&live_hdr_peak); }
+float config_live_hdr_game(void) { return get_float(&live_hdr_game); }
+float config_live_hdr_ui(void) { return get_float(&live_hdr_ui); }
+int config_live_hdr_tonemap(void) { return SDL_GetAtomicInt(&live_hdr_tonemap); }
+int config_live_hdr_scene(void) { return SDL_GetAtomicInt(&live_hdr_scene); }
+float config_live_hdr_exposure(void) { return get_float(&live_hdr_exposure); }
+float config_live_hdr_highlights(void) { return get_float(&live_hdr_highlights); }
+float config_live_hdr_shadows(void) { return get_float(&live_hdr_shadows); }
+float config_live_hdr_contrast(void) { return get_float(&live_hdr_contrast); }
+float config_live_hdr_saturation(void) { return get_float(&live_hdr_saturation); }
+float config_live_hdr_highlight_saturation(void) { return get_float(&live_hdr_highlight_saturation); }
+float config_live_hdr_flare(void) { return get_float(&live_hdr_flare); }
+float config_live_hdr_bloom(void) { return get_float(&live_hdr_bloom); }
 float config_live_fsr_sharpness(void) { return get_float(&live_fsr_sharpness); }
 float config_live_fsr_reactive(void) { return get_float(&live_fsr_reactive); }
 int config_live_village_in_hub(void) { return SDL_GetAtomicInt(&live_village); }
