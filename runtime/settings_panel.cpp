@@ -343,6 +343,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(face_buttons);
     SAME(ldn_port);
     SAME(sync_small_monsters);
+    SAME(ldn_direct);
     SAME(bonus_content);
     SAME(village_in_hub);
     SAME(share_urgent);
@@ -849,6 +850,7 @@ void reset_section() {
         SDL_strlcpy(c.ldn_join, f.ldn_join, sizeof c.ldn_join);
         SDL_strlcpy(c.ldn_server, f.ldn_server, sizeof c.ldn_server);
         SDL_strlcpy(c.ldn_key, f.ldn_key, sizeof c.ldn_key);
+        c.ldn_direct = f.ldn_direct;
         break;
     case 4:
         c.sync_small_monsters = f.sync_small_monsters;
@@ -1278,6 +1280,8 @@ std::vector<Row> main_rows() {
         text(r, "key", "Matchmaking key", c.ldn_key, sizeof c.ldn_key, *c.ldn_key ? c.ldn_key : tr("Public"), ini("Key"));
 #endif
         hub_check(r);
+        add_bool(r, "direct", "Direct connections", &c.ldn_direct, ini("Direct"));
+        r.back().help = tr("In an internet hub, your game and the host's send their packets straight to each other when both routers let them, for a lower ping; else through the hub server. The other player's game then sees your IP address. Off: always through the hub server.");
         header(r, "discord.header", "Discord");
         add_bool(r, "discord", "Discord Rich Presence", &c.discord, ini("RichPresence"));
         add_bool(r, "discord.hunter", "Show hunter name and HR", &c.discord_hunter, ini("ShowHunter"));

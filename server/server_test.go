@@ -443,6 +443,71 @@ func TestJoinSpliceRelay(t *testing.T) {
 	}
 }
 
+// Direct UDP: each end learns the other's address only after both asked; queries are never relayed.
+func TestPeerAddress(t *testing.T) {
+	s := start(t, nil)
+	hc, id := host(t, s, 0, 1)
+	pc := dial(t, s)
+	send(t, pc, tJoin, header(2, 0), u64(id))
+	ticket := expect(t, hc, tIncoming)
+	ac := dial(t, s)
+	send(t, ac, tAttach, header(2, 0), ticket)
+	hs := expect(t, ac, tSpliced)
+	ps := expect(t, pc, tSpliced)
+	ua := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: s.Addr().Port}
+	hu, _ := net.DialUDP("udp", nil, ua)
+	pu, _ := net.DialUDP("udp", nil, ua)
+	defer hu.Close()
+	defer pu.Close()
+	query := func(sec []byte) []byte {
+		return append(append(append([]byte(udpMagic), ps[:4]...), sec...), "MHGQ\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"...)
+	}
+	b := make([]byte, 64)
+	nothing := func(c *net.UDPConn, what string) {
+		t.Helper()
+		c.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		if n, err := c.Read(b); err == nil {
+			t.Fatalf("%s: got %q", what, b[:n])
+		}
+	}
+	answer := func(c *net.UDPConn, sec []byte, other *net.UDPConn) []byte {
+		t.Helper()
+		c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		n, err := c.Read(b)
+		if err != nil || n != udpQuerySize || string(b[:4]) != peerAnswer || !bytes.Equal(b[4:8], ps[:4]) ||
+			!bytes.Equal(b[8:16], sec) {
+			t.Fatalf("answer %q, %v", b[:n], err)
+		}
+		want := other.LocalAddr().(*net.UDPAddr)
+		if !net.IP(b[16:20]).Equal(want.IP) || int(binary.BigEndian.Uint16(b[20:])) != want.Port {
+			t.Fatalf("address %v:%d, want %v", net.IP(b[16:20]), binary.BigEndian.Uint16(b[20:]), want)
+		}
+		return append([]byte(nil), b[24:32]...) // the direct key
+	}
+	hu.Write(query(hs[4:12])) // the host asks, the player has not: no answer, nothing relayed
+	time.Sleep(50 * time.Millisecond)
+	nothing(hu, "host's answer before the player asked")
+	pu.Write(append(append(append([]byte(udpMagic), ps[:4]...), ps[4:12]...), ""...)) // the player only says where it is
+	nothing(hu, "relayed query")
+	pu.Write(query(make([]byte, 8))) // wrong secret
+	nothing(pu, "answer to a forged query")
+	pu.Write(query(ps[4:12]))
+	pk := answer(pu, ps[4:12], hu)
+	nothing(hu, "relayed query")
+	hu.Write(query(hs[4:12]))
+	if hk := answer(hu, hs[4:12], pu); !bytes.Equal(hk, pk) || bytes.Equal(hk, make([]byte, 8)) ||
+		bytes.Equal(hk, hs[4:12]) || bytes.Equal(hk, ps[4:12]) {
+		t.Fatalf("direct keys %x / %x: not one shared key of its own", hk, pk)
+	}
+	nothing(pu, "relayed query")
+	short := append(append(append([]byte(udpMagic), ps[:4]...), ps[4:12]...), "MHGQ\x00\x00\x00\x00"...)
+	pu.Write(short) // the old 24-byte query: no answer (and it is passed on as data, as an older server would)
+	pu.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	if n, err := pu.Read(b); err == nil {
+		t.Fatalf("answer to a short query: %q", b[:n])
+	}
+}
+
 func TestHostDoesNotAnswer(t *testing.T) {
 	s := start(t, func(c *Config) { c.HandshakeTime = 300 * time.Millisecond })
 	hc, id := host(t, s, 0, 1)

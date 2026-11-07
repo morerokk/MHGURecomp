@@ -1,9 +1,10 @@
-# Internet hubs without port forwarding (planned 2026-10-25; steps 2-3 done 2026-10-29)
+# Internet hubs without port forwarding (planned 2026-10-25; steps 2-3 done 2026-10-29, step 4 2026-11-08)
 
 Status: the relay / lobby server (server/) and its client in runtime/net/ldn.c work (docs/STATUS.md "Internet hubs
 through a hub server"). Friends are grouped by a matchmaking key ([Multiplayer] Key) rather than a room code: same
-key, same hub list; no key, the public list. Still open: step 1 (traffic), step 4 (hole punching), the players'
-side of the audit below. The public server runs (docs/STATUS.md).
+key, same hub list; no key, the public list. Direct UDP by hole punching (step 4) is in, with the relay as the
+fallback and ini Direct = Off as the relay-only option (STATUS.md has how and what was measured). Still open: step 1
+(traffic), the players' side of the audit below. The public server runs (docs/STATUS.md).
 
 Goal: Local Play hubs over the internet that nobody has to forward a port for, for friends (private, by code) and
 for public play (a hub list), through a relay / lobby server of our own. Not Ryujinx's servers and no crossplay:
@@ -31,6 +32,11 @@ into the LAN results, so the game's own Search Hubs screen shows internet hubs.
    version only.
 4. Direct UDP by hole punching through the server's help, relay as the fallback (symmetric / carrier-grade NAT).
    Direct means players see each other's IPs: keep a relay-only option.
+   Done 2026-11-08: the server tells each end the other's public UDP address only when both asked (ini Direct on
+   both: the consent), the host punches and the station's hellos find the way, and either end goes back to the
+   relay after 3.5 s without two-way proof. Only host <-> station links (the star): stations still reach each other
+   through the host, as on a LAN. Two players behind one router (same public address) would need hairpin NAT for
+   it, but they find the hub by LAN search anyway.
 
 ## Security (a requirement, not an afterthought)
 

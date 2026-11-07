@@ -237,6 +237,37 @@ Plan and security notes: docs/research/internet-hubs.md.
 - UDP through the server: datagrams prefixed "MHGR" + pair id + own secret (Link relay_pair / relay_secret); the
   server passes the rest to the other end. The host sends a bare prefix every second until the station's hellos come
   through, so the server knows where its end is. TCP fallback as before.
+- Direct UDP by hole punching (2026-11-08, research/internet-hubs.md step 4): ini [Multiplayer] Direct (default On,
+  live, settings menu "Direct connections"; MHGU_LDN_DIRECT env). The user decided (2026-11-08) that direct may be
+  the default in public hubs too; Off stays as the relay-only option. Each end of a relayed link sends the server a
+  32-byte "MHGQ" query over its relay socket; the server answers "MHGP" (same size: no amplification) with the other
+  end's public UDP address and the pair's direct key, only once BOTH ends asked (Direct = Off on either end: no
+  address is ever given out) and never relays a query. Direct datagrams start "MHGR" + pair + direct key (like
+  relayed ones with the sender's secret) and must come from the address the server named: anything else reaching
+  the port straight from the internet is dropped. Then the host sends U_PUNCH and the station direct U_HELLOs (200 ms
+  for 15 s, then 2 s); the station's direct path is up when a direct hello is answered, and its hellos then carry
+  UF_DIRECT_OK, which brings the host's up. Game packets go direct while it is up, each packet by one path only (no
+  duplicates); the relay stays up beside it (relay hellos every 2 s, direct hellos every 1 s also keep the routers'
+  mappings open). Liveness counts only two-way proof (station: answers to its own hellos; host: the station's hellos /
+  packets, whose UF_DIRECT_OK says ours arrive): 3.5 s without and that end goes back to the relay, asks the server
+  again at once (an address change after a Wi-Fi / mobile switch) and punches fast again; coming back to direct after
+  a fall takes 3 answers (no flapping). The log says why there is no direct path: the other end never offers one
+  (Direct Off, older game or server) after 30 s, or 15 s of punching got nothing (symmetric / CGNAT, firewall). The
+  station's UDP socket is no longer connected (it hears the server and the host); SIO_UDP_CONNRESET off on Windows.
+  Old servers forward the query as data and the other end ignores it; old peers never ask: both stay on the relay.
+  No on-screen indicator yet (logs only).
+- Debug: MHGU_LDN_RTT=1 (both ends): hellos every 250 ms carry the station's clock and the answer echoes it; every
+  10 s the station logs the round trip per path (relay / direct) and both ends log their game packets sent /
+  received per path (direct, UDP via server or LAN, TCP). MHGU_LDN_BLOCK_DIRECT=<s>[-<t>]: direct datagrams ignored
+  from s s after a link starts (0: always, a symmetric-NAT stand-in), until t s if given (a passing outage).
+- Measured (2026-11-08, two instances on this PC, ~10 game packets/s each way): through a local server, relay round
+  trip 0.22-0.28 ms vs direct 0.13-0.16 ms, and after punching every game packet went direct (0 through the
+  server). Through the public server (Direct Off, test key): relay round trip 10.5-12.8 ms avg, 9.2 ms min, which is
+  what the relay adds over a direct path between two players on this PC's line; across a country / ocean it adds the
+  players' two legs to the server. Fallback tested: punching blocked from the start (stays on the relay), direct
+  broken mid-session either way (both ends back on the relay within ~4 s, packets kept flowing), the player with
+  Direct Off (the host never got its address). Not tested yet: two PCs behind real NATs, a hunt over the direct path.
+  Scripts: session f782a77e scratchpad (start.ps1, route.ps1, scenario.ps1 -hblock / -jblock / -hdirect / -jdirect).
 - Hardening on the way: every NetworkInfo from the network goes through info_sane (counts / sizes in range, strings
   terminated, node ids = index) before the game sees it; a WELCOME's node number is range-checked (was an out-of-
   bounds read); F_REFUSE results other than nn::ldn's become ConnectionRejected.

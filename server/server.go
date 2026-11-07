@@ -6,7 +6,9 @@
 // link the games speak over a direct connection (ldn.c link frames), which this server neither reads nor changes.
 // Game packets go by UDP when that gets through: datagrams to this server's UDP port, prefixed with the pair's id
 // and the sender's secret, are passed to the other end of the pair (without the prefix). Nobody needs a forwarded
-// port, and players never see each other's IP addresses.
+// port, and players never see each other's IP addresses - unless both ends ask for direct UDP (hole punching, see
+// peerQuery): then each is told the other's public UDP address, the games send their packets straight to each other
+// when their routers let them, and the relay stays as the fallback.
 //
 // Control frames: u32 size (of what follows), u8 type, payload; little endian. The first frame of a connection is a
 // request, whose payload starts with a header: "MHGS", u16 server protocol, u16 link protocol (the port's
@@ -66,6 +68,15 @@ const (
 	udpMagic  = "MHGR"
 	udpHeader = 16 // magic, u32 pair, u64 secret
 	udpMax    = udpHeader + 12 + 16 + 8192
+	// Direct UDP between the two ends (hole punching): a datagram of exactly udpQuerySize bytes whose payload is
+	// "MHGQ" + 12 zero bytes asks for the other end's address. It is not passed on; once both ends have asked (each
+	// end's consent to show its address to the other; a game too old to ask stays on the relay), the answer goes
+	// back to the asker, as big as the query: "MHGP", u32 pair, u64 the asker's secret, IPv4 address[4], u16 port
+	// (big endian), 2 zero bytes, u64 the pair's direct key. The games prefix their direct datagrams with "MHGR",
+	// the pair and that key, so each end can tell the other's datagrams from anything else reaching its port.
+	peerQuery    = "MHGQ"
+	peerAnswer   = "MHGP"
+	udpQuerySize = udpHeader + 16
 
 	// NetworkInfo offsets (runtime/net/ldn.c)
 	niSSID      = 0x26
@@ -129,6 +140,8 @@ type pair struct {
 	secret [2]uint64 // 0: host, 1: player
 	mu     sync.Mutex
 	addr   [2]*net.UDPAddr
+	direct [2]bool // the end asked for the other's address (it may see its own then)
+	dkey   uint64  // the pair's direct key (both ends get it with the address)
 	lim    *bucket
 }
 
@@ -615,7 +628,7 @@ func (s *Server) join(c *net.TCPConn, proto uint16, room [16]byte, id uint64) {
 		}
 		hc = <-pj.host
 	}
-	p := &pair{secret: [2]uint64{rand64(), rand64()}, lim: newBucket(s.cfg.Bandwidth, s.cfg.Bandwidth)}
+	p := &pair{secret: [2]uint64{rand64(), rand64()}, dkey: rand64(), lim: newBucket(s.cfg.Bandwidth, s.cfg.Bandwidth)}
 	s.mu.Lock()
 	for p.id == 0 || s.pairs[p.id] != nil {
 		p.id = uint32(rand64())
@@ -715,10 +728,31 @@ func (s *Server) serveUDP() {
 		if side < 0 {
 			continue
 		}
+		query := n == udpQuerySize && string(buf[udpHeader:udpHeader+4]) == peerQuery
 		p.mu.Lock()
 		p.addr[side] = from // (NAT may change it: the latest wins)
 		to := p.addr[1-side]
+		if query {
+			p.direct[side] = true
+		}
+		both := p.direct[0] && p.direct[1]
 		p.mu.Unlock()
+		if query {
+			// direct UDP (hole punching): the other end's address, once both ends asked for each other's; never bigger
+			// than the query
+			if both && to != nil && to.IP.To4() != nil && p.lim.take(float64(n)) {
+				a := make([]byte, 0, udpQuerySize)
+				a = append(a, peerAnswer...)
+				a = binary.LittleEndian.AppendUint32(a, id)
+				a = binary.LittleEndian.AppendUint64(a, secret)
+				a = append(a, to.IP.To4()...)
+				a = binary.BigEndian.AppendUint16(a, uint16(to.Port))
+				a = append(a, 0, 0)
+				a = binary.LittleEndian.AppendUint64(a, p.dkey)
+				s.udp.WriteToUDP(a, from)
+			}
+			continue
+		}
 		// (an empty datagram only tells where its sender is)
 		if n > udpHeader && to != nil && p.lim.take(float64(n)) {
 			s.udp.WriteToUDP(buf[udpHeader:n], to)

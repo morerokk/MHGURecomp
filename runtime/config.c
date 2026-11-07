@@ -101,6 +101,7 @@
     .ldn_join = "",                                                                                 \
     .ldn_server = "",                                                                               \
     .ldn_key = "",                                                                                  \
+    .ldn_direct = 1,                                                                                \
     .sync_small_monsters = 1,                                                                       \
     .share_urgent = 1,                                                                              \
     /* [Monster HP, Village Quests] */                                                              \
@@ -413,6 +414,13 @@ static const char DEFAULT_INI[] =
     "; On Android, empty means public among Android players only: to play with friends on PC, all enter the same key.\n"
     "; Default:\n"
     "Key =\n"
+    "\n"
+    "; Direct = On: in an internet hub, your game and the host's send their packets straight to each other when both\n"
+    "; routers let them (the hub server helps them find each other), for a lower ping; else they go through the hub\n"
+    "; server. Direct means the other player's game sees your IP address (as on the Switch). Off: always through the hub\n"
+    "; server, nobody sees your address. Both ends need it On for a direct connection.\n"
+    "; Default: On\n"
+    "Direct = On\n"
     "\n"
     "; Sync small monsters between players in multiplayer. Everyone in the hunt should use the same setting.\n"
     "; Default: On\n"
@@ -743,6 +751,7 @@ const ConfigSetting g_settings[] = {
     {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, false, ERR_NET},
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},
+    ON_OFF("Multiplayer", "Direct", ldn_direct, false),
     ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, false),
     ON_OFF("Multiplayer", "ShareUrgentCredit", share_urgent, false),
     {"Monster HP", "1Player|1Players", SET_FACTOR, F(hp.scale[0]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
@@ -1203,6 +1212,7 @@ void config_load(void) {
     if ((e = getenv("MHGU_LDN_JOIN"))) snprintf(g_config.ldn_join, sizeof g_config.ldn_join, "%s", e);
     if ((e = getenv("MHGU_LDN_SERVER"))) snprintf(g_config.ldn_server, sizeof g_config.ldn_server, "%s", e);
     if ((e = getenv("MHGU_LDN_KEY"))) snprintf(g_config.ldn_key, sizeof g_config.ldn_key, "%s", e);
+    if ((e = getenv("MHGU_LDN_DIRECT"))) g_config.ldn_direct = atoi(e) != 0;
     if ((e = getenv("MHGU_LDN_RYU"))) snprintf(g_config.ldn_ryu_servers, sizeof g_config.ldn_ryu_servers, "%s", e);
     if ((e = getenv("MHGU_LDN_RYU_HOST"))) snprintf(g_config.ldn_ryu_host, sizeof g_config.ldn_ryu_host, "%s", e);
     if ((e = getenv("MHGU_LDN_ROOM"))) snprintf(g_config.ldn_room_server, sizeof g_config.ldn_room_server, "%s", e);

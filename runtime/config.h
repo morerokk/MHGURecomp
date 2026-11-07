@@ -81,6 +81,8 @@ typedef struct {
     int combo_window;         // [Controls] ComboInputWindow: COMBO_*, how long a press waits for a second button
     char ldn_server[256];     // [Multiplayer] Server: hub server for internet hubs (host[:port]); "" the default, "Off" none
     char ldn_key[64];         // [Multiplayer] Key: matchmaking key, hubs seen only by players with the same; "" public
+    int ldn_direct;           // [Multiplayer] Direct: in an internet hub, game packets go straight between the players when
+                              // their routers let them (hole punching; they see each other's IP address), else through the server
     char chat_key[32];        // [Controls] ChatKey: the key that opens a line of chat (runtime/hle/chat.c), by SDL's
                               // name for it ("/", "Y"...); "" none
     int fxaa_mode;            // [Anti-aliasing] FXAAMode: FXAA_*, which FXAA draws while FXAA is on
@@ -239,6 +241,7 @@ float config_live_hp_village(void);     // [Village Quests] HubHP as saved now
 int config_live_village_in_hub(void);   // [Village Quests] VillageQuestsInHub (hle/villagehub.c)
 int config_live_ldn_port(void);         // [Multiplayer] Port: the next hub hosted and the next search (net/ldn.c)
 void config_live_ldn_join(char *join, size_t size);  // [Multiplayer] Join: the next search (net/ldn.c)
+int config_live_ldn_direct(void);  // [Multiplayer] Direct (net/ldn.c: for the next player link)
 int config_live_sync_small_monsters(void);  // [Multiplayer] SyncSmallMonsters (net/emsync.c)
 int config_live_bonus_content(void);    // [Bonus Content] BonusContent: each time the game opens a save (services/bonus.c)
 int config_live_discord(void);         // [Discord] RichPresence
