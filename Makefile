@@ -135,7 +135,7 @@ GENFLAGS += -D_FILE_OFFSET_BITS=64
 # (the GCC runtime - libstdc++, libgcc, winpthreads - linked in: three DLLs fewer to ship, and their licenses ask no
 # more than their notices then; build/licenses has those)
 LDFLAGS  := -fuse-ld=lld -Wl,--stack,268435456 $(SDL_LIBS) $(AV_LIBS) -lvulkan-1 $(SHADERC_LIBS) -lwinmm -lversion -lole32 -lshell32 -luuid -lws2_32 \
-            -lbcrypt -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread $(ZSTD_LIBS) -Wl,-Bdynamic \
+            -lbcrypt -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread $(ZSTD_LIBS) -lz -Wl,-Bdynamic \
             -Wl,--export-all-symbols -Wl,--out-implib,$(O)/mhgurecomp.dll.a
 GAMELIB  := $(B)/mhgugame.dll
 GAMELIB_LDFLAGS := -shared -fuse-ld=lld -static-libgcc $(O)/mhgurecomp.dll.a
@@ -158,7 +158,7 @@ FFMPEG_CONF += --enable-pic
 # (--exclude-libs: the static libraries linked in - SDL3, shaderc with glslang, FFmpeg - stay inside; only the runtime's
 # own functions are exported, for the game code library. A Vulkan layer or overlay with its own glslang or SDL then
 # doesn't bind to ours, as happened with ImGui: see IMGUIFLAGS.)
-LDFLAGS  := -fuse-ld=lld -rdynamic -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -lvulkan $(SHADERC_LIBS) $(ZSTD_LIBS) -lpthread -ldl -lm
+LDFLAGS  := -fuse-ld=lld -rdynamic -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -lvulkan $(SHADERC_LIBS) $(ZSTD_LIBS) -lz -lpthread -ldl -lm
 # The programs start with glibc GLIBC_MAX or later (Ubuntu 24.04, Linux Mint 22, Debian 13, SteamOS): calls to the
 # functions newer glibc versions gave a new symbol version go to the old one (runtime/platform/linux_glibc.c), and the
 # link checks that nothing newer is left.

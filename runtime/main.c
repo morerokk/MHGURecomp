@@ -84,6 +84,7 @@ static void boot(const char *root) {
     camjit_init();  // (FSR: the main camera and its jitter: runtime/hle/camera_jitter.c)
     mousecam_init();  // (mouse look on the hunt camera's angles: runtime/hle/mousecam.c)
     itembar_init();  // (the mouse wheel on the item bar: runtime/hle/itembar.c)
+    { void textlayout_init(void); textlayout_init(); }  // (UI text spacing and kerning: runtime/hle/textlayout.c)
     emtrace_init();  // (debug, MHGU_EMTRACE: runtime/hle/emtrace.c)
     kotrace_init();  // (debug, MHGU_KOTRACE: runtime/hle/kotrace.c)
     dummy_init();  // (debug, MHGU_DUMMY: runtime/hle/dummy.c)

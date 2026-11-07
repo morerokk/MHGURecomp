@@ -65,6 +65,12 @@ PATCHES = {
     # and its reload `mov r0, #20` count in the frame step instead of updates
     ('main', 0x834d20): (0xE2477001, '{ extern uint32_t buffcycle_tick(void); c->r[7] -= buffcycle_tick(); }'),
     ('main', 0x834ef4): (0xE3A00014, '{ extern uint32_t buffcycle_reload(void); c->r[0] = buffcycle_reload(); }'),
+    # UI text glyph snap (runtime/hle/textlayout.c): after a text's lines are aligned, each glyph's x is snapped to the
+    # 1280x720 canvas, `vadd.f32 s0, s0, s24` (+0.5), `vrintm.f32 s0, s0` (floor), then +0.5 again; with a canvas unit
+    # 1.5 px (1080p) the letters land half a pixel apart unevenly. x keeps its exact place instead (+0.5, as on average)
+    # ([Graphics] FixKerning off: the game's snap)
+    ('main', 0xc45554): (0xEE300A0C, '{ extern int config_live_fix_kerning(void); if (!config_live_fix_kerning()) c->v.f[0] += c->v.f[24]; }'),
+    ('main', 0xc4555c): (0xFEBB0A40, '{ extern int config_live_fix_kerning(void); if (!config_live_fix_kerning()) c->v.f[0] = floorf(c->v.f[0]); }'),
     # Two-button input window (runtime/hle/combowin.c): the countdown a press waits for a second button takes 1.0 off
     # per update (`vmov.f32 s2, #-1.0`); it takes the frame step instead
     ('main', 0x47ca84): (0xEEBF1A00, '{ extern float combowin_tick(void); c->v.f[2] = -combowin_tick(); }'),

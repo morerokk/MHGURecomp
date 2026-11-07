@@ -85,6 +85,7 @@ typedef struct {
                               // name for it ("/", "Y"...); "" none
     int fxaa_mode;            // [Anti-aliasing] FXAAMode: FXAA_*, which FXAA draws while FXAA is on
     int smooth_gradients;     // [Graphics] SmoothGradients: the game's RGBA8 render targets as RGBA16 (nvn/vulkan/textures.c)
+    int fix_kerning;          // [Graphics] FixKerning: UI text at exact places, even margins, kerning (hle/textlayout.c)
     int binds[BINDS][BIND_KEYS];  // [Keybinds]: BIND_* -> its keys (an SDL scancode or KEY_MOUSE + button; 0 none)
     int menu_theme;           // [Application] Theme: THEME_*, the settings menu's colours (runtime/settings_panel.cpp)
     int discord;              // [Discord] RichPresence: what you play, on your Discord profile (runtime/net/discord.c)
@@ -187,6 +188,7 @@ int config_live_chat_key(void);  // [Controls] ChatKey as an SDL scancode (0: no
 int config_live_bind(int bind, int slot);  // [Keybinds]: one of BIND_*'s keys (Config.binds)
 int config_live_fxaa_mode(void);
 int config_live_smooth_gradients(void);
+int config_live_fix_kerning(void);  // [Graphics] FixKerning, read as each text is set (game threads)
 float config_live_fsr_sharpness(void);  // [Upscaler] Sharpness, read by each FSR dispatch (nvn/vulkan/fsr.c)
 float config_live_fsr_reactive(void);   // [Upscaler] Reactive, read by each FSR frame (nvn/vulkan/fsr.c)
 void config_live_hp(HpScale *out);      // [Monster HP] and [Village Quests] HubHP as saved now (hle/hpscale.c)

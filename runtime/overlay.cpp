@@ -48,6 +48,7 @@ void vk_lock(void);
 void vk_unlock(void);
 SDL_Window *ui_window(void);
 bool shader_prewarm_progress(uint64_t *done, uint64_t *total);  // (runtime/nvn/vulkan/exec.c)
+bool romfs_mods_progress(int *done, int *total);                // (runtime/romfs.c)
 }
 
 static std::atomic<bool> g_enabled, g_ready, g_open, g_wants_text;
@@ -593,7 +594,8 @@ static void draw_fps(uint64_t now) {
 }
 
 // ------------------------------------------------------------------ loading indicator
-// A spinner and "Loading" in the bottom right corner, with the shader prewarm's count while it runs: on the black
+// A spinner and "Loading" in the bottom right corner, with the mods' count while romfs.c layers them and then the
+// shader prewarm's while it runs: on the black
 // window until the game's first frame (overlay_loading: device.c's loading screen), then over the game while the
 // prewarm still has programs left, and for the game's first second at least (its own first frames are black too).
 // Then it fades and stays gone. (Under g_frame_lock: the loading screen's thread and the game's both draw it.)
@@ -620,8 +622,19 @@ static void draw_loading(uint64_t now, float scale, float alpha) {
     int language = config_language();
     const char *title = settings_text(language, "Loading");
     uint64_t done, total;
+    int mods_done, mods_total;
     char line[128] = "", widest[128] = "";
-    if (shader_prewarm_progress(&done, &total) && total) {
+    if (romfs_mods_progress(&mods_done, &mods_total)) {  // (before the game's first frame: a big mod can take a while)
+        if (!mods_total) {
+            snprintf(line, sizeof line, "%s  %d %s", settings_text(language, "Reading mods"), mods_done,
+                     settings_text(language, "files"));
+            snprintf(widest, sizeof widest, "%s", line);
+        } else {
+            const char *what = settings_text(language, "Applying mods");
+            snprintf(line, sizeof line, "%s  %d / %d", what, mods_done, mods_total);
+            snprintf(widest, sizeof widest, "%s  %d / %d", what, mods_total, mods_total);
+        }
+    } else if (shader_prewarm_progress(&done, &total) && total) {
         const char *what = settings_text(language, "Compiling shaders");
         snprintf(line, sizeof line, "%s  %llu / %llu", what, (unsigned long long)done, (unsigned long long)total);
         snprintf(widest, sizeof widest, "%s  %llu / %llu", what, (unsigned long long)total, (unsigned long long)total);

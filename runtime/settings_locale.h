@@ -57,6 +57,9 @@ static inline const char *settings_text(int language, const char *english) {
         {"Shader prewarm", "Precarga de shaders"},
         {"Loading", "Cargando"},  // (the loading indicator: runtime/overlay.cpp)
         {"Compiling shaders", "Compilando shaders"},
+        {"Reading mods", "Leyendo mods"},
+        {"Applying mods", "Aplicando mods"},
+        {"files", "archivos"},
         {"FXAA mode", "Modo de FXAA"},
         {"Application audio", "Audio de la aplicación"},
         {"Master volume", "Volumen general"},
@@ -230,6 +233,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Field of view", "Campo de visión"},
         {"Draw distance", "Distancia de dibujado"},
         {"Smooth gradients", "Degradados suaves"},
+        {"Fix kerning", "Corregir el kerning"},
         {"No limit", "Sin límite"},
         {"HUD anchor", "Posición del HUD"},
         {"Edges", "Bordes"},

@@ -65,5 +65,5 @@ FFMPEG_CONF += --enable-cross-compile --target-os=android --arch=$(if $(filter x
 # libmain.so: SDL calls its SDL_main. (--exclude-libs: shaderc and FFmpeg stay inside, as on Linux; libc++ static.)
 # (--no-undefined: a function newer than Android $(API) fails here, not on the player's device when the game starts)
 LDFLAGS   := -shared -Wl,-soname,libmain.so -Wl,--no-undefined $(PAGE16) -Wl,--exclude-libs,ALL $(SDL_LIBS) $(AV_LIBS) -lvulkan $(SHADERC_LIBS) $(ZSTD_LIBS) \
-             -landroid -llog -ldl -lm -static-libstdc++
+             -landroid -llog -lz -ldl -lm -static-libstdc++
 GAMELIB_LDFLAGS := -shared -Wl,-soname,libmhgugame.so -Wl,--no-undefined $(PAGE16) -L$(B)/lib/$(ABI) -lmain
