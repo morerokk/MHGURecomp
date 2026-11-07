@@ -32,6 +32,7 @@
 #include "hle/input.h"
 #include "hle/itembar.h"
 #include "hle/mousecam.h"
+#include "mods.h"
 #include "overlay.h"
 #include "rt.h"
 #include "textinput.h"
@@ -214,6 +215,8 @@ static void script_parse(void) {
 //                          frame (shots/pass_*.png), or of the next n frames (shots/f<i>_pass_*.png for i >= 1)
 //   hudtrace               log every HUD quad of the next frame: its layer, place, and where 16:10 / ultrawide moved it
 //   frame                  log the current frame number
+//   fps <n>                (debug) the frame rate target from now on, 30..240 (not saved)
+//   dummy <cm> <degrees>   (debug, MHGU_DUMMY) the held monster's distance and its heading from the hunter's
 //   type <text>            type into the game's text entry (runtime/textinput.c); textkey enter|escape|backspace
 //   mousemove <x> <y> <ms> mouse look as if the mouse moved at that many counts a second (y down) for that long
 //   wheel <notches>        the mouse wheel turned that far (> 0 up; by default the item bar to the left)
@@ -484,6 +487,11 @@ static void control_poll(void) {
                 snprintf(g_shot_request, sizeof g_shot_request, "shots/%s.png", arg[0] ? arg : "control");
             } else if (!strcmp(cmd, "frame")) {
                 LOG("[control] frame %llu\n", (unsigned long long)g_present_count);
+            } else if (!strcmp(cmd, "fps")) {
+                config_set_live_fps(strtof(arg, NULL));
+                LOG("[control] frame rate target %.0f\n", (double)config_live_fps());
+            } else if (!strcmp(cmd, "dummy")) {
+                dummy_set(strtof(arg, NULL), strtof(arg2, NULL));
             } else {
                 unsigned long n = arg[0] ? strtoul(arg, NULL, 10) : 8, delay = strtoul(arg2, NULL, 10);
                 uint64_t at = g_present_count + 1 + delay;

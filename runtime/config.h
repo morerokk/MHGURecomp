@@ -201,6 +201,7 @@ bool config_validate(const Config *config, char *error, size_t error_size);
 // Immutable boot settings stay in g_config. These getters are atomic live values.
 void config_runtime_init(const Config *effective); // After environment/Auto resolution at startup.
 float config_live_fps(void);
+void config_set_live_fps(float fps);
 float config_live_fov(void);
 float config_live_mouse_sensitivity(void);
 float config_live_draw_distance(void);

@@ -606,6 +606,35 @@ every hit's KO, the buildup / threshold, KOs held back at the threshold, KO star
 30 vs 60 fps hammer session. Debug aid added: the control file's "interpread <lo>:<hi> <file of entries>" (interp.c:
 logs the instructions of the listed functions and their callees that read a guest range).
 
+KO in multiplayer (2026-11-07/08): the monster's owner decides, no frame-rate cause found. Theory tested: KOs harder only
+online. How hits work: every game computes hits for every hunter's melee attacks against its own copy of the monster
+(hit dispatch 0x370968 sends a player's hit to 0x376ad0 whether the attacker is local or not; attack types 8 / 9 / 0x45,
+likely shots, only on the owner: 0x36b4e0 / 0x3709a0 test +0x7420). Only the owner applies a KO (0x29a34c -> 0x2a2e18):
+its buildup (+0x5d76, with the other statuses +0x5c94..+0x5daa) goes out in netEmAction (send 0x2cbb74, at each new
+monster action) and overwrites the others' copies (receive 0x2cca0c). So a client's head blow counts only if the
+host's copy of the client (built from its network updates) also lands it on the head. Measured (two instances, two
+copies of a hammer save, Tackling the Tetsucabra, MHGU_DUMMY_SLOT=1 + MHGU_DUMMY_FACE=1 on both, the client pinned):
+the host registered every client head blow at 60/60 (26 of 26), 30/30 (24 of 26) and host 240 / client 60 (27 of 27);
+host 240 / client 30 once 2 of 26, but this PC can't run both games at those rates (median real rate during hits ~10
+fps on the host), so that is overload, not a frame-rate result. Single player at 30 and 240 fps: same KO per blow.
+Network sends are paced by game time, not frames (MHGU_NETRATE, real 30 / 60 / ~130 fps): ~12 UDP datagrams/s,
+~1.2 KB/s per game; netPlPositionQuest (send 0x400438, from 0x49ca48) ~7.5/s, netPlAction (0x3ffbf8) on new actions,
+netEmAction (0x3eb868) on monster actions. The remote hunter: a position update (apply 0x3ffff4: target +0x1480, facing
++0x14a0) starts a 20-frame glide (0x480548: counter +0x147c, velocity +0x1490; each update 0x4806e0 moves it by
+velocity x step and counts down by the step, so it takes the same time at any frame rate; 800+ units off, or every 40th
+update, it snaps); an action (netPlAction apply 0x3ff308) snaps the copy to where and how the attacker started it, then
+plays the move from its first frame. So the host checks a client's swing about one network delay after it was made,
+against a monster the client saw about one delay late: misses grow with the round trip and with how fast the head
+moves (the frozen dummy hides this). Internet hubs added the server's legs to that delay until direct UDP (above).
+Debug aids: MHGU_DUMMY_SLOT=<0..3> (the dummy in front of that player on every game), MHGU_DUMMY_FACE=1 (it faces the
+hunter: heading status +0x54, 65536 = a full turn, rebuilt into the rotation each update), control file "dummy <cm>
+<degrees>" (distance and heading; pins our hunter, held for, in place with its HP topped up) and "fps <n>" (frame rate
+target from now on); KO trace lines say "own 1" on the game that runs the monster; MHGU_NETRATE=1 (runtime/hle/netrate.c:
+real fps, UDP datagrams / bytes and RPC sends per send site every 5 s; RPC send 0xbfc3d8, the return address names the
+message type). Caveat: the dummy (motion speed 0) also stops the KO's countdown, so a KO on it lasts minutes. Two-instance
+route (both from the airship save, Hub Low 1 star quest 7): session da3c4186 scratchpad mp_go.ps1, mp_attack.ps1,
+rate_phase.ps1.
+
 Two-button inputs and the frame rate (2026-10-28): fixed. Reported: the Hunting Horn's X+A (and the Lance's R+X+A)
 need both buttons almost together at high frame rates. The player's input update (0x47ca28, every weapon; called
 from the player update at 0x4a7dec) holds a new attack-button press (the key config's mask from 0x85f93c, | 0x1b0)

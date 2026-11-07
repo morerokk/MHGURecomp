@@ -38,7 +38,10 @@ void inflate_init(void);  // zlib's inflate_fast as host code: archives decompre
 void movelog_init(void);  // (debug) MHGU_LOG_MOVES: the player's command table changes (runtime/hle/movelog.c)
 void quickhunt_init(void);  // (debug) MHGU_QUICKHUNT: start-up straight into a quest (runtime/hle/quickhunt.c)
 void emtrace_init(void);  // (debug) MHGU_EMTRACE: large monster actions and their durations (runtime/hle/emtrace.c)
+void netrate_init(void);  // (debug) MHGU_NETRATE: network sends against the frame rate (runtime/hle/netrate.c)
+void netrate_udp(uint32_t len);
 void kotrace_init(void);  // (debug) MHGU_KOTRACE: large monster KO (stun) events (runtime/hle/kotrace.c)
+void dummy_set(float dist_cm, float turn_degrees);  // (debug) the control file's "dummy <cm> <degrees>"
 void dummy_init(void);  // (debug) MHGU_DUMMY: a large monster held in front of the hunter, for testing attacks (runtime/hle/dummy.c)
 
 // Cheat codes (Atmosphere's format) from the .txt files in cheats/, beside mods/ (runtime/cheats.c)
