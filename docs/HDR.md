@@ -80,6 +80,16 @@ rendering into RGBA8 (HDR off) it changes nothing.
 FSR is off while HDR is on (config.c; the settings menu shows "Off (HDR)"): FSR's input stays RGBA8, so the picture
 would be SDR-bright. Turning HDR on while FSR runs applies fully at the next start (HDR's row is marked " *").
 
+## Wide colour gamut
+
+From the colour grading on, a graded frame's picture is in BT.2020 (linear BT.709 -> BT.2020 before the tone mapper,
+in the intermediate encoding), so colours outside BT.709 that the grading makes (Saturation, HighlightSaturation)
+stay positive through the game's later passes (FXAA, its brightness pass's `pow`, the NaN guard's clamp), which lost
+them as negative BT.709 values. The HUD drawn into H is converted as it is drawn (`HDR_PASS_HUD`, its BT.709 colours
+-> BT.2020), and the picture goes into the composition image as BT.709 again, signed (`present.frag.hdr`), where the
+overlay is drawn in BT.709 and the window image's pass turns it into BT.2020 / scRGB. A frame without the grading's
+HDR variant (loading screens, movies, the first frame) stays BT.709 throughout.
+
 ## HDR analysis
 
 `[HDR] Analysis = On` (the settings menu: HDR analysis) draws, over the game, what the display gets - roughly what

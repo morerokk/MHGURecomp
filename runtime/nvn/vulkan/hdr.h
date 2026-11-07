@@ -5,7 +5,7 @@
 #include "vk.h"
 
 enum { HDR_OUT_NONE, HDR_OUT_PQ, HDR_OUT_SCRGB };  // the window image: SDR, HDR10 (BT.2020 PQ), scRGB (linear FP16)
-enum { HDR_PASS_NONE, HDR_PASS_GRADE, HDR_PASS_BLOOM };  // ShaderKey.hdr: the game's post passes drawn as HDR variants
+enum { HDR_PASS_NONE, HDR_PASS_GRADE, HDR_PASS_BLOOM, HDR_PASS_HUD };  // ShaderKey.hdr: the game's passes drawn as HDR variants
 #define HDR_PARAMS_BINDING 23                            // (fragment set) the HDR variants' settings (vk_hdr_params)
 
 extern int g_hdr_out;  // HDR_OUT_*: what the window image is now (device.c create_swapchain)
@@ -20,6 +20,8 @@ char *vk_hdr_guard_fs(const char *src);           // exec.c compile_program: oth
 #define HDR_NPARAMS 24
 void vk_hdr_params(float out[HDR_NPARAMS]);       // exec.c stage_set: binding HDR_PARAMS_BINDING's contents
 void vk_hdr_present(NvnTexture *presented);                 // device.c backend_present: learns the full-screen image
+bool vk_hdr_presented_bt2020(void);
+float vk_hdr_gamma(void);  // the intermediate encoding's gamma (0: sRGB)  // exec.c vk_present_draw: the presented picture is in BT.2020 (a graded frame)
 void vk_hdr_variant_used(int pass, bool ready, int state);  // (exec.c draw: logged when it changes)
 // device.c, inside the HDR render pass on the window image: the composition (the game's picture in the intermediate
 // encoding + the overlay) -> HDR10 / scRGB.

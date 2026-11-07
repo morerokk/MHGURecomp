@@ -46,6 +46,8 @@ static uint64_t last_b_hash;                  // this frame: the last full-scree
 static bool fxaa_seen, hud_seen;
 static bool is_rt(NvnTexture *t) { return t && t->backend && ((TexBackend *)t->backend)->gpu_owned; }
 
+static bool frame_graded, present_2020;  // (this frame's colour grading went through its HDR variant; the presented one's)
+
 int vk_hdr_draw(const FsrDraw *d, uint64_t fs_hash) {
     last_target = d->color0;
     last_src = d->ntex ? d->tex[0] : NULL;
@@ -66,7 +68,8 @@ int vk_hdr_draw(const FsrDraw *d, uint64_t fs_hash) {
         }
         return HDR_PASS_NONE;
     }
-    if (hud_seen || !g_h || d->color0 != g_h) return HDR_PASS_NONE;
+    if (!g_h || d->color0 != g_h) return HDR_PASS_NONE;
+    if (hud_seen) goto hud;
     // The bloom add: full-screen, sampling a smaller render target (the bloom chain is at half size and below). Other
     // full-screen draws into H sampling a render target (a copy of B, ...) carry values that are already in the HDR
     // encoding: drawn as they are (converting them again would scale the picture by GameBrightness / UIBrightness twice).
@@ -89,11 +92,21 @@ int vk_hdr_draw(const FsrDraw *d, uint64_t fs_hash) {
                 break;
             }
         }
-        return HDR_PASS_BLOOM;
+        return frame_graded ? HDR_PASS_BLOOM : HDR_PASS_NONE;
     }
     hud_seen = true;  // (the first other draw into H: the HUD)
-    return HDR_PASS_NONE;
+hud:
+    // The HUD (and menus) into H: its BT.709 colours into the BT.709 -> BT.2020 picture (a graded frame's). Not what
+    // reads the picture itself (already BT.2020).
+    if (!frame_graded) return HDR_PASS_NONE;
+    for (int i = 0; i < d->ntex; i++)
+        if (d->tex[i] == g_b || d->tex[i] == g_h) return HDR_PASS_NONE;
+    return HDR_PASS_HUD;
 }
+
+bool vk_hdr_presented_bt2020(void) { return g_hdr_out && present_2020; }
+static float gamma_value(void);
+float vk_hdr_gamma(void) { return gamma_value(); }
 
 void vk_hdr_present(NvnTexture *t) {
     if (last_target == t && last_src && last_src != t && last_src->backend &&
@@ -107,6 +120,8 @@ void vk_hdr_present(NvnTexture *t) {
     }
     grade_hash_next = last_b_hash = 0;
     fxaa_seen = hud_seen = false;
+    present_2020 = frame_graded;
+    frame_graded = false;
     last_target = last_src = NULL;
 }
 
@@ -120,10 +135,11 @@ bool vk_hdr_rt_float(NvnTexture *t) {
 }
 
 // (log) the passes' HDR variants: drawn through them or not, when that changes
-static const char *const pass_name[] = {"", "colour grading", "bloom add"};
+static const char *const pass_name[] = {"", "colour grading", "bloom add", "HUD"};
 void vk_hdr_variant_used(int pass, bool ready, int state) {
-    static int last[3] = {-1, -1, -1};
-    if (pass < 1 || pass > 2 || last[pass] == (int)ready) return;
+    static int last[4] = {-1, -1, -1, -1};
+    if (pass == HDR_PASS_GRADE && ready) frame_graded = true;
+    if (pass < 1 || pass > 3 || last[pass] == (int)ready) return;
     last[pass] = ready;
     float p[HDR_NPARAMS];
     vk_hdr_params(p);
@@ -186,6 +202,10 @@ static const char *const hdr_lib =
     "  return sign(l) * mix(a * 12.92, 1.055 * pow(a, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), a));\n"
     "}\n"
     "float hdr_y(vec3 c) { return dot(c, vec3(0.2126390059, 0.7151686788, 0.0721923154)); }\n"
+    "vec3 hdr_to2020(vec3 c) {\n"  // (linear BT.709 -> BT.2020: the picture from the grading on, so that colours outside
+    "  return max(vec3(dot(vec3(0.6274040, 0.3292820, 0.0433136), c), dot(vec3(0.0690970, 0.9195400, 0.0113612), c),\n"
+    "                  dot(vec3(0.0163916, 0.0880132, 0.8955950), c)), vec3(0.0));\n"  // BT.709 stay positive through
+    "}\n"  // the game's later passes: FXAA, its brightness pass's pow, ... which would lose them)
     "vec3 hdr_cbrt(vec3 x) { return sign(x) * pow(abs(x), vec3(1.0 / 3.0)); }\n"
     "vec3 hdr_oklab(vec3 c) {\n"
     "  vec3 lms = vec3(dot(c, vec3(0.4122214708, 0.5363325363, 0.0514459929)),\n"
@@ -257,7 +277,7 @@ static const char *const grade_main =
     "void main() {\n"
     "  hdr_game_main();\n"
     "  if (hdr_p[3].x < 0.5) return;\n"
-    "  c0.rgb = hdr_intermediate(hdr_tonemap(hdr_grade(hdr_srgb_dec(hdr_clean(c0.rgb)))));\n"
+    "  c0.rgb = hdr_intermediate(hdr_tonemap(hdr_to2020(hdr_grade(hdr_srgb_dec(hdr_clean(c0.rgb))))));\n"
     "}\n";
 
 static const char *const bloom_main =
@@ -266,7 +286,19 @@ static const char *const bloom_main =
     "  if (hdr_p[3].x < 0.5) return;\n"
     "  vec3 lin = hdr_srgb_dec(hdr_clean(c0.rgb));\n"
     "  if (hdr_p[0].x < 0.5) lin = clamp(lin, 0.0, 1.0);\n"
-    "  c0.rgb = hdr_intermediate(hdr_tonemap(hdr_grade(lin * hdr_p[2].w)));\n"
+    "  c0.rgb = hdr_intermediate(hdr_tonemap(hdr_to2020(hdr_grade(lin * hdr_p[2].w))));\n"
+    "}\n";
+
+// The HUD: as drawn (UI white = 1, the intermediate's transfer), its colours BT.709 -> BT.2020.
+static const char *const hud_main =
+    "void main() {\n"
+    "  hdr_game_main();\n"
+    "  vec3 c = hdr_clean(c0.rgb);\n"
+    "  c0.a = clamp(isnan(c0.a) ? 0.0 : c0.a, 0.0, 1.0);\n"
+    "  if (hdr_p[3].x < 0.5) { c0.rgb = clamp(c, 0.0, 256.0); return; }\n"
+    "  float g = hdr_p[0].y;\n"
+    "  vec3 lin = hdr_to2020(g > 0.0 ? hdr_spow(c, g) : hdr_srgb_dec(c));\n"
+    "  c0.rgb = min(g > 0.0 ? hdr_spow(lin, 1.0 / g) : hdr_srgb_enc(lin), vec3(256.0));\n"
     "}\n";
 
 // Every other fragment shader (exec.c compile_program): its colour outputs as an RGBA8 target took them - no NaN,
@@ -318,7 +350,7 @@ char *vk_hdr_wrap_fs(const char *src, int pass) {
         LOG("[hdr] the game's pass %d has no main() / c0 to wrap: drawn as it is\n", pass);
         return NULL;
     }
-    const char *body = pass == HDR_PASS_GRADE ? grade_main : bloom_main;
+    const char *body = pass == HDR_PASS_GRADE ? grade_main : pass == HDR_PASS_BLOOM ? bloom_main : hud_main;
     static const char renamed[] = "void hdr_game_main()";
     size_t head = (size_t)(m - src), tail = strlen(m + 11);
     size_t n = head + sizeof renamed - 1 + tail + strlen(hdr_lib) + strlen(body) + 2;
@@ -469,6 +501,10 @@ static const char *const analysis_comp =
     "  return vec3(dot(vec3(0.6274040, 0.3292820, 0.0433136), c), dot(vec3(0.0690970, 0.9195400, 0.0113612), c),\n"
     "              dot(vec3(0.0163916, 0.0880132, 0.8955950), c));\n"
     "}\n"
+    "vec3 from_bt2020(vec3 c) {\n"
+    "  return vec3(dot(vec3(1.6604910, -0.5876411, -0.0728499), c), dot(vec3(-0.1245505, 1.1328999, -0.0083494), c),\n"
+    "              dot(vec3(-0.0181508, -0.1005789, 1.1187297), c));\n"
+    "}\n"
     "vec3 to_p3(vec3 c) {\n"
     "  return vec3(dot(vec3(0.8224621, 0.1775380, 0.0), c), dot(vec3(0.0331941, 0.9668058, 0.0), c),\n"
     "              dot(vec3(0.0170827, 0.0723974, 0.9105199), c));\n"
@@ -487,7 +523,8 @@ static const char *const analysis_comp =
     "    bool vanilla = pc.opt.x < 0.5;\n"
     "    if (vanilla) c = clamp(c, 0.0, 1.0);\n"
     "    vec3 lin = pc.opt.y > 0.0 ? spow(c, pc.opt.y) : srgb_dec(c);\n"
-    "    vec3 n2020 = to_bt2020(lin);\n"
+    "    vec3 n2020 = pc.opt.z > 0.5 ? lin : to_bt2020(lin);\n"  // (opt.z: the picture is BT.2020 already)
+    "    if (pc.opt.z > 0.5) lin = from_bt2020(lin);\n"
     "    const float e = -1e-4;\n"
     "    int g = all(greaterThanEqual(lin, vec3(e))) ? 0 : all(greaterThanEqual(to_p3(lin), vec3(e))) ? 1 :\n"
     "            all(greaterThanEqual(n2020, vec3(e))) ? 2 : 3;\n"
@@ -628,7 +665,7 @@ void vk_hdr_analyze(VkCommandBuffer cb, TexBackend *src) {
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, an_pipe);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, an_layout, 0, 1, &ds, 0, NULL);
     float pc[8] = {config_live_hdr_game(), config_live_hdr_ui(), config_live_hdr_peak(), (float)g_hdr_out,
-                   (float)config_live_hdr_tonemap(), gamma_value(), 0, 0};
+                   (float)config_live_hdr_tonemap(), gamma_value(), present_2020 ? 1.0f : 0.0f, 0};
     vkCmdPushConstants(cb, an_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, pc);
     uint32_t gx = (src->width / 2 + 15) / 16, gy = (src->height / 2 + 15) / 16;
     vkCmdDispatch(cb, gx ? gx : 1, gy ? gy : 1, 1);
