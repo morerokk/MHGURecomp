@@ -45,7 +45,7 @@ import java.util.Locale;
 import java.util.Map;
 
 public class ImportActivity extends Activity {
-    public static final int GAME = 1, SAVE = 2, EXPORT = 3, FOLDER = 4, MOD_ZIP = 5, MOD_FOLDER = 6, GAME_FOLDER = 7;
+    public static final int GAME = 1, SAVE = 2, EXPORT = 3, FOLDER = 4, MOD_ZIP = 5, MOD_FOLDER = 6, GAME_FOLDER = 7, FILES_FOLDER = 8;
     public static final int RUNNING = 0, DONE = 1, CANCELLED = 2, FAILED = 3;
     static final long SAVE_SIZE = 0x4eb8bcL;  // (a save's system file: runtime/services/bonus.c)
     static final int PICK = 1, ALL_FILES = 2;
@@ -70,7 +70,7 @@ public class ImportActivity extends Activity {
 
     private String title() {
         return mode == GAME ? "Import game files" : mode == SAVE ? "Import save" : mode == EXPORT ? "Export save"
-            : mode == FOLDER ? "Save folder" : mode == GAME_FOLDER ? "Game files folder" : "Import mod";
+            : mode == FOLDER ? "Save folder" : mode == GAME_FOLDER ? "Game files folder" : mode == FILES_FOLDER ? "Files folder" : "Import mod";
     }
 
     private volatile boolean stop;
@@ -100,6 +100,13 @@ public class ImportActivity extends Activity {
             : mode == MOD_FOLDER
             ? "Pick a mod's folder (for example in Download). The app checks it has the layout the game loads mods "
               + "from, offers to fix it if it doesn't, and copies it into the mods folder. Restart the app afterwards to load it."
+            : mode == FILES_FOLDER
+            ? "Pick a folder for the app's files: the settings (mhgurecomp.ini), the save, mods, cheats, screenshots and log.txt, "
+              + "so you can open them with the file managers on this device (the app's own folder, in Android/data, can't be "
+              + "opened by them). For example a new MHGURecomp folder in the device's storage. The app copies its files there "
+              + "(files already there are kept), uses that folder from now on, and closes: start it again to play. The game "
+              + "files are not copied: they are used where they are. The app reads and writes the folder itself, so Android "
+              + "asks you to allow \"All files access\" for it."
             : mode == GAME_FOLDER
             ? "Pick the folder that holds your dump's exefs and romfs folders, for example on a USB drive or SD card. Nothing is "
               + "copied: the game reads them there, so the drive has to stay connected while you play. The app reads the folder "
@@ -148,12 +155,12 @@ public class ImportActivity extends Activity {
         super.onActivityResult(request, result, data);
         if (request == ALL_FILES) {  // back from Android's settings page for "All files access"
             if (allFiles()) finishFolder();
-            else fail("Without \"All files access\" the app can't use that folder, so " + (mode == GAME_FOLDER ? "nothing was changed." : "the save stays where it was."));
+            else fail("Without \"All files access\" the app can't use that folder, so " + (mode == FOLDER ? "the save stays where it was." : "nothing was changed."));
             return;
         }
         if (request != PICK) return;
         if (result != RESULT_OK || data == null) { end(CANCELLED); return; }
-        if (mode == FOLDER || mode == GAME_FOLDER) { folderPicked(data.getData()); return; }
+        if (mode == FOLDER || mode == GAME_FOLDER || mode == FILES_FOLDER) { folderPicked(data.getData()); return; }
         if (mode == MOD_ZIP || mode == MOD_FOLDER) { modPicked(data.getData()); return; }
         progress = dialog().setTitle(title()).setMessage("Starting...")
             .setNegativeButton("Stop", null).show();
@@ -694,7 +701,8 @@ public class ImportActivity extends Activity {
         if (Build.VERSION.SDK_INT < 30) { fail("This needs Android 11 or newer."); return; }
         if (allFiles()) { finishFolder(); return; }
         dialog().setTitle(title())
-            .setMessage((mode == GAME_FOLDER ? "To read the game files in that folder itself" : "To read and write the save in that folder itself")
+            .setMessage((mode == GAME_FOLDER ? "To read the game files in that folder itself" : mode == FILES_FOLDER ? "To keep its files in that folder"
+                         : "To read and write the save in that folder itself")
                         + ", the app needs \"All files access\". The next screen is Android's own: turn it on for MHGU Recomp, then go back.")
             .setPositiveButton("Continue", new DialogInterface.OnClickListener() {
                 @Override public void onClick(DialogInterface d, int w) {
@@ -737,6 +745,10 @@ public class ImportActivity extends Activity {
             return;
         }
         picked = folderPath;
+        if (mode == FILES_FOLDER) {  // (the copy is the native side's: runtime/platform/android.c android_import)
+            done("The app's files will be kept in " + folderPath + ". OK copies them there; the app then closes: start it again to play.");
+            return;
+        }
         done("The save will be kept in " + folderPath + ". Press Save in the menu, then restart the app to use it.");
     }
 

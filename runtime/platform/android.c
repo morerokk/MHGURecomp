@@ -2,8 +2,11 @@
 //
 // The app's folder is its external files folder, /sdcard/Android/data/<package>/files: the player (or adb push) puts
 // the game's exefs / romfs in its data/ there, and the settings, saves, caches, mods, cheats and log.txt go beside
-// them, as in the PC build's game folder. Android gives no app an environment to start with, so the debug variables
+// them, as in the PC build's game folder. The device's own file managers can't open Android/data since Android 11, so
+// the player can choose another folder for all of it (the Android tab's Files folder: android_home, below). Android gives no app an environment to start with, so the debug variables
 // (MHGU_QUICKHUNT, MHGU_NO_BC...) come from env.txt in that folder: one NAME=value per line, # for comments.
+#include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -16,11 +19,14 @@
 #include <SDL3/SDL.h>
 #include <jni.h>
 
+#include "android_files.h"
 #include "config.h"
 #include "modorder.h"
 #include "rt.h"
 
-const char *android_home(void) {
+// The app's own folder (Android/data/<package>/files): always there, and where files-folder.txt says which folder
+// the app's files are in when the player chose one (android/java: FilesFolder.java reads it too).
+static const char *app_folder(void) {
     static char dir[1024];
     if (!dir[0]) {
         const char *p = SDL_GetAndroidExternalStoragePath();  // (SDL's Java activity has set up JNI before SDL_main)
@@ -29,6 +35,35 @@ const char *android_home(void) {
     }
     return dir;
 }
+
+static char chosen_note[1200];  // (a chosen files folder that can't be used now: why, for the log and the settings)
+
+// The files folder: the one chosen (files-folder.txt) while the app can write to it ("All files access"), else the
+// app's own.
+const char *android_home(void) {
+    static char dir[1024];
+    if (dir[0]) return dir;
+    snprintf(dir, sizeof dir, "%s", app_folder());
+    char ptr[1100], line[1024] = "";
+    snprintf(ptr, sizeof ptr, "%s/files-folder.txt", app_folder());
+    FILE *f = fopen(ptr, "r");
+    if (f) {
+        if (!fgets(line, sizeof line, f)) line[0] = 0;
+        fclose(f);
+        line[strcspn(line, "\r\n")] = 0;
+    }
+    if (line[0] == '/') {
+        mkdir(line, 0777);
+        if (access(line, W_OK | X_OK) == 0) snprintf(dir, sizeof dir, "%s", line);
+        else snprintf(chosen_note, sizeof chosen_note, "%s can't be used (%s): \"All files access\" off, or the drive gone?",
+                      line, strerror(errno));
+    }
+    return dir;
+}
+
+// For the settings' Android tab: the files folder chosen ("" the app's own), and why it isn't used if it isn't
+const char *android_files_folder(void) { return strcmp(android_home(), app_folder()) ? android_home() : ""; }
+const char *android_files_folder_problem(void) { return chosen_note; }
 
 // <the app's folder>/<rel> (an absolute path: SDL's file functions read relative ones from the APK's assets)
 static const char *android_path(const char *rel) {
@@ -160,6 +195,113 @@ static const char *absolute(const char *dir, char *buf, size_t size) {
 static char picked_path[1100];
 static SDL_AtomicInt picked_ready;  // the kind of import (4 or 7) that chose picked_path
 
+// ------------------------------------------------------------------ the files folder (kinds 8 and 9 of android_import)
+// The files of the files folder now copied into another, where they are missing there (nothing there is replaced):
+// the settings, the save, mods, cheats, screenshots... Not the game files (data/: 13 GB; GameFolder then points at
+// them where they are) nor the shader cache (made again) nor this run's log.
+static bool copy_file(const char *from, const char *to) {
+    FILE *in = fopen(from, "rb");
+    if (!in) return false;
+    char tmp[2300];
+    snprintf(tmp, sizeof tmp, "%s.part", to);
+    FILE *out = fopen(tmp, "wb");
+    if (!out) { fclose(in); return false; }
+    static char buf[1 << 16];
+    bool ok = true;
+    for (size_t n; (n = fread(buf, 1, sizeof buf, in)) > 0;)
+        if (fwrite(buf, 1, n, out) != n) { ok = false; break; }
+    if (ferror(in)) ok = false;
+    fclose(in);
+    if (fclose(out) != 0) ok = false;
+    if (ok && rename(tmp, to) == 0) return true;
+    remove(tmp);
+    return false;
+}
+
+static int copy_missing(const char *from, const char *to, bool top, int *failed) {
+    DIR *d = opendir(from);
+    if (!d) return 0;
+    mkdir(to, 0777);
+    int copied = 0;
+    for (struct dirent *e; (e = readdir(d));) {
+        const char *n = e->d_name;
+        if (!strcmp(n, ".") || !strcmp(n, "..")) continue;
+        if (top && (!strcmp(n, "data") || !strcmp(n, "cache") || !strcmp(n, "files-folder.txt") || !strcmp(n, "log.txt") ||
+                    !strcmp(n, "last-run-crashed")))
+            continue;
+        char a[2048], b[2048];
+        snprintf(a, sizeof a, "%s/%s", from, n);
+        snprintf(b, sizeof b, "%s/%s", to, n);
+        struct stat st;
+        if (stat(a, &st) != 0) continue;
+        if (S_ISDIR(st.st_mode)) copied += copy_missing(a, b, false, failed);
+        else if (S_ISREG(st.st_mode) && access(b, F_OK) != 0) {
+            if (copy_file(a, b)) copied++;
+            else ++*failed, LOG("[android] files folder: %s not copied (%s)\n", a, strerror(errno));
+        }
+    }
+    closedir(d);
+    return copied;
+}
+
+static bool has_game_files(const char *dir) {
+    char p[1200];
+    snprintf(p, sizeof p, "%s/data/exefs/main", dir);
+    return access(p, R_OK) == 0;
+}
+
+// The app's files from now on in to (app_folder(): the app's own again): copied, files-folder.txt set. true: done (the
+// app then closes: the game has this folder's files open).
+static bool move_files_folder(const char *to) {
+    const char *from = android_home();
+    char text[1500];
+    if (!strcmp(from, to)) {
+        android_error_box("That is the folder the app's files are in already.");
+        return false;
+    }
+    size_t lf = strlen(from);
+    if (!strncmp(to, from, lf) && to[lf] == '/') {
+        android_error_box("That folder is inside the one the app's files are in now: pick another one.");
+        return false;
+    }
+    mkdir(to, 0777);
+    if (access(to, W_OK | X_OK) != 0) {
+        snprintf(text, sizeof text, "The app can't write to %s (%s).", to, strerror(errno));
+        android_error_box(text);
+        return false;
+    }
+    // The game files stay where they are: the settings copied over point at them (unless a folder of the player's
+    // is set already, or the new folder has game files of its own)
+    if (!g_config.game_dir[0] && has_game_files(from) && !has_game_files(to)) {
+        Config c = config_editable();
+        char error[200];
+        snprintf(c.game_dir, sizeof c.game_dir, "%s/data", from);
+        if (!config_save(&c, error, sizeof error)) LOG("[android] files folder: GameFolder not saved: %s\n", error);
+    }
+    int failed = 0, copied = copy_missing(from, to, true, &failed);
+    LOG("[android] files folder: %d files copied from %s to %s, %d not\n", copied, from, to, failed);
+    if (failed) {
+        snprintf(text, sizeof text, "%d of the app's files could not be copied to %s (the log says which). Nothing was changed: "
+                 "the app keeps its files where they are.", failed, to);
+        android_error_box(text);
+        return false;
+    }
+    char ptr[1100];
+    snprintf(ptr, sizeof ptr, "%s/files-folder.txt", app_folder());
+    if (!strcmp(to, app_folder())) remove(ptr);
+    else {
+        FILE *f = fopen(ptr, "w");
+        if (!f || fprintf(f, "%s\n", to) < 0 || fclose(f) != 0) {
+            android_error_box("The app couldn't note the new folder in its own folder: nothing was changed.");
+            return false;
+        }
+    }
+    snprintf(text, sizeof text, "The app's files are in %s from now on (%d copied; what was there already was kept). The files in "
+             "%s are left where they are. The app closes now: start it again to play.", to, copied, from);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "MHGU Recomp", text, NULL);
+    return true;
+}
+
 // The folder chosen by the last import of kind 4 or 7, once: which kind it was (0: none).
 int android_take_picked(char *out, size_t size) {
     int what = SDL_SetAtomicInt(&picked_ready, 0);
@@ -169,8 +311,10 @@ int android_take_picked(char *out, size_t size) {
 
 bool android_import(int what, bool running) {
     char buf[1100], folder[1200];
+    if (what == 9) return move_files_folder(app_folder());  // (the app's own folder again: nothing to pick)
     if (what == 1) snprintf(folder, sizeof folder, "%s", android_path("data"));  // (always the app's own: see below)
     else if (what == 5 || what == 6) snprintf(folder, sizeof folder, "%s", absolute(mods_dir(), buf, sizeof buf));
+    else if (what == 8) snprintf(folder, sizeof folder, "%s", android_home());
     else snprintf(folder, sizeof folder, "%s/save_0", absolute(getenv("MHGU_SAVE_DIR") ? getenv("MHGU_SAVE_DIR") : g_save_dir, buf, sizeof buf));
     JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
     jobject act = (jobject)SDL_GetAndroidActivity();
@@ -190,16 +334,20 @@ bool android_import(int what, bool running) {
         LOG("[android] the import isn't in this APK\n");
     } else {
         LOG("[android] %s: %s\n", what == 1 ? "importing the game files into" : what == 2 ? "importing a save into" :
-            what == 3 ? "exporting the save from" : what == 7 ? "choosing the game files' folder, now" : "choosing the save folder, now", folder);
+            what == 3 ? "exporting the save from" : what == 7 ? "choosing the game files' folder, now" :
+            what == 8 ? "choosing the files folder, now" : "choosing the save folder, now", folder);
         jstring dir = (*env)->NewStringUTF(env, folder);
         (*env)->CallStaticVoidMethod(env, c, begin, act, (jint)what, dir, (jboolean)running);
         if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
         else while ((result = (*env)->CallStaticIntMethod(env, c, state)) == 0) SDL_Delay(100);
         (*env)->DeleteLocalRef(env, dir);
-        if ((what == 4 || what == 7) && result == 1) {
+        if ((what == 4 || what == 7 || what == 8) && result == 1) {
             jstring str = (jstring)(*env)->CallStaticObjectMethod(env, c, pickedm);
             const char *chars = str ? (*env)->GetStringUTFChars(env, str, NULL) : NULL;
-            if (chars && *chars) {
+            if (chars && *chars && what == 8) {
+                snprintf(buf, sizeof buf, "%s", chars);
+                if (!move_files_folder(buf)) result = 3;
+            } else if (chars && *chars) {
                 snprintf(picked_path, sizeof picked_path, "%s", chars);
                 SDL_SetAtomicInt(&picked_ready, what);
             }
