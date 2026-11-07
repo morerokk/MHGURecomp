@@ -77,6 +77,7 @@
     .hdr_bloom = 100.0f,                                                                        \
     .hdr_scene = 1,                                                                             \
     .hdr_format = HDR_FORMAT_AUTO,                                                              \
+    .hdr_analysis = 0,                                                                          \
     /* [Performance] */                                                                             \
     .show_fps = 0,                                                                                  \
     .show_battery = BATTERY_OFF,                                                                    \
@@ -290,6 +291,11 @@ static const char DEFAULT_INI[] =
     "; Not in the settings menu\n"
     "; Default: Auto\n"
     "HDRFormat = Auto\n"
+    "\n"
+    "; Shows an HDR analysis over the game: the picture's brightness in nits (maximum, average, minimum, the middle of\n"
+    "; the screen), the colour gamut it uses and a waveform of its brightness across the screen, as the display gets it\n"
+    "; Default: Off\n"
+    "Analysis = Off\n"
     "\n"
     "[Performance]\n"
     "; Show the frame rate (FPS) in a small box on the screen. Drag it with the mouse while the settings menu is open\n"
@@ -604,6 +610,7 @@ const SettingRow g_setting_rows[] = {
     {"HDR", "HDR", "HighlightSaturation", "Highlight Saturation", SETTING_VALUE, "0|25|50|82|100", NULL, true, false},
     {"HDR", "HDR", "Flare", "Flare", SETTING_VALUE, "0|5|10|25|50", NULL, true, false},
     {"HDR", "HDR", "Bloom", "Bloom", SETTING_VALUE, "0|25|50|75|100", NULL, true, false},
+    {"HDR", "HDR", "Analysis", "HDR Analysis", SETTING_CHOICE, ONOFF, NULL, true, false},
     {"Graphics", "Performance", "ShowFPS", "Show FPS", SETTING_CHOICE, ONOFF, NULL, true, true},
     {"Graphics", "Performance", "FPS", "Frame Rate Cap", SETTING_VALUE, "30|60|90|120|144|240", NULL, true, true},
     {"Graphics", "Performance", "VSync", "VSync", SETTING_CHOICE, ONOFF, NULL, true, true},
@@ -841,6 +848,7 @@ const ConfigSetting g_settings[] = {
     {"HDR", "Flare", SET_FLOAT, F(hdr_flare), 0, 0.0f, 100.0f, NULL, NULL, false, ERR_HDR},
     {"HDR", "Bloom", SET_FLOAT, F(hdr_bloom), 0, 0.0f, 100.0f, NULL, NULL, false, ERR_HDR},
     ON_OFF("HDR", "UnclampedScene", hdr_scene, false),
+    ON_OFF("HDR", "Analysis", hdr_analysis, false),
     {"HDR", "HDRFormat", SET_CHOICE, F(hdr_format), 0, 0, 0, "Auto,HDR10|pq,scRGB|fp16", NULL, false, ERR_HDR},
     ON_OFF("Performance", "ShowFPS", show_fps, false),
     {"Performance", "ShowBattery", SET_CHOICE, F(show_battery), 0, 0, 0, "Off,WithFPS,ByItself", NULL, false, ERR_MISC},

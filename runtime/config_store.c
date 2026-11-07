@@ -35,7 +35,7 @@ static SDL_AtomicInt live_kerning;
 static SDL_AtomicInt live_bold;
 // [HDR]
 static SDL_AtomicInt live_hdr, live_hdr_format, live_hdr_gamma = {HDR_GAMMA_22}, live_hdr_tonemap = {HDR_TONEMAP_RENODRT};
-static SDL_AtomicInt live_hdr_scene = {1};
+static SDL_AtomicInt live_hdr_scene = {1}, live_hdr_analysis;
 static SDL_AtomicInt live_hdr_peak = {0x447a0000}, live_hdr_game = {0x434b0000}, live_hdr_ui = {0x434b0000};  // 1000, 203
 static SDL_AtomicInt live_hdr_exposure = {0x3f266666}, live_hdr_flare = {0}, live_hdr_bloom = {0x42c80000};  // 0.65, 0, 100
 static SDL_AtomicInt live_hdr_highlights = {0x42700000}, live_hdr_shadows = {0x42480000}, live_hdr_contrast = {0x42480000};  // 60, 50, 50
@@ -112,6 +112,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->hdr_ui != saved.hdr_ui) set_float(&live_hdr_ui, c->hdr_ui);
     if (all || c->hdr_tonemap != saved.hdr_tonemap) SDL_SetAtomicInt(&live_hdr_tonemap, c->hdr_tonemap);
     if (all || c->hdr_scene != saved.hdr_scene) SDL_SetAtomicInt(&live_hdr_scene, c->hdr_scene);
+    if (all || c->hdr_analysis != saved.hdr_analysis) SDL_SetAtomicInt(&live_hdr_analysis, c->hdr_analysis);
     if (all || c->hdr_exposure != saved.hdr_exposure) set_float(&live_hdr_exposure, c->hdr_exposure);
     if (all || c->hdr_highlights != saved.hdr_highlights) set_float(&live_hdr_highlights, c->hdr_highlights);
     if (all || c->hdr_shadows != saved.hdr_shadows) set_float(&live_hdr_shadows, c->hdr_shadows);
@@ -192,6 +193,7 @@ float config_live_hdr_game(void) { return get_float(&live_hdr_game); }
 float config_live_hdr_ui(void) { return get_float(&live_hdr_ui); }
 int config_live_hdr_tonemap(void) { return SDL_GetAtomicInt(&live_hdr_tonemap); }
 int config_live_hdr_scene(void) { return SDL_GetAtomicInt(&live_hdr_scene); }
+int config_live_hdr_analysis(void) { return SDL_GetAtomicInt(&live_hdr_analysis); }
 float config_live_hdr_exposure(void) { return get_float(&live_hdr_exposure); }
 float config_live_hdr_highlights(void) { return get_float(&live_hdr_highlights); }
 float config_live_hdr_shadows(void) { return get_float(&live_hdr_shadows); }

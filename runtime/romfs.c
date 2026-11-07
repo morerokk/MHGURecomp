@@ -28,6 +28,7 @@ typedef struct {
     uint32_t off;
     Dir *parent;
     char *rpath;        // path inside the RomFS
+    int8_t partial;     // (a mod's archive) arc_partial against the file it replaces, found ahead: 1 yes, 2 no, 0 not yet
 } File;
 struct Dir {
     char *name;
@@ -98,23 +99,75 @@ static Dir *scan(const char *path, const char *name, int depth) {
     return dir;
 }
 
+static bool is_arc(const char *name) {
+    size_t nl = strlen(name);
+    return nl > 4 && !strcasecmp(name + nl - 4, ".arc");
+}
+
+// Each archive a mod replaces is checked against the game's first (arc_partial: both entry tables). On a first start
+// that's ~4 ms a file, nearly all of it the virus scanner looking at a file nothing opened before (Windows Defender,
+// which remembers it after), against 0.05 ms once it has: 70 s for the HD mod's 7665 archives, one at a time. The
+// checks don't depend on each other, so they're all made ahead on a few threads (the scanner takes them in parallel:
+// ~10x with 16, worse again with 64), and merge() reads the answers. (Merging two mods' archives stays in order.)
+typedef struct { const char *orig; File *f; } Check;
+typedef struct { Check *c; int n, cap; atomic_int next; } Checks;
+
+static void find_checks(Dir *dst, Dir *src, Checks *cs) {  // (merge()'s matching: the archives it will ask about)
+    for (int i = 0; i < src->nfiles; i++) {
+        File *f = src->files[i];
+        if (!is_arc(f->name)) continue;
+        for (int k = 0; k < dst->nfiles; k++) {
+            File *d = dst->files[k];
+            if (strcasecmp(d->name, f->name)) continue;
+            if (!d->orig) {
+                if (cs->n == cs->cap) cs->c = realloc(cs->c, sizeof *cs->c * (cs->cap = cs->cap ? cs->cap * 2 : 256));
+                cs->c[cs->n++] = (Check){d->path, f};
+            }
+            break;
+        }
+    }
+    for (int i = 0; i < src->ndirs; i++)
+        for (int k = 0; k < dst->ndirs; k++)  // (a folder the game hasn't: nothing in it to compare)
+            if (!strcasecmp(dst->dirs[k]->name, src->dirs[i]->name)) { find_checks(dst->dirs[k], src->dirs[i], cs); break; }
+}
+
+static void *check_thread(void *arg) {
+    Checks *cs = arg;
+    for (int i; (i = atomic_fetch_add(&cs->next, 1)) < cs->n;) {
+        cs->c[i].f->partial = arc_partial(cs->c[i].orig, cs->c[i].f->path) ? 1 : 2;
+        atomic_fetch_add(&g_mods_done, 1);  // (its file's count: merge() doesn't add it again)
+    }
+    return NULL;
+}
+
+static void check_ahead(Dir *dst, Dir *src) {
+    Checks cs = {0};
+    find_checks(dst, src, &cs);
+    pthread_t th[16];
+    int nt = 0;
+    if (cs.n >= 32)  // (a few: not worth the threads)
+        for (; nt < 16 && pthread_create(&th[nt], NULL, check_thread, &cs) == 0; nt++) {}
+    check_thread(&cs);  // (this thread too, and alone when no thread could start)
+    for (int i = 0; i < nt; i++) pthread_join(th[i], NULL);
+    free(cs.c);
+}
+
 // overlay `src` onto `dst`: its files replace or join dst's, its folders merge. Names match in any case (a mod's
 // nativenx/ is the game's nativeNX/: Windows doesn't tell them apart either); the game's own spelling stays.
 static int merge(Dir *dst, Dir *src) {
     int changed = 0;
     for (int i = 0; i < src->nfiles; i++) {
         File *f = src->files[i];
-        atomic_fetch_add(&g_mods_done, 1);
+        if (!f->partial) atomic_fetch_add(&g_mods_done, 1);
         int k = 0;
         while (k < dst->nfiles && strcasecmp(dst->files[k]->name, f->name)) k++;
         if (k < dst->nfiles) {
             File *d = dst->files[k];
-            size_t nl = strlen(f->name);
             char merged[1200];
             // (two mods' archives: both's changes. One with only some of the game's entries: those over the rest)
-            bool arc = nl > 4 && !strcasecmp(f->name + nl - 4, ".arc");
+            bool arc = is_arc(f->name);
             if (arc && !d->orig) g_arcs_compared++;
-            if (arc && (d->orig || arc_partial(d->path, f->path)) &&
+            if (arc && (d->orig || (f->partial ? f->partial == 1 : arc_partial(d->path, f->path))) &&
                 arc_merge(d->orig ? d->orig : d->path, d->path, f->path, merged, sizeof merged)) {
                 struct stat st;
                 if (!stat(merged, &st)) {
@@ -244,6 +297,7 @@ bool romfs_open(const char *base_dir, const char *const *overlays, int noverlays
         LOG("[romfs] mod %s: %d files found in %.1f s, applying them\n", overlays[i], found[i], read_ns[i] / 1e9);
         g_arcs_compared = g_arcs_merged = 0;
         uint64_t t = plat_now_ns();
+        check_ahead(root, ov[i]);  // (after the mods before it: those it layers over)
         int n = merge(root, ov[i]);
         LOG("[romfs] mod %s: %d files in %.1f s (%d archive(s) checked against the game's, %d merged)\n", overlays[i],
             n, (plat_now_ns() - t) / 1e9, g_arcs_compared, g_arcs_merged);
