@@ -44,7 +44,7 @@ para el renderizado. No es un emulador.
 
 | Área | Qué obtienes |
 | --- | --- |
-| **Gráficos** | Resolución, resolución de render (supermuestreo), MSAA, FXAA, escalado FSR 3.1, VSync, mayor distancia de dibujado |
+| **Gráficos** | Resolución, resolución de render (supermuestreo), MSAA, FXAA, escalado FSR 3.1, salida HDR, VSync, mayor distancia de dibujado |
 | **Pantallas** | Cualquier relación de aspecto panorámica (16:10, 16:9 y más ancha), con el HUD centrado o extendido hasta los bordes |
 | **Tasa de fotogramas** | Un límite entre 30 y 240 fps, con correcciones para los fallos de velocidad que tienen los emuladores a fps altos |
 | **Controles** | Casi cualquier mando (a través de SDL), y teclado y ratón con teclas reasignables |

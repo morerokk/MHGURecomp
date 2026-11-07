@@ -237,6 +237,43 @@ GuideLayout guide_layout(float width) {
     layout.height = y + f;
     return layout;
 }
+// A row's help at the bottom, wrapped as ImGui wraps it (so its height is what CalcTextSize measured), with the
+// warnings in it (shout) in bright red.
+void draw_help(ImDrawList *draw, ImVec2 pos, ImU32 col, const std::string &text, float wrap) {
+    static const char *const shout[] = {"NOT FOR HDR400 DISPLAYS"};
+    const ImU32 red = IM_COL32(255, 20, 20, 255);
+    std::vector<bool> loud(text.size(), false);
+    for (const char *en : shout)
+        for (const char *w : {en, tr(en)})  // (English, and the menu's language)
+            for (size_t at = text.find(w); at != std::string::npos; at = text.find(w, at + 1))
+                for (size_t i = at; i < at + strlen(w); i++) loud[i] = true;
+    ImFont *font = ImGui::GetFont();
+    float size = ImGui::GetFontSize(), y = pos.y;
+    const char *base = text.c_str(), *end = base + text.size();
+    for (const char *line = base; line <= end;) {
+        const char *nl = (const char *)memchr(line, '\n', (size_t)(end - line));
+        const char *line_end = nl ? nl : end;
+        const char *s = line;
+        do {
+            const char *eol = line_end > s ? ImFontCalcWordWrapPositionEx(font, size, s, line_end, wrap) : s;
+            if (eol <= s && s < line_end) eol = s + 1;
+            float x = pos.x;
+            for (const char *a = s; a < eol;) {
+                const char *b = a;
+                bool l = loud[(size_t)(a - base)];
+                while (b < eol && loud[(size_t)(b - base)] == l) b++;
+                draw->AddText(font, size, ImVec2(x, y), l ? red : col, a, b);
+                x += font->CalcTextSizeA(size, FLT_MAX, 0.f, a, b).x;
+                a = b;
+            }
+            y += size;
+            s = eol < line_end ? ImTextCalcWordWrapNextLineStart(eol, line_end) : line_end;
+        } while (s < line_end);
+        if (!nl) break;
+        line = nl + 1;
+    }
+}
+
 void draw_guides(ImGuiWindow *window, const GuideLayout &layout, float top) {
     auto *draw = window->DrawList;
     ImVec2 start(window->InnerRect.Min.x + ImGui::GetStyle().WindowPadding.x, top);
@@ -283,6 +320,22 @@ bool equal(const Config &a, const Config &b) {
     SAME(smooth_gradients);
     SAME(fix_kerning);
     SAME(bold_text);
+    SAME(hdr);
+    SAME(hdr_peak);
+    SAME(hdr_game);
+    SAME(hdr_ui);
+    SAME(hdr_tonemap);
+    SAME(hdr_gamma);
+    SAME(hdr_exposure);
+    SAME(hdr_highlights);
+    SAME(hdr_shadows);
+    SAME(hdr_contrast);
+    SAME(hdr_saturation);
+    SAME(hdr_highlight_saturation);
+    SAME(hdr_flare);
+    SAME(hdr_bloom);
+    SAME(hdr_scene);
+    SAME(hdr_format);
     SAME(msaa);
     SAME(fxaa);
     SAME(fxaa_mode);
@@ -758,6 +811,22 @@ void reset_section() {
         c.smooth_gradients = f.smooth_gradients;
         c.fix_kerning = f.fix_kerning;
         c.bold_text = f.bold_text;
+        c.hdr = f.hdr;
+        c.hdr_peak = f.hdr_peak;
+        c.hdr_game = f.hdr_game;
+        c.hdr_ui = f.hdr_ui;
+        c.hdr_tonemap = f.hdr_tonemap;
+        c.hdr_gamma = f.hdr_gamma;
+        c.hdr_exposure = f.hdr_exposure;
+        c.hdr_highlights = f.hdr_highlights;
+        c.hdr_shadows = f.hdr_shadows;
+        c.hdr_contrast = f.hdr_contrast;
+        c.hdr_saturation = f.hdr_saturation;
+        c.hdr_highlight_saturation = f.hdr_highlight_saturation;
+        c.hdr_flare = f.hdr_flare;
+        c.hdr_bloom = f.hdr_bloom;
+        c.hdr_scene = f.hdr_scene;
+        c.hdr_format = f.hdr_format;
         c.msaa = f.msaa;
         c.fxaa = f.fxaa;
         c.fxaa_mode = f.fxaa_mode;
@@ -1143,7 +1212,11 @@ std::vector<Row> main_rows() {
         add_bool(r, "kerning", "Fix kerning", &c.fix_kerning, ini("FixKerning"));
         add_bool(r, "boldtext", "Bold text", &c.bold_text, ini("BoldText"));
         add_bool(r, "fsr", "FSR", &c.fsr, ini("FSR"));
-        if (c.fsr) {
+        if (c.hdr) {  // (FSR's input stays 8-bit: with HDR it is off, config.c)
+            r.back().enabled = false;
+            r.back().value = tr("Off (HDR)");
+        }
+        if (c.fsr && !c.hdr) {
             add_choice(
                 r, "fsr.quality", "FSR quality", c.fsr_quality,
                 {tr("Native AA"), tr("Quality"), tr("Balanced"), tr("Performance"), tr("Ultra performance")},
@@ -1152,6 +1225,29 @@ std::vector<Row> main_rows() {
             add_bool(r, "fsr.motion", "Object motion", &c.fsr_objmotion, ini("ObjectMotion"));
             number(r, "fsr.reactive", tr("Reactive mask"), &c.fsr_reactive, lo("Reactive"), hi("Reactive"), .05f, ini("Reactive"));
             add_bool(r, "fsr.surfaces", "Animated surfaces", &c.fsr_animsurf, ini("AnimSurf"));
+        }
+        header(r, "hdr.header", "HDR");
+        add_bool(r, "hdr", "HDR", &c.hdr, ini("HDR"));
+        if (g_config.fsr)  // (FSR running: it is turned off, for HDR, at the next start)
+            r.back().cold = true;
+        if (c.hdr) {
+            number(r, "hdr.peak", tr("Peak brightness (nits)"), &c.hdr_peak, lo("PeakBrightness"), hi("PeakBrightness"), 50.f,
+                   ini("PeakBrightness"));
+            number(r, "hdr.game", tr("Game brightness (nits)"), &c.hdr_game, lo("GameBrightness"), hi("GameBrightness"), 5.f,
+                   ini("GameBrightness"));
+            number(r, "hdr.ui", tr("UI brightness (nits)"), &c.hdr_ui, lo("UIBrightness"), hi("UIBrightness"), 5.f,
+                   ini("UIBrightness"));
+            add_choice(r, "hdr.gamma", "Gamma correction", c.hdr_gamma, {tr("Off"), "2.2", "BT.1886"},
+                       [](int v) { s.draft.hdr_gamma = v; }, ini("GammaCorrection"));
+            number(r, "hdr.exposure", tr("Exposure"), &c.hdr_exposure, lo("Exposure"), hi("Exposure"), .05f, ini("Exposure"));
+            number(r, "hdr.highlights", tr("Highlights"), &c.hdr_highlights, lo("Highlights"), hi("Highlights"), 1.f,
+                   ini("Highlights"));
+            number(r, "hdr.shadows", tr("Shadows"), &c.hdr_shadows, lo("Shadows"), hi("Shadows"), 1.f, ini("Shadows"));
+            number(r, "hdr.contrast", tr("Contrast"), &c.hdr_contrast, lo("Contrast"), hi("Contrast"), 1.f, ini("Contrast"));
+            number(r, "hdr.saturation", tr("Saturation"), &c.hdr_saturation, lo("Saturation"), hi("Saturation"), 1.f,
+                   ini("Saturation"));
+            number(r, "hdr.hlsat", tr("Highlight saturation"), &c.hdr_highlight_saturation, lo("HighlightSaturation"),
+                   hi("HighlightSaturation"), 1.f, ini("HighlightSaturation"));
         }
         break;
     case 2:
@@ -2246,8 +2342,7 @@ void settings_panel(bool *open) {
                             ImGui::GetColorU32(ImGuiCol_WindowBg) | IM_COL32_A_MASK);
         draw->AddLine(ImVec2(x0 + pad, help_top), ImVec2(x1 - pad, help_top), look.divider);
         if (!help.empty())
-            draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(x0 + pad, help_top + spacing),
-                          look.text_dim, help.c_str(), nullptr, help_wrap);
+            draw_help(draw, ImVec2(x0 + pad, help_top + spacing), look.text_dim, help, help_wrap);
     }
     if (pinned_guides && s.view == View::Main)
         draw_guides(window, guides, guide_top);

@@ -51,6 +51,9 @@ typedef struct {
     uint8_t alpha_coverage; // fragment (GLSL), MSAA: the alpha test (< <= > >=) as sample coverage of this many samples
                             // (gl_SampleMask from how far c0.a is past the reference, over a pixel's alpha change), for
                             // smooth cut-out edges. (In the padding: keys without it hash as before.)
+    uint8_t hdr;            // fragment (GLSL): native HDR variant of one of the game's post passes (HDR_PASS_*,
+                            // runtime/nvn/vulkan/hdr.c): the translated main() is wrapped. Not read by the translator.
+                            // (In the padding: keys without it hash as before.)
 } ShaderKey;
 #define ALPHA_REF_BUFFER_INDEX 22
 
