@@ -40,7 +40,7 @@ graphics API are reimplemented on Windows, Linux and Android, with Vulkan for re
 
 | Area | What you get |
 | --- | --- |
-| **Graphics** | Resolution, render resolution (supersampling), MSAA, FXAA, FSR 3.1 upscaling, VSync, longer draw distance |
+| **Graphics** | Resolution, render resolution (supersampling), MSAA, FXAA, FSR 3.1 upscaling, HDR output, VSync, longer draw distance |
 | **Screens** | Any widescreen aspect ratio (16:10, 16:9 or anything wider), with HUD adjustment options for ultrawide |
 | **Frame rate** | Framerates anywhere between 30-240 fps, with fixes for bugs that GU normally has on emulators at high frame rates |
 | **Controls** | Almost any controller is supported (SDL), as well as keyboard+mouse |
@@ -48,6 +48,8 @@ graphics API are reimplemented on Windows, Linux and Android, with Vulkan for re
 | **Multiplayer options** | Small monsters are synced between players, monster HP optionally scaled by player count, Village quests playable in Multiplayer Hubs, Urgent Quest credit for everyone |
 | **Quality of life** | Fast-forward unskippable cutscenes with A, an in-game PC settings menu (F1 or `Plus`+`Minus`), Discord Rich Presence |
 | **Mods and cheats** | Drop-in `mods` folder with load order and conflict checks. Natively supports Forge plugins ([Mods](#mods)), and Ryujinx / Atmosphère cheat files ([Cheats](#cheats)) |
+
+**For AMD FSR 4 support, use this module: https://github.com/Huss3A/mhgurecomp-fsr4-module**
 
 ## Requirements
 
@@ -266,6 +268,11 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   UltraPerformance), `Sharpness`. FSR replaces MSAA and FXAA while it is on. Details: `docs/FSR-PORT.md`
 - `[Graphics]`: `DrawDistance` (how far away people in the villages and the Hubs are still drawn: 1 = the game's,
   2 = twice as far, 0.5 = half, 0 = no limit; up to 10)
+- `[HDR]`: `HDR` (Off / On, default Off: native HDR10 or scRGB output on an HDR display, a port of the RenoDX HDR mod
+  for this game; turn HDR on in the system's display settings first), `PeakBrightness`, `GameBrightness`,
+  `UIBrightness` (nits), `ToneMapper` (Vanilla / None / RenoDRT), `GammaCorrection` (Off / 2.2 / BT.1886),
+  `Exposure`, `Highlights`, `Shadows`, `Contrast`, `Saturation`, `HighlightSaturation`, `Flare`, `Bloom`,
+  `UnclampedScene`, `HDRFormat` (ini only). Use it with FSR off. Details: [docs/HDR.md](docs/HDR.md)
 - `[Performance]`: `FPS` (30 to 240), `VSync` (On / Off; above your monitor's refresh rate, turn VSync off), `ShaderPrewarm`
   (On / Off: translate all of the game's shaders in the background at startup, so fewer things are drawn black the
   first time they appear; the first start takes about 20 s for it, during the logos, and the cache folder needs about
@@ -316,6 +323,42 @@ See [server/README.md](server/README.md) if you want to host your own LDN server
 You can also play multiplayer without an LDN server if you want to play with your friends. The host needs to forward the right port (39500 TCP/UDP by default), and all clients need to configure the host's IP address in their .ini file. (`Join = xxx.xxx.xxx.xxx`)
 
 Choose the "Local Wireless" multiplayer options, as this port pretends to be a local nearby Switch with a wireless connection. The online options are unavailable and are unnecessary.
+
+### Crossplay with emulators (experimental)
+
+You can also play with people on Ryujinx / Ryubing, and on suyu, yuzu, Eden, Citron and the other forks that kept their multiplayer rooms. This is still experimental: it has been tested against the emulators' server software, but not yet in real hunts with real emulator players. Please [open an issue](https://github.com/morerokk/MHGURecomp/issues/new/choose) with your `log.txt` if something goes wrong.
+
+Some things to know first:
+- Crossplay is set up in `mhgurecomp.ini`, under `[Multiplayer]`, not in the F1 menu. If your .ini is from an older version and doesn't have the settings below yet, just add them.
+- Everyone needs game version 1.4.0, the emulator players too.
+- This port's extras (small monster sync, HP scaling) are off in a hub with emulator players: only players on this port understand them.
+
+**The easy way: one player on this port hosts everything.** The host turns on the servers that are built into the game:
+
+```ini
+RyuServe = On        ; for Ryujinx / Ryubing players (TCP port 30456)
+RoomServe = On       ; for suyu, yuzu, Eden, Citron... players (UDP port 24872)
+RoomPassword =       ; optional: a password for the room
+```
+
+These only run while Local Wireless play is open, so the host creates a hub as usual. To play over the internet, the host forwards those ports, or everyone uses a VPN such as Radmin. Then:
+- **Ryujinx players** set their LDN server to the host's address (port 30456) and search for hubs in Local Play.
+- **suyu / Eden / Citron players** connect to a multiplayer room at the host's IP, port 24872 (with the room password, if there is one).
+- **Other players on this port** set `RyuServers = <the host's address>`, so the hub shows up in their Search Hubs.
+
+With both servers on, Ryujinx players and room players all play in the same hub.
+
+**Using a server that already exists:**
+- `RyuServers = host[:port], ...`: Ryujinx LDN servers whose lobbies show up in Search Hubs (default port 30456).
+- `RyuHost = host`: hubs you create are made on that server, so Ryujinx players on it can join them.
+- `RoomServer = host[:port]` and `RoomHost = On`: the same for a suyu-style multiplayer room (default port 24872). `RoomName` is your name in the room, `RoomPassword` its password.
+- `RyuHost` and `RoomHost` together make one hub that both Ryujinx and room players can join.
+- Please don't use Ryujinx's own public LDN server for this, it's meant for Ryujinx users. Run your own Ryujinx LdnServer, or just use `RyuServe`.
+
+**Good to know:**
+- For a private group with Ryujinx players, set `RyuPassphrase` to `Ryujinx-` followed by exactly 8 hex digits (for example `Ryujinx-1a2b3c4d`), and have the Ryujinx players enter the same one. Anything else (a typo too) counts as no passphrase, which means your lobby is **public**. Ryujinx does the same.
+- Hubs with both Ryujinx and room players are the least tested. If something odd happens there (players not seeing each other in a quest, for example), try a hub with only Ryujinx players or only room players.
+- If things get strange after someone left and rejoined a crossplay hub, make a new hub.
 
 ## Bonus content
 

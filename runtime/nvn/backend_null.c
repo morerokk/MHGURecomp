@@ -12,6 +12,7 @@ bool shader_prewarm_progress(uint64_t *done, uint64_t *total) {
     if (total) *total = 0;
     return false;
 }
+bool shader_warmup_progress(uint64_t *done, uint64_t *total) { return shader_prewarm_progress(done, total); }  // (none: zeros, false)
 void backend_execute(uint64_t handle) { (void)handle; }
 void backend_present(NvnTexture *tex) {
     (void)tex;

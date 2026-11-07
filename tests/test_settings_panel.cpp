@@ -18,6 +18,7 @@
 #include <string>
 static int requested;
 extern "C" const char *g_game_dir = "obj/settings-test/game";  // (modorder.c compares archives with the game's)
+extern "C" volatile uint64_t g_present_count = 0;  // (runtime/ui.c's frame counter: config.c's model previews read it)
 extern "C" void ui_request_action(bool restart) { requested = restart ? 2 : 1; }
 extern "C" bool ui_action_failed(void) { return false; }
 static int import_requested;
@@ -31,6 +32,8 @@ extern "C" int ui_take_picked_folder(char *out, size_t size) {
 }
 extern "C" int ldn_hub_status(const char *, const char *, int *, int *) { return 0; }
 extern "C" void ldn_hub_check(const char *, const char *) {}
+extern "C" bool forge_plugins_have(int) { return false; }  // (no Forge plugins started)
+extern "C" int forge_plugin_titles(const char **, int) { return 0; }
 // (cheats.c: two cheats, a master code and one that can be turned off)
 static bool cheat_on[2] = {true, true};
 extern "C" int cheats_count(void) { return 2; }
@@ -243,6 +246,25 @@ int main() {
     idle();
     selected("bind.6");
     assert(!settings_panel_mouse(SDL_BUTTON_LEFT));  // (not choosing: a click is the menu's)
+    // The pointer on the capture view's Cancel: a left click is that row's, a side button (Mouse 4) still the key
+    down();
+    selected("bind.7");
+    confirm();
+    selected("choice.0");  // Set key
+    confirm();
+    selected("capture.cancel");
+    {
+        ImGuiWindow *w = ImGui::GetCurrentContext()->NavWindow;
+        ImRect r = ImGui::WindowRectRelToAbs(w, w->NavRectRel[0]);
+        ImGui::GetIO().AddMousePosEvent(r.GetCenter().x, r.GetCenter().y);
+        idle();
+    }
+    assert(!settings_panel_mouse(SDL_BUTTON_LEFT));
+    assert(settings_panel_mouse(SDL_BUTTON_X1));
+    idle();
+    ImGui::GetIO().AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+    idle();
+    selected("bind.7");
     back();
     selected("keybinds");
     assert(settings_panel_dirty());
@@ -251,6 +273,7 @@ int main() {
     selected("save");
     confirm();
     assert(config_live_bind(BIND_B, 0) == SDL_SCANCODE_G && config_live_bind(BIND_B, 1) == KEY_MOUSE + SDL_BUTTON_MIDDLE);
+    assert(config_live_bind(BIND_X, 0) == KEY_MOUSE + SDL_BUTTON_X1);
     press(ImGuiKey_Home);
     down(4);
     confirm();
@@ -596,7 +619,7 @@ int main() {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     selected("volume");
-    down(11);  // (mutebg, show.fps, fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, smooth, fsr)
+    down(13);  // (mutebg, show.fps, fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, smooth, kerning, boldtext, fsr)
     selected("fsr");
     confirm();
     assert(settings_panel_dirty());

@@ -37,6 +37,20 @@ typedef struct {
 typedef const GameLibTables *(*GameLibEntry)(void);
 #define GAMELIB_ENTRY "mhgugame_tables"
 
+// The x86 features the game code was compiled to use (GENARCH: the release's x86-64-v3 is AVX2 + FMA), as data the
+// library exports (a uint32_t of these bits), so the app can check the CPU before it runs any of that code: on an
+// older CPU (Ivy Bridge: AVX, no AVX2) its first instruction was an illegal-instruction crash.
+#define GAMELIB_CPU_NEEDS "mhgugame_cpu_needs"
+#define GAMELIB_CPU_SSE42  (1u << 0)
+#define GAMELIB_CPU_POPCNT (1u << 1)
+#define GAMELIB_CPU_AVX    (1u << 2)
+#define GAMELIB_CPU_AVX2   (1u << 3)
+#define GAMELIB_CPU_FMA    (1u << 4)
+#define GAMELIB_CPU_BMI    (1u << 5)
+#define GAMELIB_CPU_BMI2   (1u << 6)
+#define GAMELIB_CPU_F16C   (1u << 7)
+#define GAMELIB_CPU_AVX512 (1u << 8)  // (AVX-512 F)
+
 #ifdef __cplusplus
 extern "C" {
 #endif

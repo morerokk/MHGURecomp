@@ -31,8 +31,8 @@
 #endif
 
 #include "../../kernel.h"
-#include "../../overlay.h"
 #include "fsr.h"
+#include "hdr.h"
 #include "shaders.h"
 #include "vk.h"
 
@@ -893,11 +893,18 @@ static bool ui_relax_scissor;  // the draw being set up moved a HUD piece out fr
 static int ui_scissor_v = -1;  // 16:10: the draw being set up is a HUD piece anchored so (0 top, 1 centre, 2 bottom),
                                // and its scissor moves with it
 static bool ui_menu_pass;  // this pass drew a layer 97 menu before (the windows of layer 100 then sit beside Top-anchored ones)
-// The HUD quads this pass drew last (16:9 canvas place, vertical anchor 0 top / 1 centre / 2 bottom, horizontal 0 left /
-// 1 right / 2 centre): a model preview follows the window drawn over it (ui_preview_map)
+// The HUD quads drawn last (16:9 canvas place, vertical anchor 0 top / 1 centre / 2 bottom, horizontal 0 left / 1 right /
+// 2 centre): a model preview follows the window drawn over it (ui_preview_map). Kept across passes: the Smithy's model
+// is drawn in a pass of its own, after the parchment it sits in.
 #define UI_RECENT 256
 static struct { float x, y; uint8_t vanchor, hanchor; } ui_recent[UI_RECENT];
-static uint32_t ui_nrecent;  // (quads recorded this pass; the slot is the count modulo UI_RECENT)
+// The last model preview's box (canvas units) and how its frame was anchored vertically (ui_preview_map): its button
+// prompts just under it go with the frame (cbuf_info; they are drawn before the model, so last frame's box)
+static float ui_pv_x0, ui_pv_x1, ui_pv_y1;
+static int ui_pv_v = -1;
+static uint64_t ui_pv_present;
+static uint32_t ui_nrecent, ui_pass_recent;  // (quads recorded so far, the slot is the count modulo UI_RECENT; and when
+                                             // this pass began)
 static bool ui_loading_pass;  // this pass draws the loading screen (its backdrop, layer 110, came first)
 static bool ui_title_pass;  // this pass draws the title screen (its layout, layer 108 at the canvas centre, came first)
 static bool ui_frontend_pass;  // this pass draws a front-end screen (Main Menu, Character Select: its 16:9 backdrop, layer
@@ -1070,6 +1077,30 @@ static float half_to_float(uint16_t h) {
     float v = e == 0 ? ldexpf((float)m, -24) : e == 31 ? (m ? NAN : INFINITY) : ldexpf((float)(m | 1024), (int)e - 25);
     return s ? -v : v;
 }
+// (HDR: the game's RGBA8 texels into an RGBA16F stand-in) v / 255 as a half float, rounded to nearest
+static uint16_t unorm8_to_half(uint8_t v) {
+    static uint16_t tab[256];
+    static bool made;
+    if (!made) {
+        for (int i = 1; i < 256; i++) {
+            float f = (float)i / 255.0f;
+            int e;
+            float m = frexpf(f, &e);  // f = m * 2^e, m in [0.5, 1)
+            int he = e - 1 + 15;      // half exponent of 2m * 2^(e-1)
+            uint32_t hm;
+            if (he <= 0) {            // subnormal
+                hm = (uint32_t)lrintf(f * 16777216.0f);  // f / 2^-24
+                tab[i] = (uint16_t)hm;
+            } else {
+                hm = (uint32_t)lrintf((m * 2.0f - 1.0f) * 1024.0f);
+                if (hm == 1024) hm = 0, he++;
+                tab[i] = (uint16_t)((he << 10) | hm);
+            }
+        }
+        made = true;
+    }
+    return tab[v];
+}
 static float uf11(uint32_t v, int mbits) {  // unsigned small float: 5-bit exponent, mbits mantissa
     uint32_t e = v >> mbits, m = v & ((1u << mbits) - 1);
     if (e == 0) return ldexpf((float)m, -14 - mbits);
@@ -1086,7 +1117,8 @@ static void dump_pass(void) {
     uint64_t draws = stat_draws - pass_draws_at;
     if (t && t->backend) vk_ms_resolve(t->backend);  // (MSAA: resolved for the dump)
     if (dump_depth && dump_depth->backend) vk_ms_resolve(dump_depth->backend);
-    if ((!t || !t->backend) && dump_depth && dump_depth->backend && ((TexBackend *)dump_depth->backend)->format == VK_FORMAT_D32_SFLOAT) {
+    VkFormat dfmt = dump_depth && dump_depth->backend ? ((TexBackend *)dump_depth->backend)->format : VK_FORMAT_UNDEFINED;
+    if ((!t || !t->backend) && (dfmt == VK_FORMAT_D32_SFLOAT || dfmt == VK_FORMAT_D32_SFLOAT_S8_UINT || dfmt == VK_FORMAT_D24_UNORM_S8_UINT)) {
         // depth-only pass (shadow maps): depth as grey, stretched over its own min..max
         TexBackend *b = dump_depth->backend;
         uint32_t w = b->width, h = b->height;
@@ -1097,7 +1129,9 @@ static void dump_pass(void) {
         vkCmdCopyImageToBuffer(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, out.buf, 1, &c);
         renderer_submit();
         vk_wait_seq(submit_seq);
-        const float *d = out.ptr;
+        float *d = out.ptr;
+        if (dfmt == VK_FORMAT_D24_UNORM_S8_UINT)  // (24-bit depth in the low bits of each word)
+            for (uint64_t i = 0; i < (uint64_t)w * h; i++) d[i] = (float)(((const uint32_t *)out.ptr)[i] & 0xFFFFFF) / 16777215.0f;
         float lo = INFINITY, hi = -INFINITY;
         for (uint64_t i = 0; i < (uint64_t)w * h; i++) if (d[i] < 1.0f) { if (d[i] < lo) lo = d[i]; if (d[i] > hi) hi = d[i]; }
         uint8_t *px = malloc((size_t)w * h * 4);
@@ -1169,6 +1203,15 @@ static void dump_pass(void) {
     }
     char path[128];
     mkdir("shots", 0755);
+    if (b->format == VK_FORMAT_R16G16B16A16_SFLOAT && w >= 4 && h >= 4) {  // (HDR) the real values: every 4th texel, RGBA16F
+        snprintf(path, sizeof path, "%s%03d_rgba16f_%ux%u.raw", dump_prefix(), g_dump_no, w / 4, h / 4);
+        FILE *rf = fopen(path, "wb");
+        if (rf) {
+            for (uint32_t y = 0; y + 4 <= h; y += 4)
+                for (uint32_t x = 0; x + 4 <= w; x += 4) fwrite((const uint8_t *)out.ptr + ((uint64_t)y * w + x) * 8, 8, 1, rf);
+            fclose(rf);
+        }
+    }
     snprintf(path, sizeof path, "%s%03d_f%d_%ux%u.png", dump_prefix(), g_dump_no, b->format, w, h);
     vk_save_png(path, px, w, h);
     snprintf(path, sizeof path, "%s%03d_alpha.png", dump_prefix(), g_dump_no);
@@ -1247,7 +1290,7 @@ static bool models_2d_in_samples(void) { return mr_frame == g_present_count && m
 void vk_end_pass(void) {
     if (!in_pass) return;
     ui_group_end();
-    if (ui_nrecent) ui_results_last = ui_results_pass;
+    if (ui_nrecent != ui_pass_recent) ui_results_last = ui_results_pass;
     vkCmdEndRenderPass(vk_cmd());
     in_pass = false;
     if (gp_active) {
@@ -1637,7 +1680,8 @@ static void begin_pass(void) {
         NvnTexture *t = st.rt.color[i];
         pass_color[i] = VK_FORMAT_UNDEFINED;
         if (!t) continue;
-        vk_rt_widen(t, vk_wide_rt_on() && !vk_fsr_input(t));  // (the game's own target: FSR 3 / 4 take no RGBA16 UNORM)
+        // (the game's own target: FSR 3 / 4 take no RGBA16 UNORM. HDR: the post chain and the scene as RGBA16F, hdr.c)
+        vk_rt_widen(t, vk_fsr_input(t) ? WIDE_NONE : vk_hdr_rt_float(t) ? WIDE_FLOAT16 : vk_wide_rt_on() ? WIDE_UNORM16 : WIDE_NONE);
         if (g_fsr_on) {  // FSR: from the start of the HUD on, an output-size stand-in (fsr.c)
             NvnTexture *s = vk_fsr_map(t, false);
             if (s != t) pass_sx = (float)s->width / (float)t->width, pass_sy = (float)s->height / (float)t->height, t = s;
@@ -1688,7 +1732,7 @@ static void begin_pass(void) {
     ui_results_pass = false;
     ui_meownster_pass = false;
     ui_menu_pass = false;
-    ui_nrecent = 0;
+    ui_pass_recent = ui_nrecent;
     pass_msaa = false;
     // (MSAA: a colour target 3D models were drawn into lately (ms_expand), while they are; once they are not, it is like
     // any other target again)
@@ -1810,8 +1854,9 @@ static bool ui_preview_map(PreviewMap *pm) {
     if (w < 8.0f || w > 0.9f * pw || h > 0.98f * ph) return false;  // (the scene itself: the whole picture)
     *pm = (PreviewMap){0, 1, 0, 1};
     // The window it is drawn in: the last quad over the viewport (inside it sideways, not below it). The last quad of all
-    // can be a button prompt under the window ("Rotate" under the Palico Scout preview), anchored apart from it.
-    int vanchor = ui_nrecent ? ui_recent[(ui_nrecent - 1) % UI_RECENT].vanchor : 1, hanchor = -1;
+    // can be a button prompt under the window ("Rotate" under the Palico Scout preview), anchored apart from it; with
+    // no quad over it, the last one of this pass, or the centre.
+    int vanchor = ui_nrecent != ui_pass_recent ? ui_recent[(ui_nrecent - 1) % UI_RECENT].vanchor : 1, hanchor = -1;
     {
         float x0 = vp[0] / pw * 1280.0f, x1 = (vp[0] + w) / pw * 1280.0f, y1 = (fminf(vp[1], vp[1] + vp[3]) + h) / ph * 720.0f;
         for (uint32_t i = ui_nrecent; i > 0 && ui_nrecent - i < UI_RECENT; i--) {
@@ -1838,6 +1883,16 @@ static bool ui_preview_map(PreviewMap *pm) {
     } else {
         float sy = asp / (16.0f / 9.0f);
         pm->ky = sy;
+        // (config.c camera_aspect gives a camera of this box's shape the box's 16:9 shape)
+        float a = w / h;
+        int slot = 0;
+        for (int i = 0; i < 4; i++) {
+            if (fabsf(g_preview_box_aspect[i] / a - 1.0f) < 0.001f) { slot = i; break; }
+            if (g_preview_box_present[i] < g_preview_box_present[slot]) slot = i;
+        }
+        g_preview_box_aspect[slot] = a, g_preview_box_present[slot] = g_present_count;
+        ui_pv_x0 = vp[0] / pw * 1280.0f, ui_pv_x1 = (vp[0] + w) / pw * 1280.0f;
+        ui_pv_y1 = (fminf(vp[1], vp[1] + vp[3]) + h) / ph * 720.0f, ui_pv_v = vanchor, ui_pv_present = g_present_count;
         if (vanchor == 0) pm->sy = 0;
         else if (vanchor == 2) pm->sy = ph * (1.0f - sy);
         else pm->sy = ph * 0.5f * (1.0f - sy);
@@ -2236,6 +2291,8 @@ static void compile_program(void *arg) {
     if (prog_fs_hash(p) == FXAA_FS_HASH && !p->fkey.alpha_func && !p->fkey.alpha_coverage && !p->fkey.rt_kind[0] &&
         (p->fkey.vs_out_mask & 2))
         fsrc = vk_builtin_source("fxaa.frag.game");
+    char *hdr_src = p->fkey.hdr ? vk_hdr_wrap_fs(fsrc, p->fkey.hdr) : vk_hdr_guard_fs(fsrc);  // (HDR: main() wrapped, hdr.c)
+    if (hdr_src) fsrc = hdr_src;
     char *over = NULL;
     if (getenv("MHGU_GLSL_OVERRIDE")) {  // (debug) glsl_override/<code address>_fs.glsl replaces the translated shader
         char path[96];
@@ -2251,8 +2308,12 @@ static void compile_program(void *arg) {
             LOG("[shader] using %s\n", path);
         }
     }
-    uint32_t *sf = sv ? vk_glsl_to_spirv(fsrc, STAGE_FRAGMENT, "fs", &nf) : NULL;
+    uint32_t *sf = sv ? vk_glsl_to_spirv(fsrc, STAGE_FRAGMENT, p->fkey.hdr ? "fs_hdr" : "fs", &nf) : NULL;
+    if (p->fkey.hdr)
+        LOG("[hdr] HDR variant of pass %d (fragment program %016llx): %s%s\n", p->fkey.hdr, (unsigned long long)prog_fs_hash(p),
+            sf ? "built" : "FAILED to compile", hdr_src ? "" : " (not wrapped)");
     free(over);
+    free(hdr_src);
     if (!sv || !sf) { free(sv); free(sf); set_state(&p->state, 2, p->t_req); prewarm_pipelines(p); return; }
     p->nbinds = vk_reflect(sv, nv, p->binds, MAX_BIND);
     p->nbinds += vk_reflect(sf, nf, p->binds + p->nbinds, MAX_BIND - p->nbinds);
@@ -2393,6 +2454,7 @@ static uint64_t prog_content_key(const uint64_t chash[2], const ShaderKey *vkey,
     h = hash_words(h, fkey->rt_kind, sizeof fkey->rt_kind);
     h = hash_words(h, &fkey->alpha_func, 1);
     if (fkey->alpha_coverage) h = hash_words(h, &fkey->alpha_coverage, 1);  // (MSAA variant)
+    if (fkey->hdr) h = hash_words(h, &fkey->hdr, 1);  // (HDR variant, hdr.c)
     return h ? h : 1;
 }
 
@@ -2727,6 +2789,7 @@ static Prog *get_program(NvnProgram *np, ShaderKey *vkey, ShaderKey *fkey) {
     h = hash_words(h, fkey->rt_kind, sizeof fkey->rt_kind);
     h = hash_words(h, &fkey->alpha_func, 1);
     if (fkey->alpha_coverage) h = hash_words(h, &fkey->alpha_coverage, 1);  // (MSAA variant)
+    if (fkey->hdr) h = hash_words(h, &fkey->hdr, 1);                        // (HDR variant, hdr.c)
     if (!h) h = 1;
     uint32_t slot = (uint32_t)(h ^ (h >> 31)) & (PROG_TAB - 1);
     while (prog_tab[slot].key && prog_tab[slot].key != h) slot = (slot + 1) & (PROG_TAB - 1);
@@ -3331,23 +3394,15 @@ static void prebuild_report(void) {
     LOG("[shader] warm-up: %llu programs set up, %d warmed of %d to warm\n", (unsigned long long)seen, warmed, queued);
 }
 
-// (the window) how far the warm-up is while it has work, as the overlay's status line (runtime/overlay.h); gone when
-// everything queued is warm. (The count to warm grows while the game's programs are still being translated.)
-static void prebuild_status(void) {
-    static uint64_t last;
-    static bool shown;
-    uint64_t now = plat_now_ns();
-    if (now - last < 250000000ull) return;
-    last = now;
-    int warmed = atomic_load(&stat_warmed), queued = atomic_load(&stat_warm_queued);
-    if (warmed >= queued) {
-        if (shown) overlay_status(NULL), shown = false;
-        return;
-    }
-    char s[96];
-    snprintf(s, sizeof s, "Preparing shaders: %d%% (%d of %d)", warmed * 100 / queued, warmed, queued);
-    overlay_status(s);
-    shown = true;
+// The Metal warm-up's progress for the loading indicator (runtime/overlay.cpp), a line under the prewarm's: programs
+// warm of those queued so far; false once everything queued is warm (or there is no warm-up: prebuild_on). The count
+// to warm grows while the prewarm is still compiling; a program is queued before the prewarm counts it done
+// (prewarm_compile), so the two are never both idle while work is left. Any thread.
+bool shader_warmup_progress(uint64_t *done, uint64_t *total) {
+    int warmed = atomic_load(&stat_warmed), queued = atomic_load(&stat_warm_queued);  // (warmed first: queued >= it)
+    if (done) *done = warmed > 0 ? (uint64_t)warmed : 0;
+    if (total) *total = queued > 0 ? (uint64_t)queued : 0;
+    return warmed < queued;
 }
 
 // ================================================================== feedback: sampling a texture that is an attachment
@@ -3642,6 +3697,13 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // frame's lower edge slid away from it. All of it but the header and prompts (below y 600) goes top.
                     if (fabsf(pos_z - 105.0f) < 0.5f && pos_x == 215.0f && pos_y == 0.0f) ui_meownster_pass = true;
                     if (ui_meownster_pass && pos_z > 97.5f && pos_z < 105.5f) vanchor = pos_y > 600.0f ? V_BOTTOM : V_TOP;
+                    // A model preview's button prompts just under its box (the Palico Scout's "Rotate", layer 100 like its
+                    // frame) go with the frame the preview followed: the frame (one turned quad, its corner at the top
+                    // right) went Top with the target cam's rule and the prompt Bottom, below the frame. (The Smithy's
+                    // prompts and parchment are both Bottom already.)
+                    if (sy < 1.0f && ui_pv_v >= 0 && ui_pv_present + 2 >= g_present_count && fabsf(pos_z - 100.0f) < 0.5f &&
+                        pos_x >= ui_pv_x0 - 30.0f && pos_x <= ui_pv_x1 + 30.0f && pos_y >= ui_pv_y1 && pos_y <= ui_pv_y1 + 40.0f)
+                        vanchor = ui_pv_v == 0 ? V_TOP : ui_pv_v == 2 ? V_BOTTOM : V_CENTER;
                     // The loading backdrop's tiles (x -30, 549, 1128...: one every 579, past 1280) are one picture sideways
                     // too, from the screen's left edge: by place they went Left / Centre / Right, three copies with gaps
                     // between them with Edges / 21:9; centred (or Center), nothing covered the left of the first tile.
@@ -3762,6 +3824,11 @@ static VkDescriptorSet stage_set(int nbinds, const VkBindingInfo *binds, VkDescr
             for (int k = 0; k < 67; k++) rs[k][0] = rs[k][1] = 1, rs[k][2] = rs[k][3] = 0;
             memset(rs[66], 0xFF, 4);  // [66].x: the front-face mask's all-ones word (translate.c)
             bi[n] = ubo_span(vk_transient_copy(rs, sizeof rs, 256), sizeof rs);
+            w[n].pBufferInfo = &bi[n];
+        } else if (b->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b->binding == HDR_PARAMS_BINDING) {  // (hdr.c)
+            float hp[HDR_NPARAMS];
+            vk_hdr_params(hp);
+            bi[n] = ubo_span(vk_transient_copy(hp, sizeof hp, 256), sizeof hp);
             w[n].pBufferInfo = &bi[n];
         } else if (b->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b->binding == ALPHA_REF_BUFFER_INDEX) {
             float ref[4] = {st.alpha_ref, 0, 0, 0};
@@ -4091,19 +4158,31 @@ static void draw(CmdRec *r, bool indexed) {
     Prog *pr = get_program(st.program, &vkey, &fkey);
     if (!pr) { stat_skipped++; return; }
     if (!await_build(&pr->state, pr, 0)) { skip_draw(&stat_skip_prog); return; }
+    FsrDraw fd = {0};
+    if (g_fsr_on || vk_hdr_tracking()) {  // FSR / HDR: the frame's structure (fsr.c, hdr.c)
+        fd = (FsrDraw){.color0 = st.rt.ncolor ? st.rt.color[0] : NULL, .depth = st.rt.depth, .count = (uint32_t)r->x[2],
+                       .depth_write = st.ds[0] && st.ds[1], .vubuf = &st.ubuf[0][0].addr, .nvubuf = 18,
+                       .vp_w = st.viewport[0][2], .vp_h = st.viewport[0][3]};
+        for (int i = 0; i < pr->fi->ntex && fd.ntex < 16; i++) fd.tex[fd.ntex++] = shader_texture_object(1, &pr->fi->tex[i]);
+    }
+    if (vk_hdr_tracking()) {  // HDR: the game's colour grading / bloom add drawn through their HDR variants (hdr.c)
+        int hk = vk_hdr_draw(&fd, prog_fs_hash(pr));
+        if (hk) {
+            fkey.hdr = (uint8_t)hk;
+            Prog *hp = get_program(st.program, &vkey, &fkey);
+            bool ok = hp && await_build(&hp->state, hp, 0);
+            vk_hdr_variant_used(hk, ok, hp ? atomic_load(&hp->state) : -1);
+            if (ok) pr = hp;
+            else fkey.hdr = 0;  // (not built yet: the game's own shader this frame)
+        }
+    }
     if (fxaa_skipped(pr)) return;
     NvnTexture *movie = movie_picture(pr);
     uint32_t mode = (uint32_t)r->x[0];
     VkPrimitiveTopology topo;
     bool native = topology(mode, &topo);
     if (!native && mode != 6 && mode != 7 && mode != 9) { stat_skipped++; return; }
-    if (g_fsr_on) {  // FSR: the frame's structure; at the start of the HUD FSR runs before this draw (fsr.c)
-        FsrDraw fd = {.color0 = st.rt.ncolor ? st.rt.color[0] : NULL, .depth = st.rt.depth, .count = (uint32_t)r->x[2],
-                      .depth_write = st.ds[0] && st.ds[1], .vubuf = &st.ubuf[0][0].addr, .nvubuf = 18,
-                      .vp_w = st.viewport[0][2], .vp_h = st.viewport[0][3]};
-        for (int i = 0; i < pr->fi->ntex && fd.ntex < 16; i++) fd.tex[fd.ntex++] = shader_texture_object(1, &pr->fi->tex[i]);
-        vk_fsr_draw(&fd);
-    }
+    if (g_fsr_on) vk_fsr_draw(&fd);  // FSR: at the start of the HUD it runs before this draw (fsr.c)
 
     ms_want_depth = st.ds[0] && st.rt.depth;  // (MSAA, a picture 3D models are drawn into: pass_models)
     if (in_pass && pass_models && !pass_msaa && ms_want_depth && !pass_want_depth) st.rt_dirty = true;
@@ -4256,9 +4335,16 @@ static void draw(CmdRec *r, bool indexed) {
     PreviewMap pm;
     if (movie && movie_viewport(movie, vp, movie_vp)) vp = movie_vp;
     memcpy(v, vp, sizeof v);
-    if (vp != movie_vp && ui_preview_map(&pm)) {  // (a model preview: the viewport keeps its size, its centre moves)
-        v[0] = pm.sx + (vp[0] + vp[2] * 0.5f) * pm.kx - vp[2] * 0.5f;
-        v[1] = pm.sy + (vp[1] + vp[3] * 0.5f) * pm.ky - vp[3] * 0.5f;
+    if (vp != movie_vp && ui_preview_map(&pm)) {  // (a model preview: its centre moves with its window)
+        // On a narrower picture (16:10) the game's viewport is its 16:9 one stretched to the taller picture, and so is
+        // the model's camera (made for the viewport's shape): the model came out 1 / ky times too big for its frame
+        // (flattened by ky), and its scissor cut it. config.c camera_aspect gives that camera the 16:9 shape, and the
+        // viewport its 16:9 height: the model as big and with as much room to the sides as at 16:9. Until the camera has
+        // it (the first frame), the viewport shrinks by ky both ways instead: the right size, narrower.
+        if (pm.ky < 1.0f && g_preview_cam_present + 2 >= g_present_count) v[3] = vp[3] * pm.ky;
+        else if (pm.ky < 1.0f) v[2] = vp[2] * pm.ky, v[3] = vp[3] * pm.ky;
+        v[0] = pm.sx + (vp[0] + vp[2] * 0.5f) * pm.kx - v[2] * 0.5f;
+        v[1] = pm.sy + (vp[1] + vp[3] * 0.5f) * pm.ky - v[3] * 0.5f;
     }
     set_viewport(cb, v[0] * pass_sx, v[1] * pass_sy, v[2] * pass_sx, v[3] * pass_sy, st.depth_range[0][0],
                  st.depth_range[0][1]);  // (FSR: pass_s* scale onto output-size stand-ins, else 1)
@@ -4520,6 +4606,7 @@ static void copy_buffer_to_texture(uint64_t src, const TexRef *dst) {
             const uint8_t *sr = (const uint8_t *)G2H((uint32_t)(src + (uint64_t)z * img + (uint64_t)y * row));
             uint8_t *dr = (uint8_t *)s.ptr + ((uint64_t)z * hb + y) * out_row;
             if (out_bpb == fi->bpb) memcpy(dr, sr, out_row);
+            else if (b->wide == WIDE_FLOAT16) for (uint32_t x = 0; x < wb * 4; x++) ((uint16_t *)dr)[x] = unorm8_to_half(sr[x]);
             else if (b->wide) for (uint32_t x = 0; x < wb * 4; x++) ((uint16_t *)dr)[x] = (uint16_t)(sr[x] * 257);
             else for (uint32_t x = 0; x < wb; x++) { memcpy(dr + x * 4, sr + x * 3, 3); dr[x * 4 + 3] = 255; }
         }
@@ -4563,7 +4650,13 @@ static void copy_texture_to_buffer(const TexRef *src, uint64_t dst) {
     vkCmdCopyImageToBuffer(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, out.buf, 1, &c);
     renderer_submit();  // the CPU may read the result right after the fence
     vk_wait_seq(submit_seq);
-    if (b->wide) {
+    if (b->wide == WIDE_FLOAT16) {  // (HDR: values above 1 clamp, as the game's RGBA8 would have)
+        uint8_t *d = (uint8_t *)G2H((uint32_t)dst);
+        for (uint64_t i = 0; i < total; i++) {
+            float f = half_to_float(((const uint16_t *)out.ptr)[i]);
+            d[i] = (uint8_t)(f <= 0.0f || f != f ? 0 : f >= 1.0f ? 255 : (int)(f * 255.0f + 0.5f));
+        }
+    } else if (b->wide) {
         uint8_t *d = (uint8_t *)G2H((uint32_t)dst);
         for (uint64_t i = 0; i < total; i++) d[i] = (uint8_t)((((const uint16_t *)out.ptr)[i] + 128) / 257);
     } else memcpy(G2H((uint32_t)dst), out.ptr, total);
@@ -4890,10 +4983,7 @@ static void exec_list(uint64_t handle, int depth) {
 void backend_execute(uint64_t handle) {
     vk_lock();
     plist_drain();  // (the pipeline list's programs the prewarm met)
-    if (prebuild_on()) {
-        prebuild_report();
-        prebuild_status();
-    }
+    if (prebuild_on()) prebuild_report();
     uint64_t t0 = plat_now_ns();
     exec_list(handle, 0);
     stat_exec_ns += plat_now_ns() - t0;

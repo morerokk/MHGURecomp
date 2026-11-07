@@ -1059,6 +1059,35 @@ old way while on.
   tail-call threaded ops (each handler jumping to the next) might give another ~1.5x; matching an emulator would take a
   JIT (AArch32 -> x86-64 and -> AArch64), a project of its own.
 
+## Even letter spacing in the game's text: [Graphics] FixKerning (2026-11-07)
+
+- The UI text (cGUI, font_festa.gfd) looked unevenly spaced, on the console too. Three causes, all fixed with
+  FixKerning (default On, live; runtime/hle/textlayout.c has the details):
+  - The 2D canvas is 1280x720 and the game snaps each glyph's x to it after aligning a line (0xc45548:
+    floor(x + 0.5) + 0.5). At 1080p a unit is 1.5 px: letters start on whole and half pixels by turns, so the same
+    pair ("he" in "sheathe" / "sheathing") is up to 1.5 px further apart in one word. tools/gen.py PATCHES 0xc45554 /
+    0xc4555c skip the snap of x (y keeps it).
+  - The font's cells hold their letters with uneven blank columns, and its signed x offsets (entry +0x10: -1 on c f m r
+    s t, +1 on i l E H M N ( : ') only move the glyph, not the pen: "r elies", "ent er". The glyph placement
+    (0xc45e64, hooked) places each Latin letter as if its cell held one blank column either side of its ink.
+  - No kerning in the font: pairs whose ink stays 2+ px apart beyond the plain 2 px ("Va", "To", "LT", "r.") get
+    closer, at most 3 px; never with a digit.
+- Measured from the font the game reads (loc/arc/resident.arc through the RomFS, so a font mod's own): the font file and
+  its first glyph page (RGBA8, block linear), at the first text (~15 ms; "[text] ... glyphs measured, N kerning pairs").
+  The runtime links zlib for it (Windows static, Linux / Android the system's libz). MHGU_FIX_KERNING=0|1 overrides the
+  file. How it was found: MHGU_CONTROL "interpwatch" on a glyph node's x showed the layout's write and the snap's.
+- Checked by the user in game (1080p, the style descriptions of the Equipment Box); Linux / Android builds not yet.
+  An aside found on the way: a tab whose longest help runs three lines at 640x480 makes End in the settings menu stop
+  with the last row partly under the pinned help (test_settings_panel.cpp line 653); FixKerning's help is two lines.
+- [Graphics] BoldText (default Off, On on Android for a phone's small screen; live, independent of FixKerning;
+  MHGU_BOLD_TEXT=0|1): the glyph quad writers
+  (0xc3f8c4, 0xc55524, 0xea757c: obj, list, glyph node) draw the whole cell but take the texture from half a texel
+  inside each edge (list +0x38), so every letter is stretched about one font pixel each way: bolder, wider, 4% taller
+  ('l' 25% wider, 'e' 8%; measured in the vertex dump: 'o' texels 926.5-938.5 over a 13-texel quad). Off moves the quad
+  in by the inset for the write (hooks, node put back after): letters at true size, thinner and crisper. The user's
+  side by side (Equipment Box, 1080p): better, but the stretched one reads more easily for some, so it stays an option
+  ("Bold text"; its help names dyslexia).
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,
@@ -1122,7 +1151,10 @@ old way while on.
    button guides on layer 96 go top, layers below 95 by thirds (the Guild Card name plate), the Meownster Hunters return screen (marked by its map frame, layer 105 at 215, 0) goes top but for
    its prompts, the quest results screen (marked by its Time Left bar, layer 99 at y 643) centres its
    middle: the stamp, reward table, item lists' parchment and rows, the title's PRESS A scales
-   about the centre with its layout (layer 108), and a model preview follows the frame drawn over it, not the last quad
+   about the centre with its layout (layer 108), and a model preview follows the frame drawn over it (also from an earlier pass: the Smithy's model is drawn in a pass of
+   its own), not the last quad; its camera, made for its box stretched to the taller picture, gets the box's 16:9 shape
+   (config.c camera_aspect: only a camera whose aspect is a preview box's the renderer drew), so the model is as big and
+   as wide as at 16:9, and a prompt just under its box (the Palico Scout's "Rotate") goes with its frame
    (the Palico Scout's "Rotate" prompt). MHGU_CONTROL `hudtrace` logs a frame's HUD quads and their anchors. Left: the HUD's layout elsewhere (title, town, quest board, item box) unverified; at Edges
    the Hunter Arts prompt goes right with its layer; whether an off-screen 3D view (equipment box preview, guild
    card) uses one of the three cameras (they are left alone unless 16:9).

@@ -40,13 +40,14 @@ PATCHES = {
     ('main', 0xdbcd48): (0xE3A07C05, '{ extern uint32_t g_ui_size[2]; c->r[7] = g_ui_size[0]; }'),
     ('main', 0xdbcd54): (0xE3A07E2D, '{ extern uint32_t g_ui_size[2]; c->r[7] = g_ui_size[1]; }'),
     # 3D camera projection (sCamera / uCamera -> the perspective matrix at 0x9c617c(near, far, fovy, aspect)): a
-    # camera made for the screen (aspect 16:9) gets the picture's shape (config.c g_render_aspect, 16:10 or wider)
-    # and its field of view from config.c camera_fovy (the FOV factor; Vert+ below 16:9); other cameras keep theirs
-    ('main', 0x21c36c): (0xEDD11A0E, '{ extern float g_render_aspect; float a = LDF(c->r[1] + 0x38u); c->v.f[3] = a > 1.77f && a < 1.786f ? g_render_aspect : a; }'),
+    # camera made for the screen (aspect 16:9) gets the picture's shape (config.c camera_aspect, 16:10 or wider; a model
+    # preview's camera at 16:10 its box's 16:9 shape) and its field of view from config.c camera_fovy (the FOV factor;
+    # Vert+ below 16:9); other cameras keep theirs
+    ('main', 0x21c36c): (0xEDD11A0E, '{ extern float camera_aspect(float); c->v.f[3] = camera_aspect(LDF(c->r[1] + 0x38u)); }'),
     ('main', 0x21c370): (0xEE211A02, '{ extern float camera_fovy(float, float); c->v.f[2] = camera_fovy(c->v.f[2] * c->v.f[4], c->v.f[3]); }'),
-    ('main', 0x21c3b8): (0xEDD01A0E, '{ extern float g_render_aspect; float a = LDF(c->r[0] + 0x38u); c->v.f[3] = a > 1.77f && a < 1.786f ? g_render_aspect : a; }'),
+    ('main', 0x21c3b8): (0xEDD01A0E, '{ extern float camera_aspect(float); c->v.f[3] = camera_aspect(LDF(c->r[0] + 0x38u)); }'),
     ('main', 0x21c3c0): (0xEE221A01, '{ extern float camera_fovy(float, float); c->v.f[2] = camera_fovy(c->v.f[4] * c->v.f[2], c->v.f[3]); }'),
-    ('main', 0xaf44a8): (0xEDD11A0E, '{ extern float g_render_aspect; float a = LDF(c->r[1] + 0x38u); c->v.f[3] = a > 1.77f && a < 1.786f ? g_render_aspect : a; }'),
+    ('main', 0xaf44a8): (0xEDD11A0E, '{ extern float camera_aspect(float); c->v.f[3] = camera_aspect(LDF(c->r[1] + 0x38u)); }'),
     ('main', 0xaf44ac): (0xEE211A02, '{ extern float camera_fovy(float, float); c->v.f[2] = camera_fovy(c->v.f[2] * c->v.f[4], c->v.f[3]); }'),
     # A monster's stall timers count per update (`vadd.f32 s0, s16, s0` / `vadd.f32 s0, s2, s0`; r4 = the monster):
     # runtime/hle/emstall.c scales what they add by its step
@@ -65,6 +66,12 @@ PATCHES = {
     # and its reload `mov r0, #20` count in the frame step instead of updates
     ('main', 0x834d20): (0xE2477001, '{ extern uint32_t buffcycle_tick(void); c->r[7] -= buffcycle_tick(); }'),
     ('main', 0x834ef4): (0xE3A00014, '{ extern uint32_t buffcycle_reload(void); c->r[0] = buffcycle_reload(); }'),
+    # UI text glyph snap (runtime/hle/textlayout.c): after a text's lines are aligned, each glyph's x is snapped to the
+    # 1280x720 canvas, `vadd.f32 s0, s0, s24` (+0.5), `vrintm.f32 s0, s0` (floor), then +0.5 again; with a canvas unit
+    # 1.5 px (1080p) the letters land half a pixel apart unevenly. x keeps its exact place instead (+0.5, as on average)
+    # ([Graphics] FixKerning off: the game's snap)
+    ('main', 0xc45554): (0xEE300A0C, '{ extern int config_live_fix_kerning(void); if (!config_live_fix_kerning()) c->v.f[0] += c->v.f[24]; }'),
+    ('main', 0xc4555c): (0xFEBB0A40, '{ extern int config_live_fix_kerning(void); if (!config_live_fix_kerning()) c->v.f[0] = floorf(c->v.f[0]); }'),
     # Two-button input window (runtime/hle/combowin.c): the countdown a press waits for a second button takes 1.0 off
     # per update (`vmov.f32 s2, #-1.0`); it takes the frame step instead
     ('main', 0x47ca84): (0xEEBF1A00, '{ extern float combowin_tick(void); c->v.f[2] = -combowin_tick(); }'),

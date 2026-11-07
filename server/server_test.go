@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -112,6 +115,203 @@ func TestKeysAndVersions(t *testing.T) {
 	send(t, c, tJoin, header(2, 8), u64(friends))
 	if code := binary.LittleEndian.Uint32(expect(t, c, tError)); code != errNotFound {
 		t.Fatalf("error %d", code)
+	}
+}
+
+// MinProto: older games are refused for every request (errVersion); that version and newer ones are served.
+func TestMinProto(t *testing.T) {
+	s := start(t, func(c *Config) { c.MinProto = 3 })
+	for _, r := range []struct {
+		typ  byte
+		body []byte
+	}{{tList, nil}, {tHost, testInfo(1)}, {tJoin, u64(1)}, {tAttach, u64(1)}} {
+		c := dial(t, s)
+		send(t, c, r.typ, header(2, 0), r.body)
+		if code := binary.LittleEndian.Uint32(expect(t, c, tError)); code != errVersion {
+			t.Fatalf("request %d: error %d", r.typ, code)
+		}
+	}
+	c := dial(t, s)
+	send(t, c, tHost, header(3, 0), testInfo(1))
+	id := binary.LittleEndian.Uint64(expect(t, c, tHosted))
+	if l := list(t, s, 3, 0); len(l) != 1 || l[id] == nil {
+		t.Fatalf("protocol 3 list %v", l)
+	}
+	if l := list(t, s, 4, 0); len(l) != 0 {
+		t.Fatal("protocol 4 sees a protocol 3 hub")
+	}
+}
+
+// SeparatePhones: Android's public room (key "public-phone") is a room of its own by default; turned off, it is the
+// public room for hosting, searching and joining alike, and keyed rooms stay apart.
+func TestSeparatePhones(t *testing.T) {
+	headerRoom := func(proto uint16, room [16]byte) []byte {
+		h := header(proto, 0)
+		copy(h[8:24], room[:])
+		return h
+	}
+	hostIn := func(s *Server, room [16]byte) uint64 {
+		c := dial(t, s)
+		send(t, c, tHost, headerRoom(3, room), testInfo(1))
+		return binary.LittleEndian.Uint64(expect(t, c, tHosted))
+	}
+	listIn := func(s *Server, room [16]byte) map[uint64]bool {
+		c := dial(t, s)
+		send(t, c, tList, headerRoom(3, room))
+		p := expect(t, c, tHubs)
+		out := map[uint64]bool{}
+		for i := 0; i < int(binary.LittleEndian.Uint32(p)); i++ {
+			out[binary.LittleEndian.Uint64(p[4+i*(8+netInfoSize):])] = true
+		}
+		return out
+	}
+	var keyed [16]byte
+	keyed[0] = 7
+
+	apart := start(t, nil)
+	pc, ph := hostIn(apart, [16]byte{}), hostIn(apart, phoneRoom)
+	if l := listIn(apart, [16]byte{}); len(l) != 1 || !l[pc] {
+		t.Fatalf("separate: PCs see %v", l)
+	}
+	if l := listIn(apart, phoneRoom); len(l) != 1 || !l[ph] {
+		t.Fatalf("separate: phones see %v", l)
+	}
+
+	one := start(t, func(c *Config) { c.SeparatePhones = false })
+	pc, ph = hostIn(one, [16]byte{}), hostIn(one, phoneRoom)
+	friends := hostIn(one, keyed)
+	for _, r := range [][16]byte{{}, phoneRoom} {
+		if l := listIn(one, r); len(l) != 2 || !l[pc] || !l[ph] {
+			t.Fatalf("one room: %s sees %v", roomName(r), l)
+		}
+	}
+	if l := listIn(one, keyed); len(l) != 1 || !l[friends] {
+		t.Fatalf("one room: keyed room sees %v", l)
+	}
+	// a phone joins a PC's hub: the server asks the host (no "not found")
+	c := dial(t, one)
+	h := dial(t, one)
+	send(t, h, tHost, headerRoom(3, [16]byte{}), testInfo(1))
+	id := binary.LittleEndian.Uint64(expect(t, h, tHosted))
+	send(t, c, tJoin, headerRoom(3, phoneRoom), u64(id))
+	expect(t, h, tIncoming)
+}
+
+// Apply, while the server runs: a higher MinProto refuses older games and takes their hubs off (the host's connection
+// is closed) while a game already joined through the relay plays on; SeparatePhones regroups the hubs already listed.
+func TestApply(t *testing.T) {
+	s := start(t, nil)
+	old, oldID := host(t, s, 0, 1) // protocol 2
+	// a player in the old hub, through the relay
+	pc := dial(t, s)
+	send(t, pc, tJoin, header(2, 0), u64(oldID))
+	ticket := expect(t, old, tIncoming)
+	ac := dial(t, s)
+	send(t, ac, tAttach, header(2, 0), ticket)
+	expect(t, ac, tSpliced)
+	expect(t, pc, tSpliced)
+	hostIn := func(room [16]byte) uint64 {
+		c := dial(t, s)
+		h := header(3, 0)
+		copy(h[8:24], room[:])
+		send(t, c, tHost, h, testInfo(1))
+		return binary.LittleEndian.Uint64(expect(t, c, tHosted))
+	}
+	pc3, phone3 := hostIn([16]byte{}), hostIn(phoneRoom)
+	listIn := func(proto uint16, room [16]byte) map[uint64]bool {
+		c := dial(t, s)
+		h := header(proto, 0)
+		copy(h[8:24], room[:])
+		send(t, c, tList, h)
+		p := expect(t, c, tHubs)
+		out := map[uint64]bool{}
+		for i := 0; i < int(binary.LittleEndian.Uint32(p)); i++ {
+			out[binary.LittleEndian.Uint64(p[4+i*(8+netInfoSize):])] = true
+		}
+		return out
+	}
+
+	if n := s.Apply(Settings{MinProto: 3, SeparatePhones: true}); n != 1 {
+		t.Fatalf("min-proto 3 took off %d hub(s)", n)
+	}
+	old.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		if _, _, err := readFrame(old, maxFrame); err != nil {
+			break // (a ping may come first)
+		}
+	}
+	c := dial(t, s)
+	send(t, c, tList, header(2, 0))
+	if code := binary.LittleEndian.Uint32(expect(t, c, tError)); code != errVersion {
+		t.Fatalf("protocol 2 search: error %d", code)
+	}
+	if l := listIn(3, [16]byte{}); len(l) != 1 || !l[pc3] {
+		t.Fatalf("protocol 3 public room %v", l)
+	}
+	// the game in the old hub is still spliced
+	ac.Write([]byte("still here"))
+	b := make([]byte, 32)
+	if n, _ := pc.Read(b); string(b[:n]) != "still here" {
+		t.Fatalf("relayed game got %q", b[:n])
+	}
+
+	s.Apply(Settings{MinProto: 3, SeparatePhones: false})
+	for _, r := range [][16]byte{{}, phoneRoom} {
+		if l := listIn(3, r); len(l) != 2 || !l[pc3] || !l[phone3] {
+			t.Fatalf("one room: %s sees %v", roomName(r), l)
+		}
+	}
+	s.Apply(Settings{MinProto: 3, SeparatePhones: true})
+	if l := listIn(3, phoneRoom); len(l) != 1 || !l[phone3] {
+		t.Fatalf("apart again: phones see %v", l)
+	}
+	if got := s.Settings(); got != (Settings{3, true}) {
+		t.Fatalf("Settings() = %+v", got)
+	}
+}
+
+func TestReadSettings(t *testing.T) {
+	dir := t.TempDir()
+	write := func(text string) string {
+		p := filepath.Join(dir, "settings")
+		if err := os.WriteFile(p, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	flags := Settings{MinProto: 2, SeparatePhones: true}
+	st, err := readSettings(write("# comment\n\nmin-proto = 3   # from Sunday\r\nSeparate-Phones=Off\n"), flags)
+	if err != nil || st != (Settings{3, false}) {
+		t.Fatalf("%+v, %v", st, err)
+	}
+	if st, err = readSettings(write("separate-phones = on\n"), Settings{4, false}); err != nil || st != (Settings{4, true}) {
+		t.Fatalf("a key left out keeps the flag's value: %+v, %v", st, err)
+	}
+	for _, bad := range []string{"min-proto = three\n", "min-proto = 70000\n", "separate-phones = maybe\n", "min-proto\n", "port = 1\n"} {
+		if st, err := readSettings(write(bad), flags); err == nil || st != flags {
+			t.Errorf("%q: %+v, %v (want an error and the flags' values)", bad, st, err)
+		}
+	}
+	if _, err := readSettings(filepath.Join(dir, "missing"), flags); err == nil {
+		t.Error("a missing file is no error")
+	}
+}
+
+// The log's room names: the public room, Android's public room (the same hash as the game's), any other key.
+func TestRoomName(t *testing.T) {
+	var keyed [16]byte
+	keyed[0], keyed[3] = 0xab, 0x01
+	for _, c := range []struct {
+		room [16]byte
+		want string
+	}{{[16]byte{}, "public"}, {phoneRoom, "phone"}, {keyed, "key ab000001000000000000000000000000"}} {
+		if got := roomName(c.room); got != c.want {
+			t.Errorf("roomName(%x) = %q, want %q", c.room, got, c.want)
+		}
+	}
+	// runtime/net/ldn.c: the first 16 bytes of SHA-256("MHGURecomp matchmaking key:public-phone")
+	if got := fmt.Sprintf("%x", phoneRoom[:4]); got != "4efa8642" {
+		t.Errorf("phone room %s", got)
 	}
 }
 
