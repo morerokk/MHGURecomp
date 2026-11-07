@@ -336,6 +336,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(hdr_bloom);
     SAME(hdr_scene);
     SAME(hdr_format);
+    SAME(hdr_analysis);
     SAME(msaa);
     SAME(fxaa);
     SAME(fxaa_mode);
@@ -827,6 +828,7 @@ void reset_section() {
         c.hdr_bloom = f.hdr_bloom;
         c.hdr_scene = f.hdr_scene;
         c.hdr_format = f.hdr_format;
+        c.hdr_analysis = f.hdr_analysis;
         c.msaa = f.msaa;
         c.fxaa = f.fxaa;
         c.fxaa_mode = f.fxaa_mode;
@@ -1248,6 +1250,7 @@ std::vector<Row> main_rows() {
                    ini("Saturation"));
             number(r, "hdr.hlsat", tr("Highlight saturation"), &c.hdr_highlight_saturation, lo("HighlightSaturation"),
                    hi("HighlightSaturation"), 1.f, ini("HighlightSaturation"));
+            add_bool(r, "hdr.analysis", "HDR analysis", &c.hdr_analysis, ini("Analysis"));
         }
         break;
     case 2:
