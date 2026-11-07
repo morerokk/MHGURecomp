@@ -14,6 +14,12 @@ PLATFORM := darwin
 else
 PLATFORM := linux
 endif
+# macOS: the SDK of the selected developer tools (xcode-select), as tools/build_gamecode.py does. Plain clang asks xcrun
+# with no --sdk, which can name a newer Command Line Tools SDK than the selected Xcode's linker reads ("tapi error:
+# malformed file ... unknown architecture"). Exported, so the libraries' cmake builds and make_app.py use it too.
+ifeq ($(PLATFORM),darwin)
+export SDKROOT ?= $(shell /usr/bin/xcrun --sdk macosx --show-sdk-path)
+endif
 ANDROID  := $(filter android,$(PLATFORM))
 ABI      ?= arm64-v8a
 
