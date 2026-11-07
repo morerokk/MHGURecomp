@@ -1,4 +1,5 @@
-// UI text spacing: letters at exact places, even margins and pair kerning (the game's festa font, Latin glyphs).
+// UI text spacing: letters at exact places, even margins and pair kerning (the game's festa font, Latin glyphs);
+// and letters at their true size unless [Graphics] BoldText (below, "drawing a glyph").
 //
 // How the game sets a text (cGUI text, 0xc43d38): a glyph node per letter; for each, x = the line's pen + the glyph's
 // x offset (the font entry's signed byte at +0x10) x the text's scale (11/12 for 22 px text from the 24 px font), then
@@ -246,6 +247,43 @@ static void place_glyph(Cpu *c) {
     fnhook_call_original(c, FN_PLACE_GLYPH);
 }
 
+// ------------------------------------------------------------------ drawing a glyph: [Graphics] BoldText
+// The glyph quad writers (obj, list, glyph node) draw the node's whole cell (x, y, width, height at +0x10..+0x1c) but
+// take the texture from half a texel inside each edge (the inset: list +0x38, 0.5 in the menus; 0 when bit 4 of
+// [[list] +0xc4]): each letter comes out stretched by about one font pixel each way, bolder and wider (narrow letters
+// most: 'l' 25%, 'e' 8%, every glyph 4% taller). BoldText off (the default): the quad is moved in by the inset too, for
+// the write only (the node is put back after), so letters are drawn at their true size. On: as the game draws them.
+// Independent of FixKerning (spacing).
+#define FN_QUAD_A 0xc3f8c4u
+#define FN_QUAD_B 0xc55524u
+#define FN_QUAD_C 0xea757cu
+
+static void draw_quad(Cpu *c, uint32_t fn) {
+    uint32_t list = c->r[1], node = c->r[2], entry = node ? LD32(node + GN_ENTRY) : 0;
+    if (!entry || config_live_bold_text()) {
+        fnhook_call_original(c, fn);
+        return;
+    }
+    uint32_t owner = LD32(list), b = LD32(entry + 8);
+    float inset = owner && (LD32(owner + 0xc4) & 4) ? 0.0f : LDF(list + 0x38);
+    float bw = (float)(b & 0xfff), bh = (float)((b >> 12) & 0xfff);
+    float x = LDF(node + GN_X), y = LDF(node + GN_X + 4), w = LDF(node + GN_QUAD_W), h = LDF(node + GN_QUAD_W + 4);
+    bool moved = inset > 0.0f && inset < 4.0f && bw > 2 * inset && bh > 2 * inset && w > 0 && h > 0;
+    if (moved) {
+        float sx = w / bw, sy = h / bh;
+        STF(node + GN_X, x + inset * sx), STF(node + GN_X + 4, y + inset * sy);
+        STF(node + GN_QUAD_W, w - 2 * inset * sx), STF(node + GN_QUAD_W + 4, h - 2 * inset * sy);
+    }
+    fnhook_call_original(c, fn);
+    if (moved) STF(node + GN_X, x), STF(node + GN_X + 4, y), STF(node + GN_QUAD_W, w), STF(node + GN_QUAD_W + 4, h);
+}
+static void draw_quad_a(Cpu *c) { draw_quad(c, FN_QUAD_A); }
+static void draw_quad_b(Cpu *c) { draw_quad(c, FN_QUAD_B); }
+static void draw_quad_c(Cpu *c) { draw_quad(c, FN_QUAD_C); }
+
 void textlayout_init(void) {
     fnhook_set(FN_PLACE_GLYPH, hle_register("text:place_glyph", place_glyph));
+    fnhook_set(FN_QUAD_A, hle_register("text:quad_a", draw_quad_a));
+    fnhook_set(FN_QUAD_B, hle_register("text:quad_b", draw_quad_b));
+    fnhook_set(FN_QUAD_C, hle_register("text:quad_c", draw_quad_c));
 }

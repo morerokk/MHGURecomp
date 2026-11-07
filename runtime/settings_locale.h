@@ -234,6 +234,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Draw distance", "Distancia de dibujado"},
         {"Smooth gradients", "Degradados suaves"},
         {"Fix kerning", "Corregir el kerning"},
+        {"Bold text", "Texto en negrita"},
         {"No limit", "Sin límite"},
         {"HUD anchor", "Posición del HUD"},
         {"Edges", "Bordes"},

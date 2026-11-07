@@ -32,6 +32,7 @@ static SDL_AtomicInt live_fsr_reactive;
 static SDL_AtomicInt live_draw = {0x3f800000};
 static SDL_AtomicInt live_smooth;
 static SDL_AtomicInt live_kerning;
+static SDL_AtomicInt live_bold;
 // [Performance]
 static SDL_AtomicInt show_fps;
 static SDL_AtomicInt show_battery;
@@ -95,6 +96,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->fxaa_mode != saved.fxaa_mode) SDL_SetAtomicInt(&live_fxaa_mode, c->fxaa_mode);
     if (all || c->smooth_gradients != saved.smooth_gradients) SDL_SetAtomicInt(&live_smooth, c->smooth_gradients);
     if (all || c->fix_kerning != saved.fix_kerning) SDL_SetAtomicInt(&live_kerning, c->fix_kerning);
+    if (all || c->bold_text != saved.bold_text) SDL_SetAtomicInt(&live_bold, c->bold_text);
     if (all || c->discord != saved.discord) SDL_SetAtomicInt(&live_discord, c->discord);
     if (all || c->discord_hunter != saved.discord_hunter) SDL_SetAtomicInt(&live_discord_hunter, c->discord_hunter);
     if (all || c->share_urgent != saved.share_urgent) SDL_SetAtomicInt(&live_share_urgent, c->share_urgent);
@@ -157,6 +159,7 @@ int config_live_chat_key(void) { return SDL_GetAtomicInt(&live_chat_key); }
 int config_live_fxaa_mode(void) { return SDL_GetAtomicInt(&live_fxaa_mode); }
 int config_live_smooth_gradients(void) { return SDL_GetAtomicInt(&live_smooth); }
 int config_live_fix_kerning(void) { return SDL_GetAtomicInt(&live_kerning); }
+int config_live_bold_text(void) { return SDL_GetAtomicInt(&live_bold); }
 float config_live_fsr_sharpness(void) { return get_float(&live_fsr_sharpness); }
 float config_live_fsr_reactive(void) { return get_float(&live_fsr_reactive); }
 int config_live_village_in_hub(void) { return SDL_GetAtomicInt(&live_village); }

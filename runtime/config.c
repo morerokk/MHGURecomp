@@ -3,7 +3,8 @@
 // deleting it resets everything; keys that are missing or not understood keep their defaults (the log says which).
 //   MHGU_CONFIG=<path>   another settings file
 //   MHGU_WINDOW=WxH      windowed at that size, MHGU_RENDER=WxH  3D resolution, MHGU_MSAA=1|2|4|8, MHGU_FXAA=0|1,
-//                        MHGU_RT16=0|1 (SmoothGradients), MHGU_FIX_KERNING=0|1, MHGU_PAD_POSITIONAL=0|1 (test runs;
+//                        MHGU_RT16=0|1 (SmoothGradients), MHGU_FIX_KERNING=0|1, MHGU_BOLD_TEXT=0|1,
+//                        MHGU_PAD_POSITIONAL=0|1 (test runs;
 //                        override the file)
 #include <ctype.h>
 #include <float.h>
@@ -51,6 +52,7 @@
     .draw_distance = 1.0f,                                                                          \
     .smooth_gradients = 0,                                                                          \
     .fix_kerning = 1,                                                                               \
+    .bold_text = 0,                                                                                 \
     /* [Performance] */                                                                             \
     .show_fps = 0,                                                                                  \
     .show_battery = BATTERY_OFF,                                                                    \
@@ -194,6 +196,11 @@ static const char DEFAULT_INI[] =
     "; (closer pairs such as \"Va\" and \"To\"). Off: the text as the game sets it\n"
     "; Default: On\n"
     "FixKerning = On\n"
+    "\n"
+    "; Draws letters slightly thicker and wider, as the original game does. Some players, including players with\n"
+    "; dyslexia, find this easier to read. Off: letters at their true size, thinner and crisper\n"
+    "; Default: Off\n"
+    "BoldText = Off\n"
     "\n"
     "[Performance]\n"
     "; Show the frame rate (FPS) in a small box on the screen. Drag it with the mouse while the settings menu is open\n"
@@ -596,6 +603,7 @@ const ConfigSetting g_settings[] = {
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
     ON_OFF("Graphics", "FixKerning", fix_kerning, false),
+    ON_OFF("Graphics", "BoldText", bold_text, false),
     ON_OFF("Performance", "ShowFPS", show_fps, false),
     {"Performance", "ShowBattery", SET_CHOICE, F(show_battery), 0, 0, 0, "Off,WithFPS,ByItself", NULL, false, ERR_MISC},
     {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, 30, 240, NULL, NULL, false, ERR_MISC},
@@ -1073,6 +1081,7 @@ void config_load(void) {
     if ((e = getenv("MHGU_FXAA"))) g_config.fxaa = atoi(e) != 0;
     if ((e = getenv("MHGU_RT16"))) g_config.smooth_gradients = atoi(e) != 0;
     if ((e = getenv("MHGU_FIX_KERNING"))) g_config.fix_kerning = atoi(e) != 0;
+    if ((e = getenv("MHGU_BOLD_TEXT"))) g_config.bold_text = atoi(e) != 0;
     if ((e = getenv("MHGU_BACKGROUND_INPUT"))) g_config.background_input = atoi(e) != 0;
     if ((e = getenv("MHGU_PAD_POSITIONAL"))) g_config.face_buttons = atoi(e) ? FACE_POSITION : FACE_LABEL;
     if ((e = getenv("MHGU_LDN_PORT")) && atoi(e) > 0) g_config.ldn_port = atoi(e);

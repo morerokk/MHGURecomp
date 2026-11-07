@@ -282,6 +282,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(draw_distance);
     SAME(smooth_gradients);
     SAME(fix_kerning);
+    SAME(bold_text);
     SAME(msaa);
     SAME(fxaa);
     SAME(fxaa_mode);
@@ -756,6 +757,7 @@ void reset_section() {
         c.draw_distance = f.draw_distance;
         c.smooth_gradients = f.smooth_gradients;
         c.fix_kerning = f.fix_kerning;
+        c.bold_text = f.bold_text;
         c.msaa = f.msaa;
         c.fxaa = f.fxaa;
         c.fxaa_mode = f.fxaa_mode;
@@ -1139,6 +1141,7 @@ std::vector<Row> main_rows() {
             r.back().value = tr("No limit");
         add_bool(r, "smooth", "Smooth gradients", &c.smooth_gradients, ini("SmoothGradients"));
         add_bool(r, "kerning", "Fix kerning", &c.fix_kerning, ini("FixKerning"));
+        add_bool(r, "boldtext", "Bold text", &c.bold_text, ini("BoldText"));
         add_bool(r, "fsr", "FSR", &c.fsr, ini("FSR"));
         if (c.fsr) {
             add_choice(
