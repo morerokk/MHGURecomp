@@ -49,6 +49,8 @@ graphics API are reimplemented on Windows, Linux and Android, with Vulkan for re
 | **Quality of life** | Fast-forward unskippable cutscenes with A, an in-game PC settings menu (F1 or `Plus`+`Minus`), Discord Rich Presence |
 | **Mods and cheats** | Drop-in `mods` folder with load order and conflict checks. Natively supports Forge plugins ([Mods](#mods)), and Ryujinx / Atmosphère cheat files ([Cheats](#cheats)) |
 
+**For AMD FSR 4 support, use this module: https://github.com/Huss3A/mhgurecomp-fsr4-module**
+
 ## Requirements
 
 - OS: Windows 10/11 64-bit, or Linux 64-bit with glibc 2.39 or newer. The following Linux distros are known to work (Vulkan support required):
