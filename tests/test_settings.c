@@ -15,6 +15,8 @@
 #define set_env(key, value) setenv(key, value, 1)
 #endif
 
+volatile uint64_t g_present_count;  // (runtime/ui.c's frame counter: config.c's model previews read it)
+
 static char *read_file(const char *path) {
     FILE *f = fopen(path, "rb"); assert(f);
     fseek(f, 0, SEEK_END); long size = ftell(f); rewind(f);

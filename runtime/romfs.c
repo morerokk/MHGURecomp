@@ -6,6 +6,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,6 +52,21 @@ static void add_file(Dir *d, File *f) {
     f->parent = d;
 }
 
+// The mods' progress for the loading indicator (romfs_mods_progress): their files found while the folders are read,
+// then those applied of all of them. A big mod's first start can take a while (each archive it replaces is compared
+// with the game's, files nothing has read since they were unpacked), with the window showing nothing else.
+enum { MODS_IDLE, MODS_READING, MODS_APPLYING };
+static atomic_int g_mods_phase, g_mods_done, g_mods_total;
+static int g_arcs_compared, g_arcs_merged;  // (this mod's, for the log)
+
+bool romfs_mods_progress(int *done, int *total) {
+    int phase = atomic_load(&g_mods_phase);
+    if (phase == MODS_IDLE) return false;
+    if (done) *done = atomic_load(&g_mods_done);
+    if (total) *total = phase == MODS_APPLYING ? atomic_load(&g_mods_total) : 0;
+    return true;
+}
+
 static Dir *scan(const char *path, const char *name, int depth) {
     if (depth > 32) return NULL;
     DIR *dd = opendir(path);
@@ -73,6 +89,7 @@ static Dir *scan(const char *path, const char *name, int depth) {
             File *f = calloc(1, sizeof *f);
             f->name = strdup(e->d_name), f->path = p, f->size = (uint64_t)st.st_size;
             add_file(dir, f);
+            if (atomic_load(&g_mods_phase) == MODS_READING) atomic_fetch_add(&g_mods_done, 1);
         } else {
             free(p);
         }
@@ -87,6 +104,7 @@ static int merge(Dir *dst, Dir *src) {
     int changed = 0;
     for (int i = 0; i < src->nfiles; i++) {
         File *f = src->files[i];
+        atomic_fetch_add(&g_mods_done, 1);
         int k = 0;
         while (k < dst->nfiles && strcasecmp(dst->files[k]->name, f->name)) k++;
         if (k < dst->nfiles) {
@@ -94,10 +112,13 @@ static int merge(Dir *dst, Dir *src) {
             size_t nl = strlen(f->name);
             char merged[1200];
             // (two mods' archives: both's changes. One with only some of the game's entries: those over the rest)
-            if (nl > 4 && !strcasecmp(f->name + nl - 4, ".arc") && (d->orig || arc_partial(d->path, f->path)) &&
+            bool arc = nl > 4 && !strcasecmp(f->name + nl - 4, ".arc");
+            if (arc && !d->orig) g_arcs_compared++;
+            if (arc && (d->orig || arc_partial(d->path, f->path)) &&
                 arc_merge(d->orig ? d->orig : d->path, d->path, f->path, merged, sizeof merged)) {
                 struct stat st;
                 if (!stat(merged, &st)) {
+                    g_arcs_merged++;
                     if (!d->orig) d->orig = strdup(d->path);
                     free(d->path);
                     d->path = strdup(merged);
@@ -199,12 +220,36 @@ bool romfs_open(const char *base_dir, const char *const *overlays, int noverlays
             free(root->dirs[i]->name);
             root->dirs[i]->name = strdup("nativeNX");
         }
+    // The mods' folders all read first (the indicator's total), then layered in order
+    uint64_t t0 = plat_now_ns();
+    if (noverlays > 64) noverlays = 64;
+    Dir *ov[64];
+    int found[64];
+    uint64_t read_ns[64];
+    if (noverlays) atomic_store(&g_mods_done, 0), atomic_store(&g_mods_phase, MODS_READING);
     for (int i = 0; i < noverlays; i++) {
-        Dir *o = scan(overlays[i], "", 0);
-        if (!o) continue;
-        int n = merge(root, o);
-        LOG("[romfs] mod %s: %d files\n", overlays[i], n);
+        LOG("[romfs] mod %s: reading its files\n", overlays[i]);
+        int before = atomic_load(&g_mods_done);
+        uint64_t t = plat_now_ns();
+        ov[i] = scan(overlays[i], "", 0);
+        found[i] = atomic_load(&g_mods_done) - before, read_ns[i] = plat_now_ns() - t;
     }
+    if (noverlays) {
+        atomic_store(&g_mods_total, atomic_load(&g_mods_done));
+        atomic_store(&g_mods_done, 0);
+        atomic_store(&g_mods_phase, MODS_APPLYING);
+    }
+    for (int i = 0; i < noverlays; i++) {
+        if (!ov[i]) continue;
+        LOG("[romfs] mod %s: %d files found in %.1f s, applying them\n", overlays[i], found[i], read_ns[i] / 1e9);
+        g_arcs_compared = g_arcs_merged = 0;
+        uint64_t t = plat_now_ns();
+        int n = merge(root, ov[i]);
+        LOG("[romfs] mod %s: %d files in %.1f s (%d archive(s) checked against the game's, %d merged)\n", overlays[i],
+            n, (plat_now_ns() - t) / 1e9, g_arcs_compared, g_arcs_merged);
+    }
+    atomic_store(&g_mods_phase, MODS_IDLE);
+    uint64_t mods_ns = plat_now_ns() - t0;
     sort_tree(root);
     Lists l = {0};
     l.dirs = malloc(sizeof *l.dirs * (l.cd = 64));
@@ -270,7 +315,9 @@ bool romfs_open(const char *base_dir, const char *const *overlays, int noverlays
     g_files = l.files;  // (flatten order is data order)
     g_nfiles = l.nf;
     free(l.dirs);
-    LOG("[romfs] %d files, %d folders, image %.1f GB\n", l.nf, l.nd, g_size / 1e9);
+    LOG("[romfs] %d files, %d folders, image %.1f GB", l.nf, l.nd, g_size / 1e9);
+    if (noverlays) LOG(" (the mods took %.1f s)", mods_ns / 1e9);
+    LOG("\n");
     return true;
 }
 

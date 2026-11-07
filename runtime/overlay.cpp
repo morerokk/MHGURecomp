@@ -49,6 +49,7 @@ void vk_unlock(void);
 SDL_Window *ui_window(void);
 bool shader_prewarm_progress(uint64_t *done, uint64_t *total);  // (runtime/nvn/vulkan/exec.c)
 bool shader_warmup_progress(uint64_t *done, uint64_t *total);   // (the same: MoltenVK's Metal warm-up)
+bool romfs_mods_progress(int *done, int *total);                // (runtime/romfs.c)
 }
 
 static std::atomic<bool> g_enabled, g_ready, g_open, g_wants_text;
@@ -630,11 +631,11 @@ static void draw_fps(uint64_t now) {
 }
 
 // ------------------------------------------------------------------ loading indicator
-// A spinner and "Loading" in the bottom right corner, with the shader prewarm's count while it runs (and on macOS the
-// Metal warm-up's under it): on the black window until the game's first frame (overlay_loading: device.c's loading
-// screen), then over the game while either still has programs left, and for the game's first second at least (its
-// own first frames are black too). Then it fades and stays gone. (Under g_frame_lock: the loading screen's thread and
-// the game's both draw it.)
+// A spinner and "Loading" in the bottom right corner, with the mods' count while romfs.c layers them, then the shader
+// prewarm's count while it runs (and on macOS the Metal warm-up's under it): on the black window until the game's first
+// frame (overlay_loading: device.c's loading screen), then over the game while either still has programs left, and for
+// the game's first second at least (its own first frames are black too). Then it fades and stays gone. (Under
+// g_frame_lock: the loading screen's thread and the game's both draw it.)
 static const uint64_t LOADING_HOLD_NS = 1000000000ull, LOADING_FADE_NS = 400000000ull;
 static uint64_t g_loading_t0, g_loading_fade;  // the game's first overlay frame; when the fade began (0: not yet)
 static bool g_loading_over;
@@ -658,7 +659,8 @@ static void draw_loading(uint64_t now, float scale, float alpha) {
     };
     int language = config_language();
     const char *title = settings_text(language, "Loading");
-    // the counts under the title: the prewarm's, then the Metal warm-up's (macOS), each while it has work
+    // the counts under the title: the mods' while romfs.c layers them; else the prewarm's, then the Metal warm-up's
+    // (macOS), each while it has work
     char line[2][128], widest[128];
     int nlines = 0;
     ImFont *font = ImGui::GetFont();
@@ -673,8 +675,23 @@ static void draw_loading(uint64_t now, float scale, float alpha) {
         ImVec2 s = font->CalcTextSizeA(small, FLT_MAX, 0, widest);  // (no jitter as it counts)
         ls = ImVec2(std::max(ls.x, s.x), ls.y + gap + s.y);
     };
-    count(shader_prewarm_progress, "Compiling shaders");
-    count(shader_warmup_progress, "Building Metal shaders");
+    int mods_done, mods_total;
+    if (romfs_mods_progress(&mods_done, &mods_total)) {  // (before the game's first frame: a big mod can take a while)
+        if (!mods_total) {
+            snprintf(line[nlines], sizeof line[0], "%s  %d %s", settings_text(language, "Reading mods"), mods_done,
+                     settings_text(language, "files"));
+            snprintf(widest, sizeof widest, "%s", line[nlines++]);
+        } else {
+            const char *what = settings_text(language, "Applying mods");
+            snprintf(line[nlines++], sizeof line[0], "%s  %d / %d", what, mods_done, mods_total);
+            snprintf(widest, sizeof widest, "%s  %d / %d", what, mods_total, mods_total);
+        }
+        ImVec2 s = font->CalcTextSizeA(small, FLT_MAX, 0, widest);
+        ls = ImVec2(std::max(ls.x, s.x), ls.y + gap + s.y);
+    } else {
+        count(shader_prewarm_progress, "Compiling shaders");
+        count(shader_warmup_progress, "Building Metal shaders");
+    }
     ImGuiViewport *vp = ImGui::GetMainViewport();
     float r = size * 0.55f, margin = 24 * scale;
     ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0, title);
@@ -880,11 +897,18 @@ static void vk_check(VkResult r) {
 static bool backend_ready(const OverlayTarget *t) {
     if (!g_enabled) return false;
     g_disp_w = t->width, g_disp_h = t->height;
-    if (t->pass != g_pass) {  // (the window's render pass: made once, again only if the window's format changes)
-        if (g_pass) {
-            g_ready = false;
-            ImGui_ImplVulkan_Shutdown();
-        }
+    if (g_pass && t->pass != g_pass) {
+        // The window's format changed (HDR turned on or off: its render pass draws into the RGBA16F composition image
+        // instead). Only the pipeline is made again: shutting the backend down freed the textures' descriptor sets
+        // that the frame already built on the game's thread still named, and the game crashed drawing it.
+        ImGui_ImplVulkan_PipelineInfo pi = {};
+        pi.RenderPass = t->pass;
+        pi.Subpass = 0;
+        pi.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        ImGui_ImplVulkan_CreateMainPipeline(&pi);
+        g_pass = t->pass;
+    }
+    if (t->pass != g_pass) {  // (the window's render pass: the backend made once)
         ImGui_ImplVulkan_InitInfo info = {};
         info.ApiVersion = VK_API_VERSION_1_2;
         info.Instance = t->inst;
