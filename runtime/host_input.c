@@ -98,6 +98,56 @@ static float mouse_dx, mouse_dy;  // counts moved since the last update
 static float test_vx, test_vy;
 static uint64_t test_until;
 
+// ---- the mouse for mods (runtime/forge.c: forge_input_getMouse, getMouseMove, setMouseFree, the port's own calls):
+// where the pointer last moved in the window and whether it is over it, the buttons held and pressed since the last
+// take, and all the movement since then, wherever it went (the hunt camera, the right stick, the free pointer). Kept
+// from every mouse event, also those Forge's menu or the chat box takes (forge.c leaves those times out), on this
+// thread; taken on the game's. A mod can make the mouse free for a pointer of its own (mods_free): it isn't captured
+// then (let go if it was, captured again after if the player had clicked in), and a click is only the mod's: not a
+// capture, not a button the game sees.
+static SDL_SpinLock mods_lock;
+static struct { float x, y, dx, dy; bool inside; uint32_t held, pressed; } mods_mouse;
+static SDL_AtomicInt mods_free;
+
+static void mods_mouse_event(const SDL_Event *e) {
+    SDL_LockSpinlock(&mods_lock);
+    switch (e->type) {
+    case SDL_EVENT_MOUSE_MOTION:  // (SDL sends it over the window, or captured)
+        mods_mouse.x = e->motion.x, mods_mouse.y = e->motion.y, mods_mouse.inside = true;
+        mods_mouse.dx += e->motion.xrel, mods_mouse.dy += e->motion.yrel;
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (e->button.button >= 1 && e->button.button <= SDL_BUTTON_X2) {
+            uint32_t b = SDL_BUTTON_MASK(e->button.button);
+            if (e->button.down) mods_mouse.held |= b, mods_mouse.pressed |= b;
+            else mods_mouse.held &= ~b;
+        }
+        break;
+    case SDL_EVENT_WINDOW_MOUSE_ENTER: case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+        mods_mouse.inside = e->type == SDL_EVENT_WINDOW_MOUSE_ENTER;
+        break;
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+        mods_mouse.held = 0;
+        break;
+    }
+    SDL_UnlockSpinlock(&mods_lock);
+}
+
+void host_input_mouse_take(HostMouse *out) {
+    SDL_LockSpinlock(&mods_lock);
+    out->x = mods_mouse.x, out->y = mods_mouse.y, out->inside = mods_mouse.inside;
+    out->buttons = mods_mouse.held | mods_mouse.pressed;  // (a click shorter than a frame is seen once)
+    out->dx = mods_mouse.dx, out->dy = mods_mouse.dy;
+    mods_mouse.pressed = 0, mods_mouse.dx = mods_mouse.dy = 0;
+    SDL_UnlockSpinlock(&mods_lock);
+}
+
+void host_input_set_mouse_free(bool free) {
+    if (SDL_SetAtomicInt(&mods_free, free) != free) LOG("[input] %s\n", free ? "the mouse is free for a mod" : "the mouse is the game's again");
+}
+
+bool host_input_mouse_free(void) { return SDL_GetAtomicInt(&mods_free) != 0; }
+
 // ---- scripted input
 typedef struct { uint64_t start, len; uint64_t buttons; int stick, x, y; } ScriptStep;
 #define MAX_STEPS 4096
@@ -550,6 +600,7 @@ static bool chat_mouse(const SDL_Event *e) {
 
 void host_input_event(const SDL_Event *e) {
     if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) pad_pressed(e->gbutton.which);
+    mods_mouse_event(e);  // (the mouse for mods: every event, whoever takes it)
     if (overlay_event(e)) return;  // (Forge's menu open: keyboard and mouse are its)
     if (chat_mouse(e)) return;  // (typing a line of chat: the mouse drags its box)
     if (textinput_event(e)) return;  // (typing into a text entry: not controller buttons)
@@ -606,6 +657,8 @@ void host_input_event(const SDL_Event *e) {
         if (btn < 1 || btn > SDL_BUTTON_X2) break;
         if (!e->button.down) {
             mouse_held &= ~(1u << btn);
+        } else if (host_input_mouse_free()) {
+            break;  // (a mod's free pointer: the click is the mod's only)
         } else if (!mouse_captured && !mouse_no_capture) {  // (the click that captures the mouse is not a button press)
             if (!mouse_grab) LOG("[input] capturing the mouse\n");
             mouse_grab = true;
@@ -637,7 +690,8 @@ static int32_t clamp_axis(int v) { return v < -32767 ? -32767 : v > 32767 ? 3276
 
 // Capture or release the mouse as wanted, and give its movement to the hunt camera or the right stick.
 static void mouse_update(int *rx, int *ry) {
-    bool want = mouse_grab && !overlay_menu_open() && !chat_active();  // (Forge's menu, the chat box: the pointer is theirs)
+    // (Forge's menu, the chat box, a mod's free pointer: the pointer is theirs)
+    bool want = mouse_grab && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
     SDL_Window *w = ui_window();
     if (want != mouse_captured && w) {
         if (SDL_SetWindowRelativeMouseMode(w, want) || !want) {
@@ -648,11 +702,13 @@ static void mouse_update(int *rx, int *ry) {
         }
         mouse_dx = mouse_dy = 0;
     }
-    static bool chat_pointer;  // (full screen hides the pointer: shown while the chat box can be dragged)
-    if (chat_active() != chat_pointer && w) {
-        chat_pointer = chat_active();
-        if (chat_pointer) SDL_ShowCursor();
-        else if (SDL_GetWindowFlags(w) & SDL_WINDOW_FULLSCREEN) SDL_HideCursor();
+    // (full screen hides the pointer: shown while the chat box can be dragged or a mod has the mouse free)
+    static bool pointer_shown;
+    bool show = chat_active() || host_input_mouse_free();
+    if (show != pointer_shown && w) {
+        pointer_shown = show;
+        if (show) SDL_ShowCursor();
+        else if ((SDL_GetWindowFlags(w) & SDL_WINDOW_FULLSCREEN) && !overlay_menu_open()) SDL_HideCursor();
     }
     static uint64_t last;
     static float vx, vy;  // the speed, smoothed: counts a second
@@ -660,7 +716,12 @@ static void mouse_update(int *rx, int *ry) {
     float dt = last ? (float)(now - last) * 1e-9f : 0.0f;
     last = now;
     if (dt > 0.1f) dt = 0.1f;
-    if (now < test_until) mouse_dx += test_vx * dt, mouse_dy += test_vy * dt;
+    if (now < test_until) {
+        mouse_dx += test_vx * dt, mouse_dy += test_vy * dt;
+        SDL_LockSpinlock(&mods_lock);  // (mods see it too)
+        mods_mouse.dx += test_vx * dt, mods_mouse.dy += test_vy * dt;
+        SDL_UnlockSpinlock(&mods_lock);
+    }
     if (mousecam_active()) {  // (the hunt camera turns by the counts themselves)
         if (mouse_dx != 0 || mouse_dy != 0) mousecam_add(mouse_dx, mouse_dy);
         mouse_dx = mouse_dy = vx = vy = 0;
