@@ -45,9 +45,10 @@ typedef struct {
                             // after flip_y: keys without it hash as before - shader caches stay valid.)
     uint32_t vs_out_mask;   // fragment: varyings the vertex shader provides
     uint8_t glsl;           // emit Vulkan GLSL (see the contract above) instead of MSL
-    uint8_t alpha_func;     // fragment (GLSL): NVN's fixed-function alpha test on color target 0 (NVNalphaFunc 1..7;
-                            // 0 / 8 = always): `uniform AlphaRef { vec4 alpha_ref; }` at binding ALPHA_REF_BUFFER_INDEX,
-                            // fragments failing `c0.a <func> alpha_ref.x` are discarded
+    uint8_t alpha_func;     // fragment (GLSL), with alpha_coverage only: NVN's fixed-function alpha test on color target 0
+                            // (NVNalphaFunc 1..7) as sample coverage. Otherwise the test's function is the specialization
+                            // constant 0 of every fragment program writing target 0 as float (0: none), against
+                            // `uniform AlphaRef { vec4 alpha_ref; }` at binding ALPHA_REF_BUFFER_INDEX
     uint8_t alpha_coverage; // fragment (GLSL), MSAA: the alpha test (< <= > >=) as sample coverage of this many samples
                             // (gl_SampleMask from how far c0.a is past the reference, over a pixel's alpha change), for
                             // smooth cut-out edges. (In the padding: keys without it hash as before.)
