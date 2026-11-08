@@ -965,8 +965,9 @@ static void ui_group_end(void) {
     if (g_hudtrace_active) LOG("[hud] group z %.1f: %d pieces, y %.1f..%.1f -> %c\n", ui_group.z, n, ui_group.ymin, ui_group.ymax, "TCB"[v]);
 }
 static void ui_group_add(float *m, float pos_z, float pos_x, float pos_y, int vanchor) {
-    // Not near: more than 400 above or below (a frame drawn as its corners only, the help windows' 336 high, is one group;
-    // the target cam at y 42..82 and the Hunter Arts prompts below y 600 are two), or a piece of another anchor beside the
+    // Not near: more than 470 above or below (a frame drawn as its corners only, the help windows' 336 high, the Weapon
+    // Controls sheet's back parchment 436, is one group; the target cam at y 42..82 and the Hunter Arts prompts below
+    // y 600, 518 apart, are two), or a piece of another anchor beside the
     // group both sideways and vertically (the Guild Card's page counter, top right, next to its page; a window's own
     // pieces line up with the rest of it on one side: its other corner, its bottom edge). Wider than 16:9 by place alone:
     // the pieces' own anchors are the ones that split a window there.
@@ -974,7 +975,7 @@ static void ui_group_add(float *m, float pos_z, float pos_x, float pos_y, int va
     bool apart = (g_render_aspect > 16.0f / 9.0f || !(ui_group.anchors & (1u << vanchor))) &&
                  (pos_x < ui_group.xmin - margin || pos_x > ui_group.xmax + margin) &&
                  (pos_y < ui_group.ymin - margin || pos_y > ui_group.ymax + margin);
-    if (ui_group.n && (fabsf(pos_z - ui_group.z) > 0.5f || pos_y < ui_group.ymin - 400.0f || pos_y > ui_group.ymax + 400.0f ||
+    if (ui_group.n && (fabsf(pos_z - ui_group.z) > 0.5f || pos_y < ui_group.ymin - 470.0f || pos_y > ui_group.ymax + 470.0f ||
                        apart || ui_group.n == UI_GROUP_MAX))
         ui_group_end();
     if (!ui_group.n) {
