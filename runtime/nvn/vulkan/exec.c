@@ -843,14 +843,15 @@ static bool ui_relax_scissor;  // the draw being set up moved a HUD piece out fr
 static int ui_scissor_v = -1;  // 16:10: the draw being set up is a HUD piece anchored so (0 top, 1 centre, 2 bottom),
                                // and its scissor moves with it
 static bool ui_menu_pass;  // this pass drew a layer 97 menu before (the windows of layer 100 then sit beside Top-anchored ones)
+static uint64_t ui_menu_frame;  // the frame (g_present_count) that last drew a layer 97 menu (ui_preview_map)
 // The HUD quads drawn last (16:9 canvas place, vertical anchor 0 top / 1 centre / 2 bottom, horizontal 0 left / 1 right /
 // 2 centre): a model preview follows the window drawn over it (ui_preview_map). Kept across passes: the Smithy's model
 // is drawn in a pass of its own, after the parchment it sits in.
 #define UI_RECENT 256
-static struct { float x, y; uint8_t vanchor, hanchor; } ui_recent[UI_RECENT];
-// The last model preview's box (canvas units) and how its frame was anchored vertically (ui_preview_map): its button
-// prompts just under it go with the frame (cbuf_info; they are drawn before the model, so last frame's box)
-static float ui_pv_x0, ui_pv_x1, ui_pv_y1;
+static struct { float x, y, z; uint8_t vanchor, hanchor; } ui_recent[UI_RECENT];
+// The last model preview's box (canvas units) and how its window is anchored vertically (ui_preview_map): the window's
+// frame and prompts around it go so (cbuf_info; they are drawn before the model, so last frame's box)
+static float ui_pv_x0, ui_pv_x1, ui_pv_y0, ui_pv_y1;
 static int ui_pv_v = -1;
 static uint64_t ui_pv_present;
 static uint32_t ui_nrecent, ui_pass_recent;  // (quads recorded so far, the slot is the count modulo UI_RECENT; and when
@@ -881,6 +882,13 @@ static struct {
     uint8_t anchors;  // (bit per vertical anchor among its pieces)
     struct { float *m, pos_x, pos_y; uint8_t vanchor; uint32_t recent; } p[UI_GROUP_MAX];
 } ui_group;
+// The group settled last in this pass (16:10), as it was placed: a window stacked right under it on the same layer
+// (the chat log's box under its "Chat" label) goes with it (ui_group_end)
+static struct {
+    int n, v;  // v: the anchor its pieces got (one for all; -1 when they kept their own, which disagreed)
+    float z, xmin, xmax, ymin, ymax;
+    struct { float *m, pos_y; uint32_t recent; } p[UI_GROUP_MAX];
+} ui_group_prev;
 // Each group's final anchor, by its first piece (layer and place): the HUD is drawn the same way every frame, so the
 // scissors of a group's pieces, recorded before the group is complete, take the anchor it got last frame
 #define UI_KNOWN 64
@@ -954,18 +962,49 @@ static void ui_group_end(void) {
     int v = n < 2 ? -1 : ui_group_vanchor();
     ui_group_remember(v >= 0 ? v : ui_group.p[0].vanchor);
     ui_group.n = 0;
-    if (v < 0) return;
     float sy = g_render_aspect / (16.0f / 9.0f);
-    for (int i = 0; i < n; i++) {
-        float y = ui_group.p[i].pos_y;
-        ui_group.p[i].m[13] = v == 0 ? y * sy : v == 2 ? 720.0f - (720.0f - y) * sy : 360.0f + (y - 360.0f) * sy;
-        if (ui_nrecent - ui_group.p[i].recent <= UI_RECENT) ui_recent[ui_group.p[i].recent % UI_RECENT].vanchor = (uint8_t)v;
+    if (v >= 0) {
+        for (int i = 0; i < n; i++) {
+            float y = ui_group.p[i].pos_y;
+            ui_group.p[i].m[13] = v == 0 ? y * sy : v == 2 ? 720.0f - (720.0f - y) * sy : 360.0f + (y - 360.0f) * sy;
+            if (ui_nrecent - ui_group.p[i].recent <= UI_RECENT) ui_recent[ui_group.p[i].recent % UI_RECENT].vanchor = (uint8_t)v;
+        }
+        if (g_hudtrace_active) LOG("[hud] group z %.1f: %d pieces, y %.1f..%.1f -> %c\n", ui_group.z, n, ui_group.ymin, ui_group.ymax, "TCB"[v]);
     }
-    if (g_hudtrace_active) LOG("[hud] group z %.1f: %d pieces, y %.1f..%.1f -> %c\n", ui_group.z, n, ui_group.ymin, ui_group.ymax, "TCB"[v]);
+    // A window stacked right on the one before it (same layer, overlapping sideways, its top within 8 of the other's
+    // bottom or the other way round) is one picture with it: the chat log's "Chat" label (y 547..598, Top) and its
+    // message box (596..708, Bottom) came apart by 70. When the two went different ways, both take the anchor of where
+    // the pair sits, as one group would; when they agree nothing changes.
+    int vf = v >= 0 ? v : ui_group.p[0].vanchor;  // (v < 0: its pieces agree)
+    if (ui_group_prev.n && vf >= 0 && ui_group_prev.v >= 0 && vf != ui_group_prev.v && fabsf(ui_group_prev.z - ui_group.z) < 0.5f &&
+        ui_group.xmin < ui_group_prev.xmax && ui_group.xmax > ui_group_prev.xmin &&
+        (fabsf(ui_group.ymin - ui_group_prev.ymax) <= 8.0f || fabsf(ui_group.ymax - ui_group_prev.ymin) <= 8.0f)) {
+        float ymin = fminf(ui_group.ymin, ui_group_prev.ymin), ymax = fmaxf(ui_group.ymax, ui_group_prev.ymax);
+        float above = ymin, below = 720.0f - ymax;
+        int w = above < 0.5f * below ? 0 : below < 0.5f * above ? 2 : 1;
+        for (int k = 0; k < 2; k++) {
+            int m = k ? ui_group_prev.n : n;
+            for (int i = 0; i < m; i++) {
+                float *mm = k ? ui_group_prev.p[i].m : ui_group.p[i].m, y = k ? ui_group_prev.p[i].pos_y : ui_group.p[i].pos_y;
+                uint32_t r = k ? ui_group_prev.p[i].recent : ui_group.p[i].recent;
+                mm[13] = w == 0 ? y * sy : w == 2 ? 720.0f - (720.0f - y) * sy : 360.0f + (y - 360.0f) * sy;
+                if (ui_nrecent - r <= UI_RECENT) ui_recent[r % UI_RECENT].vanchor = (uint8_t)w;
+            }
+        }
+        if (g_hudtrace_active)
+            LOG("[hud] stacked z %.1f: y %.1f..%.1f with %.1f..%.1f -> %c\n", ui_group.z, ui_group_prev.ymin, ui_group_prev.ymax,
+                ui_group.ymin, ui_group.ymax, "TCB"[w]);
+        vf = w;
+    }
+    ui_group_prev.n = n, ui_group_prev.v = vf, ui_group_prev.z = ui_group.z;
+    ui_group_prev.xmin = ui_group.xmin, ui_group_prev.xmax = ui_group.xmax, ui_group_prev.ymin = ui_group.ymin, ui_group_prev.ymax = ui_group.ymax;
+    for (int i = 0; i < n; i++)
+        ui_group_prev.p[i].m = ui_group.p[i].m, ui_group_prev.p[i].pos_y = ui_group.p[i].pos_y, ui_group_prev.p[i].recent = ui_group.p[i].recent;
 }
 static void ui_group_add(float *m, float pos_z, float pos_x, float pos_y, int vanchor) {
-    // Not near: more than 400 above or below (a frame drawn as its corners only, the help windows' 336 high, is one group;
-    // the target cam at y 42..82 and the Hunter Arts prompts below y 600 are two), or a piece of another anchor beside the
+    // Not near: more than 470 above or below (a frame drawn as its corners only, the help windows' 336 high, the Weapon
+    // Controls sheet's back parchment 436, is one group; the target cam at y 42..82 and the Hunter Arts prompts below
+    // y 600, 518 apart, are two), or a piece of another anchor beside the
     // group both sideways and vertically (the Guild Card's page counter, top right, next to its page; a window's own
     // pieces line up with the rest of it on one side: its other corner, its bottom edge). Wider than 16:9 by place alone:
     // the pieces' own anchors are the ones that split a window there.
@@ -973,7 +1012,7 @@ static void ui_group_add(float *m, float pos_z, float pos_x, float pos_y, int va
     bool apart = (g_render_aspect > 16.0f / 9.0f || !(ui_group.anchors & (1u << vanchor))) &&
                  (pos_x < ui_group.xmin - margin || pos_x > ui_group.xmax + margin) &&
                  (pos_y < ui_group.ymin - margin || pos_y > ui_group.ymax + margin);
-    if (ui_group.n && (fabsf(pos_z - ui_group.z) > 0.5f || pos_y < ui_group.ymin - 400.0f || pos_y > ui_group.ymax + 400.0f ||
+    if (ui_group.n && (fabsf(pos_z - ui_group.z) > 0.5f || pos_y < ui_group.ymin - 470.0f || pos_y > ui_group.ymax + 470.0f ||
                        apart || ui_group.n == UI_GROUP_MAX))
         ui_group_end();
     if (!ui_group.n) {
@@ -1683,6 +1722,7 @@ static void begin_pass(void) {
     ui_meownster_pass = false;
     ui_menu_pass = false;
     ui_pass_recent = ui_nrecent;
+    ui_group_prev.n = 0;  // (its matrices are submitted with the pass)
     pass_msaa = false;
     // (MSAA: a colour target 3D models were drawn into lately (ms_expand), while they are; once they are not, it is like
     // any other target again)
@@ -1803,7 +1843,9 @@ static bool ui_preview_map(PreviewMap *pm) {
     float w = vp[2], h = fabsf(vp[3]);
     if (w < 8.0f || w > 0.9f * pw || h > 0.98f * ph) return false;  // (the scene itself: the whole picture)
     *pm = (PreviewMap){0, 1, 0, 1};
-    // The window it is drawn in: the last quad over the viewport (inside it sideways, not below it). The last quad of all
+    // The window it is drawn in: the last quad over the viewport (inside it sideways, give or take 60: a frame drawn as
+    // one turned quad is placed by its corner, just outside the box, as the Poogie costume's at x 161 beside a box from
+    // x 204; not below it). The last quad of all
     // can be a button prompt under the window ("Rotate" under the Palico Scout preview), anchored apart from it; with
     // no quad over it, the last one of this pass, or the centre.
     int vanchor = ui_nrecent != ui_pass_recent ? ui_recent[(ui_nrecent - 1) % UI_RECENT].vanchor : 1, hanchor = -1;
@@ -1811,8 +1853,14 @@ static bool ui_preview_map(PreviewMap *pm) {
         float x0 = vp[0] / pw * 1280.0f, x1 = (vp[0] + w) / pw * 1280.0f, y1 = (fminf(vp[1], vp[1] + vp[3]) + h) / ph * 720.0f;
         for (uint32_t i = ui_nrecent; i > 0 && ui_nrecent - i < UI_RECENT; i--) {
             uint32_t k = (i - 1) % UI_RECENT;
-            if (ui_recent[k].x >= x0 && ui_recent[k].x <= x1 && ui_recent[k].y <= y1) {
+            if (ui_recent[k].x >= x0 - 60.0f && ui_recent[k].x <= x1 + 60.0f && ui_recent[k].y <= y1) {
                 vanchor = ui_recent[k].vanchor, hanchor = ui_recent[k].hanchor;
+                // A window on the left beside the menus (the Smithy's parchment, the Poogie costume's) goes Top with
+                // them, as the Request Log does (layer 100's rule); these come before the menu in their pass, so the
+                // rule's ui_menu_pass missed them: the window went Bottom, out of line with the menus.
+                if (asp < 16.0f / 9.0f && ui_menu_frame + 1 >= g_present_count && fabsf(ui_recent[k].z - 100.0f) < 0.5f && ui_recent[k].x < 630.0f &&
+                    ui_recent[k].y < 560.0f)
+                    vanchor = 0;
                 break;
             }
         }
@@ -1842,14 +1890,16 @@ static bool ui_preview_map(PreviewMap *pm) {
         }
         g_preview_box_aspect[slot] = a, g_preview_box_present[slot] = g_present_count;
         ui_pv_x0 = vp[0] / pw * 1280.0f, ui_pv_x1 = (vp[0] + w) / pw * 1280.0f;
-        ui_pv_y1 = (fminf(vp[1], vp[1] + vp[3]) + h) / ph * 720.0f, ui_pv_v = vanchor, ui_pv_present = g_present_count;
+        ui_pv_y0 = fminf(vp[1], vp[1] + vp[3]) / ph * 720.0f, ui_pv_y1 = ui_pv_y0 + h / ph * 720.0f;
+        ui_pv_v = vanchor, ui_pv_present = g_present_count;
         if (vanchor == 0) pm->sy = 0;
         else if (vanchor == 2) pm->sy = ph * (1.0f - sy);
         else pm->sy = ph * 0.5f * (1.0f - sy);
     }
     if (g_hudtrace_active)
-        LOG("[hud] preview vp %.0f,%.0f %.0fx%.0f sc %d,%d %dx%d (pass %.0fx%.0f) -> sx %.1f kx %.3f sy %.1f ky %.3f\n", vp[0], vp[1], w, h,
-            st.scissor[0][0], st.scissor[0][1], st.scissor[0][2], st.scissor[0][3], pw, ph, pm->sx, pm->kx, pm->sy, pm->ky);
+        LOG("[hud] preview vp %.0f,%.0f %.0fx%.0f sc %d,%d %dx%d (pass %.0fx%.0f) -> sx %.1f kx %.3f sy %.1f ky %.3f%s\n", vp[0], vp[1], w, h,
+            st.scissor[0][0], st.scissor[0][1], st.scissor[0][2], st.scissor[0][3], pw, ph, pm->sx, pm->kx, pm->sy, pm->ky,
+            ui_menu_frame + 1 >= g_present_count ? " menu" : "");
     return true;
 }
 
@@ -3285,13 +3335,16 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 // Layer 110 is the loading screen's scrolling backdrop: strips at y 168 / 433 / 570 that must stay one picture.
                 // The generic rule anchored each strip to a different edge and flattened it, leaving gaps between them.
                 // They keep their height (as on a stretched 16:9 canvas), so nothing moves vertically.
+                // (Only in the loading screen's pass: mid-hunt the bowgun's and the Palico boomerang's reticle and the
+                // lock-on markers use layer 110 too, and kept the stretched canvas's height: a round reticle came out 11%
+                // taller than wide at 16:10. Those mark points of the 3D picture, so they scale about the centre below.)
                 bool loading_strip = false;
                 if (fabsf(pos_z - 110.0f) < 0.5f) {
-                    sy = 1.0f;
                     // (only the strips: the lock-on markers and other effects use layer 110 too, mid-hunt, and made
                     // everything after them center-anchored, so the HUD jumped down)
                     loading_strip = fabsf(pos_y - 168.0f) < 0.3f || fabsf(pos_y - 433.0f) < 0.3f || fabsf(pos_y - 570.0f) < 0.3f;
                     if (loading_strip) ui_loading_pass = true;
+                    if (ui_loading_pass) sy = 1.0f;
                 }
                 // Front-end screens keep their backdrop 16:9: the HUD stays on it as with the 16:9 anchor. Edges / 21:9 / 32:9
                 // took their centred menus (layer 100, x 640, anchored Right) and the help box (96) off it, to the sides.
@@ -3351,7 +3404,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         }
                         // The Quest Complete banner's lower border slides in from y 739: it belongs to the bottom edge.
                         vanchor = pos_y > 650.0f ? V_BOTTOM : V_TOP;
-                        if (fabsf(pos_z - 97.0f) < 0.5f) ui_menu_pass = true;
+                        if (fabsf(pos_z - 97.0f) < 0.5f) ui_menu_pass = true, ui_menu_frame = g_present_count;
                         // The Quest Complete stamp is one picture, after its borders (x 640, by the top and bottom edges; the
                         // lower one slides in from y 739). Right / Left by place split it on a wide picture, its tilted
                         // "QUEST" (x -17) left of the rest.
@@ -3372,7 +3425,10 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // 103.0: In-hunt Status HUD & Item Selector
                         // Status HUD (Clock, HP bar, Stamina, gauges, palico status: y < 500) -> Left anchor
                         // Item Selector wheel (y >= 500) -> Right anchor
-                        if (pos_y < 500.0f) {
+                        // The bowgun's ammo list (held L) stands over the item bar, x 970..1242, y 360..568: by height it was
+                        // split at 500, its upper rows Left / Top, a gap in the middle. The status HUD ends at x 742, so the
+                        // right side (x >= 900) is the item bar's whatever its height.
+                        if (pos_y < 500.0f && pos_x < 900.0f) {
                             anchor = ANCHOR_LEFT;
                             vanchor = V_TOP;
                         } else {
@@ -3417,12 +3473,17 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // frame's lower edge slid away from it. All of it but the header and prompts (below y 600) goes top.
                     if (fabsf(pos_z - 105.0f) < 0.5f && pos_x == 215.0f && pos_y == 0.0f) ui_meownster_pass = true;
                     if (ui_meownster_pass && pos_z > 97.5f && pos_z < 105.5f) vanchor = pos_y > 600.0f ? V_BOTTOM : V_TOP;
-                    // A model preview's button prompts just under its box (the Palico Scout's "Rotate", layer 100 like its
-                    // frame) go with the frame the preview followed: the frame (one turned quad, its corner at the top
-                    // right) went Top with the target cam's rule and the prompt Bottom, below the frame. (The Smithy's
-                    // prompts and parchment are both Bottom already.)
+                    // Layer 110 outside the loading screen (the bowgun's reticle, lock-on markers) marks points of the 3D
+                    // picture, which at 16:10 (Vert+: 16:9's width, more height about the centre) is the 16:9 one scaled
+                    // about the centre: so are they, or they leave the point they mark (the fallback's thirds moved one at
+                    // y 150 to 135 instead of 171).
+                    if (fabsf(pos_z - 110.0f) < 0.5f && !ui_loading_pass) vanchor = V_CENTER;
+                    // A model preview's window (layer 100: its frame, placed by a corner just outside the box, and the
+                    // prompts just under it) goes as the preview does: the Palico Scout's frame went Top with the target
+                    // cam's rule and its "Rotate" Bottom, below the frame; the Smithy's and the Poogie costume's go Top
+                    // beside the menus (ui_preview_map).
                     if (sy < 1.0f && ui_pv_v >= 0 && ui_pv_present + 2 >= g_present_count && fabsf(pos_z - 100.0f) < 0.5f &&
-                        pos_x >= ui_pv_x0 - 30.0f && pos_x <= ui_pv_x1 + 30.0f && pos_y >= ui_pv_y1 && pos_y <= ui_pv_y1 + 40.0f)
+                        pos_x >= ui_pv_x0 - 60.0f && pos_x <= ui_pv_x1 + 60.0f && pos_y >= ui_pv_y0 - 60.0f && pos_y <= ui_pv_y1 + 40.0f)
                         vanchor = ui_pv_v == 0 ? V_TOP : ui_pv_v == 2 ? V_BOTTOM : V_CENTER;
                     // The loading backdrop's tiles (x -30, 549, 1128...: one every 579, past 1280) are one picture sideways
                     // too, from the screen's left edge: by place they went Left / Centre / Right, three copies with gaps
@@ -3438,6 +3499,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     }
                     int v = vanchor == V_TOP ? 0 : vanchor == V_BOTTOM ? 2 : 1;
                     ui_recent[ui_nrecent % UI_RECENT].x = pos_x, ui_recent[ui_nrecent % UI_RECENT].y = pos_y;
+                    ui_recent[ui_nrecent % UI_RECENT].z = pos_z;
                     ui_recent[ui_nrecent % UI_RECENT].vanchor = (uint8_t)v;
                     ui_recent[ui_nrecent % UI_RECENT].hanchor = (uint8_t)anchor;
                     ui_nrecent++;
