@@ -1050,7 +1050,19 @@ host_input.c gives the mouse to the camera while the handler ran in the last 200
 Tested 2026-10-31 in quest 101 with the control file's mousemove: 500 counts = 40 degrees left and right, 20 counts
 turn 1.6 degrees, 1 count a second still turns; pitch stops at the game's limits and comes back at once; all four
 invert settings; the in-quest start menu (the camera turns there with the stick too). Not tried by hand with a real
-mouse, nor with a gunner's aim, mounting or the second camera type (+0x980).
+mouse, nor with mounting or the second camera type (+0x980).
+
+Aiming (2026-11-08): while aiming (the Bow's R, action 0010:011 and the charging actions) the stick turns the hunter
+and the camera follows, so 0x2255cc doesn't run and the mouse fell back to the stick emulation. The aim camera
+(0x226e84) takes its yaw from the hunter's +0x14a0 and its pitch from the float at +0x14bc (-100 to 100, spread over
+camera parameters 0x1d up and 0x1e down, 56 degrees each), and steps its eye angles +0x9d8 / +0x9dc straight toward
+them. 0x4a1738 (r0 = player, r1 = mode: the weapon's kind of aim, 3 for the Bow, r2 = yaw) applies the turn, reached
+from the stick reader 0x4a07a8 only while the player may turn, so it is hooked too: the counts go to the yaw, the pitch
+(+0x14b8 / +0x14bc) and the eye's angles, with the aim's own invert option (options byte +0x66). It stands aside when
+0x2255cc also ran since its last call (camera options that keep the stick on the camera). Tested 2026-11-08 with a Bow
+at 30 and 120 fps: 500 counts = 40.1 degrees aiming and charging, as out of aiming; 150 counts up = 12 degrees; the eye
+within 3 units of the aim while turning; pitch stops at +-56 degrees. Not tried by hand with a real mouse, nor with
+the Bowguns' aim (other modes; mode 1's pitch is +0x2714 instead), nor the aim invert settings.
 
 ## Mouse wheel on the item bar (2026-10-31)
 
