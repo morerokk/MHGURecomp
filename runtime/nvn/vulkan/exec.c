@@ -2332,6 +2332,7 @@ typedef struct {
     _Atomic int state;  // 0 building, 1 ready, 2 failed, 3 dormant (in programs.bin, not built: prog_want)
     uint64_t t_req;     // (stats) when first needed
     uint64_t chash[2], ck;  // program cache: hashes of the vertex / fragment code, the lookup key
+    uint64_t wk;            // its translated sources' hash: the warm-up's key (warmed.bin; 0: not translated)
     long src_off;           // program cache: where its sources are in programs.src (when src_saved)
     uint32_t vlen, flen;
     bool src_saved;
@@ -2438,6 +2439,15 @@ static void tex_limit_check(Prog *p) {
 // Translates p and records it in programs.bin; false: failed (state 2). quiet: the prewarm's (not logged: a program
 // no draw uses may hit translator gaps no one sees)
 static _Atomic uint64_t stat_pw_failed;
+// The warm-up's key for a program (warmed.bin): its translated sources, which decide the SPIR-V (cache/spirv is keyed
+// the same way) and so the Metal libraries macOS keeps. A translator change re-warms only the programs it changed.
+static uint64_t warm_key(const char *vs, const char *fs) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (const char *s = vs; *s; s++) h = (h ^ (uint8_t)*s) * 0x100000001B3ull;
+    h = (h ^ 0xFF) * 0x100000001B3ull;  // (between the stages)
+    for (const char *s = fs; *s; s++) h = (h ^ (uint8_t)*s) * 0x100000001B3ull;
+    return h ? h : 1;
+}
 static bool translate_core(Prog *p, bool quiet) {
     uint64_t t0 = plat_now_ns();
     maxwell_gmem_base = HEAP_BASE;
@@ -2469,6 +2479,7 @@ static bool translate_core(Prog *p, bool quiet) {
     if (p->fkey.alpha_func)  // (alpha-test variants)
         snprintf(fsuf, sizeof fsuf, "fs_at%d%s", p->fkey.alpha_func, p->fkey.alpha_coverage ? "c" : "");
     save_glsl(p->fi->msl, p->code[1], fsuf);
+    p->wk = warm_key(p->vi->msl, p->fi->msl);
     progcache_store(p);
     return true;
 }
@@ -2496,6 +2507,7 @@ typedef struct {
     ShaderInfo vi, fi;  // (msl: NULL)
     uint64_t src_off;   // its sources in programs.src: vlen + flen bytes there
     uint32_t vlen, flen;
+    uint64_t wk;        // (Prog's)
 } ProgRec;
 #define PROGREC_MAGIC 0x31475250u  // "PRG1"
 #define PROGCACHE_PATH "cache/programs.bin"
@@ -2503,11 +2515,11 @@ typedef struct {
 static FILE *progcache_f, *progsrc_f;
 static bool progcache_on;
 typedef struct { char magic[8]; uint64_t stamp; } CacheHeader;
-#define CACHE_FORMAT 1  // bump when what a programs.bin / pipelines.bin record means changes here (ProgRec, PipeKey)
+#define CACHE_FORMAT 2  // bump when what a programs.bin / pipelines.bin record means changes here (ProgRec, PipeKey)
 static void pipecache_init(const CacheHeader *hdr);
-static void warmed_init(const CacheHeader *hdr);
+static void warmed_init(void);
 static bool prebuild_on(void);
-static bool warmed_has(uint64_t ck, bool add);
+static bool warmed_has(uint64_t wk, bool add);
 static void plist_load(void);
 static void plist_export_finish(void);
 static uint64_t stat_prog_cached;
@@ -2623,6 +2635,7 @@ static void progcache_open(void) {
             memcpy(p->cmax, r.cmax, sizeof p->cmax);
             memcpy(p->chash, r.chash, sizeof p->chash);
             p->ck = r.ck;
+            p->wk = r.wk;
             p->vkey = r.vkey;
             p->fkey = r.fkey;
             atomic_store(&p->state, 3);
@@ -2649,7 +2662,7 @@ static void progcache_open(void) {
     pipecache_init(&hdr);  // (attaches the recorded pipelines to their programs before these are built)
     plist_load();          // (and the shipped list's whose programs are in programs.bin)
     plist_export_finish();
-    warmed_init(&hdr);
+    warmed_init();
     // Programs a draw has used (each has recorded pipelines) are built now; the others (the prewarm's) stay dormant
     // until a draw wants one (prog_want). Under MoltenVK (prebuild_on) those whose Metal library an earlier run didn't
     // get to warm are built on the low list and warmed (warm_program).
@@ -2661,7 +2674,7 @@ static void progcache_open(void) {
             atomic_store(&p->state, 0);
             run_program(load_program, p);
             used++;
-        } else if (prebuild_on() && !warmed_has(p->ck, false)) {
+        } else if (prebuild_on() && !warmed_has(p->wk, false)) {
             p->warm = true;
             atomic_store(&p->state, 0);
             enqueue(&program_q, 2, true, load_program, p);
@@ -2691,6 +2704,7 @@ static void progcache_store(Prog *p) {
     memset(&r, 0, sizeof r);
     r.magic = PROGREC_MAGIC;
     r.ck = p->ck;
+    r.wk = p->wk;
     memcpy(r.chash, p->chash, sizeof r.chash);
     memcpy(r.code, p->code, sizeof r.code);
     memcpy(r.cmax, p->cmax, sizeof r.cmax);
@@ -2763,7 +2777,7 @@ static void prewarm_done(void) {
 // already wants it.
 static void prewarm_compile(void *arg) {
     Prog *p = arg;
-    if (prebuild_on() && !warmed_has(p->ck, false)) {  // (MoltenVK: built, then its Metal library warmed)
+    if (prebuild_on() && !warmed_has(p->wk, false)) {  // (MoltenVK: built, then its Metal library warmed)
         p->warm = true;
         compile_program(p);
         prewarm_done();
@@ -2979,7 +2993,7 @@ typedef struct {
 static FILE *pipecache_f;
 
 static void build_pipeline(void *arg);
-static bool warmed_has(uint64_t ck, bool add);
+static bool warmed_has(uint64_t wk, bool add);
 static void warm_program(void *arg);
 static _Atomic int stat_warm_queued;
 static void prewarm_pipelines(Prog *p) {
@@ -2993,7 +3007,7 @@ static void prewarm_pipelines(Prog *p) {
         if (atomic_load(&p->state) == 1) run_job(build_pipeline, q);
         else set_state(&q->state, 2, 0);
     }
-    if (!recorded && p->warm && atomic_load(&p->state) == 1 && !warmed_has(p->ck, false)) {
+    if (!recorded && p->warm && atomic_load(&p->state) == 1 && !warmed_has(p->wk, false)) {
         atomic_fetch_add(&stat_warm_queued, 1);
         run_warm(warm_program, p);
     }
@@ -3366,13 +3380,20 @@ static void build_pipeline(void *arg) {
 // library (~86 ms, against ~11 ms for the pipeline itself), which macOS keeps in its shader cache on disk: so each
 // program the prewarm translates (and its skinned variant) is built rather than left dormant, and gets a throwaway
 // pipeline (a target per output, float4 vertex inputs) on the warm workers, and an area's real pipelines come quickly
-// the first time it is seen. cache/warmed.bin lists the programs warmed (by content key), so a later run warms only
-// what an earlier one didn't get to (progcache_open).
+// the first time it is seen. cache/warmed.bin lists the programs warmed (by their sources: warm_key), so a later run
+// warms only what an earlier one didn't get to (progcache_open), and after a translator change only the programs it
+// changed (programs.bin starts over, warmed.bin doesn't).
 // On by default under MoltenVK only, where it was measured; MHGU_PREBUILD=1 / 0 turns it on / off on any driver. Off
 // with the prewarm (ShaderPrewarm = Off, MHGU_NO_PREWARM=1).
 #define WARMED_PATH "cache/warmed.bin"
+#define WARMED_FORMAT 2  // bump when the same sources may no longer make the same Metal libraries (warm_key, shaders.c)
+// The sources of earlier translators stay listed, so the table is bigger than the programs' and warmed.bin keeps the
+// newest WARMED_KEEP entries once it lists more than WARMED_TAB / 2.
+#define WARMED_TAB 65536
+#define WARMED_KEEP 16384
 static pthread_mutex_t warm_lock = PTHREAD_MUTEX_INITIALIZER;
-static uint64_t warmed_tab[PROG_TAB];
+static uint64_t warmed_tab[WARMED_TAB];
+static int warmed_n;
 static FILE *warmed_f;
 static _Atomic int stat_warmed;
 
@@ -3386,50 +3407,57 @@ static bool prebuild_on(void) {
     return on;
 }
 
-static bool warmed_has(uint64_t ck, bool add) {  // add: record it (it is warm now)
-    if (!ck) return false;
+static bool warmed_has(uint64_t wk, bool add) {  // add: record it (it is warm now)
+    if (!wk) return false;
     pthread_mutex_lock(&warm_lock);
-    uint32_t slot = (uint32_t)(ck ^ (ck >> 29)) & (PROG_TAB - 1);
-    int n = 0;
-    while (warmed_tab[slot] && warmed_tab[slot] != ck && n++ < PROG_TAB) slot = (slot + 1) & (PROG_TAB - 1);
-    bool had = warmed_tab[slot] == ck;
-    if (add && !had && !warmed_tab[slot]) {
-        warmed_tab[slot] = ck;
-        if (warmed_f) { fwrite(&ck, sizeof ck, 1, warmed_f); fflush(warmed_f); }
+    uint32_t slot = (uint32_t)(wk ^ (wk >> 29)) & (WARMED_TAB - 1);
+    while (warmed_tab[slot] && warmed_tab[slot] != wk) slot = (slot + 1) & (WARMED_TAB - 1);  // (never full: warmed_init)
+    bool had = warmed_tab[slot] == wk;
+    if (add && !had && warmed_n < WARMED_TAB - 1) {
+        warmed_tab[slot] = wk;
+        warmed_n++;
+        if (warmed_f) { fwrite(&wk, sizeof wk, 1, warmed_f); fflush(warmed_f); }
     }
     pthread_mutex_unlock(&warm_lock);
     return had;
 }
 
 // cache/warmed.bin says what the driver's own shader cache has (macOS's, for MoltenVK: it keeps an app's compiled
-// Metal libraries across updates of the app, measured): it goes with the translator (the programs' file), the driver
-// and GPU, and on macOS the OS build (a new Metal compiler).
-static void warmed_init(const CacheHeader *phdr) {
+// Metal libraries across updates of the app, measured): it goes with the driver and GPU, and on macOS the OS build (a
+// new Metal compiler). Not with the translator: its entries are the sources themselves.
+static void warmed_init(void) {
     if (!prebuild_on()) return;
-    CacheHeader whdr = *phdr, *hdr = &whdr, fh;
+    CacheHeader hdr = {"MHGUWRM", WARMED_FORMAT}, fh;
     VkPhysicalDeviceProperties *pp = &g_vk.props;
-    whdr.stamp = hash_words(whdr.stamp, (uint32_t[]){pp->driverVersion, pp->vendorID, pp->deviceID, 0}, 16);
+    hdr.stamp = hash_words(hdr.stamp, (uint32_t[]){pp->driverVersion, pp->vendorID, pp->deviceID, 0}, 16);
 #ifdef __APPLE__
     char os[64] = "";
     size_t osn = sizeof os;
-    if (sysctlbyname("kern.osversion", os, &osn, NULL, 0) == 0) whdr.stamp = hash_words(whdr.stamp, os, strlen(os));
+    if (sysctlbyname("kern.osversion", os, &osn, NULL, 0) == 0) hdr.stamp = hash_words(hdr.stamp, os, strlen(os));
 #endif
-    FILE *f = fopen(WARMED_PATH, "r+b");
-    long good = 0;
-    int n = 0;
-    if (f && fread(&fh, sizeof fh, 1, f) == 1 && !memcmp(&fh, hdr, sizeof fh)) {
-        good = (long)sizeof fh;
-        uint64_t ck;
-        while (fread(&ck, sizeof ck, 1, f) == 1) { good = ftell(f); warmed_has(ck, true), n++; }
-        fseek(f, good, SEEK_SET);
-        if (ftruncate(fileno(f), good)) {}
-    } else {
-        if (f) fclose(f);
-        f = fopen(WARMED_PATH, "wb");
-        if (f) fwrite(hdr, sizeof *hdr, 1, f);
+    FILE *f = fopen(WARMED_PATH, "rb");
+    uint64_t *keys = NULL;
+    long n = 0;
+    if (f && fread(&fh, sizeof fh, 1, f) == 1 && !memcmp(&fh, &hdr, sizeof fh)) {
+        fseek(f, 0, SEEK_END);
+        n = (ftell(f) - (long)sizeof fh) / (long)sizeof(uint64_t);  // (a cut-short last entry: left out)
+        fseek(f, (long)sizeof fh, SEEK_SET);
+        keys = n > 0 ? malloc((size_t)n * sizeof *keys) : NULL;
+        if (!keys || fread(keys, sizeof *keys, (size_t)n, f) != (size_t)n) n = 0;
     }
-    warmed_f = f;  // (set after reading: the entries read are not written again)
-    if (n) LOG("[shader] %d programs warmed in earlier runs\n", n);
+    if (f) fclose(f);
+    long from = n > WARMED_TAB / 2 ? n - WARMED_KEEP : 0;
+    for (long i = from; i < n; i++) warmed_has(keys[i], true);
+    // written again whole: without what was cut short or left out (warmed_f is set after: not written twice)
+    f = fopen(WARMED_PATH, "wb");
+    if (f) {
+        fwrite(&hdr, sizeof hdr, 1, f);
+        if (n > from) fwrite(keys + from, sizeof *keys, (size_t)(n - from), f);
+        fflush(f);
+    }
+    free(keys);
+    warmed_f = f;
+    if (n) LOG("[shader] %d programs' sources warmed in earlier runs%s\n", warmed_n, from ? " (the oldest dropped)" : "");
 }
 
 static void warm_program(void *arg) {
@@ -3460,7 +3488,7 @@ static void warm_program(void *arg) {
     if (!warm_slot_take()) return;
     if (create_pipeline(&k, &pipe) == VK_SUCCESS) {
         vkDestroyPipeline(g_vk.dev, pipe, NULL);  // (its Metal library is what was wanted: macOS has it now)
-        warmed_has(p->ck, true);
+        warmed_has(p->wk, true);
     }
     atomic_fetch_sub(&warm_running, 1);
     atomic_fetch_add(&stat_warmed, 1);
