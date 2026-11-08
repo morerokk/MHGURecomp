@@ -662,6 +662,21 @@ PATCHES): the constant is -step / 2 updates (at most 1). Checked: at 120 fps X+A
 (67 ms) after the press; 30 fps unchanged. A lone attack button is read 67 ms after the press at any frame rate,
 as on the Switch (it was 17 ms at 120 fps).
 
+Three-button inputs at high frame rates (2026-11-08): fixed in Lenient. Reported: R+X+A (Lance charge, Wyvern's Fire)
+inconsistent, by a player with the Better Inputs plugin; SDL's side was clean. The window in 0x47ca28 ends on the second
+attack-button press and resolves saved | new at once (0x47cb44), so the third button had to come in the same update,
+7 ms wide at 150 fps. Lenient's longer window made R pressed just before X and A resolve as R+X (flags +0x1444: 0x400
+R+X+A, 0x40 X+A, R held at that update is R+X+A too, 0x80 R+X). Better Inputs (no source; hooks the pad update 0x5de064)
+ORs held & mask into the pad's new-press word every update for its hold-to-repeat, so a window closed after one
+update and R held earlier + X was R+X at once. Fix (runtime/hle/combowin.c, tools/gen.py PATCHES at 0x47ca38 and
+0x47cc58, local player, step < 2.0, Lenient only): that code decides on a corrected word: R / ZR new only on a real
+press (word & ~last held), a running window sees real presses only, and a press making two of R, X, A with the third
+not held waits for it up to 2.0 of the step with the countdown stopped; the word is put back for the rest of the
+function. Measured (scripted R/X/A, MHGU_PLSNAP, player flags, not on a physical controller): 8 timings at 150 fps, 5
+failed without mods before, 6 with the plugin, none now in either; 240 fps with the plugin none. Plain R+X, R+A, X+A
+come up to 33 ms later (X+A pressed together 0 -> 33 ms); a lone press is unchanged (53 ms for a tap); Strict and 30 fps
+are as before. The plugin's held X fired ~40 times in 0.6 s at 150 fps, now 7-8 (one per 67 ms window, as at 30 fps).
+
 Mashing out of a stun and the frame rate (2026-10-30): fixed. Reported: at high frame rates mashing buttons and
 turning the stick ends a stun far sooner than at 30 fps. The stun (dizzy) is act 0x40:026 (update 0x4bcfd0, motion
 0x1a; the knockback before it is 1:085 / 1:087, not part of it): up to 4 rounds of 750 (60 fps frames, counted down
