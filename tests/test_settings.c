@@ -243,6 +243,16 @@ int main(int argc, char **argv) {
     config_format(bind_b, &keys, value, sizeof value); assert(!strcmp(value, "None"));
     keys.binds[BIND_B][0] = SDL_SCANCODE_F;
     assert(config_save(&keys, error, sizeof error) && config_live_bind(BIND_B, 0) == SDL_SCANCODE_F);
+    // A mod's keys for a row (forge_input_setKeybind): over the settings' while set, the settings' kept; NULL: theirs again
+    int mod_keys[BIND_KEYS] = {0};
+    assert(!config_parse_keys("F12", mod_keys) && !config_parse_keys("A, B, C", mod_keys));
+    assert(config_parse_keys("Left Ctrl, Q", mod_keys) && mod_keys[0] == SDL_SCANCODE_LCTRL && mod_keys[1] == SDL_SCANCODE_Q);
+    config_format_keys(mod_keys, value, sizeof value); assert(!strcmp(value, "Left Ctrl, Q"));
+    assert(!config_mod_bound(BIND_B));
+    config_mod_bind(BIND_B, mod_keys);
+    assert(config_mod_bound(BIND_B) && config_live_bind(BIND_B, 1) == SDL_SCANCODE_Q && config_player_bind(BIND_B, 0) == SDL_SCANCODE_F);
+    config_mod_bind(BIND_B, NULL);
+    assert(!config_mod_bound(BIND_B) && config_live_bind(BIND_B, 0) == SDL_SCANCODE_F);
     text = read_file(path);
     // (the section added to the file has the platform's line ends)
     assert((strstr(text, "\nB = F\r\n") || strstr(text, "\nB = F\n")) && strstr(text, "\nPlus = Return, Keypad Enter"));

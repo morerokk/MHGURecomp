@@ -136,12 +136,13 @@ typedef struct {
     bool inside;       // it is over the window
     uint32_t buttons;  // held, or pressed since the last take (1 left, 2 middle, 4 right, 8 / 16 the side buttons)
     float dx, dy;      // moved since the last take (counts while captured, else window pixels; y down)
-    int key;           // the first key, mouse button or wheel notch pressed since the last take, as [Keybinds] codes
-                       // it (config.h: an SDL scancode, KEY_MOUSE + button, KEY_WHEEL_*; 0 none), whoever took it
 } HostMouse;
 void host_input_mouse_take(HostMouse *out);  // (the presses and the movement start again: forge.c, once a frame)
 void host_input_set_mouse_free(bool free);   // a mod's own pointer: the mouse not captured, its clicks the mod's only
 bool host_input_mouse_free(void);
+// For a mod's keybind menu: the first key, mouse button or wheel notch pressed since the last take, whoever took it, as
+// [Keybinds] codes it (config.h: an SDL scancode, KEY_MOUSE + button, KEY_WHEEL_*; 0 none). Not the port's own keys but Esc.
+int host_input_key_take(void);
 void quickhunt_poll(void);               // (debug) MHGU_QUICKHUNT's presses (runtime/hle/quickhunt.c; UI thread)
 
 // ---- helpers

@@ -190,6 +190,8 @@ bool config_help(const char *key, char *buf, size_t size);  // what the default 
 // "" for one that has none), and the code a name is for (0: none of them)
 const char *config_key_name(int code);
 int config_key_code(const char *name);
+bool config_parse_keys(const char *value, int keys[BIND_KEYS]);  // a [Keybinds] value as the file has it ("" or None: no keys)
+void config_format_keys(const int keys[BIND_KEYS], char *buf, size_t size);  // as the file writes it
 const ConfigSetting *config_bind_setting(int bind);  // the [Keybinds] row of BIND_*
 
 // File values, before environment overrides and automatic resolution are resolved.
@@ -217,6 +219,7 @@ int config_live_bind(int bind, int slot);  // [Keybinds]: one of BIND_*'s keys (
 // A mod's keys for BIND_* for now (runtime/forge.c forge_input_setKeybind), over the settings' own; NULL: theirs again.
 // Not saved: mhgurecomp.ini and the settings menu keep the player's.
 void config_mod_bind(int bind, const int keys[BIND_KEYS]);
+bool config_mod_bound(int bind);  // a mod has the row for now: config_live_bind is its keys
 int config_player_bind(int bind, int slot);  // the settings' own (what config_live_bind has with no mod's)
 int config_live_fxaa_mode(void);
 int config_live_smooth_gradients(void);

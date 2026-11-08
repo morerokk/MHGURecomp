@@ -32,6 +32,7 @@
 #include "hle/input.h"
 #include "hle/itembar.h"
 #include "hle/mousecam.h"
+#include "keymap.h"
 #include "mods.h"
 #include "overlay.h"
 #include "rt.h"
@@ -107,10 +108,13 @@ static uint64_t test_until;
 // then (let go if it was, captured again after if the player had clicked in), and a click is only the mod's: not a
 // capture, not a button the game sees.
 static SDL_SpinLock mods_lock;
-static struct { float x, y, dx, dy; bool inside; uint32_t held, pressed; int key; } mods_mouse;
+static struct { float x, y, dx, dy; bool inside; uint32_t held, pressed; } mods_mouse;
 static SDL_AtomicInt mods_free;
 
-// (also the first key, mouse button or wheel notch pressed: for a mod's own keybind menu, forge_input_getKeyPressed)
+static int wheel_notches(const SDL_Event *e) {  // (> 0: up)
+    return e->wheel.integer_y * (e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1);
+}
+
 static void mods_mouse_event(const SDL_Event *e) {
     SDL_LockSpinlock(&mods_lock);
     switch (e->type) {
@@ -123,17 +127,8 @@ static void mods_mouse_event(const SDL_Event *e) {
             uint32_t b = SDL_BUTTON_MASK(e->button.button);
             if (e->button.down) mods_mouse.held |= b, mods_mouse.pressed |= b;
             else mods_mouse.held &= ~b;
-            if (e->button.down && !mods_mouse.key) mods_mouse.key = KEY_MOUSE + e->button.button;
         }
         break;
-    case SDL_EVENT_KEY_DOWN:
-        if (!e->key.repeat && e->key.scancode < SDL_SCANCODE_COUNT && !mods_mouse.key) mods_mouse.key = (int)e->key.scancode;
-        break;
-    case SDL_EVENT_MOUSE_WHEEL: {
-        int n = e->wheel.integer_y * (e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1);
-        if (n && !mods_mouse.key) mods_mouse.key = n > 0 ? KEY_WHEEL_UP : KEY_WHEEL_DOWN;
-        break;
-    }
     case SDL_EVENT_WINDOW_MOUSE_ENTER: case SDL_EVENT_WINDOW_MOUSE_LEAVE:
         mods_mouse.inside = e->type == SDL_EVENT_WINDOW_MOUSE_ENTER;
         break;
@@ -149,10 +144,34 @@ void host_input_mouse_take(HostMouse *out) {
     out->x = mods_mouse.x, out->y = mods_mouse.y, out->inside = mods_mouse.inside;
     out->buttons = mods_mouse.held | mods_mouse.pressed;  // (a click shorter than a frame is seen once)
     out->dx = mods_mouse.dx, out->dy = mods_mouse.dy;
-    out->key = mods_mouse.key;
-    mods_mouse.pressed = 0, mods_mouse.dx = mods_mouse.dy = 0, mods_mouse.key = 0;
+    mods_mouse.pressed = 0, mods_mouse.dx = mods_mouse.dy = 0;
     SDL_UnlockSpinlock(&mods_lock);
 }
+
+// ---- the key pressed, for a mod's own keybind menu (forge_input_getKeyPressed): the first key, mouse button or wheel
+// notch since the last take, as [Keybinds] codes it, whoever took it. Not the port's own keys (keymap.h), which a row
+// can't have, but Esc: to cancel with, as the settings menu does.
+static SDL_AtomicInt mods_key;
+
+static void mods_key_event(const SDL_Event *e) {
+    int code = 0;
+    switch (e->type) {
+    case SDL_EVENT_KEY_DOWN:
+        if (!e->key.repeat && e->key.scancode < SDL_SCANCODE_COUNT) code = (int)e->key.scancode;
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        if (e->button.button >= 1 && e->button.button <= SDL_BUTTON_X2) code = KEY_MOUSE + e->button.button;
+        break;
+    case SDL_EVENT_MOUSE_WHEEL: {
+        int n = wheel_notches(e);
+        if (n) code = n > 0 ? KEY_WHEEL_UP : KEY_WHEEL_DOWN;
+        break;
+    }
+    }
+    if (code && (code == SDL_SCANCODE_ESCAPE || !key_reserved(code))) SDL_CompareAndSwapAtomicInt(&mods_key, 0, code);
+}
+
+int host_input_key_take(void) { return SDL_SetAtomicInt(&mods_key, 0); }
 
 void host_input_set_mouse_free(bool free) {
     if (SDL_SetAtomicInt(&mods_free, free) != free) LOG("[input] %s\n", free ? "the mouse is free for a mod" : "the mouse is the game's again");
@@ -620,6 +639,7 @@ static bool chat_mouse(const SDL_Event *e) {
 void host_input_event(const SDL_Event *e) {
     if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) pad_pressed(e->gbutton.which);
     mods_mouse_event(e);  // (the mouse for mods: every event, whoever takes it)
+    mods_key_event(e);
     if (overlay_event(e)) return;  // (Forge's menu open: keyboard and mouse are its)
     if (chat_mouse(e)) return;  // (typing a line of chat: the mouse drags its box)
     if (textinput_event(e)) return;  // (typing into a text entry: not controller buttons)
@@ -667,7 +687,7 @@ void host_input_event(const SDL_Event *e) {
         if (mouse_captured) mouse_dx += e->motion.xrel, mouse_dy += e->motion.yrel;
         break;
     case SDL_EVENT_MOUSE_WHEEL: {  // (what [Keybinds] says: by default the item bar)
-        int n = e->wheel.integer_y * (e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1);
+        int n = wheel_notches(e);
         if (mouse_captured && n) wheel_turn(n);
         break;
     }

@@ -242,6 +242,7 @@ void config_mod_bind(int bind, const int keys[BIND_KEYS]) {
 int config_live_bind(int bind, int slot) {
     return SDL_GetAtomicInt(&(SDL_GetAtomicInt(&mod_bind_set[bind]) ? mod_binds : live_binds)[bind][slot]);
 }
+bool config_mod_bound(int bind) { return SDL_GetAtomicInt(&mod_bind_set[bind]) != 0; }
 int config_player_bind(int bind, int slot) { return SDL_GetAtomicInt(&live_binds[bind][slot]); }
 void config_live_ldn(char *server, size_t server_size, char *key, size_t key_size) {
     SDL_LockSpinlock(&live_ldn_lock);

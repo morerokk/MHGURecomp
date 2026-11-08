@@ -187,6 +187,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Gold", "Dorado"},
         {"Blue", "Azul"},
         {"Chat key", "Tecla de chat"},
+        {"set by a mod:", "asignada por un mod:"},
         {"None", "Ninguna"},
         {"in use:", "en uso:"},
         {"That key can't be used for chat.", "Esa tecla no se puede usar para el chat."},

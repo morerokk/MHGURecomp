@@ -875,6 +875,29 @@ static bool parse_bool(const char *v, int *out) {
     return true;
 }
 
+bool config_parse_keys(const char *value, int keys[BIND_KEYS]) {  // names separated by ',' ("Return, Keypad Enter"), or None
+    char v[256];
+    snprintf(v, sizeof v, "%s", value);
+    squash(v);
+    int got[BIND_KEYS] = {0}, n = 0;
+    if (strcmp(v, "none") && *v)
+        for (const char *p = value;; p++) {
+            size_t len = strcspn(p, ",");
+            char one[64];
+            snprintf(one, sizeof one, "%.*s", (int)len, p);
+            char *a = one, *b = one + strlen(one);
+            while (isspace((unsigned char)*a)) a++;
+            while (b > a && isspace((unsigned char)b[-1])) *--b = 0;
+            int code = config_key_code(a);
+            if (!code || !bind_key_valid(code) || n == BIND_KEYS) return false;
+            if (!n || got[0] != code) got[n++] = code;
+            p += len;
+            if (!*p) break;
+        }
+    memcpy(keys, got, sizeof got);
+    return true;
+}
+
 bool config_parse(const ConfigSetting *s, const char *value, Config *c) {
     char v[256], *end;
     snprintf(v, sizeof v, "%s", value);
@@ -913,27 +936,17 @@ bool config_parse(const ConfigSetting *s, const char *value, Config *c) {
     case SET_TEXT:  // (as written: host names keep their dashes)
         snprintf((char *)c + s->field, s->field2, "%s", value);
         return true;
-    case SET_KEYS: {  // names separated by ',' ("Return, Keypad Enter"), or None
-        int keys[BIND_KEYS] = {0}, n = 0;
-        if (strcmp(v, "none") && *v)
-            for (const char *p = value;; p++) {
-                size_t len = strcspn(p, ",");
-                char one[64];
-                snprintf(one, sizeof one, "%.*s", (int)len, p);
-                char *a = one, *b = one + strlen(one);
-                while (isspace((unsigned char)*a)) a++;
-                while (b > a && isspace((unsigned char)b[-1])) *--b = 0;
-                int code = config_key_code(a);
-                if (!code || !bind_key_valid(code) || n == BIND_KEYS) return false;
-                if (!n || keys[0] != code) keys[n++] = code;
-                p += len;
-                if (!*p) break;
-            }
-        memcpy(field_int(c, s->field), keys, sizeof keys);
-        return true;
-    }
+    case SET_KEYS: return config_parse_keys(value, field_int(c, s->field));
     }
     return false;
+}
+
+void config_format_keys(const int keys[BIND_KEYS], char *buf, size_t size) {
+    size_t n = 0;
+    if (size) *buf = 0;
+    for (int i = 0; i < BIND_KEYS; i++)
+        if (keys[i] && n < size) n += (size_t)snprintf(buf + n, size - n, "%s%s", n ? ", " : "", config_key_name(keys[i]));
+    if (!n) snprintf(buf, size, "None");
 }
 
 void config_format(const ConfigSetting *s, const Config *c, char *buf, size_t size) {
@@ -959,15 +972,7 @@ void config_format(const ConfigSetting *s, const Config *c, char *buf, size_t si
         else snprintf(buf, size, "%g", (double)fv);
         break;
     case SET_TEXT: snprintf(buf, size, "%s", (const char *)c + s->field); break;
-    case SET_KEYS: {
-        const int *k = field_int(c, s->field);
-        size_t n = 0;
-        if (size) *buf = 0;
-        for (int i = 0; i < BIND_KEYS; i++)
-            if (k[i] && n < size) n += (size_t)snprintf(buf + n, size - n, "%s%s", n ? ", " : "", config_key_name(k[i]));
-        if (!n) snprintf(buf, size, "None");
-        break;
-    }
+    case SET_KEYS: config_format_keys(field_int(c, s->field), buf, size); break;
     }
 }
 

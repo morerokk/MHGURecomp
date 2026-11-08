@@ -923,7 +923,7 @@ static float touch_x, touch_y;
 static bool mouse_on;  // (the mouse for mods, the port's own calls below: the free pointer is on the picture)
 static float mouse_x, mouse_y, mouse_dx, mouse_dy;
 static uint32_t mouse_buttons;
-static int mouse_key;  // the first key, mouse button or wheel notch pressed since the last frame ([Keybinds] code)
+static int pressed_key;  // the first key, mouse button or wheel notch pressed since the last frame ([Keybinds] code)
 
 // A point of the window (mx, my: pixels) on the game's picture, which is fitted into the window by its shape
 // (g_render_aspect) and centred. The picture is the console's 1280x720 screen: its HUD canvas (g_ui_anchor_aspect wide
@@ -965,7 +965,6 @@ static void mouse_frame(void) {
     mouse_on = w && m.inside && !menu && !SDL_GetWindowRelativeMouseMode(w) && window_to_screen(w, m.x, m.y, &mouse_x, &mouse_y);
     mouse_buttons = m.buttons;
     mouse_dx = menu ? 0.0f : m.dx, mouse_dy = menu ? 0.0f : m.dy;
-    mouse_key = m.key;  // (also with Forge's menu open: a mod's keybind menu is in it)
 }
 
 static void input_frame(void) {
@@ -978,6 +977,7 @@ static void input_frame(void) {
     for (int i = 0; i < 256; i++) keys_now[i] = k && i < n ? k[i] : 0;
     touch_down = mouse_touch(&touch_x, &touch_y);
     mouse_frame();
+    pressed_key = host_input_key_take();  // (also with Forge's menu open: a mod's keybind menu is in it)
 }
 
 static bool key(const uint8_t *s, uint32_t k) { return k < 256 && s[k]; }
@@ -1023,34 +1023,55 @@ static int bind_of(uint32_t row) {  // (a guest string) -> BIND_*, -1 none
         if (config_bind_setting(i) == s) return i;
     return -1;
 }
+static void keys_out(uint32_t out, uint32_t size, const int keys[BIND_KEYS]) {  // (to a guest buffer, as the file writes them)
+    char buf[128];
+    config_format_keys(keys, buf, sizeof buf);
+    if (out && size) snprintf((char *)G2H(out), size, "%s", buf);
+}
 // forge_input_setKeybind(const char *row, const char *keys): the row's keys from now on (up to two); NULL: the settings'
-// again. False, and nothing changed: no such row, or a key without a name or one the port keeps (Esc, Insert, F1...).
+// again. A row has one mod's keys at a time: the last call wins, and NULL gives it back whoever set it (getModKeybind
+// shows what is set). False, and nothing changed: no such row, an empty string ("None" is no keys), a key without a name
+// or one the port keeps (Esc, Insert, F1...), or the chat key.
 HLE_FUNC("forge_input_setKeybind", f_in_set_keybind) {
     int bind = bind_of(ARG(0));
     if (bind < 0) { RET(0); return; }
     if (!ARG(1)) { config_mod_bind(bind, NULL); RET(1); return; }
-    static Config parsed;  // (the game's thread only)
-    if (!config_parse(config_bind_setting(bind), gstr(ARG(1)), &parsed)) { RET(0); return; }
-    config_mod_bind(bind, parsed.binds[bind]);
+    const char *text = gstr(ARG(1));
+    int keys[BIND_KEYS], chat = config_live_chat_key();
+    if (!config_parse_keys(text, keys)) { RET(0); return; }
+    // (no keys only if it says so: "" is a mod's empty buffer, and would take the button away)
+    if (!keys[0] && SDL_strncasecmp(text + strspn(text, " \t"), "none", 4)) { RET(0); return; }
+    for (int k = 0; chat && k < BIND_KEYS; k++)
+        if (keys[k] == chat) { RET(0); return; }
+    config_mod_bind(bind, keys);
     RET(1);
 }
 // forge_input_getKeybind(const char *row, char *out, uint32_t size): the player's own keys for the row (the settings',
 // whatever a mod set), as the file writes them. False: no such row.
 HLE_FUNC("forge_input_getKeybind", f_in_get_keybind) {
     int bind = bind_of(ARG(0));
-    if (bind < 0 || !ARG(1) || !ARG(2)) { RET(bind >= 0); return; }
-    static Config now;
-    char buf[128];
-    for (int k = 0; k < BIND_KEYS; k++) now.binds[bind][k] = config_player_bind(bind, k);
-    config_format(config_bind_setting(bind), &now, buf, sizeof buf);
-    snprintf((char *)G2H(ARG(1)), ARG(2), "%s", buf);
+    if (bind < 0) { RET(0); return; }
+    int keys[BIND_KEYS];
+    for (int k = 0; k < BIND_KEYS; k++) keys[k] = config_player_bind(bind, k);
+    keys_out(ARG(1), ARG(2), keys);
+    RET(1);
+}
+// forge_input_getModKeybind(const char *row, char *out, uint32_t size): the keys any mod gave the row for now, as the
+// file writes them. False: no mod has the row, or no such row.
+HLE_FUNC("forge_input_getModKeybind", f_in_get_mod_keybind) {
+    int bind = bind_of(ARG(0));
+    if (bind < 0 || !config_mod_bound(bind)) { RET(0); return; }
+    int keys[BIND_KEYS];
+    for (int k = 0; k < BIND_KEYS; k++) keys[k] = config_live_bind(bind, k);
+    keys_out(ARG(1), ARG(2), keys);
     RET(1);
 }
 // forge_input_getKeyPressed(char *out, uint32_t size): the first key, mouse button or wheel notch pressed in the game's
 // window since the last frame, also one Forge's menu or the game took, by its [Keybinds] name ("Left Ctrl", "Mouse 4",
-// "Wheel Up"): for a mod's own keybind menu. False: none (or one without a name).
+// "Wheel Up"): for a mod's own keybind menu. Not the port's own keys, which a row can't have, but "Escape", to cancel
+// with. False: none (or one without a name).
 HLE_FUNC("forge_input_getKeyPressed", f_in_key_pressed) {
-    const char *name = mouse_key ? config_key_name(mouse_key) : "";
+    const char *name = pressed_key ? config_key_name(pressed_key) : "";
     if (!*name) { RET(0); return; }
     if (ARG(0) && ARG(1)) snprintf((char *)G2H(ARG(0)), ARG(1), "%s", name);
     RET(1);
