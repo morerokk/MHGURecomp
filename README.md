@@ -302,10 +302,10 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   each other's hubs; empty = public, on Android public among Android players only), `SyncSmallMonsters`,
   `ShareUrgentCredit` (default On: an Urgent quest someone else posted counts for you too when you clear it, if you
   have unlocked it yourself)
-- `[Monster HP]`: HP factors for 1 to 4 hunters in Hub quests, and per-quest exceptions (default: all 1, the
+- `[Monster HP]`: factors on monster HP and part HP (flinches, breaks, severs) for 1 to 4 hunters in Hub quests, and per-quest exceptions (default: all 1, the
   original game)
 - `[Village Quests]`: `VillageQuestsInHub` (default On), `HubHP` (default 2.0: Village quests posted in the Hub
-  multiply their monsters' HP by this first, then by the `[Monster HP]` factor)
+  multiply their monsters' HP and part HP by this first, then by the `[Monster HP]` factor)
 - `[Discord]`: `RichPresence` (default On: your Discord profile shows where you are, the monsters you're hunting
   and the map, how many are in your hub or quest; Discord must be running on the same computer), `ShowHunter`
   (default On: your hunter's name, HR and weapon type too)

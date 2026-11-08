@@ -302,10 +302,10 @@ Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
   jugadores con la misma clave ven las salas de los demás; vacío = públicas, en Android públicas solo entre jugadores
   de Android), `SyncSmallMonsters`, `ShareUrgentCredit` (On por defecto: una misión Urgente que publicó otra persona
   también cuenta para ti al completarla, si la tienes desbloqueada)
-- `[Monster HP]`: factores de vida para 1 a 4 cazadores en las misiones de la Sala, y excepciones por misión (por
+- `[Monster HP]`: factores de vida de los monstruos y de sus partes (retrocesos, roturas, cortes) para 1 a 4 cazadores en las misiones de la Sala, y excepciones por misión (por
   defecto: todos 1, como el juego original)
 - `[Village Quests]`: `VillageQuestsInHub` (On por defecto), `HubHP` (2.0 por defecto: las misiones de la Aldea
-  publicadas en la Sala multiplican primero la vida de sus monstruos por este valor y luego por el factor de
+  publicadas en la Sala multiplican primero la vida de sus monstruos y de sus partes por este valor y luego por el factor de
   `[Monster HP]`)
 - `[Discord]`: `RichPresence` (On por defecto: tu perfil de Discord muestra dónde estás, los monstruos que cazas y el
   mapa, y cuántos hay en tu sala o misión; Discord tiene que estar abierto en el mismo ordenador), `ShowHunter` (On

@@ -68,7 +68,7 @@ draft and requires a subsequent Save. A write failure preserves draft and file.
 
 Save applies volume, FPS, FOV, FXAA, MSAA, VSync, mouse sensitivity, face mapping,
 background input and confirmation policy without restarting.
-So do Monster HP's factors and quest overrides and the Village Quests settings (the next large monster's HP, the
+So do Monster HP's factors and quest overrides and the Village Quests settings (the next large monster's HP, part HP at its next refill, the
 counter's rank or star menu).
 Multiplayer's Port and Join (from the next hub hosted or searched for) and SyncSmallMonsters apply at Save too.
 BonusContent counts from the next time the game opens the save, and the cheats folder is read again each time the
