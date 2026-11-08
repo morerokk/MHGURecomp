@@ -882,6 +882,13 @@ static struct {
     uint8_t anchors;  // (bit per vertical anchor among its pieces)
     struct { float *m, pos_x, pos_y; uint8_t vanchor; uint32_t recent; } p[UI_GROUP_MAX];
 } ui_group;
+// The group settled last in this pass (16:10), as it was placed: a window stacked right under it on the same layer
+// (the chat log's box under its "Chat" label) goes with it (ui_group_end)
+static struct {
+    int n, v;  // v: the anchor its pieces got (one for all; -1 when they kept their own, which disagreed)
+    float z, xmin, xmax, ymin, ymax;
+    struct { float *m, pos_y; uint32_t recent; } p[UI_GROUP_MAX];
+} ui_group_prev;
 // Each group's final anchor, by its first piece (layer and place): the HUD is drawn the same way every frame, so the
 // scissors of a group's pieces, recorded before the group is complete, take the anchor it got last frame
 #define UI_KNOWN 64
@@ -955,14 +962,44 @@ static void ui_group_end(void) {
     int v = n < 2 ? -1 : ui_group_vanchor();
     ui_group_remember(v >= 0 ? v : ui_group.p[0].vanchor);
     ui_group.n = 0;
-    if (v < 0) return;
     float sy = g_render_aspect / (16.0f / 9.0f);
-    for (int i = 0; i < n; i++) {
-        float y = ui_group.p[i].pos_y;
-        ui_group.p[i].m[13] = v == 0 ? y * sy : v == 2 ? 720.0f - (720.0f - y) * sy : 360.0f + (y - 360.0f) * sy;
-        if (ui_nrecent - ui_group.p[i].recent <= UI_RECENT) ui_recent[ui_group.p[i].recent % UI_RECENT].vanchor = (uint8_t)v;
+    if (v >= 0) {
+        for (int i = 0; i < n; i++) {
+            float y = ui_group.p[i].pos_y;
+            ui_group.p[i].m[13] = v == 0 ? y * sy : v == 2 ? 720.0f - (720.0f - y) * sy : 360.0f + (y - 360.0f) * sy;
+            if (ui_nrecent - ui_group.p[i].recent <= UI_RECENT) ui_recent[ui_group.p[i].recent % UI_RECENT].vanchor = (uint8_t)v;
+        }
+        if (g_hudtrace_active) LOG("[hud] group z %.1f: %d pieces, y %.1f..%.1f -> %c\n", ui_group.z, n, ui_group.ymin, ui_group.ymax, "TCB"[v]);
     }
-    if (g_hudtrace_active) LOG("[hud] group z %.1f: %d pieces, y %.1f..%.1f -> %c\n", ui_group.z, n, ui_group.ymin, ui_group.ymax, "TCB"[v]);
+    // A window stacked right on the one before it (same layer, overlapping sideways, its top within 8 of the other's
+    // bottom or the other way round) is one picture with it: the chat log's "Chat" label (y 547..598, Top) and its
+    // message box (596..708, Bottom) came apart by 70. When the two went different ways, both take the anchor of where
+    // the pair sits, as one group would; when they agree nothing changes.
+    int vf = v >= 0 ? v : ui_group.p[0].vanchor;  // (v < 0: its pieces agree)
+    if (ui_group_prev.n && vf >= 0 && ui_group_prev.v >= 0 && vf != ui_group_prev.v && fabsf(ui_group_prev.z - ui_group.z) < 0.5f &&
+        ui_group.xmin < ui_group_prev.xmax && ui_group.xmax > ui_group_prev.xmin &&
+        (fabsf(ui_group.ymin - ui_group_prev.ymax) <= 8.0f || fabsf(ui_group.ymax - ui_group_prev.ymin) <= 8.0f)) {
+        float ymin = fminf(ui_group.ymin, ui_group_prev.ymin), ymax = fmaxf(ui_group.ymax, ui_group_prev.ymax);
+        float above = ymin, below = 720.0f - ymax;
+        int w = above < 0.5f * below ? 0 : below < 0.5f * above ? 2 : 1;
+        for (int k = 0; k < 2; k++) {
+            int m = k ? ui_group_prev.n : n;
+            for (int i = 0; i < m; i++) {
+                float *mm = k ? ui_group_prev.p[i].m : ui_group.p[i].m, y = k ? ui_group_prev.p[i].pos_y : ui_group.p[i].pos_y;
+                uint32_t r = k ? ui_group_prev.p[i].recent : ui_group.p[i].recent;
+                mm[13] = w == 0 ? y * sy : w == 2 ? 720.0f - (720.0f - y) * sy : 360.0f + (y - 360.0f) * sy;
+                if (ui_nrecent - r <= UI_RECENT) ui_recent[r % UI_RECENT].vanchor = (uint8_t)w;
+            }
+        }
+        if (g_hudtrace_active)
+            LOG("[hud] stacked z %.1f: y %.1f..%.1f with %.1f..%.1f -> %c\n", ui_group.z, ui_group_prev.ymin, ui_group_prev.ymax,
+                ui_group.ymin, ui_group.ymax, "TCB"[w]);
+        vf = w;
+    }
+    ui_group_prev.n = n, ui_group_prev.v = vf, ui_group_prev.z = ui_group.z;
+    ui_group_prev.xmin = ui_group.xmin, ui_group_prev.xmax = ui_group.xmax, ui_group_prev.ymin = ui_group.ymin, ui_group_prev.ymax = ui_group.ymax;
+    for (int i = 0; i < n; i++)
+        ui_group_prev.p[i].m = ui_group.p[i].m, ui_group_prev.p[i].pos_y = ui_group.p[i].pos_y, ui_group_prev.p[i].recent = ui_group.p[i].recent;
 }
 static void ui_group_add(float *m, float pos_z, float pos_x, float pos_y, int vanchor) {
     // Not near: more than 470 above or below (a frame drawn as its corners only, the help windows' 336 high, the Weapon
@@ -1685,6 +1722,7 @@ static void begin_pass(void) {
     ui_meownster_pass = false;
     ui_menu_pass = false;
     ui_pass_recent = ui_nrecent;
+    ui_group_prev.n = 0;  // (its matrices are submitted with the pass)
     pass_msaa = false;
     // (MSAA: a colour target 3D models were drawn into lately (ms_expand), while they are; once they are not, it is like
     // any other target again)

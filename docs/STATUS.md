@@ -1277,7 +1277,8 @@ old way while on.
    as wide as at 16:9, and a prompt just under its box (the Palico Scout's "Rotate") goes with its frame; a preview window beside the menus (the Smithy's
    parchment, the Poogie costume's) goes Top with them, whichever is drawn first; layer 110 outside the loading screen
    (the bowgun's reticle, lock-on markers) is not stretched and scales about the centre; the bowgun's ammo list (layer 103, right side) goes with the item
-   bar; a window's pieces up to 470 apart are one group (the Weapon Controls sheet's back parchment, 436 high)
+   bar; a window's pieces up to 470 apart are one group (the Weapon Controls sheet's back parchment, 436 high), and a window stacked right on another of its layer
+   that went the other way takes the pair's anchor with it (the chat log's "Chat" label over its box)
    (the Palico Scout's "Rotate" prompt). MHGU_CONTROL `hudtrace` logs a frame's HUD quads and their anchors. Left: the HUD's layout elsewhere (title, town, quest board, item box) unverified; at Edges
    the Hunter Arts prompt goes right with its layer; whether an off-screen 3D view (equipment box preview, guild
    card) uses one of the three cameras (they are left alone unless 16:9).
