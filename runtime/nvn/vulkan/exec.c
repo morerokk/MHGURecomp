@@ -3285,13 +3285,16 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 // Layer 110 is the loading screen's scrolling backdrop: strips at y 168 / 433 / 570 that must stay one picture.
                 // The generic rule anchored each strip to a different edge and flattened it, leaving gaps between them.
                 // They keep their height (as on a stretched 16:9 canvas), so nothing moves vertically.
+                // (Only in the loading screen's pass: mid-hunt the bowgun's and the Palico boomerang's reticle and the
+                // lock-on markers use layer 110 too, and kept the stretched canvas's height: a round reticle came out 11%
+                // taller than wide at 16:10. Those mark points of the 3D picture, so they scale about the centre below.)
                 bool loading_strip = false;
                 if (fabsf(pos_z - 110.0f) < 0.5f) {
-                    sy = 1.0f;
                     // (only the strips: the lock-on markers and other effects use layer 110 too, mid-hunt, and made
                     // everything after them center-anchored, so the HUD jumped down)
                     loading_strip = fabsf(pos_y - 168.0f) < 0.3f || fabsf(pos_y - 433.0f) < 0.3f || fabsf(pos_y - 570.0f) < 0.3f;
                     if (loading_strip) ui_loading_pass = true;
+                    if (ui_loading_pass) sy = 1.0f;
                 }
                 // Front-end screens keep their backdrop 16:9: the HUD stays on it as with the 16:9 anchor. Edges / 21:9 / 32:9
                 // took their centred menus (layer 100, x 640, anchored Right) and the help box (96) off it, to the sides.
@@ -3417,6 +3420,11 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // frame's lower edge slid away from it. All of it but the header and prompts (below y 600) goes top.
                     if (fabsf(pos_z - 105.0f) < 0.5f && pos_x == 215.0f && pos_y == 0.0f) ui_meownster_pass = true;
                     if (ui_meownster_pass && pos_z > 97.5f && pos_z < 105.5f) vanchor = pos_y > 600.0f ? V_BOTTOM : V_TOP;
+                    // Layer 110 outside the loading screen (the bowgun's reticle, lock-on markers) marks points of the 3D
+                    // picture, which at 16:10 (Vert+: 16:9's width, more height about the centre) is the 16:9 one scaled
+                    // about the centre: so are they, or they leave the point they mark (the fallback's thirds moved one at
+                    // y 150 to 135 instead of 171).
+                    if (fabsf(pos_z - 110.0f) < 0.5f && !ui_loading_pass) vanchor = V_CENTER;
                     // A model preview's button prompts just under its box (the Palico Scout's "Rotate", layer 100 like its
                     // frame) go with the frame the preview followed: the frame (one turned quad, its corner at the top
                     // right) went Top with the target cam's rule and the prompt Bottom, below the frame. (The Smithy's
