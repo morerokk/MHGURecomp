@@ -952,7 +952,7 @@ static bool shot_frame(uint64_t f) {
 void backend_present(NvnTexture *t) {
     extern void vi_apply_framerate(void);
     vi_apply_framerate();
-    overlay_tick();  // (its frame, when no Forge plugin builds it: the status line. Before the lock: it takes it)
+    overlay_tick();  // (its frame, when no Forge plugin builds it: notices. Before the lock: it takes it)
     vk_lock();
     if (vk_hdr_tracking()) vk_hdr_present(t);  // (HDR: learns the frame's full-screen image, hdr.c)
     if (g_fsr_on) t = vk_fsr_present(t);  // FSR: its output-size picture with the HUD (fsr.c)

@@ -55,9 +55,6 @@ bool romfs_mods_progress(int *done, int *total);                // (runtime/romf
 
 static std::atomic<bool> g_enabled, g_ready, g_open, g_wants_text;
 static std::atomic<bool> g_forge_frames;  // forge.c's frame hook builds the frames (else overlay_tick)
-static std::mutex g_status_lock;
-static char g_status[160];
-static std::atomic<bool> g_status_on;
 static std::atomic<bool> g_settings_open, g_forge_open;
 static std::atomic<bool> g_forge_over;  // the Forge menu was opened from the settings: they wait under it, not drawn
 static std::mutex g_frame_lock;  // ImGui's frame: the game's thread, or the loading screen's before the game's first
@@ -455,35 +452,12 @@ void overlay_init(const char *font_path, float font_size, int menu_key) {
             SDL_GetScancodeName((SDL_Scancode)menu_key), font ? font_path : "ImGui's", g_font_size);
 }
 
-void overlay_status(const char *text) {
-    std::lock_guard<std::mutex> l(g_status_lock);
-    snprintf(g_status, sizeof g_status, "%s", text ? text : "");
-    g_status_on = g_status[0] != 0;
-}
-
 static bool notice_due(uint64_t now);
 
 void overlay_tick(void) {
-    if (g_forge_frames || (!g_status_on && !g_enabled && !notice_due(SDL_GetTicksNS()))) return;
+    if (g_forge_frames || (!g_enabled && !notice_due(SDL_GetTicksNS()))) return;
     if (!g_enabled) overlay_init(nullptr, 0, 0);  // (ImGui's own font; no menu)
     overlay_frame(nullptr);
-}
-
-// The status line: small, in the lower left corner, on a dark rounded backing so it reads over any scene.
-static void draw_status(float scale) {
-    char text[sizeof g_status];
-    {
-        std::lock_guard<std::mutex> l(g_status_lock);
-        snprintf(text, sizeof text, "%s", g_status);
-    }
-    if (!text[0]) return;
-    ImDrawList *dl = ImGui::GetForegroundDrawList();
-    float size = g_font_size * scale, pad = 6 * scale, margin = 14 * scale;
-    ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, 0, text);
-    ImVec2 at(margin + pad, ImGui::GetIO().DisplaySize.y - margin - pad - ts.y);
-    dl->AddRectFilled(ImVec2(at.x - pad, at.y - pad), ImVec2(at.x + ts.x + pad, at.y + ts.y + pad),
-                      IM_COL32(0, 0, 0, 150), 4 * scale);
-    dl->AddText(ImGui::GetFont(), size, at, IM_COL32(235, 235, 235, 255), text);
 }
 
 // ------------------------------------------------------------------ notices (any thread -> game thread)
@@ -838,7 +812,7 @@ void overlay_frame(void *cpu) {
     if (!g_ready) return;
     std::lock_guard<std::mutex> frame(g_frame_lock);
     if (!g_settings_open) { bool closed = false; settings_panel(&closed); }
-    bool open = g_open, free_render = cpu && forge_plugins_have(FORGE_IMGUI_FREE_RENDER), status = g_status_on;
+    bool open = g_open, free_render = cpu && forge_plugins_have(FORGE_IMGUI_FREE_RENDER);
     uint64_t now = SDL_GetTicksNS();
     bool notice = notice_due(now);
     char line[256];
@@ -856,7 +830,7 @@ void overlay_frame(void *cpu) {
 #else
     bool hdr_stats = false;
 #endif
-    if (!open && !free_render && !status && !notice && !chat && !fps && !loading && !hdr_stats) {  // (nothing to draw)
+    if (!open && !free_render && !notice && !chat && !fps && !loading && !hdr_stats) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
         apply_input(io);  // (keep the queue short)
@@ -922,7 +896,6 @@ void overlay_frame(void *cpu) {
         if (!keep) set_open(false);
     }
     if (cpu) forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);
-    if (status) draw_status(scale);
     if (notice) draw_notice(now, scale);
     if (chat) draw_chat(line, now, scale);
     if (fps) draw_fps(now);
