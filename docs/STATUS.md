@@ -994,9 +994,16 @@ the reads.
   out once, and an entry outside it skipped before the loops); the time is in the mod's own code, which only the
   interpreter runs (~20 cycles an instruction: faster would take pre-decoding, not a quick change). Quest 101 itself
   loads as fast with it as without.
-- Not changed: the game's waits. Skipping state 9's 2.5 s (the card shown with nothing loading) would be the biggest
-  cut, but it is the game's design: an option at most, Next steps 13 has the details. The town's load from the title
-  wasn't measured this way.
+- The game's waits, shortened when not in a network session (2026-11-08, runtime/hle/fastload.c; gate: !ldn_net_up(),
+  checked with a local hub: the waits stay; MHGU_NO_FASTLOAD=1 for the game's timing). Three, none of them loading:
+  state 9's count; the music streams' stop fade, 1500 ms leaving a town (0x6de8f4) and 1000 ms for a zone change
+  (0x6de048), both through 0x6e3ecc, now 300 ms; and the counter 0x6dee48 polls on the black screen (sound +0x1c, to
+  60 or 90 steps), now 4.5 times as fast. 0x6dee48 still waits until the streams and voices have stopped. Measured at 60
+  fps, the fade's start to the arrival: Depart on Quest 5.0 -> 1.8 s, village to village 2.6 -> 1.4, zone change 1.4 ->
+  0.7. The count is 150 updates of at least 1 each (the int drops the step's fraction): 2 - 2.5 s up to 60 fps, 1 s at
+  150 fps. Title to village: none of these waits from the village area's creation to its start (2.4 s, reading files; the
+  character select before that wasn't timed). Not
+  changed: returning from a quest (other callers of 0x6dee48: 0x8a12e4, 0x20fcb8, 0x2121c8, not timed).
 - Tools: MHGU_SAMPLE=<file> (runtime/sampler.c, Windows): a sampling profiler, every thread's call stack about every
   millisecond with the CPU cycles it used; tools/samples.py reads it (timeline / top / wait, game functions as their
   guest addresses). Sleeping threads are sampled every 16th round, for where they wait.
@@ -1275,8 +1282,8 @@ old way while on.
 12. Main Menu without Download / Data Transfer, with a Quit item (on hold, 2026-10-30): the title sequence's state
    machine, the menu cursor, the help line and the bar labels (pictures in HD_title00, no "Quit" among them) are
    mapped; what is left and how: docs/research/title-menu.md.
-13. Option: skip the game's forced 2.5 s wait before a quest loads (on hold, 2026-10-31; see "Loading screens"). What is
-   known: departing from a town calls the town area's depart method 0x8c02a4 (area mode +0xb8 = 4, a quest flag
+13. Done when not in a network session (2026-11-08, see "Loading screens"); in one the waits are the game's. What was
+   found: departing from a town calls the town area's depart method 0x8c02a4 (area mode +0xb8 = 4, a quest flag
    +0xda = 1). Mode 4's handler 0x8bd720 switches on the state byte at area +5 (byte 1 of the word +4): states 1-3
    start the fade, 4 (0x8bd8e0) waits for the fade object (0x5f85fc: its +0x54 object's +0x60 bit 0) and 0x6dee48
    (the music), 5-7 one update each, 8 (0x8bda88) sets state 9 when +0xda is set (else mode 6), and state 9

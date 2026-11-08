@@ -79,6 +79,7 @@ static void boot(const char *root) {
     mashrate_init();  // (mashing out of a stun at high frame rates: runtime/hle/mashrate.c)
     hatestep_init();  // (monsters' attention scores at high frame rates: runtime/hle/hatestep.c)
     inflate_init();  // (zlib's inflate_fast as host code, for loading: runtime/hle/inflate.c)
+    fastload_init();  // (shorter transitions when not in a network session: runtime/hle/fastload.c)
     movelog_init();  // (debug, MHGU_LOG_MOVES: runtime/hle/movelog.c)
     quickhunt_init();  // (debug, MHGU_QUICKHUNT: runtime/hle/quickhunt.c)
     camjit_init();  // (FSR: the main camera and its jitter: runtime/hle/camera_jitter.c)
