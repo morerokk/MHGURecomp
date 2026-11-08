@@ -150,6 +150,9 @@ def _layout(name, abi):
             continue
         unit = None
         s, a, lv = type_layout(parse(f['type']), abi)
+        if name == 'ImDrawList' and f['name'] == '_VtxWritePtr':
+            # A moving buffer cursor, like _IdxWritePtr; not a persistent object.
+            lv = [(0, 'data', s, None)]
         off = align(off, a)
         for i in range(f.get('size', 1)):
             leaves += [(off + i * s + o, k, z, x) for o, k, z, x in lv]
@@ -601,4 +604,5 @@ def _field_offsets(name, abi):
     return res
 
 
-main()
+if __name__ == '__main__':
+    main()
