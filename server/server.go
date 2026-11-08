@@ -84,7 +84,12 @@ const (
 	niNodeMax   = 0x66
 	niNodeCount = 0x67
 	niAdvSize   = 0x26A
+	niAdv       = 0x26C
 	advMax      = 0x180
+
+	// MHGU's advertise data: u16 passcode at 0xC0, 0xFFFF = none, else the 4-digit code in bits 0-14 and bit 15 set
+	// when it applies to everyone (clear: everyone but friends)
+	advPasscode = 0xC0
 	maxNodes    = 8
 )
 
@@ -454,13 +459,23 @@ func (s *Server) handle(c *net.TCPConn) {
 	}
 }
 
-// The hubs a player with this key and version sees: the ones with room for more players first, then the fullest,
-// then the newest.
+// passcoded: the hub asks a passcode (of everyone, or of everyone but friends: the same here, internet hub players
+// aren't each other's Switch friends).
+func passcoded(info []byte) bool {
+	if int(binary.LittleEndian.Uint16(info[niAdvSize:])) < advPasscode+2 {
+		return false
+	}
+	return binary.LittleEndian.Uint16(info[niAdv+advPasscode:]) != 0xFFFF
+}
+
+// The hubs a player with this key and version sees: the ones with room for more players first (without a passcode
+// before passcoded ones), then the fullest, then the newest.
 func (s *Server) list(c *net.TCPConn, proto uint16, room [16]byte) {
 	type entry struct {
 		id      uint64
 		info    [netInfoSize]byte
 		created time.Time
+		rank    int // 0 room and no passcode, 1 room and a passcode, 2 full, 3 full with a passcode
 	}
 	var es []entry
 	sep := s.separate.Load()
@@ -468,22 +483,30 @@ func (s *Server) list(c *net.TCPConn, proto uint16, room [16]byte) {
 	s.mu.Lock()
 	for _, h := range s.hubs {
 		if h.proto == proto && meet(h.room, sep) == room {
-			es = append(es, entry{h.id, h.info, h.created})
+			es = append(es, entry{id: h.id, info: h.info, created: h.created})
 		}
 	}
 	s.mu.Unlock()
-	free := func(e *entry) bool { return e.info[niNodeCount] < e.info[niNodeMax] }
-	// more hubs than one answer holds: a random ListMax of them, those with a free place before full ones, so each
-	// search (the game's Retry) can show others
+	for i := range es {
+		e := &es[i]
+		if e.info[niNodeCount] >= e.info[niNodeMax] {
+			e.rank = 2
+		}
+		if passcoded(e.info[:]) {
+			e.rank++
+		}
+	}
+	// more hubs than one answer holds: a random ListMax of them, by rank (so passcoded hubs only take the places
+	// open hubs with room leave), so each search (the game's Retry) can show others
 	if len(es) > s.cfg.ListMax {
 		mrand.Shuffle(len(es), func(i, j int) { es[i], es[j] = es[j], es[i] })
-		sort.SliceStable(es, func(i, j int) bool { return free(&es[i]) && !free(&es[j]) })
+		sort.SliceStable(es, func(i, j int) bool { return es[i].rank < es[j].rank })
 		es = es[:s.cfg.ListMax]
 	}
 	sort.Slice(es, func(i, j int) bool {
 		a, b := &es[i], &es[j]
-		if free(a) != free(b) {
-			return free(a)
+		if a.rank != b.rank {
+			return a.rank < b.rank
 		}
 		if a.info[niNodeCount] != b.info[niNodeCount] {
 			return a.info[niNodeCount] > b.info[niNodeCount]

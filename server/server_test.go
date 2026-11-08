@@ -357,6 +357,69 @@ func TestListRandomChoice(t *testing.T) {
 	}
 }
 
+// testInfoCode: a NetworkInfo with MHGU's 200 bytes of advertise data, passcode field code (0xFFFF: none).
+func testInfoCode(players byte, code uint16) []byte {
+	i := testInfo(players)
+	binary.LittleEndian.PutUint16(i[niAdvSize:], 200)
+	binary.LittleEndian.PutUint16(i[niAdv+advPasscode:], code)
+	return i
+}
+
+// Passcoded hubs come after open ones with room: left out while those fill the answer, listed after them otherwise.
+func TestListPasscodedLast(t *testing.T) {
+	s := start(t, func(c *Config) {
+		c.ListMax, c.MaxHubsPerIP, c.MaxConnsPerIP, c.ReqRate, c.ReqBurst = 4, 20, 100, 1000, 1000
+	})
+	hostInfo := func(room byte, info []byte) uint64 {
+		c := dial(t, s)
+		send(t, c, tHost, header(2, room), info)
+		return binary.LittleEndian.Uint64(expect(t, c, tHosted))
+	}
+	ids := func(room byte) []uint64 {
+		c := dial(t, s)
+		defer c.Close()
+		send(t, c, tList, header(2, room))
+		p := expect(t, c, tHubs)
+		var out []uint64
+		for i := 0; i < int(binary.LittleEndian.Uint32(p)); i++ {
+			out = append(out, binary.LittleEndian.Uint64(p[4+i*(8+netInfoSize):]))
+		}
+		return out
+	}
+
+	// room 1: 5 open hubs with room (one with the field 0xFFFF, one without advertise data) and 2 passcoded
+	coded := map[uint64]bool{}
+	hostInfo(1, testInfoCode(1, 0xFFFF))
+	for i := 0; i < 4; i++ {
+		hostInfo(1, testInfo(byte(1+i%3)))
+	}
+	coded[hostInfo(1, testInfoCode(3, 0x84D2))] = true // 1234, everyone
+	coded[hostInfo(1, testInfoCode(3, 0x0000))] = true // 0000, everyone but friends
+	for n := 0; n < 30; n++ {
+		for _, id := range ids(1) {
+			if coded[id] {
+				t.Fatal("a passcoded hub was listed while open hubs with room were left out")
+			}
+		}
+	}
+
+	// room 2: fewer hubs than ListMax: all listed, open with room, passcoded with room, then full
+	full := hostInfo(2, testInfo(4))
+	pass := hostInfo(2, testInfoCode(3, 0x84D2))
+	open1 := hostInfo(2, testInfo(1))
+	open2 := hostInfo(2, testInfoCode(2, 0xFFFF))
+	got := ids(2)
+	want := []uint64{open2, open1, pass, full}
+	if len(got) != len(want) {
+		t.Fatalf("%d hubs listed, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order %x, want %x", got, want)
+		}
+	}
+}
+
 func TestUpdateAndClose(t *testing.T) {
 	s := start(t, nil)
 	hc, id := host(t, s, 0, 1)

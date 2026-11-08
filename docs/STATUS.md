@@ -291,7 +291,13 @@ Plan and security notes: docs/research/internet-hubs.md.
   matters: LAN / Join hubs first (ldn_scan), then the server's (server.go list: hubs with a free slot first, then
   the fuller, then the newest). Since then (server.go list) the server's ListMax is 18 and, with more hubs than
   that, each LIST is a random 18 (shuffled, hubs with a free place kept before full ones), then sorted as before: a
-  Retry shows others. Not done: passworded hubs also take places in the list (they could be sorted last).
+  Retry shows others.
+- Passcoded hubs last (2026-11-08): MHGU's advertise data (NetworkInfo +0x26C, 200 bytes) has a u16 passcode at
+  +0xC0: 0xFFFF = none, else the 4-digit code in bits 0-14 (1234 = 0x04D2), bit 15 set for "Everyone", clear for
+  "Exclude Friends" (measured: open 0xFFFF, Everyone 1234 = 0x84D2, Exclude Friends 0000 = 0x0000). server.go list
+  ranks hubs: room and no passcode, room and a passcode, full, full with a passcode; both the random choice and the
+  sort go by rank, so passcoded hubs only show when open hubs with room leave places (user's call: private groups
+  should use a matchmaking key). Hosting asks the code by text entry (control "type 1234" + "textkey enter").
 
 ## Event camera pans skippable with A (2026-10-21)
 
