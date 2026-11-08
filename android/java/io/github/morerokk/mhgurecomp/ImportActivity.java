@@ -104,13 +104,13 @@ public class ImportActivity extends Activity {
             ? "Pick a folder for the app's files: the settings (mhgurecomp.ini), the save, mods, cheats, screenshots and log.txt, "
               + "so you can open them with the file managers on this device (the app's own folder, in Android/data, can't be "
               + "opened by them). For example a new MHGURecomp folder in the device's storage; if you used one before (and "
-              + "reinstalled the app), pick it again. The app copies its files there (files already there are kept) and uses "
+              + "reinstalled the app), pick it again. The app copies its files there (it asks before replacing older files already there) and uses "
               + "that folder from now on" + (closes ? ", then closes: start it again to play." : ".") + " The game files are not "
               + "copied: they are used where they are. The app reads and writes the folder itself, so Android asks you to allow "
               + "\"All files access\" for it."
             : mode == FILES_BACK
             ? "The app's files go back into its own folder (in Android/data): the settings, the save, mods, cheats and "
-              + "screenshots in " + dest + " are copied there (files already there are kept), and the app closes: start it again "
+              + "screenshots in " + dest + " are copied there (it asks before replacing older files already there), and the app closes: start it again "
               + "to play. The files in " + dest + " are left where they are."
             : mode == GAME_FOLDER
             ? "Pick the folder that holds your dump's exefs and romfs folders, for example on a USB drive or SD card. Nothing is "
@@ -129,6 +129,7 @@ public class ImportActivity extends Activity {
 
     private void pick() {
         if (mode == FILES_BACK) { copyFiles(getExternalFilesDir(null)); return; }  // (nothing to pick: the app's own folder)
+        if (mode == FILES_FOLDER && Build.VERSION.SDK_INT < 30) { fail("This needs Android 11 or newer."); return; }  // (before the picker, not after)
         // (Android would close the game behind the picker, and SDL's activity can't come back from that: the app restarts
         // and the choice is lost)
         if (Settings.Global.getInt(getContentResolver(), Settings.Global.ALWAYS_FINISH_ACTIVITIES, 0) != 0) {
@@ -756,12 +757,14 @@ public class ImportActivity extends Activity {
     }
 
     // ------------------------------------------------------------------ the files folder (FILES_FOLDER, FILES_BACK)
-    // The app's files in dest (its files folder now) copied into to where they are missing there (nothing there is
-    // replaced): the settings, the save, mods, cheats, screenshots... Not the game files (data/: they are used where they
-    // are, the settings copied over then point at them) nor the shader cache (made again) nor this run's log. The native
-    // side (runtime/platform/android.c) then notes the folder in files-folder.txt.
-    private static final Set<String> NOT_COPIED = new LinkedHashSet<>(java.util.Arrays.asList(
-        "data", "cache", FilesFolder.POINTER, "files-folder-asked", "log.txt", "last-run-crashed"));
+    // The app's files in dest (its files folder now) copied into to where they are missing there (and over older ones
+    // if the player says so): only these names at the top of it, since a chosen folder can hold anything else of the
+    // player's (Documents, say). So not the game files (data/: they are used where they are, the settings copied over
+    // then point at them) nor the shader cache (made again) nor this run's log. The native side
+    // (runtime/platform/android.c) then notes the folder in files-folder.txt.
+    private static final Set<String> COPIED = new LinkedHashSet<>(java.util.Arrays.asList(
+        "mhgurecomp.ini", "save", "mods", "cheats", "shots", "bonus", "env.txt", "crash-log.txt", "pipelines.list",
+        "chat_box.txt", "forge_imgui.ini"));
 
     private void copyFiles(final File to) {
         final File from = new File(dest);
@@ -860,26 +863,19 @@ public class ImportActivity extends Activity {
                             replacing = replace && out.isFile() && f.lastModified() > out.lastModified() + 2000 && !sameContent(f, out);
                             if (!replacing) { counts[1]++; continue; }
                         }
-                        File dir = out.getParentFile();
-                        if (dir != null && !dir.isDirectory() && !dir.mkdirs()) throw new IOException("can't make " + dir);
                         File part = new File(out.getPath() + ".part");
-                        try (InputStream in = new java.io.FileInputStream(f); OutputStream o = new FileOutputStream(part)) {
-                            for (int r; (r = in.read(buf)) > 0; ) o.write(buf, 0, r);
-                        }
+                        try (InputStream in = new java.io.FileInputStream(f)) { copy(in, part, buf); }
                         part.setLastModified(f.lastModified());  // (so the newer one stays newer)
-                        if (replacing) {
-                            File bak = new File(out.getPath() + ".bak");
-                            bak.delete();
-                            if (!out.renameTo(bak)) { part.delete(); throw new IOException("can't keep " + out + " as .bak"); }
-                        }
+                        if (replacing && !out.renameTo(backupOf(out))) { part.delete(); throw new IOException("can't keep " + out + " as .bak"); }
                         if (!part.renameTo(out)) { part.delete(); throw new IOException("can't write " + out); }
                         counts[replacing ? 2 : 0]++;
                         show("Copying the app's files: " + (total > 0 ? done * 100 / total : 100) + "% (" + f.getName() + ")");
                     }
                     pointGameFolder(from, to);
                 } catch (Exception e) {
-                    error = stop ? null : "The copy failed (" + e.getMessage() + "). Nothing was changed: the app keeps its files "
-                        + "where they are. What was copied is left in " + to + ".";
+                    error = stop ? null : "The copy failed (" + e.getMessage() + "). The app keeps its files where they are. What was "
+                        + "copied is left in " + to + (counts[2] > 0 ? ", and the " + counts[2] + " files it replaced there are kept beside "
+                        + "them as .bak." : ".");
                 }
                 final String err = error;
                 runOnUiThread(new Runnable() {
@@ -899,11 +895,18 @@ public class ImportActivity extends Activity {
         }, "files folder").start();
     }
 
+    // A name for keeping out beside it: x.bak, or x.2.bak on if an earlier replace left one (never written over)
+    private static File backupOf(File out) {
+        File bak = new File(out.getPath() + ".bak");
+        for (int i = 2; bak.exists(); i++) bak = new File(out.getPath() + "." + i + ".bak");
+        return bak;
+    }
+
     private void list(File dir, boolean top, List<File> out) {
         File[] in = dir.listFiles();
         if (in == null) return;
         for (File f : in) {
-            if (top && NOT_COPIED.contains(f.getName())) continue;
+            if (top && !COPIED.contains(f.getName())) continue;
             if (f.getName().endsWith(".part") || f.getName().endsWith(".bak")) continue;
             if (f.isDirectory()) list(f, false, out);
             else if (f.isFile()) out.add(f);

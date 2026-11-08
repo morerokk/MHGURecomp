@@ -1415,10 +1415,10 @@ std::vector<Row> main_rows() {
         const char *files = android_files_folder(), *problem = android_files_folder_problem();
         action(r, "files.folder", tr("Files folder"), []() { ui_request_import(8); });
         r.back().value = *files ? files : *problem ? tr("App folder (chosen folder not usable)") : tr("App folder (default)");
-        r.back().help = std::string(tr("Keeps the app's files (settings, save, mods, cheats, screenshots, log.txt) in a folder you choose, so you can open them with this device's file managers: the app's own folder, in Android/data, can't be opened by them. The app copies its files there (files already there are kept) and closes; start it again. The game files are used where they are. Android asks for \"All files access\".")) +
+        r.back().help = std::string(tr("Keeps the app's files (settings, save, mods, cheats, screenshots, log.txt) in a folder you choose, so you can open them with this device's file managers: the app's own folder, in Android/data, can't be opened by them. The app copies its files there (it asks before replacing older files already there) and closes; start it again. The game files are used where they are. Android asks for \"All files access\".")) +
                         (*problem ? std::string("\n\n") + problem : std::string());
-        action(r, "files.folder.reset", tr("Use the app's folder"), []() { ui_request_import(9); }, *files != 0);
-        r.back().help = tr("Keeps the app's files in its own folder again: they are copied back (files already there are kept) and the app closes. The files in the chosen folder are left where they are.");
+        action(r, "files.folder.reset", tr("Use the app's folder"), []() { ui_request_import(9); }, *files != 0 || *problem != 0);
+        r.back().help = tr("Keeps the app's files in its own folder again: they are copied back (it asks before replacing older files already there) and the app closes. The files in the chosen folder are left where they are.");
         header(r, "save.header", tr("Save data"));
         text(r, "save.folder", "Save folder", c.save_dir, sizeof c.save_dir, *c.save_dir ? c.save_dir : tr("App folder (default)"),
              ini("SaveFolder"));

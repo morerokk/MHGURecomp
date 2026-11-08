@@ -5,7 +5,6 @@
 // them, as in the PC build's game folder. The device's own file managers can't open Android/data since Android 11, so
 // the player can choose another folder for all of it (the Android tab's Files folder: android_home, below). Android gives no app an environment to start with, so the debug variables
 // (MHGU_QUICKHUNT, MHGU_NO_BC...) come from env.txt in that folder: one NAME=value per line, # for comments.
-#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
@@ -53,11 +52,10 @@ const char *android_home(void) {
         fclose(f);
         line[strcspn(line, "\r\n")] = 0;
     }
-    if (line[0] == '/') {
-        mkdir(line, 0777);
+    if (line[0] == '/') {  // (not made here if it's missing: moved or deleted, an empty one would pass for it)
         if (access(line, W_OK | X_OK) == 0) snprintf(home_dir, sizeof home_dir, "%s", line);
         else snprintf(chosen_note, sizeof chosen_note, "The app's files folder, %s, can't be used now (%s): \"All files access\" "
-                      "turned off, or its drive or SD card gone?", line, strerror(errno));
+                      "turned off, the folder moved or deleted, or its drive or SD card gone?", line, strerror(errno));
     }
     return home_dir;
 }
@@ -196,6 +194,13 @@ static const char *absolute(const char *dir, char *buf, size_t size) {
 static char picked_path[1100];
 static SDL_AtomicInt picked_ready;  // the kind of import (4 or 7) that chose picked_path
 
+static int ask(const char *text, const SDL_MessageBoxButtonData *buttons, int n) {
+    const SDL_MessageBoxData box = {SDL_MESSAGEBOX_INFORMATION, NULL, "MHGU Recomp", text, n, buttons, NULL};
+    int pressed = -1;
+    if (!SDL_ShowMessageBox(&box, &pressed)) return -1;
+    return pressed;
+}
+
 // ------------------------------------------------------------------ the files folder (kinds 8 and 9 of android_import)
 // ImportActivity copies the app's files into the folder (FILES_FOLDER, picked; FILES_BACK, the app's own) with its
 // progress dialog; this then notes it in files-folder.txt, and android_home answers it from now on.
@@ -227,7 +232,17 @@ int android_take_picked(char *out, size_t size) {
 
 bool android_import(int what, bool running) {
     char buf[1100], folder[1200];
-    if (what == 1) snprintf(folder, sizeof folder, "%s", android_path("data"));  // (always the app's own: see below)
+    if (what == 9 && chosen_note[0]) {  // (the chosen folder can't be used: nothing to copy back, only to forget it)
+        const SDL_MessageBoxButtonData b[] = {
+            {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Cancel"},
+            {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Forget it"},
+        };
+        char text[1600];
+        snprintf(text, sizeof text, "%s\n\nForget that folder and keep the app's files in its own folder from now on? Nothing is copied or "
+                 "deleted, and you can choose it again later. The app closes: start it again.", chosen_note);
+        return ask(text, b, 2) == 1 && note_files_folder(app_folder());
+    }
+    if (what == 1) snprintf(folder, sizeof folder, "%s", android_path("data"));  // (the files folder's, whatever the settings point at: see below)
     else if (what == 5 || what == 6) snprintf(folder, sizeof folder, "%s", absolute(mods_dir(), buf, sizeof buf));
     else if (what == 8 || what == 9) snprintf(folder, sizeof folder, "%s", android_home());  // (copied from)
     else snprintf(folder, sizeof folder, "%s/save_0", absolute(getenv("MHGU_SAVE_DIR") ? getenv("MHGU_SAVE_DIR") : g_save_dir, buf, sizeof buf));
@@ -285,7 +300,11 @@ bool android_import(int what, bool running) {
 // and data then says where they are. true: done, check again.
 bool android_offer_import(const char *msg, char *data, size_t size) {
     char text[2600], where[1300] = "";
-    if (strcmp(data, "data")) snprintf(where, sizeof where, "\n\nThe app looked in %s. If it's on a drive, is the drive connected?", data);
+    if (strcmp(data, "data")) {
+        bool own = !strncmp(data, app_folder(), strlen(app_folder()));  // (a reinstall deletes those, the settings kept in a chosen folder still name them)
+        snprintf(where, sizeof where, own ? "\n\nThe app looked in %s, in its own folder: uninstalling the app deletes what's there, so they need importing again."
+                                          : "\n\nThe app looked in %s. If it's on a drive, is the drive connected?", data);
+    }
     snprintf(text, sizeof text, "%s%s\n\nPick the folder that holds the exefs and romfs folders. The app can copy them into its own "
              "folder (13 GB of free space, 26 GB while copying), or use them where they are, for example on a USB drive or SD card.",
              msg, where);
@@ -316,13 +335,6 @@ bool android_offer_import(const char *msg, char *data, size_t size) {
 // Before anything is read from the files folder (linux.c plat_init): where the app's files go is asked once (the first
 // start; after an update that brought this; after a reinstall, which deletes files-folder.txt with the rest of the app's
 // own folder), and a chosen folder that can't be used now is said so rather than the app quietly using its own.
-static int ask(const char *text, const SDL_MessageBoxButtonData *buttons, int n) {
-    const SDL_MessageBoxData box = {SDL_MESSAGEBOX_INFORMATION, NULL, "MHGU Recomp", text, n, buttons, NULL};
-    int pressed = -1;
-    if (!SDL_ShowMessageBox(&box, &pressed)) return -1;
-    return pressed;
-}
-
 void android_first_start(void) {
     char marker[1100], ini[1100], text[2000];
     snprintf(marker, sizeof marker, "%s/files-folder-asked", app_folder());
@@ -330,7 +342,8 @@ void android_first_start(void) {
         android_home();
         if (chosen_note[0]) {  // (chosen, but not usable now)
             snprintf(text, sizeof text, "%s\n\nChoose it again (Android asks for \"All files access\" again if it's off), or use the app's own "
-                     "folder this time: your files in the chosen folder are then not used until you choose it again.", chosen_note);
+                     "folder this time: your files in the chosen folder are then not used until you choose it again. (If it's gone for good, the "
+                     "settings' Android tab can forget it.)", chosen_note);
             const SDL_MessageBoxButtonData b[] = {
                 {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Quit"},
                 {0, 1, "Use the app's folder"},
@@ -344,6 +357,7 @@ void android_first_start(void) {
             continue;                  // (worked out again: asked again if it still can't be used)
         }
         if (strcmp(android_home(), app_folder()) || access(marker, F_OK) == 0) return;  // (chosen and used, or asked before)
+        if (SDL_GetAndroidSDKVersion() < 30) return;  // (a chosen folder takes "All files access": Android 11 on)
         snprintf(ini, sizeof ini, "%s/mhgurecomp.ini", app_folder());
         bool had = access(ini, F_OK) == 0;
         snprintf(text, sizeof text, "%s In a folder you choose (a new MHGURecomp folder in the device's storage, say) you can open them, "
@@ -352,7 +366,8 @@ void android_first_start(void) {
                        "which this device's file managers can't open. It can copy them into a folder you choose and keep them there instead."
                      : "Where should the app keep its files (settings, save, mods, cheats, screenshots, log.txt)? Its own folder is in "
                        "Android/data, which this device's file managers can't open.",
-                 had ? "" : " If you chose one before reinstalling the app, choose it again: what's in it is used.");
+                 had ? "" : " If you chose one before reinstalling the app, choose it again: what's in it is used. (Game files that were "
+                            "in the app's own folder went with the old install and need importing again.)");
         const SDL_MessageBoxButtonData b[] = {
             {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 1, "The app's own folder"},
             {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 2, "Choose a folder"},
