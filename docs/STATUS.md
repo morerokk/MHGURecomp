@@ -1422,6 +1422,11 @@ forge_input_getMouseMove(float *dx, float *dy) is the movement since the last fr
 too (counts while captured, window pixels while free, y down; 0 while Forge's menu is open); forge_input_setMouseFree(bool)
 makes the mouse free for a mod's own pointer while true: not captured (let go if it was, captured again after if the
 player had clicked in), shown in full screen, and its clicks only the mod's (not a capture, not the game's buttons).
+Keybinds for mods, the port's calls too: forge_input_setKeybind(const char *row, const char *keys) gives a [Keybinds] row
+other keys for now ("L", "Left Ctrl, Q": spelled as the file has them; NULL: the settings' again; false for an unknown row
+or key), on top of the settings in config_live_bind, so the game reads them at once; mhgurecomp.ini and the settings menu
+keep the player's. forge_input_getKeybind(row, out, size) is the player's own keys for a row; forge_input_getKeyPressed(out, size) the
+first key, mouse button or wheel notch pressed since the last frame, by its [Keybinds] name, also one Forge's menu took.
 Forge's keyboard is 256 HID usages.
 Forge's config.ini ([menu] key, font_size; [log] level) is read as iniparser reads it, from one file: the topmost mod's
 romfs nativeNX/forge/config.ini (files are not merged; a long line, a stray line or an unreadable file means the defaults:

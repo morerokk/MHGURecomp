@@ -923,6 +923,7 @@ static float touch_x, touch_y;
 static bool mouse_on;  // (the mouse for mods, the port's own calls below: the free pointer is on the picture)
 static float mouse_x, mouse_y, mouse_dx, mouse_dy;
 static uint32_t mouse_buttons;
+static int mouse_key;  // the first key, mouse button or wheel notch pressed since the last frame ([Keybinds] code)
 
 // A point of the window (mx, my: pixels) on the game's picture, which is fitted into the window by its shape
 // (g_render_aspect) and centred. The picture is the console's 1280x720 screen: its HUD canvas (g_ui_anchor_aspect wide
@@ -964,6 +965,7 @@ static void mouse_frame(void) {
     mouse_on = w && m.inside && !menu && !SDL_GetWindowRelativeMouseMode(w) && window_to_screen(w, m.x, m.y, &mouse_x, &mouse_y);
     mouse_buttons = m.buttons;
     mouse_dx = menu ? 0.0f : m.dx, mouse_dy = menu ? 0.0f : m.dy;
+    mouse_key = m.key;  // (also with Forge's menu open: a mod's keybind menu is in it)
 }
 
 static void input_frame(void) {
@@ -1011,6 +1013,48 @@ HLE_FUNC("forge_input_getMouseMove", f_in_mouse_move) {
 // the player had clicked in) and its clicks are only the mod's (getMouse): not a capture, not the game's buttons. For a
 // mod's own pointer, while its menu is open.
 HLE_FUNC("forge_input_setMouseFree", f_in_mouse_free) { host_input_set_mouse_free((ARG(0) & 0xFF) != 0); }
+
+// Keybinds for mods (the port's own calls too): a mod can give [Keybinds] rows other keys for a while - in a hunt, say -
+// without touching the player's settings: mhgurecomp.ini and the settings menu keep theirs, which count again once the
+// mod gives the row back. Rows and keys are spelled as mhgurecomp.ini spells them ("L", "MoveUp"; "Left Ctrl, Q", "None").
+static int bind_of(uint32_t row) {  // (a guest string) -> BIND_*, -1 none
+    const ConfigSetting *s = row ? config_setting(gstr(row)) : NULL;
+    for (int i = 0; s && i < BINDS; i++)
+        if (config_bind_setting(i) == s) return i;
+    return -1;
+}
+// forge_input_setKeybind(const char *row, const char *keys): the row's keys from now on (up to two); NULL: the settings'
+// again. False, and nothing changed: no such row, or a key without a name or one the port keeps (Esc, Insert, F1...).
+HLE_FUNC("forge_input_setKeybind", f_in_set_keybind) {
+    int bind = bind_of(ARG(0));
+    if (bind < 0) { RET(0); return; }
+    if (!ARG(1)) { config_mod_bind(bind, NULL); RET(1); return; }
+    static Config parsed;  // (the game's thread only)
+    if (!config_parse(config_bind_setting(bind), gstr(ARG(1)), &parsed)) { RET(0); return; }
+    config_mod_bind(bind, parsed.binds[bind]);
+    RET(1);
+}
+// forge_input_getKeybind(const char *row, char *out, uint32_t size): the player's own keys for the row (the settings',
+// whatever a mod set), as the file writes them. False: no such row.
+HLE_FUNC("forge_input_getKeybind", f_in_get_keybind) {
+    int bind = bind_of(ARG(0));
+    if (bind < 0 || !ARG(1) || !ARG(2)) { RET(bind >= 0); return; }
+    static Config now;
+    char buf[128];
+    for (int k = 0; k < BIND_KEYS; k++) now.binds[bind][k] = config_player_bind(bind, k);
+    config_format(config_bind_setting(bind), &now, buf, sizeof buf);
+    snprintf((char *)G2H(ARG(1)), ARG(2), "%s", buf);
+    RET(1);
+}
+// forge_input_getKeyPressed(char *out, uint32_t size): the first key, mouse button or wheel notch pressed in the game's
+// window since the last frame, also one Forge's menu or the game took, by its [Keybinds] name ("Left Ctrl", "Mouse 4",
+// "Wheel Up"): for a mod's own keybind menu. False: none (or one without a name).
+HLE_FUNC("forge_input_getKeyPressed", f_in_key_pressed) {
+    const char *name = mouse_key ? config_key_name(mouse_key) : "";
+    if (!*name) { RET(0); return; }
+    if (ARG(0) && ARG(1)) snprintf((char *)G2H(ARG(0)), ARG(1), "%s", name);
+    RET(1);
+}
 static float stick_value(int32_t v) { return fminf(fmaxf(v / 32767.0f, -1.0f), 1.0f); }
 static void stick(Cpu *c, int i) {
     if (ARG(0)) STF(ARG(0), stick_value(in_sticks[i]));

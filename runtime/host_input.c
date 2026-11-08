@@ -107,9 +107,10 @@ static uint64_t test_until;
 // then (let go if it was, captured again after if the player had clicked in), and a click is only the mod's: not a
 // capture, not a button the game sees.
 static SDL_SpinLock mods_lock;
-static struct { float x, y, dx, dy; bool inside; uint32_t held, pressed; } mods_mouse;
+static struct { float x, y, dx, dy; bool inside; uint32_t held, pressed; int key; } mods_mouse;
 static SDL_AtomicInt mods_free;
 
+// (also the first key, mouse button or wheel notch pressed: for a mod's own keybind menu, forge_input_getKeyPressed)
 static void mods_mouse_event(const SDL_Event *e) {
     SDL_LockSpinlock(&mods_lock);
     switch (e->type) {
@@ -122,8 +123,17 @@ static void mods_mouse_event(const SDL_Event *e) {
             uint32_t b = SDL_BUTTON_MASK(e->button.button);
             if (e->button.down) mods_mouse.held |= b, mods_mouse.pressed |= b;
             else mods_mouse.held &= ~b;
+            if (e->button.down && !mods_mouse.key) mods_mouse.key = KEY_MOUSE + e->button.button;
         }
         break;
+    case SDL_EVENT_KEY_DOWN:
+        if (!e->key.repeat && e->key.scancode < SDL_SCANCODE_COUNT && !mods_mouse.key) mods_mouse.key = (int)e->key.scancode;
+        break;
+    case SDL_EVENT_MOUSE_WHEEL: {
+        int n = e->wheel.integer_y * (e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1);
+        if (n && !mods_mouse.key) mods_mouse.key = n > 0 ? KEY_WHEEL_UP : KEY_WHEEL_DOWN;
+        break;
+    }
     case SDL_EVENT_WINDOW_MOUSE_ENTER: case SDL_EVENT_WINDOW_MOUSE_LEAVE:
         mods_mouse.inside = e->type == SDL_EVENT_WINDOW_MOUSE_ENTER;
         break;
@@ -139,7 +149,8 @@ void host_input_mouse_take(HostMouse *out) {
     out->x = mods_mouse.x, out->y = mods_mouse.y, out->inside = mods_mouse.inside;
     out->buttons = mods_mouse.held | mods_mouse.pressed;  // (a click shorter than a frame is seen once)
     out->dx = mods_mouse.dx, out->dy = mods_mouse.dy;
-    mods_mouse.pressed = 0, mods_mouse.dx = mods_mouse.dy = 0;
+    out->key = mods_mouse.key;
+    mods_mouse.pressed = 0, mods_mouse.dx = mods_mouse.dy = 0, mods_mouse.key = 0;
     SDL_UnlockSpinlock(&mods_lock);
 }
 

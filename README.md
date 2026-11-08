@@ -407,7 +407,9 @@ To install a mod, put the mod folder in `mods\`. Remove the folder to uninstall 
   are kept in `forge_imgui.ini`.
 - For mod makers: besides Forge's API, the port gives mods the mouse: `forge_input_getMouse` (the pointer on the
   1280x720 screen and the buttons), `forge_input_getMouseMove` (the movement, also while the hunt camera has it) and
-  `forge_input_setMouseFree` (no capture while a mod's own menu is open). See `runtime/forge.c`.
+  `forge_input_setMouseFree` (no capture while a mod's own menu is open), and keybinds: `forge_input_setKeybind` (other
+  keys for a `[Keybinds]` row for a while, without changing the player's settings), `forge_input_getKeybind` and
+  `forge_input_getKeyPressed` (the key just pressed, by name, for a mod's own keybind menu). See `runtime/forge.c`.
 - You do not need any resolution, FPS cap or connection fix mods. These features are included with this port.
 
 **Places to get mods:**

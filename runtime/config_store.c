@@ -231,7 +231,18 @@ float config_live_hp_village(void) {
 int config_live_discord(void) { return SDL_GetAtomicInt(&live_discord); }
 int config_live_discord_hunter(void) { return SDL_GetAtomicInt(&live_discord_hunter); }
 int config_live_share_urgent(void) { return SDL_GetAtomicInt(&live_share_urgent); }
-int config_live_bind(int bind, int slot) { return SDL_GetAtomicInt(&live_binds[bind][slot]); }
+// [Keybinds] rows a mod set for now (mod_bind_set): its keys, over the settings' while set
+static SDL_AtomicInt mod_binds[BINDS][BIND_KEYS], mod_bind_set[BINDS];
+void config_mod_bind(int bind, const int keys[BIND_KEYS]) {
+    if (bind < 0 || bind >= BINDS) return;
+    if (!keys) { SDL_SetAtomicInt(&mod_bind_set[bind], 0); return; }
+    for (int k = 0; k < BIND_KEYS; k++) SDL_SetAtomicInt(&mod_binds[bind][k], keys[k]);
+    SDL_SetAtomicInt(&mod_bind_set[bind], 1);
+}
+int config_live_bind(int bind, int slot) {
+    return SDL_GetAtomicInt(&(SDL_GetAtomicInt(&mod_bind_set[bind]) ? mod_binds : live_binds)[bind][slot]);
+}
+int config_player_bind(int bind, int slot) { return SDL_GetAtomicInt(&live_binds[bind][slot]); }
 void config_live_ldn(char *server, size_t server_size, char *key, size_t key_size) {
     SDL_LockSpinlock(&live_ldn_lock);
     if (server) SDL_strlcpy(server, live_ldn_server, server_size);
