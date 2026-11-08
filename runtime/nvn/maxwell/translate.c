@@ -80,6 +80,10 @@ typedef struct {
     bool glsl;               // emit Vulkan GLSL: dialect-specific constructs here, the rest via glsl_rewrite()
     bool uses_gmem_store;    // STG present: the gmem buffer is not readonly
     uint32_t cbuf_need[18];  // highest constant vec4 index + 1 per cbuf (array size of the GLSL block)
+    bool guarded;            // the instruction being translated has a predicate: its write may not happen
+    uint8_t tex_alpha[256];  // register holds a texture sample's alpha here
+    uint8_t inf_now[256];    // register may hold 1 / a texture's alpha here (fragment FMZ multiplies, emit_insn)
+    uint8_t inf_ever[256];   // ... has held one so far: what a branch target may see
 } Ctx;
 
 static uint64_t bits(uint64_t w, int lo, int n) { return (w >> lo) & ((n == 64) ? ~0ull : ((1ull << n) - 1)); }
@@ -172,7 +176,16 @@ static const char *operand_c_for_ffma(Ctx *c, uint64_t w, char *buf, const char 
 static void set_reg(Ctx *c, int r, const char *expr) {
     if (r == RZ) return;
     c->reg_used[r] = 1;
+    if (!c->guarded) c->inf_now[r] = c->tex_alpha[r] = 0;
     sp(&c->body, "    r%d = %s;\n", r, expr);
+}
+
+// FMUL / FFMA with FMZ: on the Switch 0 x anything is 0, in Vulkan 0 x infinity is NaN, which comes out black (an
+// environment cube's rgb / alpha where alpha is 0). Only a register straight from 1 / a texture's alpha gets the
+// check on the zero, in fragment shaders: it costs GPU time (on every FMZ multiply it would be most of them), and the
+// depth pre-pass needs its vertex shaders' math untouched. A stale flag only adds a check that is right anyway.
+static bool fmz_check(const Ctx *c, uint64_t mode, int ra, int rb) {
+    return c->glsl && c->stage == STAGE_FRAGMENT && mode == 1 && ((ra != RZ && c->inf_now[ra]) || (rb != RZ && c->inf_now[rb]));
 }
 
 static const char *fneg_abs(const char *e, bool neg, bool abs_, char *buf) {
@@ -525,7 +538,12 @@ static void write_tex_result(Ctx *c, int slot, const char *call, uint32_t mask, 
     for (int comp = 0; comp < 4; comp++) {
         if (!(mask & (1u << comp))) continue;
         int r = regs[n++];
-        if (r != RZ) { c->reg_used[r] = 1; sp(&c->body, "      r%d = as_type<uint>(t[%d]);\n", r, comp); }
+        if (r != RZ) {
+            c->reg_used[r] = 1;
+            if (comp == 3) c->tex_alpha[r] = 1;
+            else if (!c->guarded) c->tex_alpha[r] = 0;
+            sp(&c->body, "      r%d = as_type<uint>(t[%d]);\n", r, comp);
+        }
     }
     sp(&c->body, "    }\n");
 }
@@ -868,6 +886,7 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         prn = false;
     }
     bool guarded = !(pr == PT && !prn);
+    c->guarded = guarded;
     if (pr == PT && prn) return;  // @!pt: never executes
     if (guarded) sp(&c->body, "  if (%s) {\n", P(pr, prn));
     // control flow taking a condition-code test (BRA, EXIT, KIL, SYNC, BRK, CONT): T is the usual unconditional form
@@ -1009,7 +1028,9 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         case 8: sprintf(t, "sqrt(%s)", x); break;
         default: fail(c, "mufu %d", fn); return;
         }
+        bool of_alpha = fn == 4 && a != RZ && c->tex_alpha[a];
         set_reg(c, d, FRES(t, bits(w, 50, 1)));
+        if (of_alpha && d != RZ) c->inf_now[d] = c->inf_ever[d] = 1;
     } else if (OPM(0x5c90000000000000ull, 0xfff8000000000000ull) || OPM(0x4c90000000000000ull, 0xfff8000000000000ull) ||
                OPM(0x3890000000000000ull, 0xfef8000000000000ull)) {  // RRO: range reduction (no-op for us)
         const char *x = NA(F(B(true)), bits(w, 45, 1), bits(w, 49, 1));
@@ -1025,7 +1046,8 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
     } else if (OPM(0x5c68000000000000ull, 0xfff8000000000000ull) || OPM(0x4c68000000000000ull, 0xfff8000000000000ull) ||
                OPM(0x3868000000000000ull, 0xfef8000000000000ull)) {  // FMUL
         static const char *const scale[] = {"", " * 0.5f", " * 0.25f", " * 0.125f", " * 8.0f", " * 4.0f", " * 2.0f", ""};
-        sprintf(t, "(%s * %s%s)", F(R(a)), NA(F(B(true)), bits(w, 48, 1), false), scale[bits(w, 41, 3)]);
+        bool fmz = fmz_check(c, bits(w, 44, 2), a, b_form(w) == B_REG ? (int)bits(w, 20, 8) : RZ);
+        sprintf(t, fmz ? "(fmz_mul(%s, %s)%s)" : "(%s * %s%s)", F(R(a)), NA(F(B(true)), bits(w, 48, 1), false), scale[bits(w, 41, 3)]);
         set_reg(c, d, FRES(t, bits(w, 50, 1)));
     } else if (OPM(0x1e00000000000000ull, 0xff00000000000000ull)) {  // FMUL32I
         sprintf(t, "(%s * as_type<float>(0x%08xu))", F(R(a)), (uint32_t)bits(w, 20, 32));
@@ -1035,7 +1057,8 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         const char *bv;
         char cbuf_c[256], bbuf[256];
         const char *cv = operand_c_for_ffma(c, w, cbuf_c, &bv, bbuf);
-        sprintf(t, "fma(%s, %s, %s)", F(R(a)), NA(F(bv), bits(w, 48, 1), false), NA(F(cv), bits(w, 49, 1), false));
+        int rb = (w >> 59) == 0xa && ((w >> 56) & 7) ? (int)bits(w, 39, 8) : b_form(w) == B_REG ? (int)bits(w, 20, 8) : RZ;  // (as in operand_c_for_ffma)
+        sprintf(t, fmz_check(c, bits(w, 53, 2), a, rb) ? "fmz_fma(%s, %s, %s)" : "fma(%s, %s, %s)", F(R(a)), NA(F(bv), bits(w, 48, 1), false), NA(F(cv), bits(w, 49, 1), false));
         set_reg(c, d, FRES(t, bits(w, 50, 1)));
     } else if (OPM(0x0c00000000000000ull, 0xfc00000000000000ull)) {  // FFMA32I
         sprintf(u, "as_type<float>(0x%08xu)", (uint32_t)bits(w, 20, 32));
@@ -1782,6 +1805,8 @@ static const char glsl_prelude[] =
     "vec2 saturate(vec2 x) { return vec2(saturate(x.x), saturate(x.y)); }\n"
     "float fmin(float a, float b) { return isnan(a) ? b : (isnan(b) ? a : min(a, b)); }\n"
     "float fmax(float a, float b) { return isnan(a) ? b : (isnan(b) ? a : max(a, b)); }\n"
+    "float fmz_mul(float a, float b) { return (a == 0.0f || b == 0.0f) ? 0.0f : a * b; }\n"
+    "float fmz_fma(float a, float b, float c) { return (a == 0.0f || b == 0.0f) ? c : fma(a, b, c); }\n"
     "uint clz(uint v) { return v == 0u ? 32u : uint(31 - findMSB(v)); }\n"
     "uint popcount(uint v) { return uint(bitCount(v)); }\n"
     "uint mulhi(uint a, uint b) { uint hi, lo; umulExtended(a, b, hi, lo); return hi; }\n"
@@ -2042,7 +2067,10 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
     for (size_t i = 0; i < end && !c->fail; i++) {
         if (i % 4 == 0) continue;
         uint32_t pc = (uint32_t)(i * 8);
-        if (any_branch && label[i]) sp(&c->body, "  case %uu:\n", pc);
+        if (any_branch && label[i]) {
+            sp(&c->body, "  case %uu:\n", pc);
+            for (int r = 0; r < 256; r++) c->inf_now[r] |= c->inf_ever[r];  // (reached by a jump past the last write too)
+        }
         if (annotate) sp(&c->body, "    // pc %x: %016llx\n", pc, (unsigned long long)((const uint64_t *)code)[i]);
         emit_insn(c, ((const uint64_t *)code)[i], pc);
         if (dbg && pc == maxwell_dbg_pc) {
