@@ -3386,7 +3386,10 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // 103.0: In-hunt Status HUD & Item Selector
                         // Status HUD (Clock, HP bar, Stamina, gauges, palico status: y < 500) -> Left anchor
                         // Item Selector wheel (y >= 500) -> Right anchor
-                        if (pos_y < 500.0f) {
+                        // The bowgun's ammo list (held L) stands over the item bar, x 970..1242, y 360..568: by height it was
+                        // split at 500, its upper rows Left / Top, a gap in the middle. The status HUD ends at x 742, so the
+                        // right side (x >= 900) is the item bar's whatever its height.
+                        if (pos_y < 500.0f && pos_x < 900.0f) {
                             anchor = ANCHOR_LEFT;
                             vanchor = V_TOP;
                         } else {
