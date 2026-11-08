@@ -41,7 +41,7 @@ static const MField mf_ImDrawList[] = {
     {32, 40, 0, MF_DATA, 0},
     {36, 48, 8, MF_RAW, 0},
     {44, 56, 0, MF_OBJ, 8},
-    {48, 64, 0, MF_OBJ, 10},
+    {48, 64, 0, MF_DATA, 0},
     {52, 72, 0, MF_DATA, 0},
     {56, 80, 8, MF_RAW, 0},
     {64, 88, 0, MF_DATA, 0},
