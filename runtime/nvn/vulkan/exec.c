@@ -3542,7 +3542,7 @@ static VkDescriptorSet stage_set(int nbinds, const VkBindingInfo *binds, VkDescr
         } else if (b->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b->binding == 18) {  // rscale: no scaling here
             float rs[67][4];
             for (int k = 0; k < 67; k++) rs[k][0] = rs[k][1] = 1, rs[k][2] = rs[k][3] = 0;
-            memset(rs[66], 0xFF, 4);  // [66].x: the front-face mask's all-ones word (translate.c)
+            rs[66][0] = -1;  // [66].x: -1.0, the front-face mask's all ones once converted (translate.c)
             bi[n] = ubo_span(vk_transient_copy(rs, sizeof rs, 256), sizeof rs);
             w[n].pBufferInfo = &bi[n];
         } else if (b->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b->binding == HDR_PARAMS_BINDING) {  // (hdr.c)
