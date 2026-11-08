@@ -86,6 +86,7 @@ static void boot(const char *root) {
     mousecam_init();  // (mouse look on the hunt camera's angles: runtime/hle/mousecam.c)
     itembar_init();  // (the mouse wheel on the item bar: runtime/hle/itembar.c)
     { void textlayout_init(void); textlayout_init(); }  // (UI text spacing and kerning: runtime/hle/textlayout.c)
+    { void chat_init(void); chat_init(); }  // (typed chat: a message's rows under one name: runtime/hle/chat.c)
     emtrace_init();  // (debug, MHGU_EMTRACE: runtime/hle/emtrace.c)
     kotrace_init();  // (debug, MHGU_KOTRACE: runtime/hle/kotrace.c)
     dummy_init();  // (debug, MHGU_DUMMY: runtime/hle/dummy.c)

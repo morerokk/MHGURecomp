@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 struct Cpu;
+void chat_init(void);                          // at start: a message's later rows don't repeat the sender's name
 void chat_open(void);                          // window side: "/" pressed (no text entry or menu open)
 void chat_close(void);                         // the game opened its own text entry
 bool chat_composing(char *text, size_t size);  // the overlay: the line being typed
