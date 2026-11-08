@@ -311,10 +311,11 @@ int ui_run(void) {
         }
 #ifdef __ANDROID__
         // (on this thread: SDL's own, which Java made. The app closes after an import: the game has the old files open)
-        if (action >= 3 && action <= 9) {
+        if (action >= 3 && action <= 11) {
             SDL_SetAtomicInt(&away, 1);  // (the picker takes the window's surface away: the renderer draws nothing)
             // (after 1 and 2 the app closes, the game has the old files open; the others leave it running)
-            if (android_import(action - 2, true) && action <= 4) { LOG("[ui] imported: closing\n"); exit(0); }
+            // (and after 8 / 9, the files folder changed: the game has the old one's files open)
+            if (android_import(action - 2, true) && (action <= 4 || action >= 10)) { LOG("[ui] imported: closing\n"); exit(0); }
             SDL_SetAtomicInt(&away, 0);
         }
 #else

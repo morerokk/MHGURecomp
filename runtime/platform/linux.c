@@ -36,6 +36,7 @@
 #ifdef __ANDROID__
 const char *android_home(void);  // runtime/platform/android.c
 void android_load_env(void);
+void android_first_start(void);
 void android_unpack_assets(void);
 void android_error_box(const char *msg);
 void android_mark_crash(void);   // (the next start offers to share the log)
@@ -189,6 +190,7 @@ void plat_init(void) {
     // Android starts apps with umask 077: folders made here (save, mods, cheats...) would be the app's alone, and
     // nothing could put files in them over USB or adb (group ext_data_rw: the files folder's)
     umask(007);
+    android_first_start();  // (where the app's files are: asked at the first start, android.c)
     android_load_env();
 #endif
 }

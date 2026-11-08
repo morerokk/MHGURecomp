@@ -1,5 +1,5 @@
 // The logs as content:// links for LogActivity's share (Android gives no app a file:// path of another's): only
-// log.txt and crash-log.txt of the app's folder, read only, to the app the player shared them with (a grant per share;
+// log.txt and crash-log.txt of the app's files folder (FilesFolder), read only, to the app the player shared them with (a grant per share;
 // not exported). In LogActivity's process.
 package io.github.morerokk.mhgurecomp;
 
@@ -23,7 +23,7 @@ public class LogProvider extends ContentProvider {
     private File file(Uri uri) throws FileNotFoundException {
         String name = uri.getLastPathSegment();
         if (!LOG.equals(name) && !CRASH_LOG.equals(name)) throw new FileNotFoundException(String.valueOf(uri));
-        File f = new File(getContext().getExternalFilesDir(null), name);
+        File f = new File(FilesFolder.get(getContext()), name);
         if (!f.isFile()) throw new FileNotFoundException(f.getPath());
         return f;
     }

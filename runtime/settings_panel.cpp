@@ -1,4 +1,5 @@
 #include "settings_panel.h"
+#include "android_files.h"
 #include "config.h"
 #include "menu_confirm.h"
 #include "settings_locale.h"
@@ -1409,7 +1410,15 @@ std::vector<Row> main_rows() {
 #endif
         break;
 #ifdef __ANDROID__
-    case ANDROID_PAGE:  // (Android/data can't be written by the player's file managers: the app copies files in and out)
+    case ANDROID_PAGE: {  // (Android/data can't be written by the player's file managers: the app copies files in and out)
+        header(r, "files.header", tr("App files"));
+        const char *files = android_files_folder(), *problem = android_files_folder_problem();
+        action(r, "files.folder", tr("Files folder"), []() { ui_request_import(8); });
+        r.back().value = *files ? files : *problem ? tr("App folder (chosen folder not usable)") : tr("App folder (default)");
+        r.back().help = std::string(tr("Keeps the app's files (settings, save, mods, cheats, screenshots, log.txt) in a folder you choose, so you can open them with this device's file managers: the app's own folder, in Android/data, can't be opened by them. The app copies its files there (files already there are kept) and closes; start it again. The game files are used where they are. Android asks for \"All files access\".")) +
+                        (*problem ? std::string("\n\n") + problem : std::string());
+        action(r, "files.folder.reset", tr("Use the app's folder"), []() { ui_request_import(9); }, *files != 0);
+        r.back().help = tr("Keeps the app's files in its own folder again: they are copied back (files already there are kept) and the app closes. The files in the chosen folder are left where they are.");
         header(r, "save.header", tr("Save data"));
         text(r, "save.folder", "Save folder", c.save_dir, sizeof c.save_dir, *c.save_dir ? c.save_dir : tr("App folder (default)"),
              ini("SaveFolder"));
@@ -1435,6 +1444,7 @@ std::vector<Row> main_rows() {
         action(r, "import.game", tr("Import game files"), []() { ui_request_import(1); });
         r.back().help = tr("Copies the exefs and romfs folders into the app from any folder on this device, replacing the game files it has, and uses them from now on. The app closes afterwards.");
         break;
+    }
 #endif
     }
     spacer(r, "actions.gap");  // (Save and Reset this tab, and on Menu Options Restart and Exit game, apart)

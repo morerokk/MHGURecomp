@@ -181,6 +181,15 @@ Everything lives in that `files` folder. Its contents match the PC version's gam
 The settings menu has an **Android** tab (the last one) for what the device's file managers can't do in
 `Android/data`:
 
+- **Files folder:** keeps the app's files (settings, save, mods, cheats, screenshots, `log.txt`, `env.txt`) in a folder
+  you pick instead of `Android/data`, so the device's own file managers can open them. The app copies its files there
+  (files missing there are copied; if files there are older than the app's, the save after playing elsewhere for
+  example, it asks whether to replace them, keeping the replaced ones as `.bak`; not the game files, which are then used where they are, nor the shader cache, which is
+  made again) and closes; start it again. Android asks you to allow "All files access". **Use the app's folder** copies
+  them back, with a progress dialog either way. The app asks once at the first start too (and after a reinstall, which
+  forgets the folder: choose it again and what's in it is used). If the chosen folder can't be used at a start ("All
+  files access" turned off, its drive gone), the app says so and offers to choose it again or use its own folder for
+  that time.
 - **Import save:** pick the `system` and `system_backup` files from anywhere on the device. The app copies them in,
   keeping your current save in `save/save_0.before-import-<date>`, and closes; start it again to play. (Over USB you
   can also put the two files in `save/save_0/` yourself.)
