@@ -1274,7 +1274,9 @@ old way while on.
    about the centre with its layout (layer 108), and a model preview follows the frame drawn over it (also from an earlier pass: the Smithy's model is drawn in a pass of
    its own), not the last quad; its camera, made for its box stretched to the taller picture, gets the box's 16:9 shape
    (config.c camera_aspect: only a camera whose aspect is a preview box's the renderer drew), so the model is as big and
-   as wide as at 16:9, and a prompt just under its box (the Palico Scout's "Rotate") goes with its frame
+   as wide as at 16:9, and a prompt just under its box (the Palico Scout's "Rotate") goes with its frame; a preview window beside the menus (the Smithy's
+   parchment, the Poogie costume's) goes Top with them, whichever is drawn first; layer 110 outside the loading screen
+   (the bowgun's reticle, lock-on markers) is not stretched and scales about the centre
    (the Palico Scout's "Rotate" prompt). MHGU_CONTROL `hudtrace` logs a frame's HUD quads and their anchors. Left: the HUD's layout elsewhere (title, town, quest board, item box) unverified; at Edges
    the Hunter Arts prompt goes right with its layer; whether an off-screen 3D view (equipment box preview, guild
    card) uses one of the three cameras (they are left alone unless 16:9).
