@@ -89,7 +89,7 @@ static uint64_t g_apart_since;
 
 static void summon_once(void) {
     uint32_t pl = local_player(), sen = LD32(G_SENEMY), en = 0;
-    if (!pl || !sen || !LD8(pl + OBJ_ZONE)) return;
+    if (!pl || !sen || !LD8(pl + OBJ_ZONE) || LD8(pl + OBJ_ZONE) == 255) return;  // (the camp, or not in a quest)
     for (int k = 0; k < MAX_EN && !en; k++) {
         uint32_t e = LD32(sen + 0x1c + 4u * (uint32_t)k), info = e ? LD32(e + EN_INFO) : 0;
         if (info && LD16(info + 0x1b6) < 10000) en = e;
