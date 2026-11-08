@@ -504,6 +504,11 @@ static int hdr_surface_format(const VkSurfaceFormatKHR *fmts, uint32_t nf, int w
     }
     int fmt = want - 1;  // HDR_FORMAT_*
     if (fmt == HDR_FORMAT_SCRGB && lin >= 0) return *out = HDR_OUT_SCRGB, lin;
+#ifdef __APPLE__
+    // (macOS: Auto is scRGB, the system's own EDR format. With HDR10 the system converts each frame from PQ, and other
+    // windows flashed through the game now and then, in full screen and borderless alike; with scRGB they did not)
+    if (fmt == HDR_FORMAT_AUTO && lin >= 0) return *out = HDR_OUT_SCRGB, lin;
+#endif
     if (pq >= 0) return *out = HDR_OUT_PQ, pq;
     if (lin >= 0) return *out = HDR_OUT_SCRGB, lin;
     return *out = HDR_OUT_NONE, -1;
@@ -512,6 +517,12 @@ static int hdr_surface_format(const VkSurfaceFormatKHR *fmts, uint32_t nf, int w
 static void hdr_send_metadata(bool force) {
     static float sent_peak = -1, sent_avg = -1;
     if (!set_hdr_metadata || !g_hdr_out || !g_vk.swapchain) return;
+#ifdef __APPLE__
+    // (macOS: MoltenVK hands it to the window as HDR10 EDR metadata with an optical output scale of 1, which for a
+    // linear scRGB image says 1.0 is 1 nit: the system tone maps the picture down to almost black. scRGB goes without,
+    // where 1.0 is SDR white: hdr.c hdr_peak. HDRFormat is ini only, so the window never had HDR10's metadata before.)
+    if (g_hdr_out == HDR_OUT_SCRGB) return;
+#endif
     float peak, avg;
     vk_hdr_metadata_values(&peak, &avg);
     if (!force && peak == sent_peak && avg == sent_avg) return;

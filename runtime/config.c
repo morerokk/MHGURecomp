@@ -288,7 +288,11 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "UnclampedScene = On\n"
     "\n"
+#ifdef __APPLE__
+    "; The HDR signal: Auto (scRGB on the Mac), HDR10 (10-bit PQ) or scRGB (16-bit linear).\n"
+#else
     "; The HDR signal: Auto (HDR10 where the display offers it, else scRGB), HDR10 (10-bit PQ) or scRGB (16-bit linear).\n"
+#endif
     "; Not in the settings menu\n"
     "; Default: Auto\n"
     "HDRFormat = Auto\n"
