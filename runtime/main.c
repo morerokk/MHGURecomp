@@ -90,6 +90,7 @@ static void boot(const char *root) {
     emtrace_init();  // (debug, MHGU_EMTRACE: runtime/hle/emtrace.c)
     kotrace_init();  // (debug, MHGU_KOTRACE: runtime/hle/kotrace.c)
     dummy_init();  // (debug, MHGU_DUMMY: runtime/hle/dummy.c)
+    hitsync_init();  // (multiplayer: hits as their hunter saw them: runtime/net/hitsync.c)
     netrate_init();  // (debug, MHGU_NETRATE: runtime/hle/netrate.c)
     cheats_init();  // (cheat codes from cheats/: runtime/cheats.c)
     discord_init();  // (Discord Rich Presence: runtime/net/discord.c, runtime/hle/presence.c)

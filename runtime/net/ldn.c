@@ -811,6 +811,7 @@ static void *station_thread(void *arg) {
         } else if (type == F_AUX && n > 0) {  // to the host's own game and on to the other stations
             emsync_aux_received(buf, (uint32_t)n);
             hpscale_aux_received(buf, (uint32_t)n);
+            hitsync_aux_received(buf, (uint32_t)n);
             for (int i = 1; i < MAX_NODES; i++)
                 if (i != slot && L.nodes[i].alive) link_send(&L.nodes[i], F_AUX, buf, (uint32_t)n, NULL, 0);
         }
@@ -1416,6 +1417,7 @@ static void *uplink_thread(void *arg) {
         } else if (type == F_AUX && n > 0) {
             emsync_aux_received(buf, (uint32_t)n);
             hpscale_aux_received(buf, (uint32_t)n);
+            hitsync_aux_received(buf, (uint32_t)n);
         }
     }
     L.uth_run = false;

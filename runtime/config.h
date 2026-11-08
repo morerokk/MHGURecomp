@@ -51,6 +51,7 @@ typedef struct {
     int ldn_port;             // local play: the port a hosted hub listens on (TCP; UDP for LAN search)
     char ldn_join[256];       // local play: hosts to search besides the LAN (host[:port], comma separated)
     int sync_small_monsters;  // multiplayer: small monsters synced like large ones (runtime/net/emsync.c)
+    int lag_compensation;     // multiplayer: melee hits count as the hunter saw them (runtime/net/hitsync.c)
     int bonus_content;        // free downloads copied from a donor save into saves without any (runtime/services/bonus.c)
     int village_in_hub;       // L / R at the Hub's / Pub's quest counter switch to Village quests (runtime/hle/villagehub.c)
     int share_urgent;         // an unlocked Urgent quest someone else posted counts when cleared (runtime/hle/urgentcredit.c)
@@ -251,6 +252,7 @@ int config_live_ldn_port(void);         // [Multiplayer] Port: the next hub host
 void config_live_ldn_join(char *join, size_t size);  // [Multiplayer] Join: the next search (net/ldn.c)
 int config_live_ldn_direct(void);  // [Multiplayer] Direct (net/ldn.c: for the next player link)
 int config_live_sync_small_monsters(void);  // [Multiplayer] SyncSmallMonsters (net/emsync.c)
+int config_live_lag_compensation(void);  // [Multiplayer] LagCompensation (net/hitsync.c)
 int config_live_bonus_content(void);    // [Bonus Content] BonusContent: each time the game opens a save (services/bonus.c)
 int config_live_discord(void);         // [Discord] RichPresence
 int config_live_discord_hunter(void);  // [Discord] ShowHunter
