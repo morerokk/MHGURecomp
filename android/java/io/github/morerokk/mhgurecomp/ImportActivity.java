@@ -776,29 +776,104 @@ public class ImportActivity extends Activity {
         });
         new Thread(new Runnable() {
             @Override public void run() {
+                final List<File> files = new ArrayList<>(), newer = new ArrayList<>();
+                list(from, true, files);
+                // Files there already that are older than the ones here (a switch back after playing in the other
+                // folder: its save, its settings): asked about before anything is copied
+                for (File f : files) {
+                    File out = target(from, to, f);
+                    if (out.isFile() && f.lastModified() > out.lastModified() + 2000 && !sameContent(f, out)) newer.add(f);
+                }
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        if (stop) { progress.dismiss(); end(CANCELLED); return; }
+                        if (newer.isEmpty()) { copyAll(from, to, files, false); return; }
+                        StringBuilder names = new StringBuilder();
+                        java.text.DateFormat when = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT);
+                        for (int i = 0; i < newer.size() && i < 6; i++) {
+                            File f = newer.get(i);
+                            names.append("\n").append(from.toURI().relativize(f.toURI()).getPath()).append(": ")
+                                 .append(when.format(new java.util.Date(f.lastModified()))).append(" here, ")
+                                 .append(when.format(new java.util.Date(target(from, to, f).lastModified()))).append(" there");
+                        }
+                        if (newer.size() > 6) names.append("\n... and ").append(newer.size() - 6).append(" more");
+                        progress.hide();
+                        dialog().setTitle(title())
+                            .setMessage(newer.size() + " files in " + to + " are older than the ones being copied (if the save is one of "
+                                        + "them, the progress there is older):" + names + "\n\nReplace them with the newer ones? The "
+                                        + "replaced files are kept beside them as .bak. Or keep what is there and copy only what is missing.")
+                            .setCancelable(false)
+                            .setPositiveButton("Replace", new DialogInterface.OnClickListener() {
+                                public void onClick(DialogInterface d, int w) { progress.show(); copyAll(from, to, files, true); }
+                            })
+                            .setNegativeButton("Keep what's there", new DialogInterface.OnClickListener() {
+                                public void onClick(DialogInterface d, int w) { progress.show(); copyAll(from, to, files, false); }
+                            })
+                            .setNeutralButton("Cancel", new DialogInterface.OnClickListener() {
+                                public void onClick(DialogInterface d, int w) { progress.dismiss(); end(CANCELLED); }
+                            })
+                            .show();
+                    }
+                });
+            }
+        }, "files folder").start();
+    }
+
+    private static File target(File from, File to, File f) {
+        return new File(to, from.toURI().relativize(f.toURI()).getPath());
+    }
+
+    private static boolean sameContent(File a, File b) {
+        if (a.length() != b.length()) return false;
+        byte[] x = new byte[1 << 16], y = new byte[1 << 16];
+        try (InputStream p = new java.io.FileInputStream(a); InputStream q = new java.io.FileInputStream(b)) {
+            for (int n; (n = p.read(x)) > 0; ) {
+                int m = 0;
+                while (m < n) { int r = q.read(y, m, n - m); if (r <= 0) return false; m += r; }
+                for (int i = 0; i < n; i++) if (x[i] != y[i]) return false;
+            }
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    // replace: files there already that are older than the ones here are replaced (kept as .bak); otherwise only what
+    // is missing there is copied
+    private void copyAll(final File from, final File to, final List<File> files, final boolean replace) {
+        new Thread(new Runnable() {
+            @Override public void run() {
                 String error = null;
-                final int[] counts = new int[2];
+                final int[] counts = new int[3];  // copied, kept, replaced
                 final boolean existing = new File(to, "mhgurecomp.ini").isFile();
                 try {
-                    List<File> files = new ArrayList<>();
-                    list(from, true, files);
                     long total = 0;
                     for (File f : files) total += f.length();
                     long done = 0;
                     byte[] buf = new byte[1 << 16];
                     for (File f : files) {
                         if (stop) throw new IOException("stopped");
-                        File out = new File(to, from.toURI().relativize(f.toURI()).getPath());
+                        File out = target(from, to, f);
                         done += f.length();
-                        if (out.exists()) { counts[1]++; continue; }
+                        boolean replacing = false;
+                        if (out.exists()) {
+                            replacing = replace && out.isFile() && f.lastModified() > out.lastModified() + 2000 && !sameContent(f, out);
+                            if (!replacing) { counts[1]++; continue; }
+                        }
                         File dir = out.getParentFile();
                         if (dir != null && !dir.isDirectory() && !dir.mkdirs()) throw new IOException("can't make " + dir);
                         File part = new File(out.getPath() + ".part");
                         try (InputStream in = new java.io.FileInputStream(f); OutputStream o = new FileOutputStream(part)) {
                             for (int r; (r = in.read(buf)) > 0; ) o.write(buf, 0, r);
                         }
+                        part.setLastModified(f.lastModified());  // (so the newer one stays newer)
+                        if (replacing) {
+                            File bak = new File(out.getPath() + ".bak");
+                            bak.delete();
+                            if (!out.renameTo(bak)) { part.delete(); throw new IOException("can't keep " + out + " as .bak"); }
+                        }
                         if (!part.renameTo(out)) { part.delete(); throw new IOException("can't write " + out); }
-                        counts[0]++;
+                        counts[replacing ? 2 : 0]++;
                         show("Copying the app's files: " + (total > 0 ? done * 100 / total : 100) + "% (" + f.getName() + ")");
                     }
                     pointGameFolder(from, to);
@@ -814,7 +889,8 @@ public class ImportActivity extends Activity {
                         if (err != null) { fail(err); return; }
                         picked = to.getPath();
                         done((existing && mode == FILES_FOLDER ? "The app's files from before were found in " + to + " and are used. " : "")
-                             + counts[0] + " files copied" + (counts[1] > 0 ? " (" + counts[1] + " already there, kept)" : "")
+                             + counts[0] + " files copied" + (counts[2] > 0 ? ", " + counts[2] + " older ones replaced (kept as .bak)" : "")
+                             + (counts[1] > 0 ? ", " + counts[1] + " already there kept" : "")
                              + ". The app's files are in " + to + " from now on."
                              + (closes ? " The app closes now: start it again to play." : ""));
                     }
@@ -823,12 +899,12 @@ public class ImportActivity extends Activity {
         }, "files folder").start();
     }
 
-    private void list(File dir, boolean top, List<File> out) throws IOException {
+    private void list(File dir, boolean top, List<File> out) {
         File[] in = dir.listFiles();
         if (in == null) return;
         for (File f : in) {
             if (top && NOT_COPIED.contains(f.getName())) continue;
-            if (f.getName().endsWith(".part")) continue;
+            if (f.getName().endsWith(".part") || f.getName().endsWith(".bak")) continue;
             if (f.isDirectory()) list(f, false, out);
             else if (f.isFile()) out.add(f);
         }
