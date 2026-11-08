@@ -36,7 +36,7 @@ public class MHGUActivity extends SDLActivity {
     // The last run stopped on an error (runtime/platform/android.c left the marker): keep its log as crash-log.txt and
     // ask whether to share it. (A crash that comes back right away leaves a new marker for the next start.)
     private void offerCrashLog() {
-        File dir = getExternalFilesDir(null);
+        File dir = FilesFolder.get(this);  // (where runtime/platform/android.c writes them)
         if (dir == null) return;
         File marker = new File(dir, "last-run-crashed");
         if (!marker.exists()) return;

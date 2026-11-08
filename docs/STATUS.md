@@ -237,6 +237,37 @@ Plan and security notes: docs/research/internet-hubs.md.
 - UDP through the server: datagrams prefixed "MHGR" + pair id + own secret (Link relay_pair / relay_secret); the
   server passes the rest to the other end. The host sends a bare prefix every second until the station's hellos come
   through, so the server knows where its end is. TCP fallback as before.
+- Direct UDP by hole punching (2026-11-08, research/internet-hubs.md step 4): ini [Multiplayer] Direct (default On,
+  live, settings menu "Direct connections"; MHGU_LDN_DIRECT env). The user decided (2026-11-08) that direct may be
+  the default in public hubs too; Off stays as the relay-only option. Each end of a relayed link sends the server a
+  32-byte "MHGQ" query over its relay socket; the server answers "MHGP" (same size: no amplification) with the other
+  end's public UDP address and the pair's direct key, only once BOTH ends asked (Direct = Off on either end: no
+  address is ever given out) and never relays a query. Direct datagrams start "MHGR" + pair + direct key (like
+  relayed ones with the sender's secret) and must come from the address the server named: anything else reaching
+  the port straight from the internet is dropped. Then the host sends U_PUNCH and the station direct U_HELLOs (200 ms
+  for 15 s, then 2 s); the station's direct path is up when a direct hello is answered, and its hellos then carry
+  UF_DIRECT_OK, which brings the host's up. Game packets go direct while it is up, each packet by one path only (no
+  duplicates); the relay stays up beside it (relay hellos every 2 s, direct hellos every 1 s also keep the routers'
+  mappings open). Liveness counts only two-way proof (station: answers to its own hellos; host: the station's hellos /
+  packets, whose UF_DIRECT_OK says ours arrive): 3.5 s without and that end goes back to the relay, asks the server
+  again at once (an address change after a Wi-Fi / mobile switch) and punches fast again; coming back to direct after
+  a fall takes 3 answers (no flapping). The log says why there is no direct path: the other end never offers one
+  (Direct Off, older game or server) after 30 s, or 15 s of punching got nothing (symmetric / CGNAT, firewall). The
+  station's UDP socket is no longer connected (it hears the server and the host); SIO_UDP_CONNRESET off on Windows.
+  Old servers forward the query as data and the other end ignores it; old peers never ask: both stay on the relay.
+  No on-screen indicator yet (logs only).
+- Debug: MHGU_LDN_RTT=1 (both ends): hellos every 250 ms carry the station's clock and the answer echoes it; every
+  10 s the station logs the round trip per path (relay / direct) and both ends log their game packets sent /
+  received per path (direct, UDP via server or LAN, TCP). MHGU_LDN_BLOCK_DIRECT=<s>[-<t>]: direct datagrams ignored
+  from s s after a link starts (0: always, a symmetric-NAT stand-in), until t s if given (a passing outage).
+- Measured (2026-11-08, two instances on this PC, ~10 game packets/s each way): through a local server, relay round
+  trip 0.22-0.28 ms vs direct 0.13-0.16 ms, and after punching every game packet went direct (0 through the
+  server). Through the public server (Direct Off, test key): relay round trip 10.5-12.8 ms avg, 9.2 ms min, which is
+  what the relay adds over a direct path between two players on this PC's line; across a country / ocean it adds the
+  players' two legs to the server. Fallback tested: punching blocked from the start (stays on the relay), direct
+  broken mid-session either way (both ends back on the relay within ~4 s, packets kept flowing), the player with
+  Direct Off (the host never got its address). Not tested yet: two PCs behind real NATs, a hunt over the direct path.
+  Scripts: session f782a77e scratchpad (start.ps1, route.ps1, scenario.ps1 -hblock / -jblock / -hdirect / -jdirect).
 - Hardening on the way: every NetworkInfo from the network goes through info_sane (counts / sizes in range, strings
   terminated, node ids = index) before the game sees it; a WELCOME's node number is range-checked (was an out-of-
   bounds read); F_REFUSE results other than nn::ldn's become ConnectionRejected.
@@ -260,7 +291,13 @@ Plan and security notes: docs/research/internet-hubs.md.
   matters: LAN / Join hubs first (ldn_scan), then the server's (server.go list: hubs with a free slot first, then
   the fuller, then the newest). Since then (server.go list) the server's ListMax is 18 and, with more hubs than
   that, each LIST is a random 18 (shuffled, hubs with a free place kept before full ones), then sorted as before: a
-  Retry shows others. Not done: passworded hubs also take places in the list (they could be sorted last).
+  Retry shows others.
+- Passcoded hubs last (2026-11-08): MHGU's advertise data (NetworkInfo +0x26C, 200 bytes) has a u16 passcode at
+  +0xC0: 0xFFFF = none, else the 4-digit code in bits 0-14 (1234 = 0x04D2), bit 15 set for "Everyone", clear for
+  "Exclude Friends" (measured: open 0xFFFF, Everyone 1234 = 0x84D2, Exclude Friends 0000 = 0x0000). server.go list
+  ranks hubs: room and no passcode, room and a passcode, full, full with a passcode; both the random choice and the
+  sort go by rank, so passcoded hubs only show when open hubs with room leave places (user's call: private groups
+  should use a matchmaking key). Hosting asks the code by text entry (control "type 1234" + "textkey enter").
 
 ## Event camera pans skippable with A (2026-10-21)
 
@@ -320,7 +357,7 @@ text, cursor, Appear) -> 7 -> 8 shown until Calc returns 1 -> 9 (Unset) -> 3 rea
 ## Monster HP by the number of hunters (2026-10-21)
 
 ini [Monster HP]: factors on large monsters' HP in Hub-type quests for 1-4 hunters (default 1 = original), plus
-`Quest<number> = f1, f2, f3, f4` to set one quest apart. Only HP changes. A quest gives each large monster a row
+`Quest<number> = f1, f2, f3, f4` to set one quest apart. Only HP and part HP change (part HP: see the end of this section). A quest gives each large monster a row
 of the difficulty table (resident.arc enemy\resident\em_nando_tbl, "NAN": u32 magic, version, row count, then rows
 of 8 floats: HP, attack, defense...; cQuestData mVitalTblNo_N / mAttackTblNo_N / mOtherTblNo_N pick rows, and the
 game moves the HP row a little per quest, e.g. 17 -> 16..19, with the size). Max HP = base HP (dtbase) x row[0], set in 0x2c04a0 /
@@ -331,7 +368,14 @@ quests are left alone by number (below 10000, Village Prowler 100000-109999); hu
 clients use them while in that hub. Data: sQuest *0x1a8ad90 (+0xa4 cQuestData, +8 quest number), sQuestSelector
 *0x1a8ae38. Tested (two instances, Tackling the Tetsucabra, quest 10107, base HP 4000): solo x0.6 -> max HP 1392
 (= 4000 x 0.58 x 0.6); two hunters, host 0.5 / client's own 3.0 -> both 1340 (= 4000 x 0.67 x 0.5). Village quest
-exclusion and 3-4 hunters not tested in game. MHGU_LOG_HPSCALE=1 also logs the resulting max HP.
+exclusion and 3-4 hunters not tested in game. MHGU_LOG_HPSCALE=1 also logs the resulting max HP and each part's HP.
+Part HP (2026-11-08): row +0xc (4th float, read through column 2) is the quest's multiplier on part HP: flinch HP
+(0x299db8, rec+0x3be), sever HP (0x29d1a8, rec+0x3c0) and the monster classes' own part code; a part breaks after a
+number of flinches. The hook scales it with the HP factor (HubHP included), capped at x16: the values are 16-bit, read
+signed, and the largest base in the game is 1600 flinch / 1500 sever. Monsters so flinch as often per HP lost as in the
+original game. Tested (quest 206, Great Maccao, hook forced to the from-Hub case because the test save starts in the
+Village): flinch HP 114 / 171 / 123 / 95 at x1, 57 / 85 / 61 / 47 at x0.5, 1920 / 2880 / 2080 / 1600 at x40 (the
+cap, row x16 of bases 120 / 180 / 130 / 100). Not tested: cutting a tail in play, multiplayer.
 
 ## Village quests in the Hub (2026-10-22)
 
@@ -407,6 +451,34 @@ counter. An insta-clear cheat (sQuest +0xec = 0x29) on the host ended the quest 
 quest 0010216 cleared, posted by someone else: it counts here too"; back in the Hub "Hunter Rank 2 unlocked!", the 2-star
 quests unlocked, and new NPC dialogue. Not checked yet: a joiner who hasn't unlocked the Urgent, in a real hub (only
 through the harness above; the board may refuse them first).
+
+## Quest 713 "Research Team's First Rodeo": black screen after the clear (2026-11-07, not a port bug)
+
+A player's log: black screen right after "quest photo requested", seconds into the quest, with an instant-clear cheat on.
+After the clear, 713's script (sQuest spawn manager 0x5a08e8, +0x55 = post-clear step) spawns Valstrax (em086) only once
+no monster is alive (spawn condition type 6 at 0x5a153c: live count 0 and step 4), then plays its demo event082 (event
+table entry 105, 0x34cad8 / 0x5a8c44: step > 4) and ends the quest. An insta-clear (sQuest +0xec = 0x29) leaves the
+Congalala alive, so step 4 waits forever: the same would happen on a Switch with the cheat. Played through at 60 fps with
+MHGU_KILL_AFTER (carcass gone after ~1 min, "???" Valstrax demo, Quest complete, rewards) and with A skipping the demo
+(evskip): no hang. The emulators' "set 30 fps for the Valstrax quest" issue did not show here; 30 and 120+ fps untested.
+
+## Village quest demos in a session (2026-11-07)
+
+Report: "A Forest Fracas" (329) from the Hub in multiplayer: the Mizutsune cutscene is skipped, the Bulldrome (the
+target) never appears. A quest's monster demos are the event table's type 1 entries (0x17a06fc; 329: entry 49 = event049,
+area 5); the area's update looks one up (0x34cad8) when a hunter enters, and the demo's end calls 0x5a3ecc(sQuest, 1),
+which readies the spawn slots waiting for it (condition type 4, parameter 0). In a session the lookup answers "none"
+(sNetwork +0x63e), so those slots wait forever; Hub quests have none. runtime/hle/villagehub.c (spawn_update, on the
+spawn manager 0x5a08e8) makes that call for a Village quest in a session once any hunter is in a demo's area, on every
+game. Tested alone with MHGU_VQ_DEMO_TEST=1 (skips the session check) and the hunter's zone poked to 5: "[vqhub] ...
+releasing", slot 0 spawned, live monster id 1 = em 0x1e. Two games in a Local Play hub (HR72 test saves, 2026-11-07):
+both read sNetwork +0x63e = 1 in the quest and take it as a Village quest from the Hub, but those saves have cleared
+329, so the counter offers its replay 330 (Bulldrome in slot 0 with condition type 0, no Mizutsune: not affected).
+Forcing 329 (selector +0xd68 on both, depart bit +0xd65) crashed the host at the departure (empty vtable slot, main
+0x2125b8, as MHGU_QUICKHUNT across town types). 329 itself still needs a two-player run from a save that hasn't cleared
+it (and has the Hub counter: run3\st hasn't met the Guild Manager). Possibly the same
+kind of problem: 713 / 906 end with a type 1 Valstrax demo after the clear (see the 713 section); in a session it won't
+play, and whether the quest still ends is untested.
 
 ## Save data safety (2026-10-22)
 
@@ -546,6 +618,35 @@ at 120 fps; a KO (pending KO poked) lasts 10.0 s at 30 and 60 fps. Next: MHGU_KO
 every hit's KO, the buildup / threshold, KOs held back at the threshold, KO start / end and decay, for a player's
 30 vs 60 fps hammer session. Debug aid added: the control file's "interpread <lo>:<hi> <file of entries>" (interp.c:
 logs the instructions of the listed functions and their callees that read a guest range).
+
+KO in multiplayer (2026-11-07/08): the monster's owner decides, no frame-rate cause found. Theory tested: KOs harder only
+online. How hits work: every game computes hits for every hunter's melee attacks against its own copy of the monster
+(hit dispatch 0x370968 sends a player's hit to 0x376ad0 whether the attacker is local or not; attack types 8 / 9 / 0x45,
+likely shots, only on the owner: 0x36b4e0 / 0x3709a0 test +0x7420). Only the owner applies a KO (0x29a34c -> 0x2a2e18):
+its buildup (+0x5d76, with the other statuses +0x5c94..+0x5daa) goes out in netEmAction (send 0x2cbb74, at each new
+monster action) and overwrites the others' copies (receive 0x2cca0c). So a client's head blow counts only if the
+host's copy of the client (built from its network updates) also lands it on the head. Measured (two instances, two
+copies of a hammer save, Tackling the Tetsucabra, MHGU_DUMMY_SLOT=1 + MHGU_DUMMY_FACE=1 on both, the client pinned):
+the host registered every client head blow at 60/60 (26 of 26), 30/30 (24 of 26) and host 240 / client 60 (27 of 27);
+host 240 / client 30 once 2 of 26, but this PC can't run both games at those rates (median real rate during hits ~10
+fps on the host), so that is overload, not a frame-rate result. Single player at 30 and 240 fps: same KO per blow.
+Network sends are paced by game time, not frames (MHGU_NETRATE, real 30 / 60 / ~130 fps): ~12 UDP datagrams/s,
+~1.2 KB/s per game; netPlPositionQuest (send 0x400438, from 0x49ca48) ~7.5/s, netPlAction (0x3ffbf8) on new actions,
+netEmAction (0x3eb868) on monster actions. The remote hunter: a position update (apply 0x3ffff4: target +0x1480, facing
++0x14a0) starts a 20-frame glide (0x480548: counter +0x147c, velocity +0x1490; each update 0x4806e0 moves it by
+velocity x step and counts down by the step, so it takes the same time at any frame rate; 800+ units off, or every 40th
+update, it snaps); an action (netPlAction apply 0x3ff308) snaps the copy to where and how the attacker started it, then
+plays the move from its first frame. So the host checks a client's swing about one network delay after it was made,
+against a monster the client saw about one delay late: misses grow with the round trip and with how fast the head
+moves (the frozen dummy hides this). Internet hubs added the server's legs to that delay until direct UDP (above).
+Debug aids: MHGU_DUMMY_SLOT=<0..3> (the dummy in front of that player on every game), MHGU_DUMMY_FACE=1 (it faces the
+hunter: heading status +0x54, 65536 = a full turn, rebuilt into the rotation each update), control file "dummy <cm>
+<degrees>" (distance and heading; pins our hunter, held for, in place with its HP topped up) and "fps <n>" (frame rate
+target from now on); KO trace lines say "own 1" on the game that runs the monster; MHGU_NETRATE=1 (runtime/hle/netrate.c:
+real fps, UDP datagrams / bytes and RPC sends per send site every 5 s; RPC send 0xbfc3d8, the return address names the
+message type). Caveat: the dummy (motion speed 0) also stops the KO's countdown, so a KO on it lasts minutes. Two-instance
+route (both from the airship save, Hub Low 1 star quest 7): session da3c4186 scratchpad mp_go.ps1, mp_attack.ps1,
+rate_phase.ps1.
 
 Two-button inputs and the frame rate (2026-10-28): fixed. Reported: the Hunting Horn's X+A (and the Lance's R+X+A)
 need both buttons almost together at high frame rates. The player's input update (0x47ca28, every weapon; called
@@ -1442,7 +1543,9 @@ controller, frames = presented frames; e.g. `300:A:10`), `MHGU_NAME` (answers ev
 `fnnew lo hi [learn ms]` = log only the first call of each function in [lo, hi) not seen while learning, to find what an
 event runs; `peek` / `poke` / `memsave` / `find` for guest memory), `MHGU_QUICKHUNT=<quest number>` (from start-up
 straight into that quest: A through the menus to the save's town, then the quest is ordered and departed on;
-runtime/hle/quickhunt.c has how the game departs; `MHGU_QUICKHUNT=town` stops in the town), `vpad` (control file:
+runtime/hle/quickhunt.c has how the game departs; `MHGU_QUICKHUNT=town` stops in the town), `MHGU_KILL_AFTER=<s>`
+(the quest's large monster dies by one real hit that long into the quest), `MHGU_FORCE_EVENT=<n>` (the next quest-demo
+lookup plays event table entry n; both in quickhunt.c), `vpad` (control file:
 attach an SDL virtual controller; `vpad <n> <button> <0|1>` presses its button), `MHGU_LOG_MOVES=1` (the player's actions and command table
 changes, runtime/hle/movelog.c), `MHGU_EMTRACE=1/2/3` (large monster actions with their real-time length, height and
 distance; 2: the position every update; 3: the monster object saved on 4 updates once a forced action is 200 up;

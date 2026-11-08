@@ -28,7 +28,7 @@ public class LogActivity extends Activity {
         if (saved != null) { finish(); return; }  // (made again by the system: its dialog is gone)
         boolean crash = getIntent().getBooleanExtra(CRASH, false);
         final String name = crash ? LogProvider.CRASH_LOG : LogProvider.LOG;
-        if (!new File(getExternalFilesDir(null), name).isFile()) {
+        if (!new File(FilesFolder.get(this), name).isFile()) {  // (the app's files folder: LogProvider shares from it)
             Toast.makeText(this, "No log yet: start the game once first.", Toast.LENGTH_LONG).show();
             finish();
             return;

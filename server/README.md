@@ -8,7 +8,10 @@ hubs of the same port version, no Ryujinx players).
   `mhgurecomp.ini`, or the settings menu). Friends who all enter the same key only see each other's hubs; without a
   key a hub is public and seen by everyone else without a key. The game sends a hash of the key, never the key.
 - Joining goes through the server: it pipes the player's connection to one the host opens for them, and passes the
-  game's UDP packets between the two. Nobody needs a forwarded port, and players never see each other's IP address.
+  game's UDP packets between the two. Nobody needs a forwarded port. When both players allow direct connections
+  (`[Multiplayer] Direct`, on by default), the server also tells each game the other's address so their packets can go
+  straight between them (lower ping) when their routers let them; the relay stays as the fallback. A player with
+  Direct off never has their IP address shown to anyone.
 - Players on the same LAN still find each other directly (LAN search comes first).
 
 One small executable, no database, no configuration file. Uses one port, TCP and UDP (default 39510).
@@ -40,7 +43,7 @@ Open the port for **TCP and UDP** in the firewall (and forward it, if the server
 | `-max-conns-per-ip` | 24 | connections at once from one IP address |
 | `-max-hubs` | 2000 | hubs listed at once |
 | `-max-hubs-per-ip` | 4 | hubs from one IP address |
-| `-list-max` | 18 | hubs in one search answer, as many as the game's Join Hub list shows (3 pages of 6). With more hubs than that, each search gets a random choice of them (hubs with a free place before full ones), so a Retry shows others. The answer is sorted: free places first, then the fullest, then the newest |
+| `-list-max` | 18 | hubs in one search answer, as many as the game's Join Hub list shows (3 pages of 6). With more hubs than that, each search gets a random choice of them (hubs with a free place and no passcode first, then passcoded ones with a free place, then full ones), so a Retry shows others. The answer is sorted the same way, then the fullest first, then the newest. Passcoded hubs are only listed when open hubs with a free place leave room for them: groups that want privacy can use a matchmaking key |
 | `-bandwidth` | 1048576 | bytes a second per player link and direction (a hub uses far less) |
 | `-min-proto` | 0 | the oldest link protocol (the game's `PROTO_VERSION`, runtime/net/ldn.c) served: older games are refused, and they say "The hub server runs another version" and show only LAN / Join hubs. `-min-proto 3` refuses 0.14.2 and older. 0: any version. Can change while the server runs (`-settings`) |
 | `-separate-phones` | on | Android players without a matchmaking key get public hubs of their own: the game sends the key `public-phone` then, and this server keeps that room apart, so phones and PCs don't see each other's public hubs. `-separate-phones=false` makes it the public room: everyone without a key sees everyone's hubs. Keyed rooms are not affected either way. Can change while the server runs (`-settings`) |
@@ -113,6 +116,14 @@ JOIN, ATTACH carry "MHGS", the server protocol version, the port's link protocol
 join the two connections are spliced and carry the games' own link (runtime/net/ldn.c), which the server does not
 read. UDP datagrams "MHGR" + pair id + the sender's secret + payload are passed, without that prefix, to the other end
 of the pair.
+
+Direct connections (hole punching): a datagram of exactly that prefix + `MHGQ` + 12 zero bytes asks for the other
+end's public UDP address and is not passed on. Once both ends of a pair have asked (each game asks only when its
+player has `[Multiplayer] Direct = On`: that is their consent to show their address), the server answers the asker
+with `MHGP`, the pair id, the asker's secret, the other end's IPv4 address and port, 2 zero bytes and the pair's
+direct key (32 bytes, the query's size); the games mark their direct datagrams with that key. The
+games then try to reach each other directly and use the relay whenever that does not work, so a server that is
+older than this simply keeps every game on the relay.
 
 Safety: sizes capped, every NetworkInfo checked before it is listed, LIST / JOIN rate limited per IP address,
 connections and hubs per IP address limited, handshakes time out, the relay only forwards between the two ends of a

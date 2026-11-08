@@ -59,6 +59,7 @@ static SDL_AtomicInt live_binds[BINDS][BIND_KEYS];
 // [Multiplayer]
 static SDL_AtomicInt live_ldn_port;
 static SDL_AtomicInt live_sync_zako;
+static SDL_AtomicInt live_ldn_direct;
 static SDL_AtomicInt live_share_urgent;
 // [Monster HP, Village Quests]
 static SDL_AtomicInt live_village;
@@ -145,6 +146,7 @@ static void publish_live(const Config *c, bool all) {
     }
     if (all || c->ldn_port != saved.ldn_port) SDL_SetAtomicInt(&live_ldn_port, c->ldn_port);
     if (all || c->sync_small_monsters != saved.sync_small_monsters) SDL_SetAtomicInt(&live_sync_zako, c->sync_small_monsters);
+    if (all || c->ldn_direct != saved.ldn_direct) SDL_SetAtomicInt(&live_ldn_direct, c->ldn_direct);
     if (all || c->bonus_content != saved.bonus_content) SDL_SetAtomicInt(&live_bonus, c->bonus_content);
 }
 void config_store_loaded(const Config *c) {
@@ -170,6 +172,7 @@ void config_runtime_init(const Config *effective) {
     }
 }
 float config_live_fps(void) { return get_float(&live_fps); }
+void config_set_live_fps(float f) { set_float(&live_fps, f < 30 ? 30 : f > 240 ? 240 : f); }  // (debug: the control file's "fps")
 float config_live_fov(void) { return get_float(&live_fov); }
 float config_live_mouse_sensitivity(void) { return get_float(&live_mouse); }
 float config_live_draw_distance(void) { return get_float(&live_draw); }
@@ -207,6 +210,7 @@ float config_live_fsr_reactive(void) { return get_float(&live_fsr_reactive); }
 int config_live_village_in_hub(void) { return SDL_GetAtomicInt(&live_village); }
 int config_live_ldn_port(void) { return SDL_GetAtomicInt(&live_ldn_port); }
 int config_live_sync_small_monsters(void) { return SDL_GetAtomicInt(&live_sync_zako); }
+int config_live_ldn_direct(void) { return SDL_GetAtomicInt(&live_ldn_direct); }
 int config_live_bonus_content(void) { return SDL_GetAtomicInt(&live_bonus); }
 void config_live_ldn_join(char *join, size_t size) {
     SDL_LockSpinlock(&live_ldn_lock);

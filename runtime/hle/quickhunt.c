@@ -57,7 +57,71 @@ void quickhunt_poll(void) {
     host_input_press("A", 8);
 }
 
+// (debug) MHGU_FORCE_EVENT=<index>: the next call of the quest-event lookup (0x34cad8) answers with that entry of the
+// event manager's table (0x17a06fc: 0x6b entries of 12 bytes: u8 type (1 quest demo, 2 stage, 5 movie), u8 event or
+// stage-event number, u8 stage, u8 town/area, u32, u32 quest). The lookup runs where a quest's demo can start (e.g.
+// quest 713's post-clear Valstrax demo, entry 105 = event082), and only then: not on arrival in a town.
+#define FN_QUEST_EVENT 0x34cad8u
+static int g_force_event = -1;
+static void quest_event(Cpu *c) {
+    uint32_t mgr = c->r[0];
+    if (g_force_event >= 0) {
+        uint32_t e = 0x17a06fcu + 12u * (uint32_t)g_force_event;
+        ST32(mgr + 0x28, (uint32_t)g_force_event);
+        ST8(mgr + 0x24, LD8(e));
+        LOG("[quickhunt] forced event table entry %d (type %u, event %03u)\n", g_force_event, LD8(e), LD8(e + 1));
+        g_force_event = -1;
+        RET(1);
+        return;
+    }
+    fnhook_call_original(c, FN_QUEST_EVENT);
+}
+
+// (debug) MHGU_KILL_AFTER=<s>: that long after the first quest update (sQuest 0x59f8b8), the first large monster is put
+// at 1 HP and takes one hit through the game's own damage function (0x29d6f8), so it dies as in a hunt (carcass, clear,
+// what the quest does after). Unlike an insta-clear (sQuest +0xec = 0x29), which leaves the monster alive.
+#define FN_QUEST_UPDATE 0x59f8b8u
+#define FN_EN_DAMAGE_Q  0x29d6f8u
+static uint64_t g_kill_ns, g_kill_at;
+static void quest_update(Cpu *c) {
+    if (g_kill_ns) {
+        uint64_t now = plat_now_ns();
+        if (!g_kill_at) g_kill_at = now + g_kill_ns;
+        if (now >= g_kill_at) {
+            g_kill_ns = 0;
+            uint32_t sen = LD32(0x1a51fe0u), en = 0;
+            for (int k = 0; sen && k < 10 && !en; k++) {
+                uint32_t e = LD32(sen + 0x1c + 4u * (uint32_t)k), info = e ? LD32(e + 0x1428) : 0;
+                if (info && LD16(info + 0x1b6) < 10000) en = e;
+            }
+            if (en) {
+                uint32_t info = LD32(en + 0x1428);
+                ST32(info + 0x370, 1);
+                uint32_t saved[16];
+                for (int i = 0; i < 16; i++) saved[i] = c->r[i];
+                c->r[0] = en, c->r[1] = 0, c->r[2] = 100, c->r[3] = 0;
+                guest_call(c, FN_EN_DAMAGE_Q);
+                for (int i = 0; i < 16; i++) c->r[i] = saved[i];
+                LOG("[quickhunt] killed monster %08x: HP now %d\n", en, (int)LD32(info + 0x370));
+            } else {
+                LOG("[quickhunt] kill: no large monster\n");
+            }
+        }
+    }
+    fnhook_call_original(c, FN_QUEST_UPDATE);
+}
+
 void quickhunt_init(void) {
+    const char *ka = getenv("MHGU_KILL_AFTER");
+    if (ka && *ka) {
+        g_kill_ns = (uint64_t)atoi(ka) * 1000000000ull;
+        fnhook_set(FN_QUEST_UPDATE, hle_register("quickhunt:quest_update", quest_update));
+    }
+    const char *fe = getenv("MHGU_FORCE_EVENT");
+    if (fe && *fe) {
+        g_force_event = atoi(fe);
+        fnhook_set(FN_QUEST_EVENT, hle_register("quickhunt:quest_event", quest_event));
+    }
     const char *e = getenv("MHGU_QUICKHUNT");
     if (!e || !*e) return;
     g_quest = !strcmp(e, "town") ? TOWN_ONLY : (uint32_t)strtoul(e, NULL, 10);

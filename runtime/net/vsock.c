@@ -8,6 +8,8 @@
 #include "../hle.h"
 #include "net.h"
 
+void netrate_udp(uint32_t len);  // (debug, MHGU_NETRATE: runtime/hle/netrate.c)
+
 // ---- the Switch's constants
 enum { S_EBADF = 9, S_EAGAIN = 11, S_ENOMEM = 12, S_EINVAL = 22, S_EMFILE = 24, S_EPIPE = 32, S_ENOTSOCK = 88,
        S_EDESTADDRREQ = 89, S_EMSGSIZE = 90, S_EPROTONOSUPPORT = 93, S_EOPNOTSUPP = 95, S_EAFNOSUPPORT = 97,
@@ -390,6 +392,7 @@ static int do_send(Cpu *c, int fd, uint32_t buf, uint32_t len, int flags, uint32
         if (len > 0xFFE0) return fail(S_EMSGSIZE);
         if (!ldn_net_up()) return fail(S_ENETUNREACH);
         ldn_send(&p, G2H(buf), len);
+        netrate_udp(len);  // (debug, MHGU_NETRATE)
         return (int)len;
     }
     if (s->reset) { pthread_mutex_unlock(&mu); return fail(S_ECONNRESET); }

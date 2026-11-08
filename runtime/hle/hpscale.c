@@ -4,6 +4,9 @@
 // HP x that multiplier, in two functions that read the row through one getter (0x2baaac: monster, column 0 = HP,
 // 1 = attack, 2 = the rest). Hooked there: for the HP column in a Hub-type quest the getter returns a copy of the
 // row with only the HP multiplier scaled, so attack, defense, size, stamina... stay as the quest made them.
+// Part HP gets the same factor, or a half-HP monster dies before its tail is cut: the row's fourth float (+0xc, read
+// through column 2) is the quest's multiplier on the flinch HP and sever HP of every part (0x299db8, 0x29d1a8: a part
+// breaks after a number of flinches). Nothing else reads that float, and the monster classes' own part code uses it too.
 // Village quests (numbers below 10000, and the village Prowler quests 100000-109999) are left alone: they are
 // played alone - unless posted in the Hub or the Hunters' Pub ([Village Quests], runtime/hle/villagehub.c): then
 // their HP gets [Village Quests] HubHP first, then the factor for the number of hunters. Every other quest is
@@ -12,6 +15,7 @@
 // Multiplayer: every game computes a monster's HP itself, so all must use the same factors: the hub's host sends its
 // settings to the others (ldn_send_aux), whose games use them instead of their own while they are in that hub.
 #include <pthread.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "../config.h"
@@ -27,7 +31,9 @@
 #define G_GAMECONTROL 0x1a8ca48u  // sGameControl *: +0x4c area type (0 Hub, 1-6 villages, 7 Hunters' Pub)
 #define EN_INFO       0x1428u     // enemy: status block pointer (+0x1b6 u16 network id; +0x39c HP row number)
 #define ROW_SIZE      32u
-#define RING          16u
+#define ROW_PARTS     0xcu    // row: float, the part HP multiplier
+#define PARTS_MAX     16.0f   // on it: part HP are 16-bit, read signed, and the largest in the game is 1600 (the quests' own go up to x6)
+#define RING          64u
 #define SYNC_MAGIC    0xE6u       // aux message: the host's settings (emsync.c's claims are 0xE5)
 #define SYNC_NS       2000000000ull
 
@@ -39,6 +45,10 @@ static unsigned g_ring_next;
 static volatile int g_town = -1;  // the last town's area type seen (a quest is started from there)
 static uint32_t g_watch;     // MHGU_LOG_HPSCALE: a monster whose resulting HP is logged a moment later
 static uint64_t g_watch_at;
+static uint32_t g_tick;      // counts frames (hpscale_tick), so the cache below sees changed settings
+static uint32_t g_part_tick, g_part_quest;  // the last part factor worked out (column 2 is read for every part, every frame)
+static int g_part_hunters;
+static float g_part_factor;
 
 static bool sane(uint32_t a) { return a >= 0x08000000u && a < 0xF0000000u && !(a & 3); }
 
@@ -97,10 +107,34 @@ static float village_factor(void) {
 static float f32(uint32_t w) { float f; memcpy(&f, &w, 4); return f; }
 static uint32_t u32f(float f) { uint32_t w; memcpy(&w, &f, 4); return w; }
 
+// A guest copy of a row with one float changed.
+static uint32_t row_copy(uint32_t row, uint32_t offset, float value) {
+    uint32_t copy = g_ring + ROW_SIZE * (__atomic_fetch_add(&g_ring_next, 1, __ATOMIC_RELAXED) % RING);
+    memcpy(G2H(copy), G2H(row), ROW_SIZE);
+    ST32(copy + offset, u32f(value));
+    return copy;
+}
+
+// The factor on part HP: the same as on HP.
+static float part_factor(uint32_t q, int n) {
+    uint32_t tick = __atomic_load_n(&g_tick, __ATOMIC_RELAXED);
+    pthread_mutex_lock(&g_lock);
+    bool hit = g_part_tick == tick && g_part_quest == q && g_part_hunters == n;
+    float f = g_part_factor;
+    pthread_mutex_unlock(&g_lock);
+    if (hit) return f;
+    bool host;
+    f = (village_quest(q) ? village_factor() : 1.0f) * factor(q, n, &host);
+    pthread_mutex_lock(&g_lock);
+    g_part_tick = tick, g_part_quest = q, g_part_hunters = n, g_part_factor = f;
+    pthread_mutex_unlock(&g_lock);
+    return f;
+}
+
 static void nando_row(Cpu *c) {
     uint32_t em = c->r[0], column = c->r[1];
     fnhook_call_original(c, FN_NANDO_ROW);
-    if (column != 0) return;
+    if (column != 0 && column != 2) return;
     uint32_t row = c->r[0], sen = LD32(G_SENEMY), tbl = sane(sen) ? LD32(sen + 0x257c) : 0;
     // (outside quests the getter gives a fixed row, not one of the table's)
     if (!sane(tbl) || row < LD32(tbl + 0x64) || row >= LD32(tbl + 0x64) + LD32(tbl + 0x68) * ROW_SIZE) return;
@@ -108,6 +142,11 @@ static void nando_row(Cpu *c) {
     bool from_hub = g_town == 0 || g_town == 7;
     if (!q || (village_quest(q) && !from_hub)) return;
     int n = hunters();
+    if (column == 2) {
+        float pf = part_factor(q, n), parts = f32(LD32(row + ROW_PARTS)) * pf;
+        if (pf != 1.0f) c->r[0] = row_copy(row, ROW_PARTS, parts > PARTS_MAX ? PARTS_MAX : parts);
+        return;
+    }
     bool host;
     float v = village_quest(q) ? village_factor() : 1.0f, f = v * factor(q, n, &host), hp = f32(LD32(row));
     uint32_t info = sane(em) ? LD32(em + EN_INFO) : 0;
@@ -115,20 +154,24 @@ static void nando_row(Cpu *c) {
         sane(info) ? LD16(info + 0x1b6) : 0xffffu, hp, (row - LD32(tbl + 0x64)) / ROW_SIZE, f,
         v != 1.0f ? " (Village quest from the Hub)" : "", host ? " (the hub host's setting)" : "", hp * f);
     if (ENV("MHGU_LOG_HPSCALE")) g_watch = info, g_watch_at = plat_now_ns();
-    if (f == 1.0f) return;
-    uint32_t copy = g_ring + ROW_SIZE * (__atomic_fetch_add(&g_ring_next, 1, __ATOMIC_RELAXED) % RING);
-    memcpy(G2H(copy), G2H(row), ROW_SIZE);
-    ST32(copy, u32f(hp * f));
-    c->r[0] = copy;
+    if (f != 1.0f) c->r[0] = row_copy(row, 0, hp * f);
 }
 
 // ---- the host's settings to the others in the hub
 // Message: u8 magic, u8 -, u16 quest overrides; float scale[4]; per override u32 quest, float scale[4]; float HubHP.
 void hpscale_tick(void) {
+    __atomic_add_fetch(&g_tick, 1, __ATOMIC_RELAXED);
     uint32_t gc = LD32(G_GAMECONTROL);
     if (sane(gc) && LD8(gc + 0x4c) <= 7) g_town = LD8(gc + 0x4c);
     if (g_watch && plat_now_ns() - g_watch_at > 500000000ull) {
-        if (sane(g_watch)) LOG("[hpscale] monster %u: max HP %d\n", LD16(g_watch + 0x1b6), (int)LD32(g_watch + 0x374));
+        if (sane(g_watch)) {
+            char parts[128];  // (flinch HP / sever HP of parts 0-7)
+            int len = 0;
+            for (uint32_t p = 0; p < 8; p++)
+                len += snprintf(parts + len, sizeof parts - (size_t)len, " %u/%d", LD16(g_watch + 0x3be + 12 * p),
+                                (int16_t)LD16(g_watch + 0x3c0 + 12 * p));
+            LOG("[hpscale] monster %u: max HP %d, parts%s\n", LD16(g_watch + 0x1b6), (int)LD32(g_watch + 0x374), parts);
+        }
         g_watch = 0;
     }
     static uint64_t last;

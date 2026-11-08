@@ -181,6 +181,16 @@ Everything lives in that `files` folder. Its contents match the PC version's gam
 The settings menu has an **Android** tab (the last one) for what the device's file managers can't do in
 `Android/data`:
 
+- **Files folder:** keeps the app's files (settings, save, mods, cheats, screenshots, `log.txt`, `env.txt`) in a folder
+  you pick instead of `Android/data`, so the device's own file managers can open them. The app copies its files there
+  (files missing there are copied; if files there are older than the app's, the save after playing elsewhere for
+  example, it asks whether to replace them, keeping the replaced ones as `.bak`; not the game files, which are then used where they are, nor the shader cache, which is
+  made again) and closes; start it again. Android asks you to allow "All files access". **Use the app's folder** copies
+  them back, with a progress dialog either way. The app asks once at the first start too (and after a reinstall, which
+  forgets the folder: choose it again and what's in it is used; game files left in the app's own folder are deleted by
+  the uninstall and need importing again). If the chosen folder can't be used at a start ("All files access" turned
+  off, the folder moved or deleted, its drive gone), the app says so and offers to choose it again or use its own folder
+  for that time; **Use the app's folder** then forgets it for good.
 - **Import save:** pick the `system` and `system_backup` files from anywhere on the device. The app copies them in,
   keeping your current save in `save/save_0.before-import-<date>`, and closes; start it again to play. (Over USB you
   can also put the two files in `save/save_0/` yourself.)
@@ -292,10 +302,10 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   each other's hubs; empty = public, on Android public among Android players only), `SyncSmallMonsters`,
   `ShareUrgentCredit` (default On: an Urgent quest someone else posted counts for you too when you clear it, if you
   have unlocked it yourself)
-- `[Monster HP]`: HP factors for 1 to 4 hunters in Hub quests, and per-quest exceptions (default: all 1, the
+- `[Monster HP]`: factors on monster HP and part HP (flinches, breaks, severs) for 1 to 4 hunters in Hub quests, and per-quest exceptions (default: all 1, the
   original game)
 - `[Village Quests]`: `VillageQuestsInHub` (default On), `HubHP` (default 2.0: Village quests posted in the Hub
-  multiply their monsters' HP by this first, then by the `[Monster HP]` factor)
+  multiply their monsters' HP and part HP by this first, then by the `[Monster HP]` factor)
 - `[Discord]`: `RichPresence` (default On: your Discord profile shows where you are, the monsters you're hunting
   and the map, how many are in your hub or quest; Discord must be running on the same computer), `ShowHunter`
   (default On: your hunter's name, HR and weapon type too)

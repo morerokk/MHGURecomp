@@ -9,7 +9,8 @@
 // there, for players with the same matchmaking key (ini Key, empty: public) and port version, and Scan adds the
 // server's hubs to the LAN's. Joining one goes through the server, which splices the player's connection to one the
 // host opens for it: the same link as a direct connection, so nobody forwards a port. Game packets go by UDP through
-// the server too ("MHGR" relay prefix), else through the link.
+// the server too ("MHGR" relay prefix), else through the link - or, when both players allow it (ini Direct), straight
+// between them once hole punching gets through (see "Direct UDP" below), with the relay as the fallback.
 //
 // Crossplay (ryuldn.c, ini [Multiplayer] RyuServers / RyuHost): lobbies on Ryujinx LDN servers are searched together with
 // the others, and joining one, or creating a hub on RyuHost, runs the network through that server (the "ryu" mode
@@ -124,11 +125,34 @@ typedef struct {
 // one lost packet would hold up everything behind it): datagrams "MHGD" + token + kind [+ VPacket + data] between
 // a station and the host's port. A station says hello every 2 s (keeping NAT mappings open), the host answers;
 // without UDP (blocked, not forwarded) or after 15 s without any, the packets go through the TCP link instead.
+// A hello carries the station's clock (u64 ns) and the answer echoes it: the round trip (MHGU_LDN_RTT=1 logs it).
 #define UDP_MAGIC "MHGD"
-enum { U_DATA = 0, U_HELLO, U_HELLO_ACK };
-typedef struct { char magic[4]; uint32_t token; uint8_t kind, pad[3]; } UHdr;
+enum { U_DATA = 0, U_HELLO, U_HELLO_ACK, U_PUNCH };
+typedef struct { char magic[4]; uint32_t token; uint8_t kind, flags, pad[2]; } UHdr;
+#define UF_DIRECT_OK 1  // (a direct hello) the station gets the host's direct datagrams
 #define UDP_MAX_PAYLOAD 8192
 #define UDP_SILENCE_NS 15000000000ull
+
+// Direct UDP in an internet hub (hole punching; ini Direct on both ends): over the relay socket each end asks the hub
+// server for the other's public UDP address ("MHGQ" query); the server answers ("MHGP") once both have asked, so a
+// player with Direct = Off never has its address shown, and an older game (which never asks) stays on the relay. The
+// answer also carries the pair's direct key: direct datagrams start "MHGR", pair id, direct key (as relayed ones do
+// with the sender's secret), and anything else arriving straight from the internet is dropped. Then the host sends
+// punches and the station hellos straight to the other's address, each opening its own router's way for the other's
+// datagrams; once the station's hellos are answered both ways, game packets go directly. The relay stays up beside
+// it (its hellos go on, and the direct hellos every second keep the routers' mappings open): after DIRECT_SILENCE_NS
+// without proof that the direct path works both ways, the packets go through the server again (symmetric /
+// carrier-grade NAT never get a direct path at all), and the ends ask the server again at once (a new address after a
+// network change). Coming back to direct after such a fall takes DIRECT_REUP answers in a row (no flapping).
+#define PEER_QUERY "MHGQ"
+#define PEER_ANSWER "MHGP"
+#define PEER_MSG_SIZE (RELAY_PREFIX + 16)  // the query: prefix, "MHGQ", 0[12]; the answer: "MHGP", pair, secret,
+                                           // ip[4], port (BE), 0[2], direct key (u64): never bigger than the query
+#define DIRECT_SILENCE_NS 3500000000ull  // (direct hellos every second: three lost in a row)
+#define DIRECT_HELLO_NS 1000000000ull
+#define DIRECT_REUP 3
+#define PUNCH_FAST_NS 15000000000ull  // punches / hellos every 200 ms this long after the address came, then every 2 s
+#define QUERY_FAST_NS 30000000000ull  // queries every second this long after the link came up or direct fell, then every 15 s
 
 // The hub server (server/server.go has the protocol): control frames like the link's; requests start with a header
 // "MHGS", u16 LOBBY_PROTO, u16 PROTO_VERSION, room[16] (the matchmaking key's hash).
@@ -153,6 +177,15 @@ typedef struct {
     volatile uint64_t udp_rx_ns;  // last datagram from the other end
     uint32_t relay_pair;          // through the hub server (0: direct): its pair id and our secret for UDP
     uint64_t relay_secret;
+    // relayed links: direct UDP past the server (hole punching)
+    bool direct_ok;               // ini Direct when the link came up
+    struct sockaddr_in paddr;     // the other end's public address (from the server)
+    volatile bool p_known, p_up;  // p_up: direct datagrams get through both ways, game packets go that way
+    volatile uint64_t p_rx_ns;    // last proof that the direct path works both ways
+    uint64_t dkey;                // the pair's direct key (from the server's answer; 0: none yet)
+    int p_good;                   // station: direct hello answers in a row (DIRECT_REUP after a fall)
+    bool p_ever, p_noanswer_said, p_nopunch_said;  // (for the log)
+    uint64_t born_ns, q_since, p_since, next_query, next_punch;  // (the UDP thread's timers)
 } Link;
 
 static struct {
@@ -315,6 +348,14 @@ static uint32_t relay_prefix(uint8_t *buf, const Link *l) {
     memcpy(buf + 8, &l->relay_secret, 8);
     return RELAY_PREFIX;
 }
+// Straight to the other end of a relayed link (hole punched): "MHGR", the pair and the pair's direct key.
+static uint32_t direct_prefix(uint8_t *buf, const Link *l) {
+    if (!l->relay_pair) return 0;
+    memcpy(buf, RELAY_MAGIC, 4);
+    wr32(buf + 4, l->relay_pair);
+    memcpy(buf + 8, &l->dkey, 8);
+    return RELAY_PREFIX;
+}
 // The host tells the server where its end of a relayed link is (until the station's datagrams come through).
 static void relay_register(hsock s, const Link *l) {
     uint8_t buf[RELAY_PREFIX];
@@ -338,25 +379,179 @@ static bool resolve_host(const char *text, int def, struct sockaddr_in *out) {
     return true;
 }
 
-// One datagram on link l: header [+ packet]. to = NULL: s is connected (a station's socket).
-static bool udp_send(hsock s, const struct sockaddr_in *to, const Link *l, uint8_t kind, const VPacket *p,
-                     const void *data, uint32_t len) {
+// One datagram on link l: header [+ packet] [+ data], to the server's relay (relayed) or straight to to (a relayed
+// link's direct path, or a LAN / address link).
+static bool udp_send(hsock s, const struct sockaddr_in *to, const Link *l, bool relayed, uint8_t kind, uint8_t flags,
+                     const VPacket *p, const void *data, uint32_t len) {
     uint8_t buf[RELAY_PREFIX + sizeof(UHdr) + sizeof(VPacket) + UDP_MAX_PAYLOAD];
     if (len > UDP_MAX_PAYLOAD) return false;
-    UHdr h = {{0}, l->token, kind, {0}};
+    UHdr h = {{0}, l->token, kind, flags, {0}};
     memcpy(h.magic, UDP_MAGIC, 4);
-    uint32_t n = relay_prefix(buf, l);
+    uint32_t n = relayed ? relay_prefix(buf, l) : direct_prefix(buf, l);
     memcpy(buf + n, &h, sizeof h);
     n += sizeof h;
     if (p) {
         memcpy(buf + n, p, sizeof *p);
         n += sizeof *p;
-        if (len) memcpy(buf + n, data, len);
-        n += len;
     }
-    int k = to ? sendto(s, (const char *)buf, (int)n, 0, (const struct sockaddr *)to, sizeof *to)
-               : send(s, (const char *)buf, (int)n, 0);
-    return k == (int)n;
+    if (len) memcpy(buf + n, data, len);
+    n += len;
+    return sendto(s, (const char *)buf, (int)n, 0, (const struct sockaddr *)to, sizeof *to) == (int)n;
+}
+
+static bool same_addr(const struct sockaddr_in *a, const struct sockaddr_in *b) {
+    return a->sin_addr.s_addr == b->sin_addr.s_addr && a->sin_port == b->sin_port;
+}
+
+// Windows reports an ICMP "port unreachable" (a punch that met a closed router) as an error on the socket's next
+// receive: not wanted on a socket that talks to several addresses.
+static void udp_no_connreset(hsock s) {
+#ifdef _WIN32
+    DWORD off = 0, got = 0;
+    WSAIoctl(s, _WSAIOW(IOC_VENDOR, 12) /* SIO_UDP_CONNRESET */, &off, sizeof off, NULL, 0, &got, NULL, NULL);
+#else
+    (void)s;
+#endif
+}
+
+// ---- direct UDP past the hub server (hole punching)
+// MHGU_LDN_BLOCK_DIRECT=<s>[-<t>] (testing the fallback): direct datagrams are ignored from s seconds after a link
+// came up on (0: always, as behind a symmetric NAT), until t seconds if given (a passing outage).
+static bool direct_blocked(const Link *l) {
+    static int64_t from_ns = -2, to_ns = -1;
+    if (from_ns == -2) {
+        const char *e = getenv("MHGU_LDN_BLOCK_DIRECT"), *dash = e ? strchr(e, '-') : NULL;
+        from_ns = e && *e ? (int64_t)atoi(e) * 1000000000ll : -1;
+        to_ns = dash ? (int64_t)atoi(dash + 1) * 1000000000ll : -1;
+        if (from_ns >= 0) LOG("[ldn] MHGU_LDN_BLOCK_DIRECT: direct datagrams ignored %s s after a link starts\n", e);
+    }
+    int64_t t = (int64_t)(plat_now_ns() - l->born_ns);
+    return from_ns >= 0 && t >= from_ns && (to_ns < 0 || t < to_ns);
+}
+
+static void direct_reset(Link *l, bool ok) {
+    l->direct_ok = ok && l->relay_pair;
+    l->p_known = l->p_up = l->p_ever = l->p_noanswer_said = l->p_nopunch_said = false;
+    l->p_rx_ns = l->p_since = l->next_query = l->next_punch = l->dkey = 0;
+    l->p_good = 0;
+    l->born_ns = l->q_since = plat_now_ns();
+}
+
+// Asks the server for the other end's address (every second for 30 s after the link came up or direct fell, then
+// every 15 s, until direct works), and says in the log why there is no direct connection when it can tell.
+static void peer_query(hsock s, Link *l, uint64_t now, const char *who) {
+    if (!l->direct_ok || l->p_up) return;
+    if (!l->p_known && !l->p_noanswer_said && now - l->born_ns > QUERY_FAST_NS) {
+        l->p_noanswer_said = true;
+        LOG("[ldn] %s: no direct connection: the other end does not offer one (its Direct = Off, an older version, or an "
+            "older hub server); game packets stay on the hub server\n", who);
+    }
+    if (l->p_known && !l->p_nopunch_said && now - l->p_since > PUNCH_FAST_NS) {
+        l->p_nopunch_said = true;
+        LOG("[ldn] %s: no direct connection after %d s of trying (a router that gives each destination its own port, as "
+            "symmetric / carrier-grade NAT, or a firewall): game packets stay on the hub server, still trying every 2 s\n",
+            who, (int)(PUNCH_FAST_NS / 1000000000ull));
+    }
+    if (now < l->next_query) return;
+    l->next_query = now + (now - l->q_since < QUERY_FAST_NS ? 1000000000ull : 15000000000ull);
+    uint8_t buf[PEER_MSG_SIZE] = {0};
+    relay_prefix(buf, l);
+    memcpy(buf + RELAY_PREFIX, PEER_QUERY, 4);
+    sendto(s, (const char *)buf, sizeof buf, 0, (const struct sockaddr *)&l->uaddr, sizeof l->uaddr);
+}
+
+// The server's answer (from l->uaddr, checked by the caller): the other end's address. true: it was one.
+static bool peer_answer(Link *l, const uint8_t *b, int n, const char *who) {
+    if (n != PEER_MSG_SIZE || memcmp(b, PEER_ANSWER, 4) || !l->direct_ok || rd32(b + 4) != l->relay_pair ||
+        rd64(b + 8) != l->relay_secret)
+        return false;
+    struct sockaddr_in a = {0};
+    a.sin_family = AF_INET;
+    memcpy(&a.sin_addr.s_addr, b + 16, 4);
+    memcpy(&a.sin_port, b + 20, 2);
+    l->dkey = rd64(b + 24);
+    if (l->p_known && same_addr(&a, &l->paddr)) return true;
+    if (l->p_known) LOG("[ldn] %s: the other end's address changed (a network change?)\n", who);
+    l->paddr = a;  // (never logged: the other player's address)
+    l->p_since = plat_now_ns(), l->next_punch = 0;
+    if (!l->p_known) LOG("[ldn] %s: the hub server gave the other end's address, trying a direct connection\n", who);
+    l->p_known = true;
+    return true;
+}
+
+// A datagram straight from the other end (not through the server): from its address as the server gave it (the
+// port may differ: the latest wins). What keeps the direct path alive (p_rx_ns) is only what proves it works both
+// ways: on the station the answers to its own hellos, on the host the station's hellos (which say whether ours get
+// through) and packets. A one-way path (punches still arriving, our datagrams lost) falls back like a dead one.
+static bool direct_from(Link *l, const struct sockaddr_in *from) {
+    if (!l->p_known || from->sin_addr.s_addr != l->paddr.sin_addr.s_addr || direct_blocked(l)) return false;
+    l->paddr.sin_port = from->sin_port;
+    return true;
+}
+static bool direct_usable(const Link *l) { return l->p_up && plat_now_ns() - l->p_rx_ns < DIRECT_SILENCE_NS; }
+static void direct_check_silence(Link *l, uint64_t now, const char *who) {
+    if (l->p_up && now - l->p_rx_ns > DIRECT_SILENCE_NS) {
+        l->p_up = false;
+        l->p_good = 0;
+        l->p_since = l->q_since = now, l->next_query = 0, l->p_nopunch_said = false;  // (punch and ask fast again for a while)
+        LOG("[ldn] %s: the direct connection went quiet (%.1f s without proof it works both ways): game packets go "
+            "through the hub server again\n", who, (double)(now - l->p_rx_ns) / 1e9);
+    }
+}
+
+// ---- MHGU_LDN_RTT=1: the station logs the round trip of its UDP hellos every 10 s, by path (the game's packets
+// take the same ones), and says hello every 250 ms instead of every 2 s.
+static int rtt_on = -1;
+static struct { uint32_t n; double sum, min, max; } rtt_acc[2];  // [0] relay / LAN, [1] direct
+static uint64_t rtt_next_log;
+static void pkt_report(const char *who);
+static bool rtt_enabled(void) {
+    if (rtt_on < 0) {
+        const char *e = getenv("MHGU_LDN_RTT");
+        rtt_on = e && atoi(e) > 0;
+    }
+    return rtt_on;
+}
+static void rtt_add(int path, const uint8_t *stamp, int len) {
+    if (!rtt_enabled() || len < 8) return;
+    uint64_t t0 = rd64(stamp), now = plat_now_ns();
+    if (t0 > now || now - t0 > 10000000000ull) return;
+    double ms = (double)(now - t0) / 1e6;
+    if (!rtt_acc[path].n || ms < rtt_acc[path].min) rtt_acc[path].min = ms;
+    if (!rtt_acc[path].n || ms > rtt_acc[path].max) rtt_acc[path].max = ms;
+    rtt_acc[path].n++, rtt_acc[path].sum += ms;
+}
+static void rtt_report(bool relayed, uint64_t now) {
+    if (!rtt_enabled()) return;
+    if (!rtt_next_log) rtt_next_log = now + 10000000000ull;
+    if (now < rtt_next_log) return;
+    rtt_next_log = now + 10000000000ull;
+    char line[2][96];
+    for (int i = 0; i < 2; i++) {
+        if (rtt_acc[i].n)
+            snprintf(line[i], sizeof line[i], "%u, avg %.2f, min %.2f, max %.2f ms", rtt_acc[i].n,
+                     rtt_acc[i].sum / rtt_acc[i].n, rtt_acc[i].min, rtt_acc[i].max);
+        else
+            snprintf(line[i], sizeof line[i], "none");
+    }
+    LOG("[ldn] round trip (UDP hello -> answer, last 10 s): %s %s | direct %s\n",
+        relayed ? "through the hub server" : "to the host (LAN / address)", line[0], line[1]);
+    memset(rtt_acc, 0, sizeof rtt_acc);
+    pkt_report("station");
+}
+static uint64_t hello_every(void) { return rtt_enabled() ? 250000000ull : 2000000000ull; }
+
+// (with MHGU_LDN_RTT) the game's packets by path, sent and received: [0] direct, [1] UDP through the hub server or to
+// the LAN / address host, [2] the TCP link. Logged with the round trips (station) or every 10 s (host).
+enum { PATH_DIRECT, PATH_UDP, PATH_TCP };
+static uint32_t pkt_tx[3], pkt_rx[3];
+static void pkt_count(uint32_t *a, int path) { if (rtt_enabled()) __atomic_add_fetch(&a[path], 1, __ATOMIC_RELAXED); }
+static void pkt_report(const char *who) {
+    uint32_t t[3], r[3];
+    for (int i = 0; i < 3; i++)
+        t[i] = __atomic_exchange_n(&pkt_tx[i], 0, __ATOMIC_RELAXED), r[i] = __atomic_exchange_n(&pkt_rx[i], 0, __ATOMIC_RELAXED);
+    LOG("[ldn] %s: game packets in the last 10 s, sent / received: direct %u / %u, UDP via server or LAN %u / %u, TCP %u / %u\n",
+        who, t[0], r[0], t[1], r[1], t[2], r[2]);
 }
 
 static Hello make_hello(bool scan_only, const uint8_t *user_name) {
@@ -403,8 +598,14 @@ static void host_route(int from, const VPacket *p, const void *data, uint32_t le
         Link *l = &L.nodes[i];
         if (i == from || !l->alive || !(all || l->ip == p->dst_ip)) continue;
         hsock ds = L.disc_s;
-        if (!(ds != BADSOCK && udp_usable(l) && udp_send(ds, &l->uaddr, l, U_DATA, p, data, len)))
+        if (ds != BADSOCK && direct_usable(l) && udp_send(ds, &l->paddr, l, false, U_DATA, 0, p, data, len)) {
+            pkt_count(pkt_tx, PATH_DIRECT);
+        } else if (ds != BADSOCK && udp_usable(l) && udp_send(ds, &l->uaddr, l, true, U_DATA, 0, p, data, len)) {
+            pkt_count(pkt_tx, PATH_UDP);
+        } else {
             link_send(l, F_PACKET, p, sizeof *p, data, len);
+            pkt_count(pkt_tx, PATH_TCP);
+        }
     }
 }
 
@@ -433,8 +634,14 @@ void ldn_send(const VPacket *p, const void *data, uint32_t len) {
     if (all || p->dst_ip == L.own_ip) vsock_deliver(p, data, len);  // (a broadcast reaches the sender too)
     if (p->dst_ip == L.own_ip) return;
     hsock us = L.us;
-    if (!(us != BADSOCK && udp_usable(&L.up) && udp_send(us, NULL, &L.up, U_DATA, p, data, len)))
+    if (us != BADSOCK && direct_usable(&L.up) && udp_send(us, &L.up.paddr, &L.up, false, U_DATA, 0, p, data, len)) {
+        pkt_count(pkt_tx, PATH_DIRECT);
+    } else if (us != BADSOCK && udp_usable(&L.up) && udp_send(us, &L.up.uaddr, &L.up, true, U_DATA, 0, p, data, len)) {
+        pkt_count(pkt_tx, PATH_UDP);
+    } else {
         link_send(&L.up, F_PACKET, p, sizeof *p, data, len);
+        pkt_count(pkt_tx, PATH_TCP);
+    }
 }
 
 // The port's own messages to every other game in the network (reliable, in order: the TCP link).
@@ -572,6 +779,7 @@ static void *station_thread(void *arg) {
     l->token = arc4random() | 1, l->udp_up = false, l->udp_rx_ns = 0;
     l->relay_pair = acc.relay_pair, l->relay_secret = acc.relay_secret;
     l->uaddr = acc.from;  // (relayed: the server, whose UDP port is its TCP port)
+    direct_reset(l, config_live_ldn_direct());
     if (l->relay_pair && L.disc_s != BADSOCK) relay_register(L.disc_s, l);
     uint8_t *nd = node_at(L.info, slot);
     memset(nd, 0, NODE_SIZE);
@@ -598,6 +806,7 @@ static void *station_thread(void *arg) {
             VPacket p;
             memcpy(&p, buf, sizeof p);
             p.src_ip = l->ip;  // (a station speaks for itself only)
+            pkt_count(pkt_rx, PATH_TCP);
             link_received(slot, &p, buf + sizeof p, (uint32_t)n - sizeof p);
         } else if (type == F_AUX && n > 0) {  // to the host's own game and on to the other stations
             emsync_aux_received(buf, (uint32_t)n);
@@ -626,21 +835,39 @@ static void *station_thread(void *arg) {
 // Accepts stations and answers LAN discovery probes until the listening sockets close.
 static void *host_thread(void *arg) {
     (void)arg;
-    uint64_t next_register = 0;
+    uint64_t next_register = 0, next_report = plat_now_ns() + 10000000000ull;
     for (;;) {
         hsock ls = L.listen_s, ds = L.disc_s;
         if (ls == BADSOCK) break;
         uint64_t now = plat_now_ns();
+        if (now >= next_report) {
+            next_report = now + 10000000000ull;
+            bool any = false;
+            for (int i = 1; i < MAX_NODES; i++) any |= L.nodes[i].alive;
+            if (any && rtt_enabled()) pkt_report("host");
+        }
         if (ds != BADSOCK && now >= next_register) {  // relayed links: until UDP from the station gets through
             next_register = now + 1000000000ull;
             for (int i = 1; i < MAX_NODES; i++)
                 if (L.nodes[i].alive && L.nodes[i].relay_pair && !udp_usable(&L.nodes[i])) relay_register(ds, &L.nodes[i]);
         }
+        for (int i = 1; ds != BADSOCK && i < MAX_NODES; i++) {  // relayed links: direct UDP (hole punching)
+            Link *l = &L.nodes[i];
+            if (!l->alive || !l->direct_ok) continue;
+            char who[16];
+            snprintf(who, sizeof who, "node %d", i);
+            direct_check_silence(l, now, who);
+            peer_query(ds, l, now, who);
+            if (l->p_known && !l->p_up && now >= l->next_punch) {  // (opens our router for the station's hellos)
+                l->next_punch = now + (now - l->p_since < PUNCH_FAST_NS ? 200000000ull : 2000000000ull);
+                udp_send(ds, &l->paddr, l, false, U_PUNCH, 0, NULL, NULL, 0);
+            }
+        }
         fd_set r;
         FD_ZERO(&r);
         FD_SET(ls, &r);
         if (ds != BADSOCK) FD_SET(ds, &r);
-        struct timeval tv = {0, 200000};
+        struct timeval tv = {0, 100000};
         int k = select((int)(ls > ds || ds == BADSOCK ? ls : ds) + 1, &r, NULL, NULL, &tv);
         if (!L.hosting) break;
         if (k <= 0) continue;
@@ -656,28 +883,72 @@ static void *host_thread(void *arg) {
             else pthread_detach(t);
         }
         if (ds != BADSOCK && FD_ISSET(ds, &r)) {
-            static uint8_t probe[sizeof(UHdr) + sizeof(VPacket) + UDP_MAX_PAYLOAD];
+            static uint8_t probe[RELAY_PREFIX + sizeof(UHdr) + sizeof(VPacket) + UDP_MAX_PAYLOAD];
             struct sockaddr_in from;
             socklen_t fl = sizeof from;
             int n = recvfrom(ds, (char *)probe, sizeof probe, 0, (struct sockaddr *)&from, &fl);
-            if (n >= (int)sizeof(UHdr) && !memcmp(probe, UDP_MAGIC, 4)) {  // a station's datagram
+            uint8_t *d = probe;  // past a direct datagram's prefix
+            Link *dl = NULL;     // its link: straight from a station, with the pair id and the pair's direct key
+            if (n >= RELAY_PREFIX + (int)sizeof(UHdr) && !memcmp(probe, RELAY_MAGIC, 4)) {
+                for (int i = 1; i < MAX_NODES && !dl; i++) {
+                    Link *l = &L.nodes[i];
+                    if (l->alive && l->relay_pair && l->dkey && l->relay_pair == rd32(probe + 4) && l->dkey == rd64(probe + 8) &&
+                        !same_addr(&from, &l->uaddr))
+                        dl = l;
+                }
+                if (!dl) continue;  // (anything else on the port: dropped)
+                d = probe + RELAY_PREFIX, n -= RELAY_PREFIX;
+            }
+            if (n >= (int)sizeof(UHdr) && !memcmp(d, UDP_MAGIC, 4)) {  // a station's datagram
                 UHdr h;
-                memcpy(&h, probe, sizeof h);
+                memcpy(&h, d, sizeof h);
                 int slot = 1;
                 while (slot < MAX_NODES && !(L.nodes[slot].alive && L.nodes[slot].token == h.token)) slot++;
-                if (slot == MAX_NODES) continue;
+                if (slot == MAX_NODES || (dl && dl != &L.nodes[slot])) continue;
                 Link *l = &L.nodes[slot];
+                int extra = n - (int)sizeof h;  // (a hello's clock, echoed: at most 8 bytes, never more than came)
+                if (l->relay_pair && !same_addr(&from, &l->uaddr)) {  // straight from the station (hole punched)
+                    if (!dl || !direct_from(l, &from)) continue;
+                    if (h.kind == U_HELLO || h.kind == U_DATA) l->p_rx_ns = plat_now_ns();
+                    if (h.kind == U_HELLO) {
+                        bool ok = h.flags & UF_DIRECT_OK;
+                        if (ok != l->p_up)
+                            LOG(ok ? "[ldn] node %d: direct connection up: game packets go straight to the player\n"
+                                   : "[ldn] node %d: the player gets no direct datagrams: game packets go through the hub server\n", slot);
+                        l->p_up = ok;
+                        udp_send(ds, &from, l, false, U_HELLO_ACK, 0, NULL, d + sizeof h, extra < 8 ? (uint32_t)extra : 8);
+                    } else if (h.kind == U_DATA && n >= (int)(sizeof h + sizeof(VPacket))) {
+                        if (!l->p_up) LOG("[ldn] node %d: direct connection up: game packets go straight to the player\n", slot);
+                        l->p_up = true;  // (the station sends them directly only once it gets ours)
+                        VPacket p;
+                        memcpy(&p, d + sizeof h, sizeof p);
+                        p.src_ip = l->ip;
+                        pkt_count(pkt_rx, PATH_DIRECT);
+                        link_received(slot, &p, d + sizeof h + sizeof p, (uint32_t)n - sizeof h - sizeof p);
+                    }
+                    continue;
+                }
                 l->uaddr = from;  // (NAT may change it: the latest wins)
                 l->udp_rx_ns = plat_now_ns();
                 if (h.kind == U_HELLO) {
-                    if (!l->udp_up) LOG("[ldn] node %d: game packets go by UDP\n", slot);
+                    if (!l->udp_up) LOG("[ldn] node %d: game packets go by UDP%s\n", slot, l->relay_pair ? " through the hub server" : "");
                     l->udp_up = true;
-                    udp_send(ds, &from, l, U_HELLO_ACK, NULL, NULL, 0);
+                    udp_send(ds, &from, l, true, U_HELLO_ACK, 0, NULL, d + sizeof h, extra < 8 ? (uint32_t)extra : 8);
                 } else if (h.kind == U_DATA && n >= (int)(sizeof h + sizeof(VPacket))) {
                     VPacket p;
-                    memcpy(&p, probe + sizeof h, sizeof p);
+                    memcpy(&p, d + sizeof h, sizeof p);
                     p.src_ip = l->ip;
-                    link_received(slot, &p, probe + sizeof h + sizeof p, (uint32_t)n - sizeof h - sizeof p);
+                    pkt_count(pkt_rx, PATH_UDP);
+                    link_received(slot, &p, d + sizeof h + sizeof p, (uint32_t)n - sizeof h - sizeof p);
+                }
+                continue;
+            }
+            if (n == PEER_MSG_SIZE && !memcmp(probe, PEER_ANSWER, 4)) {  // the hub server: a station's address
+                for (int i = 1; i < MAX_NODES; i++) {
+                    Link *l = &L.nodes[i];
+                    char who[16];
+                    snprintf(who, sizeof who, "node %d", i);
+                    if (l->alive && l->relay_pair && same_addr(&from, &l->uaddr) && peer_answer(l, probe, n, who)) break;
                 }
                 continue;
             }
@@ -1095,6 +1366,7 @@ static bool host_start(void) {
         if (!online || bind(ds, (struct sockaddr *)&a, sizeof a)) { hclose(ds); ds = BADSOCK; }
         if (!any_port) LOG("[ldn] UDP port %d is in use: no LAN search (only Join addresses)\n", port);
     }
+    if (ds != BADSOCK) udp_no_connreset(ds);
     L.listen_s = ls, L.disc_s = ds, L.hosting = true, L.port = port;
     pthread_create(&L.host_th, NULL, host_thread, NULL);
     if (any_port) LOG("[ldn] port %d is in use: hosting only through the hub server\n", port);
@@ -1132,6 +1404,7 @@ static void *uplink_thread(void *arg) {
         if (type == F_PACKET && n >= (int)sizeof(VPacket)) {
             VPacket p;
             memcpy(&p, buf, sizeof p);
+            pkt_count(pkt_rx, PATH_TCP);
             link_received(0, &p, buf + sizeof p, (uint32_t)n - sizeof p);
         } else if (type == F_INFO && n >= NETINFO_SIZE && info_sane(buf)) {
             pthread_mutex_lock(&L.mu);
@@ -1161,34 +1434,83 @@ static void *uplink_thread(void *arg) {
 // The station's datagrams: hello (every 2 s once answered, else every 0.5 s) and the host's packets.
 static void *station_udp_thread(void *arg) {
     (void)arg;
-    static __thread uint8_t buf[sizeof(UHdr) + sizeof(VPacket) + UDP_MAX_PAYLOAD];
+    static __thread uint8_t buf[RELAY_PREFIX + sizeof(UHdr) + sizeof(VPacket) + UDP_MAX_PAYLOAD];
     hsock us = L.us;
-    uint64_t next_hello = 0;
-    hset_timeout(us, 250);
+    Link *l = &L.up;
+    bool relayed = l->relay_pair != 0;
+    uint64_t next_hello = 0, next_dhello = 0;
+    hset_timeout(us, 100);
     while (L.uth_run) {
         uint64_t now = plat_now_ns();
-        if (now >= next_hello) {
-            udp_send(us, NULL, &L.up, U_HELLO, NULL, NULL, 0);
-            next_hello = now + (L.up.udp_up ? 2000000000ull : 500000000ull);
+        if (now >= next_hello) {  // (also through the server while direct works: the fallback stays ready)
+            udp_send(us, &l->uaddr, l, true, U_HELLO, 0, NULL, &now, 8);
+            next_hello = now + (l->udp_up ? hello_every() : 500000000ull);
         }
-        int n = recv(us, (char *)buf, sizeof buf, 0);
-        if (n < 0) { plat_sleep_until_ns(plat_now_ns() + 20000000); continue; }  // (timeout, or ICMP unreachable)
+        if (l->direct_ok) {
+            direct_check_silence(l, now, "station");
+            peer_query(us, l, now, "station");
+            if (l->p_known && now >= next_dhello) {
+                udp_send(us, &l->paddr, l, false, U_HELLO, l->p_up ? UF_DIRECT_OK : 0, NULL, &now, 8);
+                next_dhello = now + (l->p_up ? (rtt_enabled() ? hello_every() : DIRECT_HELLO_NS)
+                                             : now - l->p_since < PUNCH_FAST_NS ? 200000000ull : 2000000000ull);
+            }
+        }
+        rtt_report(relayed, now);
+        if (l->udp_up && now - l->udp_rx_ns > UDP_SILENCE_NS) {
+            l->udp_up = false;
+            LOG("[ldn] nothing by UDP from the host for 15 s: game packets go by TCP\n");
+        }
+        struct sockaddr_in from;
+        socklen_t fl = sizeof from;
+        int n = recvfrom(us, (char *)buf, sizeof buf, 0, (struct sockaddr *)&from, &fl);
+        if (n < 0) { plat_sleep_until_ns(plat_now_ns() + 5000000); continue; }  // (timeout)
+        bool direct = false;
+        uint8_t *d = buf;  // (past a direct datagram's prefix)
+        if (!same_addr(&from, &l->uaddr)) {  // straight from the host: its pair id and the pair's direct key, else dropped
+            if (!relayed || !l->dkey || n < RELAY_PREFIX || memcmp(buf, RELAY_MAGIC, 4) || rd32(buf + 4) != l->relay_pair ||
+                rd64(buf + 8) != l->dkey || !direct_from(l, &from))
+                continue;
+            direct = true;
+            d = buf + RELAY_PREFIX, n -= RELAY_PREFIX;
+        } else if (relayed && peer_answer(l, buf, n, "station")) {
+            next_dhello = 0;
+            continue;
+        }
         UHdr h;
-        if (n < (int)sizeof h || memcmp(buf, UDP_MAGIC, 4)) continue;
-        memcpy(&h, buf, sizeof h);
-        if (h.token != L.up.token) continue;
-        L.up.udp_rx_ns = plat_now_ns();
-        if (h.kind == U_HELLO_ACK && !L.up.udp_up) {
-            L.up.udp_up = true;
-            LOG("[ldn] UDP to the host works: game packets go by UDP\n");
+        if (n < (int)sizeof h || memcmp(d, UDP_MAGIC, 4)) continue;
+        memcpy(&h, d, sizeof h);
+        if (h.token != l->token) continue;
+        if (direct) {
+            if (h.kind == U_HELLO_ACK) {
+                rtt_add(1, d + sizeof h, n - (int)sizeof h);
+                l->p_rx_ns = plat_now_ns();
+                if (!l->p_up && ++l->p_good >= (l->p_ever ? DIRECT_REUP : 1)) {  // (after a fall: a few answers first)
+                    l->p_up = true;
+                    next_dhello = 0;  // (tells the host at once)
+                    LOG("[ldn] direct connection to the host %s: game packets go straight to it, not through the hub server\n",
+                        l->p_ever ? "back" : "up");
+                    l->p_ever = true;
+                }
+            } else if (h.kind == U_PUNCH) {
+                if (!l->p_up) next_dhello = 0;  // (the host's way is open: say hello now)
+            } else if (h.kind == U_DATA && n >= (int)(sizeof h + sizeof(VPacket))) {
+                VPacket p;
+                memcpy(&p, d + sizeof h, sizeof p);
+                pkt_count(pkt_rx, PATH_DIRECT);
+                link_received(0, &p, d + sizeof h + sizeof p, (uint32_t)n - sizeof h - sizeof p);
+            }
+            continue;
+        }
+        l->udp_rx_ns = plat_now_ns();
+        if (h.kind == U_HELLO_ACK) rtt_add(0, d + sizeof h, n - (int)sizeof h);
+        if (h.kind == U_HELLO_ACK && !l->udp_up) {
+            l->udp_up = true;
+            LOG("[ldn] UDP to the host works: game packets go by UDP%s\n", relayed ? " through the hub server" : "");
         } else if (h.kind == U_DATA && n >= (int)(sizeof h + sizeof(VPacket))) {
             VPacket p;
-            memcpy(&p, buf + sizeof h, sizeof p);
-            link_received(0, &p, buf + sizeof h + sizeof p, (uint32_t)n - sizeof h - sizeof p);
-        }
-        if (L.up.udp_up && plat_now_ns() - L.up.udp_rx_ns > UDP_SILENCE_NS) {
-            L.up.udp_up = false;
-            LOG("[ldn] nothing by UDP from the host for 15 s: game packets go by TCP\n");
+            memcpy(&p, d + sizeof h, sizeof p);
+            pkt_count(pkt_rx, PATH_UDP);
+            link_received(0, &p, d + sizeof h + sizeof p, (uint32_t)n - sizeof h - sizeof p);
         }
     }
     return NULL;
@@ -1207,6 +1529,7 @@ static void station_leave(void) {  // (caller: not holding L.mu)
         L.us = BADSOCK;
     }
     L.up.udp_up = false;
+    L.up.p_up = L.up.p_known = false;
     vsock_network_down();
 }
 
@@ -2037,19 +2360,27 @@ static uint32_t connect_network(const uint8_t *info, const uint8_t *user, uint16
     L.up.s = s, L.up.alive = true, L.up.ip = L.subnet | 1;
     L.up.token = rd32(buf + 4), L.up.udp_up = false, L.up.udp_rx_ns = 0;
     L.up.relay_pair = pair, L.up.relay_secret = secret;
+    L.up.uaddr = found[i].addr;
+    direct_reset(&L.up, config_live_ldn_direct());
     L.state = ST_STATION_CONNECTED, L.reason = DR_NONE;
     pthread_mutex_unlock(&L.mu);
     L.up.has_thread = pthread_create(&L.up.th, NULL, uplink_thread, NULL) == 0;
-    // UDP to the same address and port as the TCP connection (the host's hello answers tell whether it gets through)
+    // UDP to the same address and port as the TCP connection (the host's hello answers tell whether it gets through);
+    // not connected: in an internet hub the host's own address may answer too (direct UDP)
     L.us = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (L.us != BADSOCK && !connect(L.us, (const struct sockaddr *)&found[i].addr, sizeof found[i].addr)) {
+    struct sockaddr_in any = {0};
+    any.sin_family = AF_INET;
+    any.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (L.us != BADSOCK && !bind(L.us, (const struct sockaddr *)&any, sizeof any)) {
+        udp_no_connreset(L.us);
         L.uth_run = true;
         if (pthread_create(&L.uth, NULL, station_udp_thread, NULL)) { hclose(L.us); L.us = BADSOCK; }
     } else if (L.us != BADSOCK) {
         hclose(L.us);
         L.us = BADSOCK;
     }
-    if (pair) LOG("[ldn] joined a hub through the hub server as %s (node %d)\n", ipstr(L.own_ip), node);
+    if (pair) LOG("[ldn] joined a hub through the hub server as %s (node %d)%s\n", ipstr(L.own_ip), node,
+                  L.up.direct_ok ? "" : " (Direct = Off: game packets only through the server)");
     else LOG("[ldn] joined %s's network as %s (node %d)\n", inet_ntoa(found[i].addr.sin_addr), ipstr(L.own_ip), node);
     signal_change();
     return 0;

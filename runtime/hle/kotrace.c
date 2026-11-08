@@ -37,7 +37,8 @@ static float step(void) {
     uint32_t sys = LD32(G_SYSTEM);
     return sys ? LDF(sys + 0x68) : 0;
 }
-#define KLOG(en, fmt, ...) LOG("[ko] %8.2f s step %.3f %08x " fmt "\n", secs(), step(), en, __VA_ARGS__)
+// (own: 1 when this game runs the monster's AI, +0x7420: the owner's buildup is the one netEmAction sends to the others)
+#define KLOG(en, fmt, ...) LOG("[ko] %8.2f s step %.3f %08x own %u " fmt "\n", secs(), step(), en, LD8((en) + 0x7420u), __VA_ARGS__)
 
 static void ko_hit(Cpu *c) {
     uint32_t en = c->r[0], type = c->r[1], part = c->r[2], value = c->r[3];

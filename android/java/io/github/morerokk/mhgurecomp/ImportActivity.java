@@ -45,7 +45,7 @@ import java.util.Locale;
 import java.util.Map;
 
 public class ImportActivity extends Activity {
-    public static final int GAME = 1, SAVE = 2, EXPORT = 3, FOLDER = 4, MOD_ZIP = 5, MOD_FOLDER = 6, GAME_FOLDER = 7;
+    public static final int GAME = 1, SAVE = 2, EXPORT = 3, FOLDER = 4, MOD_ZIP = 5, MOD_FOLDER = 6, GAME_FOLDER = 7, FILES_FOLDER = 8, FILES_BACK = 9;
     public static final int RUNNING = 0, DONE = 1, CANCELLED = 2, FAILED = 3;
     static final long SAVE_SIZE = 0x4eb8bcL;  // (a save's system file: runtime/services/bonus.c)
     static final int PICK = 1, ALL_FILES = 2;
@@ -70,7 +70,7 @@ public class ImportActivity extends Activity {
 
     private String title() {
         return mode == GAME ? "Import game files" : mode == SAVE ? "Import save" : mode == EXPORT ? "Export save"
-            : mode == FOLDER ? "Save folder" : mode == GAME_FOLDER ? "Game files folder" : "Import mod";
+            : mode == FOLDER ? "Save folder" : mode == GAME_FOLDER ? "Game files folder" : mode == FILES_FOLDER || mode == FILES_BACK ? "Files folder" : "Import mod";
     }
 
     private volatile boolean stop;
@@ -100,6 +100,18 @@ public class ImportActivity extends Activity {
             : mode == MOD_FOLDER
             ? "Pick a mod's folder (for example in Download). The app checks it has the layout the game loads mods "
               + "from, offers to fix it if it doesn't, and copies it into the mods folder. Restart the app afterwards to load it."
+            : mode == FILES_FOLDER
+            ? "Pick a folder for the app's files: the settings (mhgurecomp.ini), the save, mods, cheats, screenshots and log.txt, "
+              + "so you can open them with the file managers on this device (the app's own folder, in Android/data, can't be "
+              + "opened by them). For example a new MHGURecomp folder in the device's storage; if you used one before (and "
+              + "reinstalled the app), pick it again. The app copies its files there (it asks before replacing older files already there) and uses "
+              + "that folder from now on" + (closes ? ", then closes: start it again to play." : ".") + " The game files are not "
+              + "copied: they are used where they are. The app reads and writes the folder itself, so Android asks you to allow "
+              + "\"All files access\" for it."
+            : mode == FILES_BACK
+            ? "The app's files go back into its own folder (in Android/data): the settings, the save, mods, cheats and "
+              + "screenshots in " + dest + " are copied there (it asks before replacing older files already there), and the app closes: start it again "
+              + "to play. The files in " + dest + " are left where they are."
             : mode == GAME_FOLDER
             ? "Pick the folder that holds your dump's exefs and romfs folders, for example on a USB drive or SD card. Nothing is "
               + "copied: the game reads them there, so the drive has to stay connected while you play. The app reads the folder "
@@ -110,12 +122,14 @@ public class ImportActivity extends Activity {
               + "for it. Your current save is not moved: use Export save first if you want it there.";
         if (closes && mode <= SAVE) text += "\n\nThe app closes when the import is done: start it again to play.";
         dialog().setTitle(title()).setMessage(text)
-            .setPositiveButton("Choose", on(0))
+            .setPositiveButton(mode == FILES_BACK ? "Copy" : "Choose", on(0))
             .setNegativeButton("Cancel", on(CANCELLED))
             .show();
     }
 
     private void pick() {
+        if (mode == FILES_BACK) { copyFiles(getExternalFilesDir(null)); return; }  // (nothing to pick: the app's own folder)
+        if (mode == FILES_FOLDER && Build.VERSION.SDK_INT < 30) { fail("This needs Android 11 or newer."); return; }  // (before the picker, not after)
         // (Android would close the game behind the picker, and SDL's activity can't come back from that: the app restarts
         // and the choice is lost)
         if (Settings.Global.getInt(getContentResolver(), Settings.Global.ALWAYS_FINISH_ACTIVITIES, 0) != 0) {
@@ -148,12 +162,12 @@ public class ImportActivity extends Activity {
         super.onActivityResult(request, result, data);
         if (request == ALL_FILES) {  // back from Android's settings page for "All files access"
             if (allFiles()) finishFolder();
-            else fail("Without \"All files access\" the app can't use that folder, so " + (mode == GAME_FOLDER ? "nothing was changed." : "the save stays where it was."));
+            else fail("Without \"All files access\" the app can't use that folder, so " + (mode == FOLDER ? "the save stays where it was." : "nothing was changed."));
             return;
         }
         if (request != PICK) return;
         if (result != RESULT_OK || data == null) { end(CANCELLED); return; }
-        if (mode == FOLDER || mode == GAME_FOLDER) { folderPicked(data.getData()); return; }
+        if (mode == FOLDER || mode == GAME_FOLDER || mode == FILES_FOLDER) { folderPicked(data.getData()); return; }
         if (mode == MOD_ZIP || mode == MOD_FOLDER) { modPicked(data.getData()); return; }
         progress = dialog().setTitle(title()).setMessage("Starting...")
             .setNegativeButton("Stop", null).show();
@@ -694,7 +708,8 @@ public class ImportActivity extends Activity {
         if (Build.VERSION.SDK_INT < 30) { fail("This needs Android 11 or newer."); return; }
         if (allFiles()) { finishFolder(); return; }
         dialog().setTitle(title())
-            .setMessage((mode == GAME_FOLDER ? "To read the game files in that folder itself" : "To read and write the save in that folder itself")
+            .setMessage((mode == GAME_FOLDER ? "To read the game files in that folder itself" : mode == FILES_FOLDER ? "To keep its files in that folder"
+                         : "To read and write the save in that folder itself")
                         + ", the app needs \"All files access\". The next screen is Android's own: turn it on for MHGU Recomp, then go back.")
             .setPositiveButton("Continue", new DialogInterface.OnClickListener() {
                 @Override public void onClick(DialogInterface d, int w) {
@@ -737,7 +752,202 @@ public class ImportActivity extends Activity {
             return;
         }
         picked = folderPath;
+        if (mode == FILES_FOLDER) { copyFiles(dir); return; }
         done("The save will be kept in " + folderPath + ". Press Save in the menu, then restart the app to use it.");
+    }
+
+    // ------------------------------------------------------------------ the files folder (FILES_FOLDER, FILES_BACK)
+    // The app's files in dest (its files folder now) copied into to where they are missing there (and over older ones
+    // if the player says so): only these names at the top of it, since a chosen folder can hold anything else of the
+    // player's (Documents, say). So not the game files (data/: they are used where they are, the settings copied over
+    // then point at them) nor the shader cache (made again) nor this run's log. The native side
+    // (runtime/platform/android.c) then notes the folder in files-folder.txt.
+    private static final Set<String> COPIED = new LinkedHashSet<>(java.util.Arrays.asList(
+        "mhgurecomp.ini", "save", "mods", "cheats", "shots", "bonus", "env.txt", "crash-log.txt", "pipelines.list",
+        "chat_box.txt", "forge_imgui.ini"));
+
+    private void copyFiles(final File to) {
+        final File from = new File(dest);
+        String a, b;
+        try { a = from.getCanonicalPath(); b = to.getCanonicalPath(); } catch (IOException e) { a = from.getPath(); b = to.getPath(); }
+        if (a.equals(b)) { fail("That is the folder the app's files are in already."); return; }
+        if (b.startsWith(a + "/")) { fail("That folder is inside the one the app's files are in now: pick another one."); return; }
+        progress = dialog().setTitle(title()).setMessage("Looking at the app's files...")
+            .setNegativeButton("Stop", null).show();
+        progress.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { stop = true; show("Stopping..."); }
+        });
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final List<File> files = new ArrayList<>(), newer = new ArrayList<>();
+                list(from, true, files);
+                // Files there already that are older than the ones here (a switch back after playing in the other
+                // folder: its save, its settings): asked about before anything is copied
+                for (File f : files) {
+                    File out = target(from, to, f);
+                    if (out.isFile() && f.lastModified() > out.lastModified() + 2000 && !sameContent(f, out)) newer.add(f);
+                }
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        if (stop) { progress.dismiss(); end(CANCELLED); return; }
+                        if (newer.isEmpty()) { copyAll(from, to, files, false); return; }
+                        StringBuilder names = new StringBuilder();
+                        java.text.DateFormat when = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT);
+                        for (int i = 0; i < newer.size() && i < 6; i++) {
+                            File f = newer.get(i);
+                            names.append("\n").append(from.toURI().relativize(f.toURI()).getPath()).append(": ")
+                                 .append(when.format(new java.util.Date(f.lastModified()))).append(" here, ")
+                                 .append(when.format(new java.util.Date(target(from, to, f).lastModified()))).append(" there");
+                        }
+                        if (newer.size() > 6) names.append("\n... and ").append(newer.size() - 6).append(" more");
+                        progress.hide();
+                        dialog().setTitle(title())
+                            .setMessage(newer.size() + " files in " + to + " are older than the ones being copied (if the save is one of "
+                                        + "them, the progress there is older):" + names + "\n\nReplace them with the newer ones? The "
+                                        + "replaced files are kept beside them as .bak. Or keep what is there and copy only what is missing.")
+                            .setCancelable(false)
+                            .setPositiveButton("Replace", new DialogInterface.OnClickListener() {
+                                public void onClick(DialogInterface d, int w) { progress.show(); copyAll(from, to, files, true); }
+                            })
+                            .setNegativeButton("Keep what's there", new DialogInterface.OnClickListener() {
+                                public void onClick(DialogInterface d, int w) { progress.show(); copyAll(from, to, files, false); }
+                            })
+                            .setNeutralButton("Cancel", new DialogInterface.OnClickListener() {
+                                public void onClick(DialogInterface d, int w) { progress.dismiss(); end(CANCELLED); }
+                            })
+                            .show();
+                    }
+                });
+            }
+        }, "files folder").start();
+    }
+
+    private static File target(File from, File to, File f) {
+        return new File(to, from.toURI().relativize(f.toURI()).getPath());
+    }
+
+    private static boolean sameContent(File a, File b) {
+        if (a.length() != b.length()) return false;
+        byte[] x = new byte[1 << 16], y = new byte[1 << 16];
+        try (InputStream p = new java.io.FileInputStream(a); InputStream q = new java.io.FileInputStream(b)) {
+            for (int n; (n = p.read(x)) > 0; ) {
+                int m = 0;
+                while (m < n) { int r = q.read(y, m, n - m); if (r <= 0) return false; m += r; }
+                for (int i = 0; i < n; i++) if (x[i] != y[i]) return false;
+            }
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    // replace: files there already that are older than the ones here are replaced (kept as .bak); otherwise only what
+    // is missing there is copied
+    private void copyAll(final File from, final File to, final List<File> files, final boolean replace) {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                String error = null;
+                final int[] counts = new int[3];  // copied, kept, replaced
+                final boolean existing = new File(to, "mhgurecomp.ini").isFile();
+                try {
+                    long total = 0;
+                    for (File f : files) total += f.length();
+                    long done = 0;
+                    byte[] buf = new byte[1 << 16];
+                    for (File f : files) {
+                        if (stop) throw new IOException("stopped");
+                        File out = target(from, to, f);
+                        done += f.length();
+                        boolean replacing = false;
+                        if (out.exists()) {
+                            replacing = replace && out.isFile() && f.lastModified() > out.lastModified() + 2000 && !sameContent(f, out);
+                            if (!replacing) { counts[1]++; continue; }
+                        }
+                        File part = new File(out.getPath() + ".part");
+                        try (InputStream in = new java.io.FileInputStream(f)) { copy(in, part, buf); }
+                        part.setLastModified(f.lastModified());  // (so the newer one stays newer)
+                        if (replacing && !out.renameTo(backupOf(out))) { part.delete(); throw new IOException("can't keep " + out + " as .bak"); }
+                        if (!part.renameTo(out)) { part.delete(); throw new IOException("can't write " + out); }
+                        counts[replacing ? 2 : 0]++;
+                        show("Copying the app's files: " + (total > 0 ? done * 100 / total : 100) + "% (" + f.getName() + ")");
+                    }
+                    pointGameFolder(from, to);
+                } catch (Exception e) {
+                    error = stop ? null : "The copy failed (" + e.getMessage() + "). The app keeps its files where they are. What was "
+                        + "copied is left in " + to + (counts[2] > 0 ? ", and the " + counts[2] + " files it replaced there are kept beside "
+                        + "them as .bak." : ".");
+                }
+                final String err = error;
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        progress.dismiss();
+                        if (stop) { end(CANCELLED); return; }
+                        if (err != null) { fail(err); return; }
+                        picked = to.getPath();
+                        done((existing && mode == FILES_FOLDER ? "The app's files from before were found in " + to + " and are used. " : "")
+                             + counts[0] + " files copied" + (counts[2] > 0 ? ", " + counts[2] + " older ones replaced (kept as .bak)" : "")
+                             + (counts[1] > 0 ? ", " + counts[1] + " already there kept" : "")
+                             + ". The app's files are in " + to + " from now on."
+                             + (closes ? " The app closes now: start it again to play." : ""));
+                    }
+                });
+            }
+        }, "files folder").start();
+    }
+
+    // A name for keeping out beside it: x.bak, or x.2.bak on if an earlier replace left one (never written over)
+    private static File backupOf(File out) {
+        File bak = new File(out.getPath() + ".bak");
+        for (int i = 2; bak.exists(); i++) bak = new File(out.getPath() + "." + i + ".bak");
+        return bak;
+    }
+
+    private void list(File dir, boolean top, List<File> out) {
+        File[] in = dir.listFiles();
+        if (in == null) return;
+        for (File f : in) {
+            if (top && !COPIED.contains(f.getName())) continue;
+            if (f.getName().endsWith(".part") || f.getName().endsWith(".bak")) continue;
+            if (f.isDirectory()) list(f, false, out);
+            else if (f.isFile()) out.add(f);
+        }
+    }
+
+    // The game files stay where they are (in from's data/): the settings in to point at them, unless to has game files
+    // of its own or its settings name a game files folder already.
+    private static void pointGameFolder(File from, File to) throws IOException {
+        if (!new File(from, "data/exefs/main").isFile() || new File(to, "data/exefs/main").isFile()) return;
+        File ini = new File(to, "mhgurecomp.ini");
+        List<String> lines = new ArrayList<>();
+        if (ini.isFile()) {
+            try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(ini))) {
+                for (String l; (l = r.readLine()) != null; ) lines.add(l);
+            }
+        }
+        String value = new File(from, "data").getPath();
+        int section = -1;
+        for (int i = 0; i < lines.size(); i++) {
+            String t = lines.get(i).trim();
+            if (t.equalsIgnoreCase("[Android]")) section = i;
+            if (t.regionMatches(true, 0, "GameFolder", 0, 10) && t.substring(10).trim().startsWith("=")) {
+                String v = t.substring(t.indexOf('=') + 1).replaceAll("[;#].*", "").trim();
+                if (!v.isEmpty()) return;  // (a folder of the player's already)
+                lines.set(i, "GameFolder = " + value);
+                write(ini, lines);
+                return;
+            }
+        }
+        if (section < 0) { lines.add(""); lines.add("[Android]"); section = lines.size() - 1; }
+        lines.add(section + 1, "GameFolder = " + value);
+        write(ini, lines);
+    }
+
+    private static void write(File f, List<String> lines) throws IOException {
+        File part = new File(f.getPath() + ".part");
+        try (java.io.Writer w = new java.io.OutputStreamWriter(new FileOutputStream(part), "UTF-8")) {
+            for (String l : lines) w.write(l + "\n");
+        }
+        if (!part.renameTo(f)) { part.delete(); throw new IOException("can't write " + f); }
     }
 
     // ------------------------------------------------------------------ save
