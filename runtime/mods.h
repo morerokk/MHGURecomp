@@ -35,6 +35,7 @@ void urgentcredit_init(void);  // Urgent quests count for all who clear them (ru
 void mashrate_init(void);  // mashing out of a stun at the Switch's rate at high frame rates (runtime/hle/mashrate.c)
 void hatestep_init(void);  // monsters' attention scores as at 30 fps at high frame rates (runtime/hle/hatestep.c)
 void inflate_init(void);  // zlib's inflate_fast as host code: archives decompress faster (runtime/hle/inflate.c)
+void fastload_init(void);  // shorter transitions when not in a network session (runtime/hle/fastload.c)
 void movelog_init(void);  // (debug) MHGU_LOG_MOVES: the player's command table changes (runtime/hle/movelog.c)
 void quickhunt_init(void);  // (debug) MHGU_QUICKHUNT: start-up straight into a quest (runtime/hle/quickhunt.c)
 void emtrace_init(void);  // (debug) MHGU_EMTRACE: large monster actions and their durations (runtime/hle/emtrace.c)
