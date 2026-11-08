@@ -614,8 +614,42 @@ static void run_job(void (*fn)(void *), void *arg) { enqueue(&compile_q, pipe_wo
 // A program's SPIR-V compiles (a few ms) have workers of their own: queued behind pipeline builds, which take
 // 200-500 ms each under MoltenVK, they waited seconds after an area load, and their draws were skipped meanwhile.
 static void run_program(void (*fn)(void *), void *arg) { enqueue(&program_q, 2, false, fn, arg); }
-// Warming Metal libraries (warm_program): low priority, two workers beside the ones that build what draws need.
-static void run_warm(void (*fn)(void *), void *arg) { enqueue(&warm_q, 2, false, fn, arg); }
+// Warming Metal libraries (warm_program): workers of their own beside the ones that build what draws need, the
+// pipeline workers but two (2 to 6: 6 on a 10-core Apple Silicon Mac). WARM_STEADY of them warm at any time, the
+// others only while no draw has waited for a build in the last second, so a new area's builds have the Metal compiler.
+// M1 Pro, macOS 27, cold: all ~10,300 programs warm in ~3 min with 6 (with 2, ~1,100 after 2 min); first sight of
+// Verdant Hills right after boot (quick-hunt) skipped 10,000-14,000 draws (7,000 with 2; 17,500 with 6 ungated;
+// 160,000 with MoltenVK's pipeline cache lock, see create_pipeline). MHGU_WARM_WORKERS=n: n of them.
+#define WARM_STEADY 2
+static _Atomic uint64_t draw_waited_ns;  // (await_build) when a draw last found its build not ready
+static _Atomic int warm_running;
+static int warm_workers(void) {
+    static int n;
+    if (!n) {
+        const char *e = getenv("MHGU_WARM_WORKERS");
+        if (e && atoi(e) > 0) {
+            n = atoi(e);
+        } else {
+            n = pipe_workers() - 2;
+            n = n < WARM_STEADY ? WARM_STEADY : n > 6 ? 6 : n;
+        }
+        LOG("[shader] %d warm-up workers\n", n);
+    }
+    return n;
+}
+static bool warm_slot_take(void) {  // false: exiting (vk_jobs_quiesce)
+    for (;;) {
+        if (atomic_load(&jobs_stop)) return false;
+        int n = atomic_load(&warm_running);
+        bool busy = plat_now_ns() - atomic_load(&draw_waited_ns) < 1000000000ull;
+        if (n < WARM_STEADY || !busy) {
+            if (atomic_compare_exchange_weak(&warm_running, &n, n + 1)) return true;
+        } else {
+            plat_sleep_until_ns(plat_now_ns() + 20000000);
+        }
+    }
+}
+static void run_warm(void (*fn)(void *), void *arg) { enqueue(&warm_q, warm_workers(), false, fn, arg); }
 void vk_run_job(void (*fn)(void *), void *arg) { run_job(fn, arg); }  // (fsr.c: its capture shaders / pipelines)
 
 // A queued job a draw is waiting for goes to the front of its queue (the queues are FIFO, and an area load queues a
@@ -677,6 +711,7 @@ static uint64_t wait_frame = ~0ull;
 static bool await_build(_Atomic int *state, void *job, int64_t at_least_ns) {
     int s = atomic_load(state);
     if (s) return s == 1;
+    atomic_store(&draw_waited_ns, plat_now_ns());  // (the warm-up holds back: warm_slot_take)
     promote(&translate_q, job);
     promote(&program_q, job);
     promote(&compile_q, job);
@@ -3255,7 +3290,12 @@ static VkResult create_pipeline(const PipeKey *k, VkPipeline *out) {
                                        .pStages = stages, .pVertexInputState = &vi, .pInputAssemblyState = &ia, .pViewportState = &vs,
                                        .pRasterizationState = &rs, .pMultisampleState = &ms, .pDepthStencilState = &ds,
                                        .pColorBlendState = &cb, .pDynamicState = &dy, .layout = k->prog->layout, .renderPass = k->rp};
-    VkResult r = vkCreateGraphicsPipelines(g_vk.dev, g_vk.pcache, 1, &pi, NULL, out);
+    // No pipeline cache under MoltenVK: it converts and compiles a pipeline's shaders into Metal libraries under one
+    // lock per pipeline cache (MVKPipelineCache::getShaderLibrary), so every build on every worker waited for the one
+    // before it, a single Metal compiler busy (~8 programs a second warmed on an M1 Pro, macOS 27). Without one the
+    // lock is the shader module's: the workers compile side by side. Nothing is lost: MoltenVK's cache isn't saved
+    // (device.c) and macOS keeps the compiled libraries itself.
+    VkResult r = vkCreateGraphicsPipelines(g_vk.dev, g_vk.portability ? VK_NULL_HANDLE : g_vk.pcache, 1, &pi, NULL, out);
     if (r != VK_SUCCESS) {
         static int n;
         if (n++ < 10) LOG("[vk] pipeline creation failed: %d\n", r);
@@ -3367,10 +3407,12 @@ static void warm_program(void *arg) {
     k.stride[0] = 16 * 32, k.used_streams = 1;
     k.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, k.poly_fill = 1, k.depth_test = 1, k.depth_write = 1;
     VkPipeline pipe = VK_NULL_HANDLE;
+    if (!warm_slot_take()) return;
     if (create_pipeline(&k, &pipe) == VK_SUCCESS) {
         vkDestroyPipeline(g_vk.dev, pipe, NULL);  // (its Metal library is what was wanted: macOS has it now)
         warmed_has(p->ck, true);
     }
+    atomic_fetch_sub(&warm_running, 1);
     atomic_fetch_add(&stat_warmed, 1);
 }
 
