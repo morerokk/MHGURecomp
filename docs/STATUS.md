@@ -662,6 +662,28 @@ PATCHES): the constant is -step / 2 updates (at most 1). Checked: at 120 fps X+A
 (67 ms) after the press; 30 fps unchanged. A lone attack button is read 67 ms after the press at any frame rate,
 as on the Switch (it was 17 ms at 120 fps).
 
+Three-button inputs at high frame rates (2026-11-08): fixed in Lenient. Reported: R+X+A (Lance charge, Wyvern's Fire)
+inconsistent, by a player with the Better Inputs plugin; SDL's side was clean. The window in 0x47ca28 ends on the second
+attack-button press and resolves saved | new at once (0x47cb44), so the third button had to come in the same update,
+7 ms wide at 150 fps. Lenient's longer window made R pressed just before X and A resolve as R+X (flags +0x1444: 0x400
+R+X+A, 0x40 X+A, R held at that update is R+X+A too, 0x80 R+X). Better Inputs (no source; hooks the pad update 0x5de064)
+ORs held & mask into the pad's new-press word every update for its hold-to-repeat, so a window closed after one
+update and R held earlier + X was R+X at once. Fix (runtime/hle/combowin.c, tools/gen.py PATCHES at 0x47ca38 and
+0x47cc58, local player, step < 2.0, Lenient only): that code decides on a corrected word: R / ZR new only on a real
+press (word & ~last held), a running window sees real presses only, and a press making two of R, X, A with the third
+not held waits for it up to 2.0 of the step with the countdown stopped; the word is put back for the rest of the
+function. Measured (scripted R/X/A, MHGU_PLSNAP, player flags, not on a physical controller): 8 timings at 150 fps, 5
+failed without mods before, 6 with the plugin, none now in either; 240 fps with the plugin none. Plain R+X, R+A, X+A
+come up to 33 ms later (X+A pressed together 0 -> 33 ms); a lone press is unchanged (53 ms for a tap); Strict and 30 fps
+are as before. The plugin's held X fired ~40 times in 0.6 s at 150 fps, now 7-8 (one per 67 ms window, as at 30 fps).
+Follow-up (2026-11-09), reported with the plugin at 60 fps: R held, X+A pressed together gave a guard poke. Measured on
+a Lance (every weapon of a save copy changed to one; act 0010:010 from the guard is the poke): when A goes up a moment
+before X the plugin goes on repeating X alone, which opens a window, expires as an X tap (flags bit 1) and, R held, is
+the poke (the Lance's key function 0x137731c). With the plugin 6 of 6, without 0 of 6. Now a button left over from an
+input of two or more doesn't repeat until it goes up: 0 of 6. Not fixed, the original game's: with R held, A a whole
+update before X sets X's tap bit with X+A and pokes, with or without the plugin. That save copy's Lance starts no charge
+from R+X+A or guard + X+A even without mods (its style not checked), so the charge itself wasn't seen.
+
 Mashing out of a stun and the frame rate (2026-10-30): fixed. Reported: at high frame rates mashing buttons and
 turning the stick ends a stun far sooner than at 30 fps. The stun (dizzy) is act 0x40:026 (update 0x4bcfd0, motion
 0x1a; the knockback before it is 1:085 / 1:087, not part of it): up to 4 rounds of 750 (60 fps frames, counted down
@@ -1411,6 +1433,15 @@ forge_input_getMouseMove(float *dx, float *dy) is the movement since the last fr
 too (counts while captured, window pixels while free, y down; 0 while Forge's menu is open); forge_input_setMouseFree(bool)
 makes the mouse free for a mod's own pointer while true: not captured (let go if it was, captured again after if the
 player had clicked in), shown in full screen, and its clicks only the mod's (not a capture, not the game's buttons).
+Keybinds for mods, the port's calls too: forge_input_setKeybind(const char *row, const char *keys) gives a [Keybinds] row
+other keys for now ("L", "Left Ctrl, Q", "None": spelled as the file has them; NULL: the settings' again; false for an
+unknown row or key, an empty string or the chat key), on top of the settings in config_live_bind, so the game reads them at
+once; mhgurecomp.ini keeps the player's, and the settings menu's Keybinds rows show the mod's beside them, in red (a key
+changed there counts once the mod gives the row back; its "in use" check knows the mod's keys). One mod's keys per row: the
+last call wins. forge_input_getKeybind(row, out, size) is the player's own keys for a row, forge_input_getModKeybind(row, out,
+size) what a mod has set (false: none); forge_input_getKeyPressed(out, size) the first key, mouse button or wheel notch
+pressed since the last frame, by its [Keybinds] name, also one Forge's menu took: never the port's own keys, except Escape
+for a mod's menu to cancel with.
 Forge's keyboard is 256 HID usages.
 Forge's config.ini ([menu] key, font_size; [log] level) is read as iniparser reads it, from one file: the topmost mod's
 romfs nativeNX/forge/config.ini (files are not merged; a long line, a stray line or an unreadable file means the defaults:

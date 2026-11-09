@@ -75,6 +75,10 @@ PATCHES = {
     # Two-button input window (runtime/hle/combowin.c): the countdown a press waits for a second button takes 1.0 off
     # per update (`vmov.f32 s2, #-1.0`); it takes the frame step instead
     ('main', 0x47ca84): (0xEEBF1A00, '{ extern float combowin_tick(void); c->v.f[2] = -combowin_tick(); }'),
+    # ... and the new-press word the code from here to 0x47cc58 decides on: real presses, a third button waited for
+    # (`mov r6, r4` at the start, `ldrh r1, [sb]` where all its paths have met)
+    ('main', 0x47ca38): (0xE1A06004, '{ extern void combowin_begin(uint32_t); c->r[6] = c->r[4]; combowin_begin(c->r[4]); }'),
+    ('main', 0x47cc58): (0xE1D910B0, '{ extern void combowin_end(uint32_t); combowin_end(c->r[4]); c->r[1] = LD16(c->r[9]); }'),
     # Town NPC fade (uLobbyNpc, 0x8c2d9c): `vldr s8, [r2]` loads the squared distance within which the NPC fades in
     # (table at 0x8c2ef0: 2500^2, or 1800^2 with flag 0x40 of +0x186a); config.c npc_fade_dist2 scales it ([Graphics]
     # DrawDistance)
