@@ -347,6 +347,25 @@ static const ActBinding *binding_of(int dev, int id, int v) {
 
 static bool is_physical(int c) { return c < ACT_SW || c >= ACT_SW + 0x60; }
 
+// The Switch button a controller input is for Tier 0 whatever FaceButtons says (-1: a face button, or none)
+static int pad_switch_button(int code) {
+    switch (code) {
+    case ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: return S_L;
+    case ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: return S_R;
+    case ACT_PAD_LT: return S_ZL;
+    case ACT_PAD_RT: return S_ZR;
+    case ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_STICK: return S_LSTICK;
+    case ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_STICK: return S_RSTICK;
+    case ACT_PAD + SDL_GAMEPAD_BUTTON_START: return S_PLUS;
+    case ACT_PAD + SDL_GAMEPAD_BUTTON_BACK: return S_MINUS;
+    case ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_UP: return S_UP;
+    case ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_DOWN: return S_DOWN;
+    case ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_LEFT: return S_LEFT;
+    case ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return S_RIGHT;
+    }
+    return -1;
+}
+
 int act_validate(const ActProfile *p) {
     int warnings = 0;
     ActProfile saved = prof;
@@ -361,6 +380,13 @@ int act_validate(const ActProfile *p) {
                 for (int a = 0; a < bi->n; a++)
                     for (int k = 0; k < bi->alt[a].n; k++) {
                         int c = bi->alt[a].code[k];
+                        int sb = pad_switch_button(c);
+                        if (sb >= 0 && !((act_view_managed(defs[i].view, false) | act_view_managed(defs[i].view, true)) & ew_of_btn[sb])) {
+                            char one[64];
+                            act_format_input(c, one, sizeof one);
+                            say("[actions] %s is on %s, which is also the Switch %s: that button is not an action of this view yet, "
+                                "so it still reaches the game", defs[i].name, one, btn_name[sb]), warnings++;
+                        }
                         if (c < SDL_SCANCODE_COUNT && key_reserved(c)) {
                             say("[actions] %s uses %s, which the recomp keeps for itself (%s)", defs[i].name,
                                 SDL_GetScancodeName((SDL_Scancode)c), key_reserved(c)), warnings++;

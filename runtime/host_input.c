@@ -62,6 +62,11 @@ static uint32_t mouse_held;  // the mouse buttons held (bit: SDL_BUTTON_*), whil
 // game to see at 30 updates a second; notches closer together than that are one press)
 #define WHEEL_PRESS_NS 70000000ull
 static uint64_t wheel_until[2];  // up, down: pressed until then
+// A wheel bound to a game action (runtime/actions.h) is one press per notch, a gap between them, so that turning it n
+// notches moves a menu n rows: notches wait in a queue and are pressed in turn (act_wheel_step, every update)
+#define ACT_WHEEL_MAX 8
+static int act_wheel_q[2];
+static uint64_t act_wheel_until[2], act_wheel_next[2];
 static bool bind_held(int bind, bool wheel) {
     uint64_t now = wheel ? plat_now_ns() : 0;
     for (int k = 0; k < BIND_KEYS; k++) {
@@ -84,7 +89,16 @@ static void wheel_turn(int n) {
             break;
         }
     // an action bound to the wheel (runtime/actions.h) is pressed the same way, unless the item bar has the wheel
-    if (act_uses_input(code) && !itembar_active()) wheel_until[code - KEY_WHEEL_UP] = plat_now_ns() + WHEEL_PRESS_NS;
+    if (act_uses_input(code) && !itembar_active() && act_wheel_q[code - KEY_WHEEL_UP] < ACT_WHEEL_MAX)
+        act_wheel_q[code - KEY_WHEEL_UP] += abs(n) < ACT_WHEEL_MAX ? abs(n) : ACT_WHEEL_MAX;
+}
+static void act_wheel_step(void) {
+    uint64_t now = plat_now_ns();
+    for (int i = 0; i < 2; i++)
+        if (act_wheel_q[i] > 0 && now >= act_wheel_next[i]) {
+            act_wheel_q[i]--;
+            act_wheel_until[i] = now + WHEEL_PRESS_NS, act_wheel_next[i] = now + 2 * WHEEL_PRESS_NS;
+        }
 }
 
 // ---- mouse: captured (relative mode) after a click in the window, Esc lets it go. In a hunt its movement turns the
@@ -864,7 +878,10 @@ static bool act_phys_held(void *user, int code) {
     (void)user;
     if (code > 0 && code < SDL_SCANCODE_COUNT) return keys[code];
     if (code > KEY_MOUSE && code <= KEY_MOUSE + SDL_BUTTON_X2) return mouse_held >> (code - KEY_MOUSE) & 1;
-    if (code == KEY_WHEEL_UP || code == KEY_WHEEL_DOWN) return plat_now_ns() < wheel_until[code - KEY_WHEEL_UP];
+    if (code == KEY_WHEEL_UP || code == KEY_WHEEL_DOWN) {
+        uint64_t now = plat_now_ns();
+        return now < wheel_until[code - KEY_WHEEL_UP] || now < act_wheel_until[code - KEY_WHEEL_UP];
+    }
     if (code >= ACT_PAD && code < ACT_PAD + 0x80 && pad) {
         if (code == ACT_PAD_LT) return SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 8000;
         if (code == ACT_PAD_RT) return SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 8000;
@@ -899,6 +916,7 @@ static int act_sw_sources(void *user, int btn, int dev, int *out, int max) {
 }
 static void act_update(uint64_t b, uint64_t script_b, bool suppress) {
     if (!act_enabled()) return;
+    act_wheel_step();
     ActHost h = {NULL, act_phys_held, act_sw_sources, b, script_b, suppress, input_view_dash_zr(), g_present_count};
     ActSnap s;
     memset(&s, 0, sizeof s);

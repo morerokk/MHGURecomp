@@ -102,13 +102,15 @@ static void test_validate(void) {
     act_set_log(collect);
     logbuf[0] = 0;
     ActProfile p = parse("[Actions]\nEnable=1\n[Actions.Kbm]\nDodge = key:space\nAttackA = key:space\nItemUse = key:escape\n"
-                         "MenuConfirm = key:space\n");
+                         "MenuConfirm = key:space\n[Actions.Pad]\nChordXA = pad:lshoulder\nDash = pad:rshoulder\n");
     int n = act_validate(&p);
     CHECK(strstr(logbuf, "conflict: Dodge and AttackA"), "conflict in one view: %s", logbuf);
     CHECK(!strstr(logbuf, "MenuConfirm and Dodge"), "no conflict across views");
     CHECK(strstr(logbuf, "ItemUse uses Escape"), "reserved key warned: %s", logbuf);
     CHECK(strstr(logbuf, "AttackA is the same game input as"), "shared-input note");
-    CHECK(n >= 3, "count %d", n);
+    CHECK(strstr(logbuf, "ChordXA is on pad:lshoulder, which is also the Switch L"), "unmanaged button leak warned: %s", logbuf);
+    CHECK(!strstr(logbuf, "Dash is on pad:rshoulder"), "R is the dash role: no leak warning");
+    CHECK(n >= 4, "count %d", n);
     act_set_log(quiet);
 }
 
