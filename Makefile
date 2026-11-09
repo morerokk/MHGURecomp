@@ -266,6 +266,13 @@ test-settings: $(LIB_STAMPS)
 	$(CC) $(RTFLAGS) tests/test_settings.c runtime/config.c runtime/config_store.c $(SDL_LIBS) -lm -o $(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe)
 	$(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe) $(O)/settings-test/settings.ini
 
+# Host-only test of game-action rebinding (runtime/actions.c): ini, sampling, and the golden property of the defaults.
+.PHONY: test-actions
+test-actions: $(LIB_STAMPS)
+	@mkdir -p $(O)/settings-test
+	$(CC) $(RTFLAGS) tests/test_actions.c runtime/actions.c runtime/config.c runtime/config_store.c $(SDL_LIBS) -lm -o $(O)/settings-test/test-actions$(if $(filter windows,$(PLATFORM)),.exe)
+	$(O)/settings-test/test-actions$(if $(filter windows,$(PLATFORM)),.exe)
+
 # Engine modules (docs/ENGINE-MODULES.md). example-engine-module builds the example into the folder layout engine_modules/
 # expects; test-engine-modules builds the loader (runtime/engine_module.c) into a host program and checks it against test
 # modules - one that loads, and the ways one can fail - without the game files.
