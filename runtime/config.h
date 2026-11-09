@@ -51,7 +51,7 @@ typedef struct {
     int ldn_port;             // local play: the port a hosted hub listens on (TCP; UDP for LAN search)
     char ldn_join[256];       // local play: hosts to search besides the LAN (host[:port], comma separated)
     int sync_small_monsters;  // multiplayer: small monsters synced like large ones (runtime/net/emsync.c)
-    int lag_compensation;     // multiplayer: melee hits count as the hunter saw them (runtime/net/hitsync.c)
+    int lag_compensation;     // multiplayer: melee and bow/bowgun hits count as the hunter saw them (runtime/net/hitsync.c)
     int bonus_content;        // free downloads copied from a donor save into saves without any (runtime/services/bonus.c)
     int village_in_hub;       // L / R at the Hub's / Pub's quest counter switch to Village quests (runtime/hle/villagehub.c)
     int share_urgent;         // an unlocked Urgent quest someone else posted counts when cleared (runtime/hle/urgentcredit.c)

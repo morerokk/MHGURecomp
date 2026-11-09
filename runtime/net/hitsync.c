@@ -1,11 +1,12 @@
-// Multiplayer: melee hits count as the hunter who made them saw them ([Multiplayer] LagCompensation, env MHGU_LAGCOMP).
+// Multiplayer: melee and bow/bowgun hits count as the hunter who made them saw them ([Multiplayer] LagCompensation, env MHGU_LAGCOMP).
 //
-// In the original game every game checks every hunter's melee hits against its own copy of the monster, but only the
-// game that runs the monster (its owner) applies them: a client's swing counts only if the owner's copy of that client
-// (built from its network updates) also connects. Here the hunter's own game reports each weapon hit it saw, and the
-// owner applies the report and ignores what its copy of that hunter does. Each hit is counted once: the owner drops its
-// copy's hit in full, and a report travels the reliable link (ldn_send_aux), once. Only direct weapon hits on large
-// monsters: bows and bowguns (hit-checked on the owner only), kinsects, phials, thrown items and Palicoes stay as they are.
+// In the original game every game checks every hunter's hits against its own copy of the monster, but only the game that
+// runs the monster (its owner) applies them: a client's swing, or the arrow its copy fires on the owner's game, counts only
+// if that copy also connects. Here the hunter's own game reports each weapon hit it saw, and the owner applies the report
+// and ignores what its copy of that hunter does (a copy's arrows still fly and show their sparks there). Each hit is counted
+// once: the owner drops its copy's hit in full, and a report travels the reliable link (ldn_send_aux), once. A shot that
+// hits several times (Rapid's arrows, Pierce) reports each hit. Only direct weapon hits and bow / bowgun shells on large
+// monsters: kinsects, phials, gunlance shells, thrown items, cannons and Palicoes stay as they are.
 //
 // A hit doesn't touch the monster's HP. It adds to per-update fields of the status block (*(monster + 0x1428)), all of
 // them in one place:
@@ -24,7 +25,9 @@
 // it changes); an owner ignores its copy of a hunter, and applies that hunter's reports, only while it hears that
 // hunter's Hello and has this on itself. A game without this drops the unknown messages (the F_AUX handlers check their
 // magic number), and its hits work as they always did, in either role. Not in a Ryujinx crossplay hub: F_AUX doesn't
-// travel there.
+// travel there. Shots are reported as their own message (M_SHOT) and announced by a flag at the end of the Hello, so a
+// build that only knows melee reports drops them and goes on counting its copy's shots; and an owner counts its copy's
+// shots from a hunter whose Hello doesn't have the flag.
 //
 // Debug: MHGU_LOG_HITSYNC=1 logs each report and copy's hit and adds up per hunter what a report said against what the
 // hunter's copy did on the owner (how much the original game would have lost or added). MHGU_HITSYNC_DIFF=1 instead
@@ -53,10 +56,16 @@
 #define INFO_HP       0x370u
 #define ZAKO_FIRST    10000u
 #define AT_TYPE       0x3au       // attack: u8. 8, 9, 0x45: shots
-#define AT_OWNER      0xcu        // attack: its player (with AT_VIA 0)
+#define AT_OWNER      0xcu        // attack: its player (AT_VIA 0), or the object that made it (a shell)
 #define AT_VIA        0x10u       // attack: u8, 0: the weapon itself; else made by something the player threw or fired
 #define AT_KIND       0x6du       // attack: u8, 1: a hunter's
+#define AT_NO_PLAYER  0x6eu       // attack: u8, 0: AT_SHOOTER is valid
+#define AT_SHOOTER    0x70u       // attack: its player (with AT_VIA other than 0)
 #define KIND_HUNTER   1u
+
+// Vtables of the bow and bowgun shells (uShellPlw10_*, uShellPlw04_*; w04 serves both bowguns). The game's other shells
+// (gunlance, kinsect, phials, ...) have their own classes and stay as they are.
+static const uint32_t SHOT_VT[] = {0x1961870u, 0x1961a08u, 0x1960820u, 0x19609b8u, 0x1960b50u};
 
 #define P_FIRST       0x484u      // the per-update fields: +0x484 .. +0x4ff
 #define P_SIZE        0x7cu
@@ -77,14 +86,15 @@
 #define I_HIT         0x444u
 
 #define MAGIC         0xE7u        // aux message (emsync.c's claims are 0xE5, hpscale.c's settings 0xE6)
-enum { M_HELLO, M_REPORT };
+enum { M_HELLO, M_REPORT, M_SHOT };
 #define HELLO_NS      1000000000ull
 #define HELLO_STALE   3500000000ull
+#define HELLO_SHOTS   1u          // Hello's caps: this hunter reports its shots
 #define QUEUE         128
 #define QUEUE_STALE   3000000000ull
 #define MAX_ADD       16000       // a part's damage or the like from one hit: more is a damaged or hostile message
 
-typedef struct { uint8_t magic, kind, slot, on; } Hello;
+typedef struct { uint8_t magic, kind, slot, on, caps; } Hello;  // (older builds send the first 4 bytes, and read only those)
 
 typedef struct {
     uint8_t magic, kind, slot, has_kind;
@@ -100,6 +110,7 @@ typedef struct {
 } Report;
 
 static volatile uint64_t g_hello[4];
+static volatile uint8_t g_caps[4];
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct { Report r; uint64_t at; } g_q[QUEUE];
 static volatile int g_nq;
@@ -116,6 +127,18 @@ static bool sane(uint32_t a) { return a >= 0x08000000u && a < 0xF0000000u && !(a
 static bool active(void) { return config_live_lag_compensation() && ldn_net_up() && !ldn_crossplay(); }
 
 static bool reports(int slot, uint64_t now) { return g_hello[slot] && now - g_hello[slot] < HELLO_STALE; }
+static bool reports_shots(int slot, uint64_t now) { return reports(slot, now) && (g_caps[slot] & HELLO_SHOTS); }
+
+// A bow or bowgun shell's attack, from a hunter: fills *player with that hunter.
+static bool shot_of(uint32_t at, uint32_t *player) {
+    if (LD8(at + AT_NO_PLAYER)) return false;
+    uint32_t shell = LD32(at + AT_OWNER);
+    if (!sane(shell)) return false;
+    uint32_t vt = LD32(shell);
+    for (unsigned i = 0; i < sizeof SHOT_VT / sizeof SHOT_VT[0]; i++)
+        if (vt == SHOT_VT[i]) { *player = LD32(at + AT_SHOOTER); return true; }
+    return false;
+}
 
 static int local_slot(void) {
     uint32_t mem = LD32(G_MEMBER);
@@ -164,11 +187,11 @@ static int damage_of(const int16_t *parts) {
 }
 
 // The change this hit made (s: the fields before it), to the other games.
-static void report_send(const Snap *s, uint32_t en, uint32_t info, int slot) {
+static void report_send(const Snap *s, uint32_t en, uint32_t info, int slot, bool shot) {
     const uint8_t *now = G2H(info + P_FIRST);
     Report r;
     memset(&r, 0, sizeof r);
-    r.magic = MAGIC, r.kind = M_REPORT, r.slot = (uint8_t)slot;
+    r.magic = MAGIC, r.kind = shot ? M_SHOT : M_REPORT, r.slot = (uint8_t)slot;
     r.id = LD16(info + INFO_ID), r.seq = ++g_seq;
     bool any = t_aggro_sum != 0;
     for (int i = 0; i < N_PARTS; i++) {
@@ -206,19 +229,27 @@ static void report_send(const Snap *s, uint32_t en, uint32_t info, int slot) {
     int d = damage_of(r.parts);
     __atomic_add_fetch(&g_st[slot].sent, 1, __ATOMIC_RELAXED);
     __atomic_add_fetch(&g_st[slot].sent_dmg, (uint32_t)d, __ATOMIC_RELAXED);
-    if (g_log) LOG("[hitsync] report %u sent: monster %u, damage %d, KO %d, aggro %d\n", r.seq, r.id, d, r.parts[(0x4d2 - P_PARTS) / 2], r.aggro);
+    if (g_log) LOG("[hitsync] %s %u sent: monster %u, damage %d, KO %d, aggro %d\n", shot ? "shot" : "report", r.seq, r.id, d, r.parts[(0x4d2 - P_PARTS) / 2], r.aggro);
 }
 
 static void hit(Cpu *c) {
     if (!active()) { fnhook_call_original(c, FN_HIT); return; }
-    uint32_t at = c->r[1], en = c->r[2], info;
-    if (LD8(at + AT_KIND) != KIND_HUNTER || LD8(at + AT_VIA) || !large(en, &info)) { fnhook_call_original(c, FN_HIT); return; }
-    uint8_t type = LD8(at + AT_TYPE);
-    int slot = slot_of(LD32(at + AT_OWNER)), me = local_slot();
-    bool shot = type == 8 || type == 9 || type == 0x45, owner = LD8(en + EN_RUNS) != 0;
-    if (shot || slot < 0 || me < 0) { fnhook_call_original(c, FN_HIT); return; }
+    uint32_t at = c->r[1], en = c->r[2], info, player;
+    if (LD8(at + AT_KIND) != KIND_HUNTER || !large(en, &info)) { fnhook_call_original(c, FN_HIT); return; }
+    bool shot = LD8(at + AT_VIA) != 0;
+    if (shot) {
+        if (!shot_of(at, &player)) { fnhook_call_original(c, FN_HIT); return; }
+    } else {
+        uint8_t type = LD8(at + AT_TYPE);
+        if (type == 8 || type == 9 || type == 0x45) { fnhook_call_original(c, FN_HIT); return; }
+        player = LD32(at + AT_OWNER);
+    }
+    int slot = slot_of(player), me = local_slot();
+    bool owner = LD8(en + EN_RUNS) != 0;
+    if (slot < 0 || me < 0) { fnhook_call_original(c, FN_HIT); return; }
     Snap s;
-    if (owner && slot != me && reports(slot, plat_now_ns())) {  // our copy of a hunter who reports: its hit doesn't count
+    uint64_t now = plat_now_ns();
+    if (owner && slot != me && (shot ? reports_shots(slot, now) : reports(slot, now))) {  // our copy of a hunter who reports: its hit doesn't count
         snap_take(&s, en, info);
         t_aggro = 2;
         fnhook_call_original(c, FN_HIT);
@@ -230,7 +261,7 @@ static void hit(Cpu *c) {
         int d = damage_of(parts);
         __atomic_add_fetch(&g_st[slot].copy, 1, __ATOMIC_RELAXED);
         __atomic_add_fetch(&g_st[slot].copy_dmg, (uint32_t)d, __ATOMIC_RELAXED);
-        if (g_log) LOG("[hitsync] slot %d's copy hit monster %u: damage %d, ignored\n", slot, LD16(info + INFO_ID), d);
+        if (g_log) LOG("[hitsync] slot %d's copy %s monster %u: damage %d, ignored\n", slot, shot ? "shot" : "hit", LD16(info + INFO_ID), d);
         return;
     }
     if (!owner && slot == me) {  // our hunter's hit on a monster someone else runs: to the owner
@@ -238,7 +269,7 @@ static void hit(Cpu *c) {
         t_aggro = 1, t_aggro_sum = 0, t_aggro_flag = 0;
         fnhook_call_original(c, FN_HIT);
         t_aggro = 0;
-        report_send(&s, en, info, slot);
+        report_send(&s, en, info, slot, shot);
         return;
     }
     fnhook_call_original(c, FN_HIT);
@@ -313,7 +344,7 @@ static void en_apply(Cpu *c) {
         for (int i = 0; i < g_nq; i++) {
             if (now - g_q[i].at > QUEUE_STALE) continue;  // (its monster never came: another zone, or gone)
             if (g_q[i].r.id == id) {
-                if (owner && reports(g_q[i].r.slot, now)) take[n++] = g_q[i].r;
+                if (owner && (g_q[i].r.kind == M_SHOT ? reports_shots(g_q[i].r.slot, now) : reports(g_q[i].r.slot, now))) take[n++] = g_q[i].r;
                 continue;
             }
             if (k != i) g_q[k] = g_q[i];
@@ -335,7 +366,7 @@ static void en_apply(Cpu *c) {
 }
 
 static void hello_send(int me, bool on) {
-    Hello m = {MAGIC, M_HELLO, (uint8_t)me, on};
+    Hello m = {MAGIC, M_HELLO, (uint8_t)me, on, HELLO_SHOTS};
     ldn_send_aux(&m, sizeof m);
 }
 
@@ -365,13 +396,13 @@ void hitsync_tick(void) {
 void hitsync_aux_received(const void *data, uint32_t len) {
     const uint8_t *m = data;
     if (len < 2 || m[0] != MAGIC) return;
-    if (m[1] == M_HELLO && len >= sizeof(Hello)) {
-        Hello h;
-        memcpy(&h, data, sizeof h);
-        if (h.slot < 4) g_hello[h.slot] = h.on ? plat_now_ns() : 0;
+    if (m[1] == M_HELLO && len >= 4) {
+        Hello h = {0};
+        memcpy(&h, data, len < sizeof h ? len : sizeof h);
+        if (h.slot < 4) g_caps[h.slot] = h.caps, g_hello[h.slot] = h.on ? plat_now_ns() : 0;
         return;
     }
-    if (m[1] != M_REPORT || len < sizeof(Report)) return;
+    if ((m[1] != M_REPORT && m[1] != M_SHOT) || len < sizeof(Report)) return;
     Report r;
     memcpy(&r, data, sizeof r);
     if (r.slot > 3 || r.id >= ZAKO_FIRST) return;
@@ -415,7 +446,9 @@ static void hit_trace(Cpu *c) {
     memcpy(g_info, G2H(info), INFO_SIZE);
     memcpy(g_en, G2H(en), EN_SIZE);
     fnhook_call_original(c, FN_HIT);
-    LOG("[hitsync] hit: kind %u type 0x%x via %u, target %08x id %u, runs it %u\n", kind, type, via, en, LD16(info + INFO_ID), LD8(en + EN_RUNS));
+    uint32_t by = LD32(at + AT_OWNER), who = LD32(at + AT_SHOOTER);
+    LOG("[hitsync] hit: kind %u type 0x%x via %u, by %08x (vt %08x, slot %d) shooter %08x (slot %d), me %d, target %08x id %u, runs it %u\n", kind, type, via, by,
+        sane(by) ? LD32(by) : 0, slot_of(by), who, slot_of(who), local_slot(), en, LD16(info + INFO_ID), LD8(en + EN_RUNS));
     log_diff("info", g_info, info, INFO_SIZE);
     log_diff("enemy", g_en, en, EN_SIZE);
 }
