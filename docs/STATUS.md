@@ -676,6 +676,13 @@ function. Measured (scripted R/X/A, MHGU_PLSNAP, player flags, not on a physical
 failed without mods before, 6 with the plugin, none now in either; 240 fps with the plugin none. Plain R+X, R+A, X+A
 come up to 33 ms later (X+A pressed together 0 -> 33 ms); a lone press is unchanged (53 ms for a tap); Strict and 30 fps
 are as before. The plugin's held X fired ~40 times in 0.6 s at 150 fps, now 7-8 (one per 67 ms window, as at 30 fps).
+Follow-up (2026-11-09), reported with the plugin at 60 fps: R held, X+A pressed together gave a guard poke. Measured on
+a Lance (every weapon of a save copy changed to one; act 0010:010 from the guard is the poke): when A goes up a moment
+before X the plugin goes on repeating X alone, which opens a window, expires as an X tap (flags bit 1) and, R held, is
+the poke (the Lance's key function 0x137731c). With the plugin 6 of 6, without 0 of 6. Now a button left over from an
+input of two or more doesn't repeat until it goes up: 0 of 6. Not fixed, the original game's: with R held, A a whole
+update before X sets X's tap bit with X+A and pokes, with or without the plugin. That save copy's Lance starts no charge
+from R+X+A or guard + X+A even without mods (its style not checked), so the charge itself wasn't seen.
 
 Mashing out of a stun and the frame rate (2026-10-30): fixed. Reported: at high frame rates mashing buttons and
 turning the stick ends a stun far sooner than at 30 fps. The stun (dizzy) is act 0x40:026 (update 0x4bcfd0, motion

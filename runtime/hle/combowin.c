@@ -16,7 +16,9 @@
 // combowin_begin (0x47ca38) gives the code that decides (up to 0x47cc58, combowin_end puts the word back) a corrected
 // new-press word: R / ZR is new only when it really went down, a running window sees only real presses (a held button
 // repeats once per window: 67 ms, as on the Switch), and a press that makes two of R, X and A, with the third not
-// held, waits for it, one 30 fps update at most and with the window stopped. A lone press isn't delayed.
+// held, waits for it, one 30 fps update at most and with the window stopped. A lone press isn't delayed. And a button
+// left over from a two-button input, when the other was let go first, doesn't repeat until it goes up: Better Inputs
+// went on repeating X alone after X+A, which read as an X tap and, with R held, a poke instead of the charge.
 #include "../config.h"
 #include "../hle.h"
 
@@ -39,13 +41,14 @@ static _Thread_local uint16_t g_word;  // ... and the word
 void combowin_begin(uint32_t pl) {
     static uint32_t last_pl;
     static uint16_t last_held, waiting;  // (waiting: presses kept from the code that decides)
+    static uint16_t combo, leftover;     // the buttons of the last input of two or more; those still held after it broke up
     static float waited;
     if (!(LD8(pl + PL_LOCAL) & 1)) return;
     uint32_t sys = LD32(G_SYSTEM);
     float step = sys ? LDF(sys + 0x68) : 0.0f;
     uint16_t held = LD16(pl + PL_HELD);
     if (pl != last_pl || config_live_combo_window() == COMBO_STRICT || !(step > 0.0f && step < 2.0f)) {
-        last_pl = pl, last_held = held, waiting = 0, waited = 0.0f;
+        last_pl = pl, last_held = held, waiting = 0, waited = 0.0f, combo = leftover = 0;
         return;
     }
     uint32_t opt = LD32(G_OPTIONS);
@@ -59,6 +62,9 @@ void combowin_begin(uint32_t pl) {
     uint16_t saved = window ? (flags >> 13) & 0xfff : 0;
     uint16_t press = word & attack & (real | (uint16_t)~mod);
     if (window) press &= real;
+    if (combo & ~held) leftover |= combo & held, combo = 0;
+    leftover &= held;
+    press &= real | (uint16_t)~leftover;
     if (waiting) {
         waiting |= real & three;
         waited += step;
@@ -77,6 +83,7 @@ void combowin_begin(uint32_t pl) {
             g_stop = true;
         }
     }
+    if (press && __builtin_popcount((saved | press) & attack) >= 2) combo = (saved | press) & attack;
     g_pl = pl, g_word = word;
     ST16(pl + PL_NEW, (word & ~attack) | press);
 }
