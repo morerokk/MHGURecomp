@@ -103,6 +103,7 @@
     .ldn_key = "",                                                                                  \
     .ldn_direct = 1,                                                                                \
     .sync_small_monsters = 1,                                                                       \
+    .lag_compensation = 1,                                                                          \
     .share_urgent = 1,                                                                              \
     /* [Monster HP, Village Quests] */                                                              \
     .hp = {{1, 1, 1, 1}, 2},                                                                        \
@@ -428,8 +429,8 @@ static const char DEFAULT_INI[] =
     "\n"
     "; Experimental. Your melee hits count as you saw them land, even if your hunter missed on the screen of the player\n"
     "; running the monster. Works when that player has it on too, and has no effect otherwise. Bows and bowguns are not affected.\n"
-    "; Default: Off\n"
-    "LagCompensation = Off\n"
+    "; Default: On\n"
+    "LagCompensation = On\n"
     "\n"
     "; Clearing an Urgent quest posted by someone else also counts for you, if you have unlocked it yourself. The\n"
     "; original game only counts it for the hunter who posted it. This only changes your own save, the others in the\n"
