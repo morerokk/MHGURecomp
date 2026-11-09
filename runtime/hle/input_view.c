@@ -31,7 +31,7 @@
 #define FN_PL_IS_LOCAL 0x47bcd0u  // (player) 1: ours
 #define FN_PAD_INDEX   0xdad28cu  // (sPad) the index of the pad slot in use
 #define G_SPAD         0x1a3cbfcu // GOT entry: **sPad
-#define G_OPTIONS      0x1a97f78u // options object **
+#define G_OPTIONS      0x1a97f78u // options object *
 #define OPT_DASH_ROLE  0x446eu    // byte: 0 R is the dash button, else ZR
 #define MB1_OFF        0x6b98u    // button objects inside sPad
 #define MB2_OFF        0x6bf0u
@@ -39,8 +39,8 @@
 #define PAD_HELD       0x1d0u
 #define PAD_PTR_X      0x68dcu
 #define PAD_PTR_Y      0x68e0u
-#define PL_DRAWN       0x2506u    // byte (research P3; 1 sheathed idle, 0x10 drawn)
-#define PL_DRAWN2      0x250au
+#define PL_ACT_ST      0x2506u    // u16: the hunter's current action (act_st, act_no; hle/movelog.c): act_st 0x10 a
+#define PL_ACT_NO      0x250au    // weapon move, 1 a common one; the drawn / sheathed discriminator is in these (P3)
 
 static const uint32_t mappers[ACT_WEAPONS] = {0x1360058, 0x1369554, 0x136f404, 0x137731c, 0x137eb58, 0x138c920, 0x1399114,
                                               0x13a03a8, 0x13aa60c, 0x13b1dc8, 0x13baef0, 0x13c2d54, 0x13cbd88, 0x13d42b0,
@@ -52,7 +52,7 @@ static uint64_t g_frame;        // frames the pad was updated
 static uint64_t g_var_frame, g_pl_frame, g_town_frame;
 static volatile bool g_dash_zr;
 static volatile int g_weapon_pub = -1;
-static uint8_t g_drawn, g_drawn2;
+static uint32_t g_act_st, g_act_no, g_player;
 static bool g_log;
 static uint32_t g_in[2], g_out[2];  // the words last given to / from the translators of each view
 static bool g_menus, g_pointer;
@@ -70,8 +70,8 @@ static uint32_t call(Cpu *c, uint32_t fn, uint32_t r0, uint32_t r1, uint32_t r2)
 }
 
 static uint32_t spad(void) {
-    uint32_t g = LD32(G_SPAD);
-    if (!sane(g)) return 0;
+    uint32_t g = LD32(G_SPAD);  // (the address of the global that holds sPad: in the image)
+    if (!g || (g & 3)) return 0;
     uint32_t p = LD32(g);
     return sane(p) ? p : 0;
 }
@@ -88,9 +88,9 @@ void input_view_status(void) {
     char names[400] = "";
     for (int i = 0; i < ACT_COUNT; i++)
         if (act >> i & 1) snprintf(names + strlen(names), sizeof names - strlen(names), "%s ", act_name(i));
-    LOG("[actions] frame %llu ctx %s weapon %d (%s) drawn %02x/%02x dash %s active: %s\n", (unsigned long long)g_frame,
-        input_view_context(), g_weapon_pub, g_weapon_pub >= 0 ? act_weapon_name(g_weapon_pub) : "-", g_drawn, g_drawn2,
-        g_dash_zr ? "ZR" : "R", names);
+    LOG("[actions] frame %llu ctx %s weapon %d (%s) player %08x act %x:%x dash %s active: %s\n", (unsigned long long)g_frame,
+        input_view_context(), g_weapon_pub, g_weapon_pub >= 0 ? act_weapon_name(g_weapon_pub) : "-", g_player, g_act_st,
+        g_act_no, g_dash_zr ? "ZR" : "R", names);
 }
 
 // ---- context and weapon
@@ -98,7 +98,7 @@ static void player_update(Cpu *c) {
     uint32_t pl = c->r[0];
     if (sane(pl) && call(c, FN_PL_IS_LOCAL, pl, 0, 0) == 1) {
         g_pl_frame = g_frame;
-        g_drawn = LD8(pl + PL_DRAWN), g_drawn2 = LD8(pl + PL_DRAWN2);
+        g_player = pl, g_act_st = LD16(pl + PL_ACT_ST), g_act_no = LD16(pl + PL_ACT_NO);
     }
     fnhook_call_original(c, FN_PLAYER);
 }
@@ -126,7 +126,6 @@ static void mb_update(Cpu *c) {
         input_act_latch(&g_snap);
         if (g_var && g_frame - g_var_frame > 3) g_var = 0, g_weapon_pub = -1;  // (no hunter for a while)
         uint32_t opt = LD32(G_OPTIONS);
-        opt = sane(opt) ? LD32(opt) : 0;
         g_dash_zr = sane(opt) && LD8(opt + OPT_DASH_ROLE) != 0;
     }
     if (g_pointer && sp && g_snap.ptr_valid) {
