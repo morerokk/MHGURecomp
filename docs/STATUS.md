@@ -409,6 +409,30 @@ HR72 hosting a Wycademy Hub, client a new HR1 save with only Village 1 star): De
 Fungal Hunt (105, a 1-star quest the client hadn't unlocked) refused; Find the Ferns (101) joined. A Forge plugin
 could do the same (same hooks), but the HP part is the port's own.
 
+Chinese text (2026-11-09): Village quest names and descriptions came up in English in the Hub and Pub when the save's
+language is Simplified or Traditional Chinese. A quest's rQuestData holds its text in 7 languages (mMessage_eng ...
+_chS); the list job loads it from the loose files, but chS and chT were added by a title update and have no loose
+files. Their text is only in the bundles an area keeps loaded (loc\arc\quest\vq for area types 1-4 and 6, gq and gq2
+for 0 and 7: the picker 0x35339c), and the Hub never loads vq. villagehub.c now holds vq (rArchive DTI 0x2324df0,
+getResource, then wait for bit 0 of +0x50: the call only starts the load) from the list job's start 0x5b7fd8 while a
+Hub / Pub counter is in Village mode, and for an on-demand load of a posted Village quest; released with 0xa87660.
+Only for language 7 (chT) and 8 (chS): for the other five, vq's text and rQuestData are byte-identical to the loose
+files (checked for all of vq, gq, gq2). Not in vq, so still English in Chinese: quests 712, 819, 827, 1008, 1014-1016,
+1043 (their text is only in their own q arc; a village has the same limit). The language is sGameControl +0xa5 (table
+0xd359a8: 1 eng, 7 chT, 8 chS), saved with the game and taken from the system language only when 0; no menu changes it.
+To test: control "poke" the byte to 8 (keep the word's other bytes), Quit Game and save, restart. Tested (HR72 test
+save, Pub): before, English names at the Village list; after, Chinese names, objectives and locale, also after Village
+-> Hub -> Village; departing on a Village quest and abandoning it works with the bundle held; English run unchanged.
+
+Empty Village list after an area load (2026-11-09): coming back from a quest with the Village list still selected, the
+counter's star rows were empty until L / R was pressed twice (in every language). The list job an area load starts
+(0x20fdc4) listed 8 quests instead of 402 (selector +0x28; the job had finished its scan, so the filter refused them;
+the filter's locked-quest test is the likely reason, not proven). Building the categories as a village at the stage's
+start (0x5ba8fc, hooked as a test) changed nothing. villagehub.c now marks a list made by an area load in Village mode
+as stale, and ui_update makes it again, as a switch does, the first time the counter's rank or star menu is up: 69 ms
+once. The reload log prints the number listed. Tested (same save, Pub): Village list, departure on quest 702, abandon,
+back to the counter: 402 listed, star rows there, names in Chinese.
+
 Maps (2026-11-05): a Village quest's supply box has one Map (0x6b3), a Hub quest's four. Started from the Hub or
 Pub (hpscale's test, `hpscale_village_from_hub`), it gets 3 more in the box's last empty slots. Supply data: the
 quest arc's quest\supp\supp_<n> (rSupplyList, DTI 0x1a8acf0): f32 1.0, u32 count, then entries of 40 slots
