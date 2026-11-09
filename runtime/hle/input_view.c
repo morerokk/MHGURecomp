@@ -169,6 +169,15 @@ void input_view_init(void) {
     if (!act_enabled()) return;
     const ActProfile *p = act_profile();
     g_log = p->log, g_menus = p->menus, g_pointer = p->pointer;
+    if (p->split) LOG("[actions] SplitDashWeaponR is not implemented in this version (ignored)\n");
+    // (a hook something else put there first would be replaced, not chained: the layer stays off then; mods that hook
+    // these functions later chain behind ours, as Forge does for any hook already there)
+    static const uint32_t needed[] = {FN_MB_UPDATE, FN_TR_MB1, FN_TR_MB2, FN_PLAYER, FN_TOWN};
+    for (unsigned i = 0; i < sizeof needed / sizeof *needed; i++)
+        if (fnhook_get(needed[i])) {
+            LOG("[actions] %08x is hooked already: the action layer stays off\n", needed[i]);
+            return;
+        }
     fnhook_set(FN_MB_UPDATE, hle_register("inputview:mb_update", mb_update));
     fnhook_set(FN_TR_MB1, hle_register("inputview:tr_mb1", tr_mb1));
     fnhook_set(FN_TR_MB2, hle_register("inputview:tr_mb2", tr_mb2));
@@ -177,7 +186,7 @@ void input_view_init(void) {
     for (int i = 0; i < ACT_WEAPONS; i++) {
         char name[32];
         snprintf(name, sizeof name, "inputview:mapper%d", i);
-        fnhook_set(mappers[i], hle_register(name, mapper_fn[i]));
+        if (!fnhook_get(mappers[i])) fnhook_set(mappers[i], hle_register(name, mapper_fn[i]));
     }
     LOG("[actions] translators hooked\n");
 }
