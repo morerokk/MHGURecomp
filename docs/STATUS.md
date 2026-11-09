@@ -1298,7 +1298,7 @@ old way while on.
    (config.c camera_aspect: only a camera whose aspect is a preview box's the renderer drew), so the model is as big and
    as wide as at 16:9, and a prompt just under its box (the Palico Scout's "Rotate") goes with its frame; a preview window beside the menus (the Smithy's
    parchment, the Poogie costume's) goes Top with them, whichever is drawn first; layer 110 outside the loading screen
-   (the bowgun's reticle, lock-on markers) is not stretched and scales about the centre; the bowgun's ammo list (layer 103, right side) goes with the item
+   (the bowgun's reticle, lock-on markers) is not stretched and scales about the centre; the bowgun's ammo list (layer 103, right side below y 300; above it the HP and stamina bars' end pieces, at x 1062 when full) goes with the item
    bar; a window's pieces up to 470 apart are one group (the Weapon Controls sheet's back parchment, 436 high), and a window stacked right on another of its layer
    that went the other way takes the pair's anchor with it (the chat log's "Chat" label over its box)
    (the Palico Scout's "Rotate" prompt). MHGU_CONTROL `hudtrace` logs a frame's HUD quads and their anchors. Left: the HUD's layout elsewhere (title, town, quest board, item box) unverified; at Edges

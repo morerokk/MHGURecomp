@@ -3776,9 +3776,10 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // Status HUD (Clock, HP bar, Stamina, gauges, palico status: y < 500) -> Left anchor
                         // Item Selector wheel (y >= 500) -> Right anchor
                         // The bowgun's ammo list (held L) stands over the item bar, x 970..1242, y 360..568: by height it was
-                        // split at 500, its upper rows Left / Top, a gap in the middle. The status HUD ends at x 742, so the
-                        // right side (x >= 900) is the item bar's whatever its height.
-                        if (pos_y < 500.0f && pos_x < 900.0f) {
+                        // split at 500, its upper rows Left / Top, a gap in the middle. So the right side (x >= 900) is the item
+                        // bar's, but only below the bars: the HP and stamina bars grow to the right with their maximum (a full
+                        // stamina bar's end piece is at x 1062, y 33), so the top (y < 300) is the status HUD's at any x.
+                        if (pos_y < 300.0f || (pos_y < 500.0f && pos_x < 900.0f)) {
                             anchor = ANCHOR_LEFT;
                             vanchor = V_TOP;
                         } else {
