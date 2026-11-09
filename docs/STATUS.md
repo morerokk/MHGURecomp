@@ -1141,6 +1141,15 @@ default ini text now has `Y = R, Mouse Middle` (the first commit changed only th
 The menu shows the Item bar rows. Not tested: choosing the wheel in the menu (needs a real wheel event), a keyboard
 key on ItemLeft / ItemRight, the wheel on a button keybind.
 
+Prowler (2026-11-10): uOtomo has its own bar handler, 0x1417d68 (vtable +0x5c4, called from the player update right
+after the hunters' 0x4f7f38, which also runs for a Palico and passes its checks: without a test there the notch only moved
+the unused pouch slot +0x3298). Selected slot u16 +0x3336 (0-8, wraps, skips the empty ones: f_1417efc(palico, slot, 0
+right / 1 left)), turn bits +0x3338 (2 right, 4 left), select check vfunc +0x230(palico, 0x10), actions 0x47 / 0x48
+without L. itembar.c hooks it too; a Palico is told apart by that vtable slot. Tested with the user's Prowler save in
+quest 101 (uOtomo found with control `find ec159501`, vtable 0x19515ec; `peek` +0x3334): `wheel` -1 / 1 move the slot one each
+way, HUD name and count following, 0 <-> 7 wraps (slot 8 empty in that save), 9 notches at once = 4 (MAX_WAITING). Hunter save (bow)
+retested the same way: the bar still turns. Not tested: a Prowler in multiplayer.
+
 ## BC textures without GPU support (2026-10-31, branch feat/android-build)
 
 First step of the Android build (docs/research/android.md): Adreno and Mali drivers on Android have no

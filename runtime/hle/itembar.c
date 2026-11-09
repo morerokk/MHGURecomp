@@ -10,6 +10,12 @@
 // animation. The handler is hooked: after it, a notch of
 // the wheel does the same, past the same checks. One notch per update, at most a few waiting; notches while the
 // handler doesn't run (towns, menus, cutscenes) or while the player may not pick an item are dropped.
+//
+// A Prowler (uOtomo) has a bar of its own: slot u16 at +0x3336 (0-8, wrapping around), turn bits at +0x3338, moved by
+// 0x1417d68 (r0 = the Palico; uOtomo's vtable +0x5c4, called right after the hunters' handler): the same logic without
+// the f_47b918 check, with vfunc +0x230(player, 0x10) and with actions 0x47 / 0x48 instead of 0x43 / 0x44. The hunters'
+// handler still runs for a Palico and its checks pass, so it is told apart there (a hunter's pouch slot means nothing
+// on a Palico).
 #include <pthread.h>
 
 #include "../hle.h"
@@ -22,6 +28,11 @@
 #define VF_CAN_SELECT    0x230u     // vfunc (player, 1) 1: may pick an item now
 #define PL_ITEM_SLOT     0x3298u    // u16: the selected pouch slot
 #define PL_ITEM_FLAGS    0x253cu    // bit 1: turned right, bit 2: turned left (the bar's animation)
+#define FN_PROWLER_BAR   0x1417d68u // a Prowler's item bar handler (r0 = the Palico)
+#define FN_PROWLER_NEXT  0x1417efcu // (Palico, slot, 0 right / 1 left): the next slot holding something
+#define VF_PROWLER_BAR   0x5c4u     // holds FN_PROWLER_BAR in uOtomo's vtable only
+#define OT_ITEM_SLOT     0x3336u    // u16: a Prowler's selected slot
+#define OT_ITEM_FLAGS    0x3338u    // as PL_ITEM_FLAGS
 #define MAX_WAITING      4
 #define ACTIVE_NS        200000000ull  // notches older than the handler's last run by this much are dropped
 
@@ -51,9 +62,16 @@ static uint32_t call(Cpu *c, uint32_t fn, uint32_t r0, uint32_t r1, uint32_t r2)
 
 static bool sane(uint32_t a) { return a >= 0x08000000u && a < 0xF0000000u && !(a & 3); }
 
-static void item_bar(Cpu *c) {
-    uint32_t pl = c->r[0];
-    fnhook_call_original(c, FN_ITEM_BAR);
+typedef struct {
+    uint32_t next, slot, flags;  // FN_*_NEXT, then the offsets of the selected slot and of the turn bits
+    uint32_t select_arg;         // vfunc +0x230's argument
+    bool busy_check;             // f_47b918 has to answer 0
+} Bar;
+static const Bar HUNTER = {FN_ITEM_NEXT, PL_ITEM_SLOT, PL_ITEM_FLAGS, 1, true};
+static const Bar PROWLER = {FN_PROWLER_NEXT, OT_ITEM_SLOT, OT_ITEM_FLAGS, 0x10, false};
+
+// After a bar's handler has run: turns the bar a notch if one is waiting and the player may pick an item now.
+static void turn(Cpu *c, uint32_t pl, const Bar *b) {
     uint64_t now = plat_now_ns(), seen = g_seen_ns;
     g_seen_ns = now;
     pthread_mutex_lock(&g_lock);
@@ -63,16 +81,32 @@ static void item_bar(Cpu *c) {
     if (!dir || !sane(pl) || call(c, FN_PL_IS_LOCAL, pl, 0, 0) != 1) return;  // (another player's: not ours)
     uint32_t vt = LD32(pl);
     uint32_t can_select = vt ? LD32(vt + VF_CAN_SELECT) : 0;  // (vtables are in main's image: not heap addresses)
-    bool may = call(c, FN_PL_BUSY, pl, 0, 0) == 0 && can_select && call(c, can_select, pl, 1, 0) == 1;
+    bool may = (!b->busy_check || call(c, FN_PL_BUSY, pl, 0, 0) == 0) && can_select &&
+               call(c, can_select, pl, b->select_arg, 0) == 1;
     pthread_mutex_lock(&g_lock);
     g_steps = may ? g_steps - dir : 0;  // (not now: dropped, not kept for when the attack is over)
     pthread_mutex_unlock(&g_lock);
     if (!may) return;
-    uint32_t slot = call(c, FN_ITEM_NEXT, pl, LD16(pl + PL_ITEM_SLOT), dir > 0 ? 0 : 1);
-    ST16(pl + PL_ITEM_SLOT, slot);
-    ST32(pl + PL_ITEM_FLAGS, LD32(pl + PL_ITEM_FLAGS) | (dir > 0 ? 2u : 4u));
+    uint32_t slot = call(c, b->next, pl, LD16(pl + b->slot), dir > 0 ? 0 : 1);
+    ST16(pl + b->slot, slot);
+    ST32(pl + b->flags, LD32(pl + b->flags) | (dir > 0 ? 2u : 4u));
+}
+
+static void item_bar(Cpu *c) {
+    uint32_t pl = c->r[0];
+    fnhook_call_original(c, FN_ITEM_BAR);
+    uint32_t vt = sane(pl) ? LD32(pl) : 0;
+    if (vt && LD32(vt + VF_PROWLER_BAR) == FN_PROWLER_BAR) return;  // (a Palico: prowler_bar's, right after this)
+    turn(c, pl, &HUNTER);
+}
+
+static void prowler_bar(Cpu *c) {
+    uint32_t pl = c->r[0];
+    fnhook_call_original(c, FN_PROWLER_BAR);
+    turn(c, pl, &PROWLER);
 }
 
 void itembar_init(void) {
     fnhook_set(FN_ITEM_BAR, hle_register("itembar:item_bar", item_bar));
+    fnhook_set(FN_PROWLER_BAR, hle_register("itembar:prowler_bar", prowler_bar));
 }
