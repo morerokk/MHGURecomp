@@ -25,11 +25,13 @@
 
 #include <SDL3/SDL.h>
 
+#include "actions.h"
 #include "config.h"
 #include "menu_confirm.h"
 #include "forge.h"
 #include "hle/chat.h"
 #include "hle/input.h"
+#include "hle/input_view.h"
 #include "hle/itembar.h"
 #include "hle/mousecam.h"
 #include "keymap.h"
@@ -81,6 +83,8 @@ static void wheel_turn(int n) {
             else wheel_until[code - KEY_WHEEL_UP] = plat_now_ns() + WHEEL_PRESS_NS;
             break;
         }
+    // an action bound to the wheel (runtime/actions.h) is pressed the same way, unless the item bar has the wheel
+    if (act_uses_input(code) && !itembar_active()) wheel_until[code - KEY_WHEEL_UP] = plat_now_ns() + WHEEL_PRESS_NS;
 }
 
 // ---- mouse: captured (relative mode) after a click in the window, Esc lets it go. In a hunt its movement turns the
@@ -99,6 +103,8 @@ static float mouse_dx, mouse_dy;  // counts moved since the last update
 // (tests: the control file's "mousemove <x> <y> <ms>", a mouse moving at that many counts a second, captured or not)
 static float test_vx, test_vy;
 static uint64_t test_until;
+// (tests: the control file's "ptr <x> <y> [down]" / "ptr off": a pointer in the 1280x720 UI space, [Actions] Pointer=1)
+static struct { int x, y; bool down, valid; } test_ptr;
 
 // ---- the mouse for mods (runtime/forge.c: forge_input_getMouse, getMouseMove, setMouseFree, the port's own calls):
 // where the pointer last moved in the window and whether it is over it, the buttons held and pressed since the last
@@ -505,6 +511,21 @@ static void control_poll(void) {
                 test_until = plat_now_ns() + (uint64_t)atoi(arg3) * 1000000ull;
                 continue;
             }
+            if (!strcmp(cmd, "act")) {  // act <Name> [frames]: the action held for that many presented frames (default 8)
+                int id = act_find(arg);
+                if (id < 0 || !act_enabled()) LOG("[control] act %s: %s\n", arg, act_enabled() ? "no such action" : "[Actions] Enable is 0");
+                else act_inject(id, (unsigned)atoi(arg2), g_present_count), LOG("[control] act %s %d\n", act_name(id), atoi(arg2) ? atoi(arg2) : 8);
+                continue;
+            }
+            if (!strcmp(cmd, "ptr")) {  // ptr <x> <y> [0|1] / ptr off: the engine's pointer at (x, y) in 1280x720 (Pointer=1)
+                int down = 0;
+                sscanf(line, "%*s %*s %*s %d", &down);
+                test_ptr.valid = strcmp(arg, "off") != 0;
+                test_ptr.x = atoi(arg), test_ptr.y = atoi(arg2), test_ptr.down = down != 0;
+                LOG("[control] ptr %s\n", test_ptr.valid ? arg : "off");
+                continue;
+            }
+            if (!strcmp(cmd, "actstat")) { input_view_status(); continue; }
             if (!strcmp(cmd, "wheel")) {  // wheel <notches>: the mouse wheel turned (< 0 down), captured or not
                 if (atoi(arg)) wheel_turn(atoi(arg));
                 continue;
@@ -821,6 +842,71 @@ static void rumble_update(void) {
     sent = out, sent_ns = now;
 }
 
+// ---- game actions (runtime/actions.h): the host's keys, mouse and controller as the sampler asks for them
+static const SDL_GamepadButton face_sdl[4] = {SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_WEST,
+                                              SDL_GAMEPAD_BUTTON_NORTH};
+// The Switch button the controller's face button at a position presses (the settings' FaceButtons; as the loop in
+// host_input_update does)
+static int face_switch_button(int i) {
+    static const int switch_at[4] = {BTN_B, BTN_A, BTN_Y, BTN_X}, xbox_at[4] = {BTN_A, BTN_B, BTN_X, BTN_Y};
+    if (config_live_face_buttons() == FACE_LABEL && pad) {
+        switch (SDL_GetGamepadButtonLabel(pad, face_sdl[i])) {
+        case SDL_GAMEPAD_BUTTON_LABEL_A: return BTN_A;
+        case SDL_GAMEPAD_BUTTON_LABEL_B: return BTN_B;
+        case SDL_GAMEPAD_BUTTON_LABEL_X: return BTN_X;
+        case SDL_GAMEPAD_BUTTON_LABEL_Y: return BTN_Y;
+        default: return xbox_at[i];
+        }
+    }
+    return switch_at[i];
+}
+static bool act_phys_held(void *user, int code) {
+    (void)user;
+    if (code > 0 && code < SDL_SCANCODE_COUNT) return keys[code];
+    if (code > KEY_MOUSE && code <= KEY_MOUSE + SDL_BUTTON_X2) return mouse_held >> (code - KEY_MOUSE) & 1;
+    if (code == KEY_WHEEL_UP || code == KEY_WHEEL_DOWN) return plat_now_ns() < wheel_until[code - KEY_WHEEL_UP];
+    if (code >= ACT_PAD && code < ACT_PAD + 0x80 && pad) {
+        if (code == ACT_PAD_LT) return SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 8000;
+        if (code == ACT_PAD_RT) return SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 8000;
+        return SDL_GetGamepadButton(pad, (SDL_GamepadButton)(code - ACT_PAD));
+    }
+    return false;
+}
+// What Tier 0 reads for a Switch button: the controller's buttons (dev 0), the [Keybinds] keys and buttons (dev 1)
+static int act_sw_sources(void *user, int btn, int dev, int *out, int max) {
+    (void)user;
+    int n = 0;
+    if (dev == 0) {
+        static const struct { int btn; int code; } fixed[] = {
+            {BTN_L, ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_SHOULDER}, {BTN_R, ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
+            {BTN_PLUS, ACT_PAD + SDL_GAMEPAD_BUTTON_START}, {BTN_MINUS, ACT_PAD + SDL_GAMEPAD_BUTTON_BACK},
+            {BTN_UP, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_UP}, {BTN_DOWN, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_DOWN},
+            {BTN_LEFT, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {BTN_RIGHT, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
+            {BTN_LSTICK, ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_STICK}, {BTN_RSTICK, ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_STICK},
+            {BTN_ZL, ACT_PAD_LT}, {BTN_ZR, ACT_PAD_RT},
+        };
+        for (unsigned i = 0; i < sizeof fixed / sizeof *fixed && n < max; i++)
+            if (fixed[i].btn == btn) out[n++] = fixed[i].code;
+        for (int i = 0; i < 4 && n < max; i++)
+            if (btn <= BTN_Y && face_switch_button(i) == btn) out[n++] = ACT_PAD + face_sdl[i];
+    } else {
+        for (int i = 0; i < BINDS; i++)
+            if (bind_buttons[i] == btn)
+                for (int k = 0; k < BIND_KEYS && n < max; k++)
+                    if (config_live_bind(i, k) > 0) out[n++] = config_live_bind(i, k);
+    }
+    return n;
+}
+static void act_update(uint64_t b, uint64_t script_b, bool suppress) {
+    if (!act_enabled()) return;
+    ActHost h = {NULL, act_phys_held, act_sw_sources, b, script_b, suppress, input_view_dash_zr(), g_present_count};
+    ActSnap s;
+    memset(&s, 0, sizeof s);
+    act_sample(&h, &s);
+    if (test_ptr.valid) s.ptr_x = test_ptr.x, s.ptr_y = test_ptr.y, s.ptr_down = test_ptr.down, s.ptr_valid = true;
+    input_act_stage(&s);
+}
+
 void host_input_update(void) {
     if (nscript < 0) script_parse();
     rumble_update();
@@ -924,11 +1010,12 @@ void host_input_update(void) {
         if (!scanned) scanned = true, pick_pad();
     }
 
-    uint64_t frame = g_present_count;
+    uint64_t frame = g_present_count, script_b = 0;
     for (int i = 0; i < nscript; i++) {
         const ScriptStep *st = &script[i];
         if (frame < st->start || frame >= st->start + st->len) continue;
         b |= st->buttons;
+        script_b |= st->buttons;
         if (st->stick == 0) lx = st->x, ly = st->y;
         if (st->stick == 1) rx = st->x, ry = st->y;
     }
@@ -974,5 +1061,6 @@ void host_input_update(void) {
         else if (down & B(BTN_B)) textinput_key(TI_CANCEL);
         b &= ~(B(BTN_PLUS) | B(BTN_B));
     }
+    act_update(b, script_b, menu || (typing && !chat_active()));
     input_set(b, clamp_axis(lx), clamp_axis(ly), clamp_axis(rx), clamp_axis(ry));
 }

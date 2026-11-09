@@ -1170,9 +1170,12 @@ void config_load(void) {
     } else {
         char buf[512], seen[512] = "|";
         int line = 0;
+        bool own = false;  // in a section another module reads itself ([Actions*], runtime/actions.c)
         while (fgets(buf, sizeof buf, f)) {
             line++;
             char *s = trim(buf);
+            if (*s == '[') own = !strncasecmp(s + 1, "Actions", 7) && (s[8] == ']' || s[8] == '.');
+            if (own) continue;
             if (*s == '[' && strchr(s, ']') && strlen(seen) + strlen(s) + 2 < sizeof seen) {
                 for (char *q = s + 1; *q != ']'; q++) {
                     size_t n = strlen(seen);
