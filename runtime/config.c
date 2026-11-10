@@ -562,10 +562,17 @@ static const char DEFAULT_INI[] =
     "; Default: Ask\n"
     "Updates = Ask\n"
     "\n"
+#ifdef __APPLE__
+    "; The folder the save is kept in (the one that holds save_0), for example in iCloud Drive or on another drive.\n"
+    "; Use Choose... in the Settings window, or write the path as it is (spaces and ~ included, no backslashes).\n"
+    "; Empty: the default (~/Library/Application Support/MHGURecomp/save).\n"
+    "; A folder with no save in it gets a copy of the current one. Takes effect at the next start\n"
+#else
     "; PC only. The folder the save is kept in (the one that holds save_0), for example on another drive or in a synced\n"
     "; folder. Empty: the default (%APPDATA%\\MHGURecomp\\save on Windows, ~/.local/share/MHGURecomp/save on Linux,\n"
     "; ~/Library/Application Support/MHGURecomp/save on macOS).\n"
     "; Your save is not moved: copy save_0 there yourself. Takes effect at the next start\n"
+#endif
     "SaveLocation =\n"
     "\n"
     "[Android]\n"

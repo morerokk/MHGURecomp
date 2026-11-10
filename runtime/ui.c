@@ -44,6 +44,37 @@ static void folder_picked(void *what, const char *const *list, int filter) {
     SDL_strlcpy(picked_path, list[0], sizeof picked_path);
     SDL_SetAtomicInt(&picked_ready, (int)(intptr_t)what);
 }
+#ifdef __APPLE__
+// A folder chosen as the save's place that has no save in it yet gets a copy of the one in use (the default folder's:
+// the game would otherwise start a new save there and look as if it had lost the old). Nothing is overwritten or
+// removed, and a folder that already has a save is used as it is.
+static SDL_EnumerationResult copy_entry(void *to, const char *dir, const char *name) {
+    char src[2200], dst[2200];
+    SDL_PathInfo info;
+    if (SDL_snprintf(src, sizeof src, "%s%s", dir, name) >= (int)sizeof src ||
+        SDL_snprintf(dst, sizeof dst, "%s/%s", (const char *)to, name) >= (int)sizeof dst || !SDL_GetPathInfo(src, &info))
+        return SDL_ENUM_CONTINUE;
+    if (info.type == SDL_PATHTYPE_DIRECTORY) {
+        SDL_CreateDirectory(dst);
+        SDL_EnumerateDirectory(src, copy_entry, dst);
+    } else if (info.type == SDL_PATHTYPE_FILE && !SDL_GetPathInfo(dst, NULL))
+        SDL_CopyFile(src, dst);
+    return SDL_ENUM_CONTINUE;
+}
+static void adopt_save(const char *from, const char *to) {
+    char src[1200], dst[1200], marker[1300];
+    if (!from || !SDL_strcmp(from, to) || SDL_snprintf(src, sizeof src, "%s/save_0", from) >= (int)sizeof src ||
+        SDL_snprintf(dst, sizeof dst, "%s/save_0", to) >= (int)sizeof dst)
+        return;
+    SDL_snprintf(marker, sizeof marker, "%s/system", src);
+    if (!SDL_GetPathInfo(marker, NULL)) return;  // (no save in use)
+    SDL_snprintf(marker, sizeof marker, "%s/system", dst);
+    if (SDL_GetPathInfo(marker, NULL)) return;  // (a save is already there)
+    SDL_CreateDirectory(dst);
+    SDL_EnumerateDirectory(src, copy_entry, dst);
+    LOG("[ui] no save in the new save folder: copied the one from %s\n", src);
+}
+#endif
 #endif
 int ui_take_picked_folder(char *out, size_t size) {
 #ifdef __ANDROID__
@@ -278,6 +309,9 @@ void ui_init(void) {
     if (g_config.save_location[0]) {  // ([Application] SaveLocation: MHGU_SAVE_DIR still wins, fs.c)
         static char save[1100];
         if (plat_use_folder(g_config.save_location, save, sizeof save)) {
+#ifdef __APPLE__
+            if (!getenv("MHGU_SAVE_DIR")) adopt_save(g_save_dir, save);
+#endif
             g_save_dir = save;
             LOG("[ui] save folder (SaveLocation): %s\n", save);
         } else

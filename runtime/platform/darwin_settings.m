@@ -119,6 +119,34 @@ static MHGUSettingsWindow *g_settings_window;
     [self reload];
 }
 
+// Save Folder's Choose...: the system's folder picker. A save_0 folder picked means the folder around it (the setting
+// is the folder that holds save_0). The pick is written like a typed value; runtime/ui.c copies the save in use into
+// a folder that has none, at the next start.
+- (void)chooseSaveFolder:(NSButton *)b {
+    MHGURow *row = nil;
+    for (MHGURow *r in self.rows) if (!strcmp(r.setting->key, "SaveLocation")) row = r;
+    if (!row) return;
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.canChooseFiles = NO;
+    panel.canChooseDirectories = YES;
+    panel.canCreateDirectories = YES;
+    panel.allowsMultipleSelection = NO;
+    panel.prompt = @"Choose";
+    panel.message = @"Choose the folder that holds (or will hold) the save. A folder with no save in it gets a copy of the current one.";
+    NSString *now = [self valueOf:row.setting];
+    BOOL dir = NO;
+    if (now.length && [NSFileManager.defaultManager fileExistsAtPath:now isDirectory:&dir] && dir)
+        panel.directoryURL = [NSURL fileURLWithPath:now isDirectory:YES];
+    self.window.level = NSNormalWindowLevel;  // (the floating window would cover the panel)
+    NSInteger result = [panel runModal];
+    self.window.level = NSFloatingWindowLevel;
+    if (result != NSModalResponseOK || !panel.URL) return;
+    NSString *path = panel.URL.path;
+    if ([path.lastPathComponent isEqual:@"save_0"]) path = path.stringByDeletingLastPathComponent;
+    row.control.stringValue = path;
+    [self apply:row value:path];
+}
+
 - (MHGURow *)rowFor:(id)control {
     for (MHGURow *row in self.rows) if (row.control == control) return row;
     return nil;
@@ -501,8 +529,13 @@ static NSView *people(int n) {
     NSTextField *title = label(str(st->title), 13, false, false);
     title.alignment = NSTextAlignmentRight;
     [title.widthAnchor constraintEqualToConstant:200].active = YES;
-    [row.control.widthAnchor constraintEqualToConstant:st->kind == SETTING_TEXT ? 320 : 230].active = YES;
-    NSStackView *line = [NSStackView stackViewWithViews:@[ title, row.control, row.note ]];
+    [row.control.widthAnchor constraintEqualToConstant:!strcmp(st->key, "SaveLocation") ? 250 : st->kind == SETTING_TEXT ? 320 : 230].active = YES;
+    NSMutableArray *views = [@[ title, row.control, row.note ] mutableCopy];
+    if (!strcmp(st->key, "SaveLocation")) {  // (a picker beside the text: a path typed by hand is easy to get wrong)
+        NSButton *choose = [NSButton buttonWithTitle:@"Choose…" target:self action:@selector(chooseSaveFolder:)];
+        [views insertObject:choose atIndex:2];
+    }
+    NSStackView *line = [NSStackView stackViewWithViews:views];
     line.spacing = 10;
     NSStackView *box = [NSStackView stackViewWithViews:@[ line ]];
     box.orientation = NSUserInterfaceLayoutOrientationVertical;

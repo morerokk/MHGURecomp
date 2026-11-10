@@ -249,8 +249,36 @@ bool plat_user_dir(char *buf, size_t size) {
 }
 
 // [Application] SaveLocation: the folder the player named, created if missing (UTF-8 paths open as they are here).
+// A path typed or pasted as a shell would take it: surrounding quotes, a leading ~/, and backslash escapes
+// ("Mobile\ Documents", "com\~apple\~CloudDocs", what Terminal pastes) all mean a folder the way it is on disk.
+// The path as written wins when it exists; the ini holds only literal paths, so a backslash is otherwise a typo.
+static void shell_path(const char *in, char *out, size_t size) {
+    char tmp[PATH_MAX];
+    size_t n = strlen(in);
+    while (n && (in[n - 1] == ' ' || in[n - 1] == '\n')) n--;
+    while (n && *in == ' ') in++, n--;
+    if (n >= 2 && (*in == '"' || *in == '\'') && in[n - 1] == *in) in++, n -= 2;
+    snprintf(tmp, sizeof tmp, "%.*s", (int)n, in);
+    struct stat st;
+    if (stat(tmp, &st) == 0) { snprintf(out, size, "%s", tmp); return; }
+    char *t = tmp, *o = out, *end = out + size - 1;
+    const char *home = getenv("HOME");
+    if (t[0] == '~' && (t[1] == '/' || !t[1]) && home) {
+        o += snprintf(out, size, "%s", home);
+        t++;
+        if (o > end) o = end;
+    }
+    for (; *t && o < end; t++) {
+        if (*t == '\\' && t[1]) t++;
+        *o++ = *t;
+    }
+    *o = 0;
+}
+
 bool plat_use_folder(const char *utf8, char *buf, size_t size) {
-    if (!*utf8 || snprintf(buf, size, "%s", utf8) >= (int)size || !mkdir_p(buf)) return false;
+    if (!*utf8) return false;
+    shell_path(utf8, buf, size);
+    if (!*buf || !mkdir_p(buf)) return false;
     struct stat st;
     return stat(buf, &st) == 0 && S_ISDIR(st.st_mode);
 }
