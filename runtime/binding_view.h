@@ -45,7 +45,15 @@
 // 5. Theme colours (settings_panel.cpp Theme): panel = t.panel, line = t.text_dim, text = t.text, text_dim = t.text_dim
 //    (a notch darker is fine), accent = t.accent, accent_bright = t.accent_bright, warn = t.warn, live = a green or
 //    blue that is not the accent (the previews use (120,240,170), (150,214,150), (110,220,255) and (24,124,170)).
-// 6. Preview without the game: `make preview-bindings` renders every state to PNG files (obj/binding-preview/, one
+// 6. Build: add $(O)/rt/binding_view.o to RT_OBJ in the Makefile next to settings_panel.o, with the same rule
+//      $(O)/rt/binding_view.o: runtime/binding_view.cpp runtime/binding_view.h runtime/config.h runtime/keymap.h
+//      	@mkdir -p $(dir $@)
+//      	$(CXX) $(IMGUIFLAGS) -Wall -Iruntime -c $< -o $@
+//    and the same object to the test-settings-panel prerequisites (settings_panel.o will then need it). The module
+//    uses ImGui, SDL3's scancode names and the key_reserved() of keymap.h; nothing of the runtime is linked.
+//    New texts for the Spanish catalogue: none (the chips print the screen's own action labels and bv_input_name's
+//    English input names: translate those two in settings_locale.h if the screen passes them through tr()).
+// 7. Preview without the game: `make preview-bindings` renders every state to PNG files (obj/binding-preview/, one
 //    scenario: make preview-bindings ONLY=pad_typical) and runs a mouse test (hover, click, reserved key).
 //    Cost: a layout is built when the width, the font size or the bindings change (about 1 to 6 ms, 17 ms for 66
 //    keys bound), never for a hover, a selection or a held key; drawing is a few hundred draw-list shapes.

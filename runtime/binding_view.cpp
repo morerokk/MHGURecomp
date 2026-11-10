@@ -1068,6 +1068,12 @@ BVResult bv_draw(const char *id, float width, float height, const BVParams &p) {
                 break;
             }
         }
+    if (hover < 0 && region_hover)  // (a chip stands for its input: pointing at it lights the input, clicking it picks it)
+        for (const Chip &c : L.chips)
+            if (mouse.x >= c.pos.x && mouse.x <= c.pos.x + c.size.x && mouse.y >= c.pos.y && mouse.y <= c.pos.y + c.size.y) {
+                hover = c.shape;
+                break;
+            }
     if (hover >= 0) {
         res.hovered = L.shapes[hover].code;
         res.reserved = L.shapes[hover].reserved;

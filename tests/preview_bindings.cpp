@@ -446,6 +446,26 @@ static bool interaction_test() {
             ok = false;
         }
     }
+    {  // a chip: hovering it names its input, clicking it picks the input
+        p.scheme = BV_CONTROLLER;
+        ImVec2 at;
+        bv_input_center(p, w, PB(EAST), &at);
+        BVResult r;
+        frames(BV_CONTROLLER, ImVec2(5, 5), false, &r);
+        // the East chip is in the right column, not on the row of the input: look for it with the mouse
+        bool found = false;
+        for (float y = 20 + at.y - 80; y < 20 + at.y + 200 && !found; y += 7)
+            for (float x = 20 + at.x + 110; x < 20 + w && !found; x += 12) {
+                frames(BV_CONTROLLER, ImVec2(x, y), false, &r);
+                if (r.hovered == PB(EAST)) {
+                    found = true;
+                    frames(BV_CONTROLLER, ImVec2(x, y), true, &r);
+                    frames(BV_CONTROLLER, ImVec2(x, y), false, &r);
+                    if (r.clicked != PB(EAST)) ok = false, fprintf(stderr, "interaction test: a click on a chip gave %d\n", r.clicked);
+                }
+            }
+        if (!found) ok = false, fprintf(stderr, "interaction test: the chip was not found by the mouse\n");
+    }
     printf("interaction test: %s\n", ok ? "ok" : "FAILED");
     return ok;
 }
