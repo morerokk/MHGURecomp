@@ -916,6 +916,8 @@ void action_rows(std::vector<Row> &r) {
            "On: the Menus actions below apply (confirm, cancel, moving, tabs). Off: the game's menus read the controller and the keybinds as before.");
     toggle("act.sheathed", "Attack A also interacts", &p.sheathed_attack,
            "Only matters once Interact has a binding of its own. Off: with the weapon away only Interact presses the game's A (gather, carve, talk), with it out only Attack A does. On: Attack A presses it in both cases.");
+    toggle("act.split", "Split Dash from weapon R-action", &p.split,
+           "On: Dash and the weapon's R-action (guard, charge, aim) are two actions you can put on two buttons. Binding Weapon R-action turns it on by itself. Off: they are one button, as in the game.");
     add_choice(r, "act.device", "Bindings of", a.dev, {tr("Controller"), tr("Keyboard and mouse")}, [](int v) { acts().dev = v; });
     r.back().help = tr("The controller's and the keyboard and mouse's bindings are separate: an action can have both.");
     std::vector<std::string> weapons = {tr("All weapons")};

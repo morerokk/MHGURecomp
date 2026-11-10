@@ -52,6 +52,31 @@ game. Once split, `AttackA` with the weapon away presses A only together with `A
 need both), or always with `[Actions] SheathedAttackA=1`. The Prowler (no weapon to put away) and a screen that reads the
 gameplay view with no hunter get both.
 
+**One input for Interact and other hunt actions** (the quest box with Interact, Dodge and the like on one button). With the
+weapon away an input bound to `Interact` and to another hunt action (`Dodge`, `AttackX`, ...) presses A and B (or X) together,
+and the game answers the other one: A + B is a roll, so the box never opened. The game does not say beforehand whether
+something can be interacted with (the research's flags `P+0x2BF4` / `P+0x1060` do not change near the box: snapshots at the
+box and 30 m away, and its Supply Box prompt), so the press is **tried as Interact first** (`act_gate`, game side
+`tr_view`): only A for `[Actions] SharedInteractFrames` updates (default 5, 1..30); if the hunter's action changes in that
+time (a common action, not a weapon move: the box opens, `act 1:0x70` came 3-4 updates after the press) it was an
+interaction and the other actions stay off for as long as the input is held; if not, they get the press (a roll 5 updates
+late), and a press that ends sooner still gets a 3-update press of them (a tap is a roll, late). Sharing is decided from the
+bindings (`act_interact_share`: the same input, or a chord that holds it, either device, per weapon class): inputs that are not
+shared, and the whole of a hunt with the weapon out, are not delayed. Cost: that shared roll starts ~5 updates later than a
+roll on its own button; the setting trades that against a slow interaction (an NPC that takes longer than that to turn
+would be rolled over). `AttackA` is not a contender (with the weapon away it is not delivered).
+
+**Dash and the weapon R-action** are one game input, the R-role getter `f_85f93c` (104 callers). `WeaponR` is the action for
+the weapon's side of it; it follows `Dash` until it has a binding of its own. The split is on with
+`[Actions] SplitDashWeaponR=1` or as soon as `WeaponR` has a binding (any device or class); off, nothing is added. On: the
+translator hook ORs the **virtual bit 0x8000** into the gameplay word while `WeaponR` is active (no pad button gives it;
+`Dash` still delivers the real R / ZR), and a hook on `f_85f93c` answers 0x8000 to the weapon's callers and the real role
+bit to every other. The callers are told apart by return address (found with the PadRemap mod's getter log and confirmed
+here with `MHGU_ACTION_KCLOG=1`, which logs each one once): the 15 classes' code `0x1360000..0x13f0000` and the sites
+`0x47e7b0 0x4a7bb0 0x47d480 0x47d508 0x47d530 0x47d564 0x47cc58 0x47d2fc 0x47d3f8` of the input update; the dash tests
+`0x47caa8 0x47cad0 0x47cb48 0x47cc24 0x47cd3c 0x47e7fc` and the two at `0x48d358 / 0x48d3f0` keep the real bit. A mod
+that hooks `f_85f93c` before this layer starts keeps Dash and WeaponR one input (log line).
+
 Weapon classes for per-class overrides: GreatSword SnS Hammer Lance HBG LBG LongSword SwitchAxe Gunlance Bow DualBlades Horn
 InsectGlaive ChargeBlade Prowler.
 
@@ -91,8 +116,8 @@ input bound to an action is **claimed** in that view: the default of the other a
 swap needs no second line (Dodge on north no longer also attacks with X, which north was).
 `act_validate` (at startup, in the log) warns about: two actions on one input in one context (another context is not a
 conflict; `AttackA` and `Interact` on one input are not one either), a key the recomp keeps for itself (Esc, F1, Insert,
-F7-F12), and notes that Dash and Dodge share their game input with another action (Weapon R-action, weapon B-actions): those
-are rebound together (the research's split is not done). Every button is an action now, so a controller button given to an
+F7-F12), and notes that Dodge shares its game input with the weapon B-actions (they are rebound together) and, until the
+split is on, Dash with the weapon R-action. Every button is an action now, so a controller button given to an
 action no longer also reaches the game as its own Switch button in that context.
 
 A scripted press (`MHGU_INPUT`, the control file's `A 8`, quickhunt) is the game's own button whatever is bound: it presses
@@ -194,9 +219,8 @@ smithy, equipment box, item box, shop, map, options: hover there is unknown (the
   follows `FaceButtons`, `[Keybinds]` and scripted input live, which a generated file would not.
 * Contexts: the gameplay word is built for the hunt (`f_4a79cc` ran in the last frames; weapon out or away by
   `player+0x114C`), else the town (`f_48d1f0`), else the hunt's actions with both A actions; mb2 whenever `ManageMenus=1`.
-  The virtual bit 0x8000 with the `f_85f93c` getter override (`SplitDashWeaponR`, parsed and ignored with a log line),
-  intent edits and the mapper wrapper (L3-L5) are **not** done: Dash and Dodge are still the same input as the weapon
-  R-action / weapon B-actions.
+  The virtual bit 0x8000 with the `f_85f93c` getter override is done (L4, above); intent edits and the mapper wrapper
+  (L3-L5) are **not**: Dodge is still the same input as the weapon B-actions.
 * The research's drawn discriminator (`P+0x2506 == 0x10`) is not what is used: it is the current action's group, 1 in a
   roll with the weapon out. `player+0x114C` (the KB's flag, which the static pass found no reader of) is constant per state.
 
@@ -215,6 +239,13 @@ smithy, equipment box, item box, shop, map, options: hover there is unknown (the
   menu meaning until the menu action is moved too; `MenuPlus` / `MenuMinus` follow `Pause` / `Map` for that reason).
 * The sticks are not actions (moving, the camera; the keyboard's are `[Keybinds]`), nor the item bar's keys.
 * The weapon-out flag was checked with the Hammer only; the Prowler is treated as "either" without having been run.
+* The weapon R-action callers outside the 15 classes' range and the nine sites above (the other 80-odd callers of the
+  getter, mostly hint and flag queries) keep the real role bit: a weapon-move test hiding in one of them would still follow
+  Dash. The Prowler's classes are in the range but it was not run.
+* The shared Interact input: a weapon whose A with the weapon away starts a weapon move (a draw attack) starts it during the
+  first updates of the press (A is what is tried first) and is then not rolled over; the gate reads the hunter's action
+  fields, so a hunter that changes action for another reason at that moment (stopping from a run) counts as interacting.
+  It was run with the Hammer at the Quest Box only; NPC talk, gathering and carving were not reached.
 * The Plus + Minus chord that opens the settings menu reads Tier 0's Plus and Minus, not `Pause` / `Map`.
 * Hooked functions that the interpreter runs (cheats, `interpwatch`) bypass hooks. A mod that hooks one of the same functions before
   this layer starts stops the layer (log line); mods that hook later chain behind it (Forge keeps a hook already there).

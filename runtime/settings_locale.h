@@ -473,6 +473,10 @@ static inline const char *settings_text(int language, const char *english) {
         {"Right stick click in town (R3)", "Pulsar stick derecho en el pueblo (R3)"},
         {"Start menu in town (+)", "Menú de inicio en el pueblo (+)"},
         {"Minus button in town (-)", "Botón menos en el pueblo (-)"},
+        {"Dash (R)", "Correr (R)"},
+        {"Weapon R-action: guard, charge, aim (R)", "Acción R del arma: guardia, carga, apuntar (R)"},
+        {"Split Dash from weapon R-action", "Separar correr de la acción R del arma"},
+        {"On: Dash and the weapon's R-action (guard, charge, aim) are two actions you can put on two buttons. Binding Weapon R-action turns it on by itself. Off: they are one button, as in the game.", "Sí: correr y la acción R del arma (guardia, carga, apuntar) son dos acciones que puedes poner en dos botones. Asignar la acción R del arma lo activa solo. No: son un solo botón, como en el juego."},
     };
     for (unsigned i = 0; i < sizeof messages / sizeof *messages; ++i)
         if (!strcmp(english, messages[i].en)) return messages[i].es;

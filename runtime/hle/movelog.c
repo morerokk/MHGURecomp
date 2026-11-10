@@ -130,8 +130,8 @@ static void set_cmdtbl(Cpu *c) {
 }
 
 static void log_action(Cpu *c, const char *how) {
-    LOG("[moves] %llu pl %08x %s %04x:%03u param %u\n", (unsigned long long)g_present_count, c->r[0], how,
-        c->r[1] & 0xffff, c->r[2] & 0xffff, c->r[3] & 0xffff);
+    LOG("[moves] %llu pl %08x %s %04x:%03u param %u (from %08x)\n", (unsigned long long)g_present_count, c->r[0], how,
+        c->r[1] & 0xffff, c->r[2] & 0xffff, c->r[3] & 0xffff, c->r[14]);
 }
 
 static void set_action(Cpu *c) {

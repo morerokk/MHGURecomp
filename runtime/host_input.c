@@ -541,6 +541,32 @@ static void control_poll(void) {
                 continue;
             }
             if (!strcmp(cmd, "actstat")) { input_view_status(); continue; }
+            if (!strcmp(cmd, "weapon")) {  // weapon <type 0-14> [id]: (debug) the local hunter holds that weapon type (before "depart")
+                uint32_t T = (uint32_t)atoi(arg), id = (uint32_t)strtoul(arg2, NULL, 0);
+                uint32_t sp = LD32(0x1a85b58u), gc = LD32(0x1a8ca48u), slot = LD32(gc + 0x30);
+                uint32_t pl = LD32(sp + 0x1c + 4 * slot), infos[2] = {LD32(pl + 0x13c4), sp + 0x5DC + 0x560 * slot};
+                for (int i = 0; i < 2; i++) {
+                    uint32_t in = infos[i];
+                    if (in < 0x1000000) continue;
+                    uint16_t tl = LD16(in + 0x1C);
+                    ST16(in + 0x1C, (uint16_t)((tl & ~0x1Fu) | ((T + 7) & 0x1Fu)));
+                    ST16(in + 0x1E, (uint16_t)id);
+                    ST8(in + 0x4D4, T);
+                    ST32(in + 0x14C, T);
+                    ST16(in + 0x150, (uint16_t)id);
+                    LOG("[control] weapon info %08x: type %u id %u (was type|lvl %04x)\n", in, T, id, tl);
+                }
+                continue;
+            }
+            if (!strcmp(cmd, "depart")) {  // depart <quest>: (debug) order that quest and depart, as MHGU_QUICKHUNT does
+                uint32_t sel = LD32(0x1a8ae38u);
+                if (sel) {
+                    ST32(sel + 0xd68u, (uint32_t)atoi(arg));
+                    ST8(sel + 0xd65u, (uint8_t)(LD8(sel + 0xd65u) | 0x09u));
+                    LOG("[control] depart on quest %d\n", atoi(arg));
+                } else LOG("[control] depart: no sQuestSelector\n");
+                continue;
+            }
             if (!strcmp(cmd, "wheel")) {  // wheel <notches>: the mouse wheel turned (< 0 down), captured or not
                 if (atoi(arg)) wheel_turn(atoi(arg));
                 continue;

@@ -459,6 +459,128 @@ static void test_save(void) {
     CHECK(!strcmp(label, "Pad South") && act_input_device(ACT_PAD_LT) == 0 && act_input_device(SDL_SCANCODE_SPACE) == 1 && act_input_device(KEY_WHEEL_UP) == 1, "labels and devices");
 }
 
+// Dash and the weapon R-action: one game input until WeaponR is bound or SplitDashWeaponR=1
+static void test_weapon_r(void) {
+    ActProfile p = parse("[Actions]\nEnable=1\n");
+    CHECK(!act_split_in(&p), "split is off by default");
+    act_use_profile(&p);
+    CHECK(!act_split() && act_virtual_bits(1ull << ACT_WEAPON_R) == 0, "no virtual bit while one input");
+    p = parse("[Actions]\nEnable=1\nSplitDashWeaponR=1\n");
+    CHECK(act_split_in(&p), "the flag splits");
+    act_use_profile(&p);
+    CHECK(act_split() && act_virtual_bits(1ull << ACT_WEAPON_R) == ACT_VBIT_WEAPON_R && act_virtual_bits(1ull << ACT_DASH) == 0, "virtual bit for WeaponR only");
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nWeaponR = pad:rtrigger\n");
+    CHECK(act_split_in(&p), "binding WeaponR splits");
+    p = parse("[Actions]\nEnable=1\n[Actions.Kbm.Weapon.Bow]\nWeaponR = mouse:right\n");
+    CHECK(act_split_in(&p), "a per-weapon WeaponR splits too");
+    // WeaponR follows Dash while unbound: Dash moved, WeaponR with it
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nDash = pad:west\n");
+    act_use_profile(&p);
+    int W = ACT_PAD + SDL_GAMEPAD_BUTTON_WEST, RS = ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
+    ActSnap s;
+    ActHost h = (ActHost){NULL, fake_held, map_sources, 0, 0, false, false, 700};
+    release_all();
+    press(W);
+    h.sw_word = map_word();
+    act_sample(&h, &s);
+    CHECK((s.hold[0] >> ACT_DASH & 1) && (s.hold[0] >> ACT_WEAPON_R & 1), "west is Dash and, following it, WeaponR");
+    // split inputs: Dash on west, WeaponR on rshoulder
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nDash = pad:west\nWeaponR = pad:rshoulder\n");
+    act_use_profile(&p);
+    CHECK(act_split(), "split by binding");
+    release_all();
+    press(W);
+    h.sw_word = map_word();
+    act_sample(&h, &s);
+    CHECK((s.hold[0] >> ACT_DASH & 1) && !(s.hold[0] >> ACT_WEAPON_R & 1), "west: Dash only");
+    CHECK(act_view(ACT_VIEW_MB1, 0, s.hold[0], false) == 0x200 && act_virtual_bits(s.hold[0]) == 0, "the game sees R, no virtual bit");
+    release_all();
+    press(RS);
+    h.sw_word = map_word();
+    act_sample(&h, &s);
+    CHECK(!(s.hold[0] >> ACT_DASH & 1) && (s.hold[0] >> ACT_WEAPON_R & 1), "rshoulder: WeaponR only (and R is no longer Dash)");
+    CHECK(act_view(ACT_VIEW_MB1, 0x200, s.hold[0], false) == 0, "no R reaches the game");
+    CHECK(act_virtual_bits(s.hold[0]) == ACT_VBIT_WEAPON_R, "the virtual bit");
+    CHECK(act_view(ACT_VIEW_TOWN, 0, s.hold[0], false) == 0, "the town's run is TownRun's");
+    // the ini
+    char text[2048];
+    p = parse("[Actions]\nEnable=1\nSplitDashWeaponR=1\nSharedInteractFrames=7\n[Actions.Pad]\nWeaponR = pad:rshoulder\n");
+    CHECK(p.split && p.shared_frames == 7, "keys");
+    act_format(&p, text, sizeof text);
+    CHECK(strstr(text, "SplitDashWeaponR=1") && strstr(text, "SharedInteractFrames=7") && strstr(text, "WeaponR = pad:rshoulder"), "format: %s", text);
+    CHECK(parse("[Actions]\nSharedInteractFrames=99\n").shared_frames == 30, "clamped");
+    // Dash's shared-input note goes away once split
+    act_set_log(collect);
+    logbuf[0] = 0;
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nDash = pad:west\n");
+    act_validate(&p);
+    CHECK(strstr(logbuf, "Dash is the same game input"), "note while one input: %s", logbuf);
+    logbuf[0] = 0;
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nDash = pad:west\nWeaponR = pad:rshoulder\n");
+    act_validate(&p);
+    CHECK(!strstr(logbuf, "Dash is the same game input"), "no note once split: %s", logbuf);
+    act_set_log(quiet);
+}
+
+// One input for Interact and Dodge (the quest box): Interact first, then the others
+static void test_gate(void) {
+    const uint64_t I = 1ull << ACT_INTERACT, D = 1ull << ACT_DODGE, X = 1ull << ACT_ATTACK_X;
+    ActProfile p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nInteract = pad:west\nDodge = pad:west\n");
+    act_use_profile(&p);
+    CHECK(act_interact_share(0) == D, "Dodge shares the input with Interact: %llx", (unsigned long long)act_interact_share(0));
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nInteract = pad:west\nDodge = pad:east\n");
+    act_use_profile(&p);
+    CHECK(act_interact_share(0) == 0, "separate inputs share nothing");
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nAttackA = pad:west\nDodge = pad:east\n");
+    act_use_profile(&p);
+    CHECK(act_interact_share(0) == 0, "Interact following AttackA, which is not a contender");
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nInteract = pad:west\nDodge = pad:west\nAttackX = pad:west\n[Actions.Pad.Weapon.Bow]\nDodge = pad:south\n");
+    act_use_profile(&p);
+    CHECK(act_interact_share(0) == (D | X), "several: %llx", (unsigned long long)act_interact_share(0));
+    CHECK(act_interact_share(10) == X, "the Bow's own Dodge is elsewhere: %llx", (unsigned long long)act_interact_share(10));
+    p = parse("[Actions]\nEnable=1\n[Actions.Kbm]\nInteract = key:e\nDodge = key:leftctrl+key:e\nAttackX = key:q\n");
+    act_use_profile(&p);
+    CHECK(act_interact_share(0) == D, "a chord that holds the input shares it: %llx", (unsigned long long)act_interact_share(0));
+    CHECK(act_shared_frames() == 5, "default frames");
+
+    // not ambiguous: nothing changes
+    ActGate g = {0};
+    CHECK(act_gate(&g, D, D, false, 100, 5) == D && act_gate(&g, I, D, false, 101, 5) == I && act_gate(&g, I | X, D, false, 102, 5) == (I | X), "no ambiguity: as it is");
+    // pressed on a box: Interact only; the action changes: the others stay off for the whole hold
+    g = (ActGate){0};
+    uint64_t both = I | D;
+    CHECK(act_gate(&g, both, D, false, 200, 5) == I, "frame 0: Interact only");
+    CHECK(act_gate(&g, both, D, false, 202, 5) == I, "frame 2: Interact only");
+    CHECK(act_gate(&g, both, D, true, 204, 5) == I, "the action changed: an interaction");
+    CHECK(act_gate(&g, both, D, true, 230, 5) == I, "and it stays one while held");
+    CHECK(act_gate(&g, 0, D, true, 231, 5) == 0 && g.phase == 0, "released");
+    // nothing to interact with: a roll, 5 frames late
+    g = (ActGate){0};
+    CHECK(act_gate(&g, both, D, false, 300, 5) == I, "frame 0");
+    CHECK(act_gate(&g, both, D, false, 304, 5) == I, "frame 4");
+    CHECK(act_gate(&g, both, D, false, 305, 5) == D, "frame 5: the roll, and no A");
+    CHECK(act_gate(&g, both, D, false, 320, 5) == D, "held: still");
+    CHECK(act_gate(&g, 0, D, false, 321, 5) == 0 && g.phase == 0, "released");
+    // a tap shorter than that: the roll comes after it
+    g = (ActGate){0};
+    CHECK(act_gate(&g, both, D, false, 400, 5) == I, "tap frame 0");
+    CHECK(act_gate(&g, both, D, false, 401, 5) == I, "tap frame 1");
+    CHECK(act_gate(&g, 0, D, false, 402, 5) == D, "released unresolved: the roll is pressed");
+    CHECK(act_gate(&g, 0, D, false, 404, 5) == D, "for a few frames");
+    CHECK(act_gate(&g, 0, D, false, 405, 5) == 0, "and ends");
+    // a tap on a box: the action changes after the release: nothing else
+    g = (ActGate){0};
+    act_gate(&g, both, D, false, 500, 5);
+    CHECK(act_gate(&g, 0, D, true, 501, 5) == 0, "released and it was an interaction (changed): no roll");
+    // two contenders: both are held back, both come
+    g = (ActGate){0};
+    CHECK(act_gate(&g, I | D | X, D | X, false, 600, 5) == I, "Dodge and AttackX held back");
+    CHECK(act_gate(&g, I | D | X, D | X, false, 606, 5) == (D | X), "then both");
+    // the next press starts again
+    CHECK(act_gate(&g, 0, D | X, false, 607, 5) == 0, "release");
+    CHECK(act_gate(&g, both, D | X, false, 700, 5) == I, "next press: Interact first again");
+}
+
 int main(void) {
     act_set_log(quiet);
     test_registry();
@@ -473,6 +595,8 @@ int main(void) {
     test_all_buttons();
     test_script();
     test_save();
+    test_weapon_r();
+    test_gate();
     printf("test_actions: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

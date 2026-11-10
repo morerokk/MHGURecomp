@@ -22,6 +22,7 @@ static const uint32_t ew_of_btn[16] = {0x2000, 0x4000, 0x1000, 0x8000, 0x2,  0x4
 static const char *const btn_name[16] = {"A", "B", "X", "Y", "LStick", "RStick", "L", "R", "ZL", "ZR", "Plus", "Minus",
                                          "Left", "Up", "Right", "Down"};
 
+#define ROLE_VIRTUAL (-3)  // no pad button: the virtual weapon R bit (act_virtual_bits)
 #define ROLE_DASH  (-1)  // the button of the dash role: R, or ZR (ACT_KCR)
 #define ROLE_OTHER (-2)  // the other one of R / ZR (ACT_KCZR)
 typedef struct {
@@ -41,8 +42,9 @@ static const ActDef defs[ACT_COUNT] = {
     // a hunt
     [ACT_DODGE] = {"Dodge", ACT_VIEW_MB1, S_B, 0, S_B, NOFB, "Dodge / roll (B)",
                    "weapon B-actions (Lance, Switch Axe, Insect Glaive, bowguns, Prowler)"},
-    [ACT_DASH] = {"Dash", ACT_VIEW_MB1, ROLE_DASH, 0, ACT_KCR, NOFB, "Dash / weapon R-action: guard, charge, aim (R)",
-                  "Weapon R-action (guard, charge, aim): one game input"},
+    [ACT_DASH] = {"Dash", ACT_VIEW_MB1, ROLE_DASH, 0, ACT_KCR, NOFB, "Dash (R)",
+                  "the weapon R-action (guard, charge, aim) until WeaponR is bound or SplitDashWeaponR=1"},
+    [ACT_WEAPON_R] = {"WeaponR", ACT_VIEW_MB1, ROLE_VIRTUAL, 0, ACT_KCR, FB1(ACT_DASH), "Weapon R-action: guard, charge, aim (R)", ""},
     [ACT_ATTACK_X] = {"AttackX", ACT_VIEW_MB1, S_X, 0, S_X, NOFB, "Attack X / draw weapon (X)", ""},
     [ACT_ATTACK_A] = {"AttackA", ACT_VIEW_MB1, S_A, 0, S_A, NOFB, "Attack A, weapon out (A)", ""},
     [ACT_ITEM_USE] = {"ItemUse", ACT_VIEW_MB1, S_Y, 0, S_Y, NOFB, "Use item / sheathe (Y)", ""},
@@ -96,7 +98,7 @@ static const ActDef defs[ACT_COUNT] = {
 };
 // The order a controls screen lists them in
 static const int order[] = {
-    ACT_ATTACK_X, ACT_ATTACK_A, ACT_CHORD_XA, ACT_DODGE, ACT_ITEM_USE, ACT_INTERACT, ACT_DASH, ACT_FIELD_ZR, ACT_FIELD_L,
+    ACT_ATTACK_X, ACT_ATTACK_A, ACT_CHORD_XA, ACT_DODGE, ACT_ITEM_USE, ACT_INTERACT, ACT_DASH, ACT_WEAPON_R, ACT_FIELD_ZR, ACT_FIELD_L,
     ACT_FIELD_ZL, ACT_CROSS_UP, ACT_CROSS_DOWN, ACT_CROSS_LEFT, ACT_CROSS_RIGHT, ACT_FIELD_L3, ACT_FIELD_R3, ACT_PAUSE,
     ACT_MAP,
     ACT_MENU_CONFIRM, ACT_MENU_CANCEL, ACT_MENU_X, ACT_MENU_Y, ACT_MENU_UP, ACT_MENU_DOWN, ACT_MENU_LEFT, ACT_MENU_RIGHT,
@@ -130,6 +132,7 @@ static int role_btn(int btn, bool dash_zr) {
 }
 uint32_t act_ew_bits(int id, bool dash_zr) {
     const ActDef *d = &defs[id];
+    if (d->btn == ROLE_VIRTUAL) return 0;
     return ew_of_btn[role_btn(d->btn, dash_zr)] | d->extra;
 }
 const char *act_weapon_name(int cls) { return cls >= 0 && cls < ACT_WEAPONS ? weapon_names[cls] : ""; }
@@ -377,6 +380,7 @@ void act_parse(const char *text, ActProfile *p) {
             else if (same_name(key, "Pointer")) p->pointer = parse_bool(val);
             else if (same_name(key, "SplitDashWeaponR")) p->split = parse_bool(val);
             else if (same_name(key, "SheathedAttackA")) p->sheathed_attack = parse_bool(val);
+            else if (same_name(key, "SharedInteractFrames")) p->shared_frames = atoi(val) < 0 ? 0 : atoi(val) > 30 ? 30 : atoi(val);
             else if (same_name(key, "Log")) p->log = parse_bool(val);
             else say("[actions] line %d: unknown setting \"%s\" in [Actions] (ignored)", line_no, key);
             continue;
@@ -420,6 +424,7 @@ size_t act_format(const ActProfile *p, char *buf, size_t size) {
     if (p->pointer) PUT("Pointer=1\n");
     if (p->split) PUT("SplitDashWeaponR=1\n");
     if (p->sheathed_attack) PUT("SheathedAttackA=1\n");
+    if (p->shared_frames) PUT("SharedInteractFrames=%d\n", p->shared_frames);
     if (p->log) PUT("Log=1\n");
     static const char *const sect[2] = {"Pad", "Kbm"};
     for (int d = 0; d < 2; d++) {
@@ -480,16 +485,94 @@ bool act_save(const char *path, const ActProfile *p) {
 // a short spin lock around both (the game thread only reads one flag of it).
 static ActProfile prof;
 static bool prof_on;
+static atomic_bool prof_split;  // act_split_in(prof), for the game thread
+static atomic_ullong share_tab[ACT_VARS];  // act_interact_share, per weapon variant
+static atomic_int shared_frames_now = 5;
 static atomic_flag prof_lock = ATOMIC_FLAG_INIT;
 static void lock(void) { while (atomic_flag_test_and_set_explicit(&prof_lock, memory_order_acquire)) {} }
 static void unlock(void) { atomic_flag_clear_explicit(&prof_lock, memory_order_release); }
 bool act_enabled(void) { return prof_on; }
 const ActProfile *act_profile(void) { return &prof; }
+static const ActBinding *binding_in(const ActProfile *p, int dev, int id, int v, int *from);
+// Two bindings press the same thing: the same inputs, or one a chord that has the other's inputs
+static bool chords_overlap(const ActChord *x, const ActChord *y) {
+    const ActChord *a = x->n <= y->n ? x : y, *b = x->n <= y->n ? y : x;  // a the smaller: all of its inputs in b
+    for (int i = 0; i < a->n; i++) {
+        bool in = false;
+        for (int k = 0; k < b->n; k++) in |= a->code[i] == b->code[k];
+        if (!in) return false;
+    }
+    return a->n > 0;
+}
+// The hunt actions that share an input with Interact for a weapon variant, either device (AttackA is Interact's own
+// pair: with the weapon away it is not delivered anyway; actions that are the same binding by following are not shared)
+static uint64_t share_in(const ActProfile *p, int v) {
+    uint64_t m = 0;
+    for (int d = 0; d < 2; d++) {
+        int fi = ACT_INTERACT;
+        const ActBinding *bi = binding_in(p, d, ACT_INTERACT, v, &fi);
+        if (!bi) continue;
+        for (int j = 0; j < ACT_COUNT; j++) {
+            if (j == ACT_INTERACT || j == ACT_ATTACK_A || defs[j].view != ACT_VIEW_MB1 || j == ACT_WEAPON_R) continue;
+            int fj = j;
+            const ActBinding *bj = binding_in(p, d, j, v, &fj);
+            if (!bj || fj == fi) continue;
+            for (int a = 0; a < bi->n; a++)
+                for (int e = 0; e < bj->n; e++)
+                    if (chords_overlap(&bi->alt[a], &bj->alt[e])) m |= 1ull << j;
+        }
+    }
+    return m;
+}
+uint64_t act_interact_share(int var) { return var >= 0 && var < ACT_VARS ? atomic_load(&share_tab[var]) : 0; }
+int act_shared_frames(void) { return atomic_load(&shared_frames_now); }
+
+uint64_t act_gate(ActGate *g, uint64_t active, uint64_t share, bool changed, uint64_t frame, int delay) {
+    const uint64_t I = 1ull << ACT_INTERACT;
+    bool amb = (active & I) && (active & share);
+    if (g->phase == 4 && frame < g->until) {  // a press that ended while it was tried: the others get a short press
+        return (active & ~I) | g->held;
+    }
+    if (!amb) {
+        if (g->phase == 1 && !changed && g->held) {  // (released before it was known)
+            g->phase = 4, g->until = frame + 3;
+            return (active & ~I) | g->held;
+        }
+        g->phase = 0, g->held = 0;
+        return active;
+    }
+    if (g->phase == 0 || g->phase == 4) g->phase = 1, g->since = frame, g->held = 0;
+    if (g->phase == 1) {
+        g->held |= active & share;
+        if (changed) g->phase = 2;
+        else if (frame - g->since >= (uint64_t)(delay > 0 ? delay : 5)) g->phase = 3;
+    }
+    if (g->phase == 3) return active & ~I;
+    return active & ~share;
+}
 void act_use_profile(const ActProfile *p) {
     lock();
     prof = *p;
     prof_on = p->enable;
+    atomic_store(&prof_split, act_split_in(p));
+    for (int v = 0; v < ACT_VARS; v++) atomic_store(&share_tab[v], share_in(p, v));
+    atomic_store(&shared_frames_now, p->shared_frames > 0 ? p->shared_frames : 5);
     unlock();
+}
+// Dash and the weapon R-action are one game input (the R-role getter) unless the profile asks for two: the flag, or a
+// WeaponR binding of its own for any device or weapon class
+bool act_split_in(const ActProfile *p) {
+    if (p->split) return true;
+    for (int d = 0; d < 2; d++) {
+        if (p->dev[d].base[ACT_WEAPON_R].set) return true;
+        for (int w = 0; w < ACT_WEAPONS; w++)
+            if (p->dev[d].weapon[w][ACT_WEAPON_R].set) return true;
+    }
+    return false;
+}
+bool act_split(void) { return prof_on && atomic_load(&prof_split); }
+uint32_t act_virtual_bits(uint64_t active) {
+    return act_split() && (active >> ACT_WEAPON_R & 1) ? ACT_VBIT_WEAPON_R : 0;
 }
 void act_get_profile(ActProfile *out) {
     lock();
@@ -564,7 +647,8 @@ int act_validate(const ActProfile *p) {
             }
         }
     for (int i = 0; i < ACT_COUNT; i++)
-        if (*defs[i].shared && (p->dev[0].base[i].set || p->dev[1].base[i].set) && defs[i].view == ACT_VIEW_MB1)
+        if (*defs[i].shared && (p->dev[0].base[i].set || p->dev[1].base[i].set) && defs[i].view == ACT_VIEW_MB1 &&
+            !(i == ACT_DASH && act_split_in(p)))
             say("[actions] note: %s is the same game input as %s", defs[i].name, defs[i].shared), warnings++;
     return warnings;
 }

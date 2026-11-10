@@ -18,6 +18,8 @@
 extern "C" {
 #endif
 
+struct ActProfile;
+
 // ---- the actions
 typedef enum {
     // a hunt (the gameplay view while a hunter plays)
@@ -28,6 +30,8 @@ typedef enum {
     // a hunt, the rest of the pad
     ACT_INTERACT, ACT_FIELD_L, ACT_FIELD_ZL, ACT_FIELD_ZR, ACT_CROSS_UP, ACT_CROSS_DOWN, ACT_CROSS_LEFT, ACT_CROSS_RIGHT,
     ACT_FIELD_L3, ACT_FIELD_R3, ACT_PAUSE, ACT_MAP,
+    // a hunt: the weapon's R-action (guard, charge, aim), apart from Dash once split (act_split)
+    ACT_WEAPON_R,
     // the menus, the rest of the pad
     ACT_MENU_PLUS, ACT_MENU_MINUS, ACT_MENU_L3, ACT_MENU_R3,
     // a town or the Hub (the gameplay view while the town avatar plays)
@@ -49,7 +53,13 @@ const char *act_label(int id);            // "Dodge / roll": for a controls scre
 int act_find(const char *name);           // case-insensitive, spaces and '_' ignored; -1: none
 int act_view_of(int id);                  // ACT_VIEW_MB1 / MB2 / TOWN
 const char *act_view_name(int view);      // "Hunt", "Menus", "Town"
-uint32_t act_ew_bits(int id, bool dash_zr);  // the engine-word bits (INPUTS-MASTER B.1) the action delivers
+uint32_t act_ew_bits(int id, bool dash_zr);  // the engine-word bits (INPUTS-MASTER B.1) the action delivers (WeaponR: none)
+// The virtual button the weapon R-action is when it is split from Dash: a bit of the gameplay word that no pad button
+// is, which the game's R-role getter (f_85f93c) returns to the callers that are weapon moves (hle/input_view.c)
+#define ACT_VBIT_WEAPON_R 0x8000u
+bool act_split(void);                     // Dash and the weapon R-action are two inputs (SplitDashWeaponR=1, or WeaponR is bound)
+bool act_split_in(const struct ActProfile *p);
+uint32_t act_virtual_bits(uint64_t active);  // the virtual bits the gameplay word gets (any thread): 0 unless split
 int act_default_switch(int id);           // the Switch button (input.h BTN_*, ACT_KCR, ACT_KCZR) Tier 0 gives it; -1: none
 const char *act_shared_with(int id);      // "" or the actions that are the same game input (documented, not an error)
 // The actions whose binding this one uses while it has none of its own, in order (-1 ends the list): TownInteract
@@ -78,12 +88,13 @@ typedef struct {
     ActBinding weapon[ACT_WEAPONS][ACT_COUNT];
     bool has_weapon[ACT_WEAPONS];
 } ActDevice;
-typedef struct {
+typedef struct ActProfile {
     bool enable;    // [Actions] Enable: the gameplay view (hunt and town)
     bool menus;     // ManageMenus: the menu view too
     bool pointer;   // Pointer: feed the engine's pointer block
-    bool split;     // SplitDashWeaponR (reserved; not implemented)
+    bool split;     // SplitDashWeaponR: Dash and the weapon R-action are two inputs (also when WeaponR has a binding)
     bool sheathed_attack;  // SheathedAttackA: AttackA presses A with the weapon put away too (default: only Interact does)
+    int shared_frames;     // SharedInteractFrames: how long Interact is tried first on an input other hunt actions share (0: 5)
     bool log;       // Log: one line per frame
     ActDevice dev[2];  // 0 [Actions.Pad], 1 [Actions.Kbm]
 } ActProfile;
@@ -144,6 +155,20 @@ void act_sample(const ActHost *h, ActSnap *out);
 void act_inject(int id, unsigned frames, uint64_t frame_now);  // "act <Name> [frames]" (control file)
 uint64_t act_injected(uint64_t frame_now);      // bitset of the injected, still running
 bool act_uses_input(int code);                  // some explicit binding uses this input (the host acts on a wheel notch)
+
+// ---- one input for Interact and other hunt actions (the game thread, with the weapon away)
+// An input bound to Interact and to another hunt action (Dodge, AttackX...) presses both game buttons, and the game
+// answers the other one (A + B is a roll, not a box opening). The game does not say beforehand whether something can be
+// interacted with, so the press is tried as Interact first: only A for a few frames; if the hunter's action changes in
+// that time (the box opens, the NPC turns, the gathering starts) the press was an interaction and the other actions
+// stay off for as long as it is held; if not, the other actions get the press (a late roll), and a press that ends
+// sooner still gets a short press of them.
+typedef struct { int phase; uint64_t since, until, held; } ActGate;
+uint64_t act_interact_share(int var);  // the hunt actions that share an input with Interact (any thread)
+int act_shared_frames(void);
+// `active` is the actions held (hold | pulse); share: act_interact_share; changed: the hunter's action differs from the
+// one when the press began (the caller tracks it while gate->phase is 0); frame: the game's update count
+uint64_t act_gate(ActGate *gate, uint64_t active, uint64_t share, bool changed, uint64_t frame, int delay);
 
 // ---- the view (game thread)
 // The word the translator gets in a context after the actions: the buttons the context's actions own are replaced by
