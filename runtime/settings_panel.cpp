@@ -931,7 +931,7 @@ const char *action_note(int id) {
         return "May share an input with Dodge: standing still it only interacts, moving it rolls. Never share it with Crouch.";
     case ACT_ITEMBAR_RIGHT:
     case ACT_ITEMBAR_LEFT:
-        return "While L is held and the item bar is open, A and B scroll the bar and do nothing else: only these two count then, whatever the other actions are bound to.";
+        return "While L is held and the item bar is open, A (next) and Y (previous) scroll the bar and do nothing else: only these two count then, whatever the other actions are bound to.";
     default:
         return nullptr;
     }

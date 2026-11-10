@@ -34,7 +34,7 @@ typedef enum {
     ACT_WEAPON_R,
     // a hunt: crouching (B while the hunter stands still), apart from Dodge once split (act_crouch_split)
     ACT_CROUCH,
-    // a hunt, while the item bar is open (L held): the bar's next / previous item, apart from AttackA / Dodge ...
+    // a hunt, while the item bar is open (L held): the bar's next (A) / previous (Y) item, apart from AttackA / ItemUse ...
     ACT_ITEMBAR_RIGHT, ACT_ITEMBAR_LEFT,
     // the menus, the rest of the pad
     ACT_MENU_PLUS, ACT_MENU_MINUS, ACT_MENU_L3, ACT_MENU_R3,
@@ -49,7 +49,7 @@ typedef enum {
 enum { ACT_VIEW_MB1, ACT_VIEW_MB2, ACT_VIEW_TOWN, ACT_VIEWS };
 #define ACT_VIEW_SHEATHED ACT_VIEWS
 #define ACT_VIEW_HUNT_ANY (ACT_VIEWS + 1)
-// OR-ed into a hunt view for act_view: the hunter's item bar is open (L held). A and B then come only from ItemBarRight /
+// OR-ed into a hunt view for act_view: the hunter's item bar is open (L held). A and Y then come only from ItemBarRight /
 // ItemBarLeft and every other action that delivers them is silent: state-scoped actions (actions.c, scopes[])
 #define ACT_VIEW_BAR 0x100
 #define ACT_KCR  16  // "the Switch button of the dash role": R, or ZR with the game's second Control Type (options +0x446E)

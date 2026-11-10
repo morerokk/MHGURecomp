@@ -46,7 +46,7 @@ static const ActDef defs[ACT_COUNT] = {
                   "the weapon R-action (guard, charge, aim) until WeaponR is bound or SplitDashWeaponR=1"},
     [ACT_CROUCH] = {"Crouch", ACT_VIEW_MB1, S_B, 0, S_B, FB1(ACT_DODGE), "Crouch, standing still (B)", ""},
     [ACT_ITEMBAR_RIGHT] = {"ItemBarRight", ACT_VIEW_MB1, S_A, 0, S_A, NOFB, "Item bar: next item, L held (A)", ""},
-    [ACT_ITEMBAR_LEFT] = {"ItemBarLeft", ACT_VIEW_MB1, S_B, 0, S_B, NOFB, "Item bar: previous item, L held (B)", ""},
+    [ACT_ITEMBAR_LEFT] = {"ItemBarLeft", ACT_VIEW_MB1, S_Y, 0, S_Y, NOFB, "Item bar: previous item, L held (Y)", ""},
     [ACT_WEAPON_R] = {"WeaponR", ACT_VIEW_MB1, ROLE_VIRTUAL, 0, ACT_KCR, FB1(ACT_DASH), "Weapon R-action: guard, charge, aim (R)", ""},
     [ACT_ATTACK_X] = {"AttackX", ACT_VIEW_MB1, S_X, 0, S_X, NOFB, "Attack X / draw weapon (X)", ""},
     [ACT_ATTACK_A] = {"AttackA", ACT_VIEW_MB1, S_A, 0, S_A, NOFB, "Attack A, weapon out (A)", ""},
@@ -112,7 +112,7 @@ static const int order[] = {
 // ---- state-scoped actions. The hunter's state (weapon out / away, item bar open, left stick pushed or not) decides which
 // actions deliver a bit: an action's scope says in which states it does (req: all of these flags, forbid: none of
 // them) and for which bits of its own (0: all of them); in any other state those bits are silent. This is how one game
-// bit (A: attack, interact, the item bar's next item; B: dodge, crouch, the bar's previous item) is told apart by what
+// bit (A: attack, interact, the item bar's next item; Y: use item, the bar's previous item; B: dodge, crouch) is told apart by what
 // the game is doing with it, with no timing involved.
 enum { ST_OUT = 1, ST_AWAY = 2, ST_BAR = 4, ST_MOVING = 8, ST_STILL = 16, ST_AWAY_MOVING = 32, ST_AWAY_STILL = 64 };
 typedef struct { uint8_t req, forbid; uint32_t bits; } ActScope;
@@ -120,10 +120,9 @@ static const ActScope scopes[ACT_COUNT] = {
     [ACT_ATTACK_A] = {0, ST_BAR, 0x2000},          // (A with the weapon away: act_view's draw-attack rule)
     [ACT_CHORD_XA] = {0, ST_BAR, 0x2000},          // (its X is not the bar's)
     [ACT_INTERACT] = {ST_AWAY, ST_BAR, 0x2000},    // (gather, carve, talk: weapon away)
-    [ACT_DODGE] = {0, ST_BAR, 0x4000},
-    [ACT_CROUCH] = {0, ST_BAR, 0x4000},
+    [ACT_ITEM_USE] = {0, ST_BAR, 0x8000},         // (Y: the bar's previous item while it is open)
     [ACT_ITEMBAR_RIGHT] = {ST_BAR, 0, 0x2000},
-    [ACT_ITEMBAR_LEFT] = {ST_BAR, 0, 0x4000},
+    [ACT_ITEMBAR_LEFT] = {ST_BAR, 0, 0x8000},
 };
 static const char *const weapon_names[ACT_WEAPONS] = {"GreatSword", "SnS", "Hammer", "Lance", "HBG", "LBG", "LongSword",
                                                       "SwitchAxe", "Gunlance", "Bow", "DualBlades", "Horn",
@@ -766,7 +765,7 @@ static const ActRow rows[] = {
     {"Dodge", "Dodge / roll (B)", 0, ACT_DODGE, {-1, -1, -1}},
     {"Crouch", "Crouch, standing still (B)", 0, ACT_CROUCH, {-1, -1, -1}},
     {"ItemBarRight", "Item bar: next item, L held (A)", 0, ACT_ITEMBAR_RIGHT, {-1, -1, -1}},
-    {"ItemBarLeft", "Item bar: previous item, L held (B)", 0, ACT_ITEMBAR_LEFT, {-1, -1, -1}},
+    {"ItemBarLeft", "Item bar: previous item, L held (Y)", 0, ACT_ITEMBAR_LEFT, {-1, -1, -1}},
     {"ItemUse", "Use item / sheathe (Y)", 0, ACT_ITEM_USE, {ACT_TOWN_Y, -1, -1}},
     {"Interact", "Gather / open / talk, weapon away (A)", 0, ACT_INTERACT, {-1, -1, -1}},
     {"Sprint", "Sprint (R)", 0, ACT_DASH, {ACT_TOWN_RUN, -1, -1}},

@@ -769,27 +769,35 @@ static void test_scopes(void) {
     CHECK(!act_crouch_split(), "Dodge alone does not split");
     SAMPLE(S);
     CHECK(VIEW(ACT_VIEW_SHEATHED, 0) == 0x4000 && VIEW(ACT_VIEW_SHEATHED, MOVING) == (MOVING | 0x4000), "B standing and moving");
-    // ---- the item bar: A and B are the bar's only
+    // ---- the item bar: with L held A (next) and Y (previous) are the bar's only; B is not
     p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nDodge = pad:south\nInteract = pad:south\nAttackA = pad:east\n");
     act_use_profile(&p);
-    SAMPLE(S);  // Tier 0's B
-    CHECK(VIEW(ACT_VIEW_SHEATHED | ACT_VIEW_BAR, 0) == 0x4000, "bar open, south: the bar's previous item (B), not Interact's A: %x", VIEW(ACT_VIEW_SHEATHED | ACT_VIEW_BAR, 0));
-    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0x4000, "bar open, weapon out, south: B");
-    CHECK(VIEW(ACT_VIEW_SHEATHED, 0) == 0x2000, "bar closed: Interact as set: %x", VIEW(ACT_VIEW_SHEATHED, 0));
     SAMPLE(E);  // Tier 0's A
     CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0x2000, "bar open, east: the bar's next item (A): %x", VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0));
+    SAMPLE(S);  // Tier 0's B
+    CHECK(VIEW(ACT_VIEW_SHEATHED | ACT_VIEW_BAR, 0) == 0 && VIEW(ACT_VIEW_SHEATHED | ACT_VIEW_BAR, MOVING) == (MOVING | 0x4000), "bar open, south: Interact's A is silent, Dodge rolls only moving (split): %x", VIEW(ACT_VIEW_SHEATHED | ACT_VIEW_BAR, 0));
+    CHECK(VIEW(ACT_VIEW_SHEATHED, 0) == 0x2000, "bar closed: Interact as set: %x", VIEW(ACT_VIEW_SHEATHED, 0));
+    // Use item moved: only the bar's own Y is the bar's
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nItemUse = pad:north\n");
+    act_use_profile(&p);
+    SAMPLE(N);
+    CHECK(VIEW(ACT_VIEW_MB1, 0) == 0x8000, "bar closed: north uses the item (Y): %x", VIEW(ACT_VIEW_MB1, 0));
+    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0, "bar open, north: Use item is silent, the bar's Y is on Tier 0's Y: %x", VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0));
+    SAMPLE(W);
+    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0x8000, "bar open, west: the bar's previous item (Y): %x", VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0));
     // the bar's actions bound: only the bar moves
     p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nItemBarLeft = pad:north\nItemBarRight = pad:west\n");
     act_use_profile(&p);
     SAMPLE(N);
-    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0x5000, "bar open, north: the bar's B, and X is still X (not claimed): %x", VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0));
+    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0x9000, "bar open, north: the bar's Y, and X is still X (not claimed): %x", VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0));
     CHECK(VIEW(ACT_VIEW_MB1, 0) == 0x1000, "bar closed: north is X as ever: %x", VIEW(ACT_VIEW_MB1, 0));
-    SAMPLE(S);  // Tier 0's B: no longer the bar's
-    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0, "bar open, south: nothing (the bar's B moved), and not Dodge's: %x", VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0));
-    CHECK(VIEW(ACT_VIEW_MB1, 0) == 0x4000, "bar closed: south is still Dodge: %x", VIEW(ACT_VIEW_MB1, 0));
+    SAMPLE(S);
+    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0x4000 && VIEW(ACT_VIEW_MB1, 0) == 0x4000, "south is B in both: %x", VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0));
     SAMPLE(W);
-    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0xA000, "bar open, west: the bar's A, and Y is still Y: %x", VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0));
+    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0x2000, "bar open, west: the bar's A, and not Use item's Y: %x", VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0));
     CHECK(VIEW(ACT_VIEW_MB1, 0) == 0x8000, "bar closed: west is Y (Tier 0's): %x", VIEW(ACT_VIEW_MB1, 0));
+    SAMPLE(E);
+    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0 && VIEW(ACT_VIEW_MB1, 0) == 0x2000, "east: the bar's A moved to west, the attack stays: %x %x", VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0), VIEW(ACT_VIEW_MB1, 0));
     // the chord's X is not the bar's
     ActProfile q = parse("[Actions]\nEnable=1\n");
     act_use_profile(&q);

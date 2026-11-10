@@ -38,12 +38,17 @@ Every one of the pad's 16 buttons is an action in each of three contexts (50 act
   `MenuX`, `MenuY`, `MenuUp/Down/Left/Right`, `MenuTabL/R` (L/R), `MenuPageL/R` (ZL/ZR), `MenuPlus`, `MenuMinus`, `MenuL3`,
   `MenuR3`.
 
-**Following.** An action with no binding of its own uses the binding of the first action it follows that has one (per
-device), else its default (Tier 0): `Interact` follows `AttackA`; `TownInteract` follows `MenuConfirm`, then `Interact`;
-`TownCancel` follows `MenuCancel`, then `Dodge`; every other `Town*` follows the hunt's action of the same button;
-`MenuPlus` / `MenuMinus` follow `Pause` / `Map`. So: nothing bound = the game as it is; only `MenuConfirm` / `MenuCancel`
-bound = the menus **and** the town's talk / back swap (the first play test's complaint) while the hunt is untouched; and each
-of them can still be bound on its own.
+**The principle: rebinding an action never changes a different feature** unless the user merged them, and only the Simple
+layout merges (its rows write one binding to several actions explicitly: Confirm = `MenuConfirm` + `TownInteract`, and so on).
+So a profile edited in Advanced never moves anything it did not name: the town's actions, the menus', the hunt's, the item
+bar's are separate bindings with separate defaults (the game's own button, Tier 0). An earlier version let the town's actions
+follow the hunt's and the menus' (`TownCancel` followed `MenuCancel`, then `Dodge`; `TownInteract` followed `MenuConfirm`;
+`MenuPlus` followed `Pause`): rebinding Dodge moved the town's B and `Confirm = pad:south` alone moved the town's talk. Those
+chains are gone (2026-11-11). What is left follows only **inside one context and one feature**, where the two are the same
+game input until the user splits them: `Interact` follows `AttackA` (the hunt's A button), `Crouch` follows `Dodge` (its B
+button), `WeaponR` follows `Dash` (the R-role getter). An action with no binding of its own uses the binding of the one it
+follows that has one (per device), else its default (Tier 0). An ini that relied on `Confirm = pad:south` also moving the
+town's talk needs `TownInteract = pad:south` (the Simple screen writes both).
 
 **The hunt's A button** is one of two actions by the hunter's state, read from `player+0x114C` (u8: 1 weapon out, 0 away;
 found by comparing memory snapshots of sheathed / drawn idle, walk, roll and attacks, see Tests): weapon out, A is `AttackA`;
@@ -65,6 +70,9 @@ bindings (`act_interact_share`: the same input, or a chord that holds it, either
 shared, and the whole of a hunt with the weapon out, are not delayed. Cost: that shared roll starts ~1 update later than a
 roll on its own button; the setting trades that against a slow interaction (an NPC that takes longer than that to turn
 would be rolled over). `AttackA` is not a contender (with the weapon away it is not delivered).
+**Dodge no longer uses this**: with Dodge and Interact on one input the state decides (see "State-scoped actions" above: Dodge
+only while the stick is pushed, weapon away), so nothing waits; the gate is kept for Interact sharing with actions that have
+no state to tell them apart (`AttackX` ...). At a chest 1 update of waiting was not enough: the hunter crouched.
 
 **Dash and the weapon R-action** are one game input, the R-role getter `f_85f93c` (104 callers). `WeaponR` is the action for
 the weapon's side of it; it follows `Dash` until it has a binding of its own. The split is on with
@@ -79,6 +87,97 @@ that hooks `f_85f93c` before this layer starts keeps Dash and WeaponR one input 
 
 Weapon classes for per-class overrides: GreatSword SnS Hammer Lance HBG LBG LongSword SwitchAxe Gunlance Bow DualBlades Horn
 InsectGlaive ChargeBlade Prowler.
+
+## State-scoped actions (the general mechanism)
+
+The game has few buttons and many consumers: one A press is an attack, an interaction, a menu confirm, a talk, the item bar's
+next item. The layer takes them apart by **the state the hunter is in**, not by timing: every action has a *scope* (`scopes[]`
+in `actions.c`: flags it requires, flags that forbid it, and the bits it applies to), the translator hook builds the hunter's
+state for the frame (`state_of`: weapon out / away, item bar open, left stick pushed or not), and a bit is delivered only by
+the actions whose scope matches. Actions with no scope deliver always, so with nothing bound every state gives the word it was
+given (the golden test runs over the hunt in each state, the item bar open or not, the town and the menus).
+
+| state flag | where it comes from |
+|---|---|
+| weapon out / away | `player+0x114C` (u8), as above; the Prowler and "no hunter" count as both |
+| item bar open | vfunc `+0x25c(player, 1)` of the hunter (hle/itembar.c: it is true while L is held and the bar may be used), called from the player update hook and latched for the translator: one frame of latency |
+| left stick pushed | the engine word's left-stick direction bits `0xf0000` (past half way) at the translator |
+
+| scope | action | what it means |
+|---|---|---|
+| weapon away only | `Interact` (A) | gather, carve, talk, open; the weapon-out A is `AttackA` |
+| not while the bar is open | `AttackA`, `Interact`, `ChordXA` (its A), `ItemUse` (Y) | the bar owns A and Y then; B is not the bar's: `Dodge` and `Crouch` are untouched |
+| only while the bar is open | `ItemBarRight` (A), `ItemBarLeft` (Y) | L held: A scrolls right, Y left |
+| weapon away, Crouch split | `Dodge` only while the stick is pushed, `Crouch` only while it is not | the roll and the crouch are one game B |
+
+**The item bar.** With L held the hunter's item bar scrolls on A (next item) and Y (previous item): the same bits as attack /
+interact / chord (A) and use item (Y), so rebinding any of those used to change how the bar scrolls (`itembar.c` names the
+game's actions: `0xa` right, `0x9` left; `0xa` is the attack A's set-C event and `0x9` use item's, so the left is Y, not B:
+with the Hammer in quest 101, L + A went `0x28 -> 1 -> 2` and L + B did nothing). Now, while the bar is open, A and Y in
+the gameplay word come only from `ItemBarRight` / `ItemBarLeft` (defaults: Tier 0's A and Y, so nothing changes until they
+are bound) and `AttackA`, `Interact`, `ChordXA`'s A and `ItemUse` are silent for those two bits; when the bar is closed the
+bar's two deliver nothing. B is not the bar's, so `Dodge`, `Crouch` and the town's B are not touched by it. The bar's
+inputs are claimed among themselves only (a physical input given to the bar's A is not taken away from the defaults of the
+hunt's other actions, and the other way round). In Simple they are two rows after Dodge / Crouch.
+
+**Crouch.** B with the hunter standing still is the crouch, B with the left stick pushed is the roll; one game button. `Crouch`
+(default: Dodge's input, so nothing changes) splits them once it has a binding of its own on any device or class, **or**
+when `Interact` and `Dodge` are on one input: with the weapon away `Crouch` then delivers B only while the stick is not
+pushed and `Dodge` only while it is. Interact and Dodge on one input is therefore a pure interaction standing still (only A:
+nothing crouches, nothing waits) and a roll while moving (A and B: the roll wins); a separate Crouch input crouches
+standing and does nothing moving. `Crouch` may not share an input with `Interact` (Simple: binding one takes the input off
+the other; Advanced: red warning; in play Interact wins standing still and `act_validate` says so). With the weapon out both
+deliver B as before, because weapon B-actions (Lance, Switch Axe, Insect Glaive, bowguns, Prowler) are read standing and the
+roll / crouch confusion only exists with the weapon away. A stick pushed less than half way counts as standing: a crouch
+input still gives the game its B, and the game rolls if it walks.
+
+This replaced the "Interact first" delay for Dodge: it was tried first for `SharedInteractFrames` updates and then the roll
+went through, and at a chest 1 update was not enough (the hunter crouched). The gate (`act_gate`, `SharedInteractFrames`) is
+kept only for Interact sharing an input with other hunt actions that have no state to tell them apart (`AttackX` ...).
+
+## Consumer map (hunt and town; what is separable now)
+
+Bits are the engine / hunter-copy ones (INPUTS-MASTER B.1). "Separable now": the layer has an action or state for it. "Gate
+known": a state discriminator exists but is not wired. "Not yet": the game reads the shared bit in one place and decides by
+internal state we cannot see from the translator. Sources: research docs `INPUTS-MASTER.md`, `ACTIONS.md`, `actions.csv`.
+
+| consumer | bit | what tells it apart | status | what it would take |
+|---|---|---|---|---|
+| attack A (weapon out) | A | weapon out (`+0x114C`) | **separable now** (`AttackA`) | - |
+| interact: gather, carve, talk, open | A | weapon away | **separable now** (`Interact`); chest / NPC / gather never reached in a hunt: only "A reaches the game in the right state" is verified | a hunt at a chest and an NPC to confirm |
+| item bar next / previous | A / Y with L held | bar open (vfunc `+0x25c(player, 1) != 0`) | **separable now** (`ItemBarRight/Left`) | - |
+| draw weapon | X (sheathed) | weapon away | **separable now** by state: `AttackX` is one action both ways; a scope `AttackX` weapon-away only would give a separate "Draw" | a `Draw` action with scope `req AWAY`, 20 lines |
+| attack X | X | weapon out | **separable now** (`AttackX`; draw is the same input) | as above |
+| sheathe | Y after a pause / sheathe move | weapon out and idle | gate known (state `act_st 1:0`, drawn) | not decoded which bit asks for motion 0x7 (U-5); probe with the moves log |
+| use item | Y | weapon out/away | **separable now** (`ItemUse`) | - |
+| roll | B + stick | stick pushed, weapon away | **separable now** (`Dodge`, split mode) | - |
+| crouch | B standing still | stick not pushed, weapon away | **separable now** (`Crouch`) | - |
+| weapon B-actions (Lance guard, SA, IG, HBG / LBG cancel, Prowler commands) | B | weapon class + move | gate known (class `g_var`, move `act_st:act_no`) | a `WeaponB` action: virtual bit like `WeaponR` + the 15 mappers' B tests (`trig16 0x80`) |
+| dash / sprint | R-role | by caller of `f_85f93c` | **separable now** (`Dash`, `WeaponR` split) | - |
+| weapon R-action: guard, charge, aim | R-role | caller of `f_85f93c` | **separable now** (`WeaponR`); ~80 other callers (prompts / flags) still read the real R | classify the rest of the callers (P16) |
+| X+A chord (tackle / special), R+X, R+X+A | X+A / R+X(+A) | the engine's own two-bit test | `ChordXA` now; R+X, R+X+A not | two more chord actions delivering the bits in one frame |
+| quick action / ammo / coating select | D-pad (RS by Control Type) | weapon class (HBG, LBG, Bow, Prowler read it in the mapper) | **separable now** as `CrossUp..Right` for all; not per use | per-use needs the mapper events (U-5) |
+| camera reset / lock-on, town L action | L-role | none seen | **separable now** (`FieldL`); lock-on vs reset not separable | event names (U-5) |
+| target camera ZL / ZR roles | ZL / ZR | none | **separable now** (`FieldZL/ZR`) | - |
+| left stick click action (flag G) | L3 | Control Type sub-option | **separable now** (`FieldL3`) | - |
+| right stick click | R3 | Control Type | **separable now** (`FieldR3`) | - |
+| pause menu / map | Plus / Minus (mb1 and mb2) | hunt vs menu | **separable now** (`Pause`/`Map` vs `MenuPlus/Minus`) | - |
+| mash / struggle | any of A B X Y L R | none (reads the six bits, mask `0x00FF05F0`) | follows the bits: not separable | a state gate on "struggling" (not found) |
+| town: talk, X / Y / B / L actions, run | A X Y B L R | town context | **separable now** (`Town*`, independent) | - |
+| town hot buttons (Hunter Search Y, World Map X) | mb2 Y / X | menu view | **separable now** (`MenuY`, `MenuX`) | - |
+| village Multiplayer / ZR hot buttons | mb1 ZL / ZR on a menu-like screen | gameplay view with no hunter | `FieldZL/ZR` ("no hunter" = hunt actions) | a menu-like-screen state (`f_6eeb78` pad owner gate) |
+| craft viewport zoom / rotate | mb1 ZL / ZR | gameplay view in a menu | same | same |
+| menus: confirm, cancel, X, Y, tabs, pages, cursor, Plus, Minus, L3 / R3 | mb2 | menu view | **separable now** (`Menu*`) | per-screen: not yet (a button means the same in every menu) |
+| raw-word readers (title ZL+ZR, options L+R, R3) | pad word | bypass both views | not separable | hook the raw readers (4 functions) |
+| gestures | via the Plus menu list | - | menu action, not a field one | - |
+| event / cutscene skip | A (host `evskip`) | host | follows the host's A, not the action layer | read the actions instead of the Switch A |
+
+**Not yet separable, ranked by what the user likely wants next** (cost and benefit): (1) weapon B-actions apart from the roll,
+for the five classes that use B, high value for Lance / Switch Axe / bowgun players, medium cost (a `WeaponB` virtual bit like
+`WeaponR`, the 15 mappers read `trig16 0x80` directly); (2) a separate Draw / Sheathe (state is known: weapon out / away,
+Y is the sheathe), low cost for Draw, the sheathe trigger is undecoded; (3) R+X and R+X+A chords, low cost; (4) the village
+ZL / ZR hot buttons and the craft viewport, medium (needs a menu-like-screen state); (5) cutscene skip on the action layer,
+low; (6) mash / struggle and the raw-word readers, not worth it.
 
 ## ini
 
@@ -215,6 +314,28 @@ map) and Y (hunter search) (those two opened or not was not checked by screensho
 the pointer does. So the vanilla list controllers and these screens do not use the pointer block: `Pointer` stays an opt-in
 experiment (default 0), there is no real-mouse feed, no cursor and no hover. Screens not probed: title, quest board, counter,
 smithy, equipment box, item box, shop, map, options: hover there is unknown (the readers could be live in one of them).
+
+## Tests of 2026-11-11 (state-scoped actions; hidden window, a copy of the save, virtual controller)
+
+* **Host** (`make test-actions`): 4,588,559 checks, 0 failures. The golden property now also runs over the hunt with the
+  weapon away and unknown, and with the item bar open (every Tier 0 word comes out unchanged), plus: Crouch / Dodge /
+  Interact in each state and with the stick, Interact winning an input with Crouch, the auto split (Dodge + Interact on one
+  input), the item bar's A / Y with Use item moved, the bar's own actions moved, the town and menu actions following
+  nothing, the Simple rows writing the town explicitly. `test-settings`, `test-settings-panel`, `test-settings-locale` pass.
+* **Item bar** (quest 101, Hammer, sheathed, L held through the virtual pad, `peek` of `player+0x3298`): vanilla ini:
+  L + east (A) `0x28 -> 1 -> 2`, L + west (Y) `2 -> 1 -> 0x28`, L + south (B) nothing, east / south alone nothing. With
+  `MenuConfirm = MenuCancel` swapped, `TownInteract`, `Dodge` and `Interact` moved to south, the same sequence (`28 1 2 1 28`);
+  before the item bar context the same run did not scroll right on L + east (A was dropped: weapon away with `Interact`
+  moved). With `ItemBarLeft = pad:east`, `ItemBarRight = pad:west` the bar turns the other way and only the bar: L + east
+  `0x28 -> 0x12 -> 0xc` (left wraps to the last item), L + west `0xc -> 0x12 -> 0x28`; the log shows the bar open (`bar 1`)
+  exactly while L is held and the gameplay word A / Y coming from the bar's two actions.
+* **Quest Box** (quest 101, `questbox` spot): with `Interact` and `Dodge` on south and `Crouch` on west, south held 0.6 s and a
+  0.08 s tap open the Supply Box; every frame of the press gives the game only A (never B), from the first. 300 units away
+  with the stick pushed the same input gives A + B from the first frame (the roll). Standing, south gives A only (no crouch,
+  nothing to interact with); west standing gives B (the crouch), west with the stick pushed gives nothing. With `Crouch` on
+  Interact's input too the log says `conflict: Crouch and Interact are both on pad:south` and standing still the input is A
+  only. No chest or NPC is reachable in the harness (the quest has the box only): the chest crouch the user saw is covered by
+  state, not by a reproduction.
 
 ## Tests of 2026-11-10 (this machine; hidden window, a copy of the save, the TeleportTool mod for the town spot)
 

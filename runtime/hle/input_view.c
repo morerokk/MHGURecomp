@@ -70,6 +70,7 @@ static volatile bool g_dash_zr;
 static volatile int g_weapon_pub = -1;
 static uint32_t g_act_st, g_act_no, g_player;
 static bool g_drawn;
+static uint32_t g_bar_raw;
 static bool g_bar;              // the item bar was open at the hunter's last update
 static int g_view;              // the context the gameplay word was last built for
 static bool g_log;
@@ -129,8 +130,9 @@ static void player_update(Cpu *c) {
         g_pl_frame = g_frame;
         g_player = pl, g_act_st = LD16(pl + PL_ACT_ST), g_act_no = LD16(pl + PL_ACT_NO);
         g_drawn = LD8(pl + PL_DRAWN) != 0;
-        uint32_t vt = LD32(pl), fn = sane(vt) ? LD32(vt + VF_BAR_OPEN) : 0;  // (vtables are in main's image)
-        g_bar = fn && call(c, fn, pl, 1, 0) == 1;
+        uint32_t vt = LD32(pl), fn = vt ? LD32(vt + VF_BAR_OPEN) : 0;  // (vtables are in main's image, below the heap: not sane())
+        g_bar_raw = fn ? call(c, fn, pl, 1, 0) : 0;
+        g_bar = (g_bar_raw & 0xff) != 0;
     }
     fnhook_call_original(c, FN_PLAYER);
 }
@@ -180,10 +182,10 @@ static void mb_update(Cpu *c) {
     }
     fnhook_call_original(c, FN_MB_UPDATE);
     if (g_log && first) {
-        LOG("[actions] f%llu %s w%d mb1 in %08x out %08x cur %08x | mb2 in %08x out %08x cur %08x | act %llx v%d st %x:%x lock %x\n",
+        LOG("[actions] f%llu %s w%d mb1 in %08x out %08x cur %08x | mb2 in %08x out %08x cur %08x | act %llx v%d st %x:%x lock %x bar %x\n",
             (unsigned long long)g_frame, input_view_context(), g_weapon_pub, g_in[0], g_out[0], LD32(mb + 4), g_in[1],
             g_out[1], LD32(sp + MB2_OFF + 4), (unsigned long long)(g_snap.hold[g_var] | g_snap.pulse[g_var]), g_view, g_act_st, g_act_no,
-            g_player ? LD32(g_player + 0x2540) : 0);
+            g_player ? LD32(g_player + 0x2540) : 0, g_bar_raw);
     }
 }
 
