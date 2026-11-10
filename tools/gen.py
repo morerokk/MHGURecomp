@@ -66,6 +66,12 @@ PATCHES = {
     # and its reload `mov r0, #20` count in the frame step instead of updates
     ('main', 0x834d20): (0xE2477001, '{ extern uint32_t buffcycle_tick(void); c->r[7] -= buffcycle_tick(); }'),
     ('main', 0x834ef4): (0xE3A00014, '{ extern uint32_t buffcycle_reload(void); c->r[0] = buffcycle_reload(); }'),
+    # Free slots of a piece (f_2db66c: its slot count minus each decoration's size, `subne r8, r1, r0` at 0x2db770, a u8
+    # at the end): a decoration bigger than the space left (another hunter's armor modded for more slots, or a slot mod
+    # removed) gives -1 = 255, and the slot icons (f_750570, 0x750680) then draw 255 "empty" ones from a 3-entry array
+    # on the stack, crashing when the equipment is viewed. Clamped at 0 on the next instruction, `ldrh r1, [r4, #0xa]`,
+    # which every subtraction reaches
+    ('main', 0x2db778): (0xE1D410BA, '{ if ((int32_t)c->r[8] < 0) c->r[8] = 0; c->r[1] = LD16(c->r[4] + 0xau); }'),
     # UI text glyph snap (runtime/hle/textlayout.c): after a text's lines are aligned, each glyph's x is snapped to the
     # 1280x720 canvas, `vadd.f32 s0, s0, s24` (+0.5), `vrintm.f32 s0, s0` (floor), then +0.5 again; with a canvas unit
     # 1.5 px (1080p) the letters land half a pixel apart unevenly. x keeps its exact place instead (+0.5, as on average)
