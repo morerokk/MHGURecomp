@@ -43,6 +43,7 @@
 #define PAD_HELD       0x1d0u
 #define PAD_PTR_X      0x68dcu
 #define PAD_PTR_Y      0x68e0u
+#define STICK_L_DIRS   0xf0000u   // the left stick pushed past half way, in the engine word (INPUTS-MASTER B.1)
 #define PL_ACT_ST      0x2506u    // u16: the hunter's current action (act_st, act_no; hle/movelog.c): act_st 0x10 a
 #define PL_ACT_NO      0x250au    // weapon move, 1 a common one
 #define PL_DRAWN       0x114cu    // u8: 1 the weapon is out, 0 put away (constant over idle, walk, roll and attacks of
@@ -191,10 +192,18 @@ static void tr_view(Cpu *c, int view, int slot, uint32_t fn) {
     if (view == ACT_VIEW_SHEATHED) {  // an input for Interact and for other hunt actions: Interact first (actions.h)
         static ActGate gate;
         static uint32_t base;
+        static bool moving;  // the press began with the left stick pushed: the roll wins at once, nothing is tried first
         uint32_t now = live_action();
-        if (!gate.phase) base = now;
-        bool changed = now != base && (now >> 16 & 0x10) == 0;  // (a weapon move is not an interaction)
-        active = act_gate(&gate, active, act_interact_share(g_var), changed, g_frame, act_shared_frames());
+        uint64_t share = act_interact_share(g_var);
+        bool amb = (active >> ACT_INTERACT & 1) && (active & share);
+        if (!amb) moving = false;
+        else if (!gate.phase) moving = (in & STICK_L_DIRS) != 0;
+        if (moving && amb) active &= ~(1ull << ACT_INTERACT);  // (standing still, Interact goes first and only the crouch waits)
+        else {
+            if (!gate.phase) base = now;
+            bool changed = now != base && (now >> 16 & 0x10) == 0;  // (a weapon move is not an interaction)
+            active = act_gate(&gate, active, share, changed, g_frame, act_shared_frames());
+        }
     }
     uint32_t out = act_view(view, in, active, g_dash_zr);
     g_in[slot] = in, g_out[slot] = out;

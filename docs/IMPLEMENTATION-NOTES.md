@@ -57,7 +57,7 @@ weapon away an input bound to `Interact` and to another hunt action (`Dodge`, `A
 and the game answers the other one: A + B is a roll, so the box never opened. The game does not say beforehand whether
 something can be interacted with (the research's flags `P+0x2BF4` / `P+0x1060` do not change near the box: snapshots at the
 box and 30 m away, and its Supply Box prompt), so the press is **tried as Interact first** (`act_gate`, game side
-`tr_view`): only A for `[Actions] SharedInteractFrames` updates (default 1, 1..30); if the hunter's action changes in that
+`tr_view`; only when the hunter stands still: if the left stick is pushed as the press begins, the roll wins at once and Interact is not tried, so only the standing crouch waits): only A for `[Actions] SharedInteractFrames` updates (default 1, 1..30); if the hunter's action changes in that
 time (a common action, not a weapon move: the box opens, `act 1:0x70` came 3-4 updates after the press) it was an
 interaction and the other actions stay off for as long as the input is held; if not, they get the press (a roll 1 update
 late), and a press that ends sooner still gets a 3-update press of them (a tap is a roll, late). Sharing is decided from the
