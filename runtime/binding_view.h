@@ -112,6 +112,7 @@ struct BVParams {
     const char *click_hint = "Click to give it to the selected action.";  // last line of an input's tooltip (nullptr: none)
     BVColors colors = {};
     float font_px = 13.f;
+    float max_height = 0;  // the height the drawing may take (0: any): it picks the controller's layout and bv_fit_width the size
 };
 struct BVResult {
     int clicked = 0;   // the input the player clicked (0 none)
@@ -119,6 +120,8 @@ struct BVResult {
     bool reserved = false;  // the click or hover is on a key the recomp keeps for itself
 };
 
+// The widest width up to `width` at which the drawing fits p.max_height (a short window: a smaller drawing)
+float bv_fit_width(const BVParams &p, float width);
 float bv_height(const BVParams &p, float width);
 // Where an input is drawn, relative to the widget's top left corner (for height == bv_height): false if it has no
 // place on this drawing (a key the keyboard does not show). For a pointer, a tooltip or a test.

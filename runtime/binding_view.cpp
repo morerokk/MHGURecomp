@@ -166,7 +166,7 @@ struct Chip {
 };
 struct Layout {
     uint64_t key = 0;
-    float W = 0, fs = 0, need_h = 0;
+    float W = 0, fs = 0, need_h = 0, diag_w = 0;
     int scheme = 0;
     std::vector<Shape> shapes;
     std::vector<Decor> decor;
@@ -494,7 +494,8 @@ uint64_t fnv(uint64_t h, const void *data, size_t n) {
 uint64_t layout_key(const BVParams &p, float W) {
     uint64_t h = 1469598103934665603ull;
     int w = (int)W, f = (int)(p.font_px * 10);
-    h = fnv(h, &p.scheme, sizeof p.scheme), h = fnv(h, &w, sizeof w), h = fnv(h, &f, sizeof f);
+    int mh = (int)p.max_height;
+    h = fnv(h, &p.scheme, sizeof p.scheme), h = fnv(h, &w, sizeof w), h = fnv(h, &f, sizeof f), h = fnv(h, &mh, sizeof mh);
     for (int i = 0; i < p.n_inputs; i++) {
         const BVInput &in = p.inputs[i];
         h = fnv(h, &in.code, sizeof in.code), h = fnv(h, &in.n, sizeof in.n), h = fnv(h, &in.conflict, sizeof in.conflict);
@@ -749,13 +750,14 @@ std::vector<float> pack_row(Layout &L, std::vector<Chip *> &grp_g, float W, floa
     return tier_h;
 }
 
-void build_layout(Layout &L, const BVParams &p, float W) {
+// mode 0: the controller's chips beside it when the width allows, 1 beside it, 2 above and below
+void build_layout(Layout &L, const BVParams &p, float W, int mode) {
     float fs = p.font_px;
     L = Layout();
     L.W = W, L.fs = fs, L.scheme = p.scheme;
     float pad = fs * .8f, gutter = fs * 2.6f;
     float gap = fs * .5f;
-    bool columns = p.scheme == BV_CONTROLLER && W >= fs * 64;  // chips beside the controller; narrower: above and below
+    bool columns = p.scheme == BV_CONTROLLER && (mode == 1 || (mode == 0 && W >= fs * 64));  // chips beside the controller, or above and below
 
     if (p.scheme == BV_CONTROLLER) {
         float chip_w = columns ? std::clamp(W * .19f, fs * 8.f, fs * 13.f) : 0.f;
@@ -889,6 +891,7 @@ void build_layout(Layout &L, const BVParams &p, float W) {
             diag_lo_y = std::min(diag_lo_y, q.y), diag_hi_y = std::max(diag_hi_y, q.y);
         }
 
+    L.diag_w = diag_hi_x - diag_lo_x;
     float need = diag_hi_y + pad;
     if (columns) {
         // the columns of chips beside the drawing, in the order of the inputs they name
@@ -981,7 +984,16 @@ Layout &layout_for(const BVParams &p, float W) {
     Layout &L = g_cache[p.scheme == BV_KEYBOARD ? 1 : 0];
     uint64_t key = layout_key(p, W);
     if (L.key != key || L.shapes.empty()) {
-        build_layout(L, p, W);
+        if (p.scheme == BV_CONTROLLER && p.max_height > 0 && W >= p.font_px * 40) {
+            // a limit on the height: the chips beside the controller or above and below it, whichever lets the drawing be larger
+            Layout a, b;
+            build_layout(a, p, W, 1);
+            build_layout(b, p, W, 2);
+            bool fa = a.need_h <= p.max_height, fb = b.need_h <= p.max_height;
+            bool pick_a = fa && fb ? a.diag_w >= b.diag_w : fa ? true : fb ? false : a.need_h <= b.need_h;
+            L = pick_a ? std::move(a) : std::move(b);
+        } else
+            build_layout(L, p, W, 0);
         L.key = key;
     }
     return L;
@@ -1028,6 +1040,31 @@ void arrow_head(ImDrawList *dl, ImVec2 tip, ImVec2 dir, float size, ImU32 col) {
     dl->AddTriangleFilled(tip, tip - dir * size + n * (size * .5f), tip - dir * size - n * (size * .5f), col);
 }
 }  // namespace
+
+float bv_fit_width(const BVParams &p, float width) {
+    // the widest drawing, up to `width`, that is not taller than p.max_height (the layout is not simply in proportion
+    // to the width: chips keep their size). Remembered while nothing changes, so a frame costs nothing.
+    static struct { uint64_t key; float w; } memo;
+    uint64_t key = layout_key(p, width);
+    if (memo.key == key && memo.w > 0) return memo.w;
+    float min_w = p.font_px * 24, w = width;
+    if (p.max_height > 0) {
+        // the candidates, each with the layout it gets (the controller's chips beside it or above and below): the one that fits
+        // and has the largest drawing; if none fits, the smallest height
+        static const float steps[] = {1.f, .9f, .8f, .7f, .6f, .5f};
+        float best_w = -1, best_d = -1, low_w = width, low_h = 1e9f;
+        for (float k : steps) {
+            float cw = std::max(min_w, width * k);
+            const Layout &L = layout_for(p, cw);
+            if (L.need_h < low_h) low_h = L.need_h, low_w = cw;
+            if (L.need_h <= p.max_height && L.diag_w > best_d) best_d = L.diag_w, best_w = cw;
+        }
+        w = best_w > 0 ? best_w : low_w;
+        layout_for(p, w);  // (the layout of the one chosen is the one kept)
+    }
+    memo.key = key, memo.w = w;
+    return w;
+}
 
 float bv_height(const BVParams &p, float width) {
     Layout &L = layout_for(p, width);

@@ -1253,6 +1253,7 @@ void action_rows(std::vector<Row> &r) {
 // ringed; every input down right now glows; an input clicked on it goes to the row being set.
 const int BV_KEY_CHAT = 999;  // (the chat key's id among the keys of the Keys tab)
 bool g_bv_pointing;           // the pointer is on the drawing: a click there is the drawing's, not a button chosen
+std::string g_bv_help;        // the help of the row focused or pointed at, under the drawing
 std::string short_label(const std::string &full) {
     std::string t = full;
     size_t cut = t.find_first_of(",:");
@@ -1541,7 +1542,7 @@ void draw_bind_tabs(float width) {
     ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + h + gap));
     ImGui::Dummy(ImVec2(width, 1));
 }
-void draw_bind_view(float width, float max_h) {
+void draw_bind_view(float width, float max_h, bool with_help) {
     ActionTab &a = acts();
     const Theme &look = theme();
     int kind = tab_kind();
@@ -1571,12 +1572,8 @@ void draw_bind_view(float width, float max_h) {
     p.click_hint = hint.empty() ? nullptr : hint.c_str();
     p.colors = bv_colors(look);
     p.font_px = ImGui::GetFontSize();
-    float fs = p.font_px;
-    float w = width, h = bv_height(p, w);
-    if (max_h > 0 && h > max_h) {  // (a short window: a smaller drawing)
-        w = std::max(fs * 24, w * max_h / h);
-        h = bv_height(p, w);
-    }
+    p.max_height = max_h;
+    float w = bv_fit_width(p, width), h = bv_height(p, w);
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (width - w) * .5f);
     BVResult r = bv_draw("##bindview", w, h, p);
     g_bv_pointing |= ImGui::IsItemHovered();
@@ -1585,6 +1582,18 @@ void draw_bind_view(float width, float max_h) {
     ImGui::PushStyleColor(ImGuiCol_Text, vec(look.text_dim));
     ImGui::TextWrapped("%s", tr("Inputs you press light up. Point at one to see what is on it."));
     ImGui::PopStyleColor();
+    if (with_help && !g_bv_help.empty()) {  // what the row is, under the drawing
+        ImVec2 at = ImGui::GetCursorScreenPos();
+        float gap = ImGui::GetStyle().ItemSpacing.y;
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(at.x, at.y + gap * .5f), ImVec2(at.x + width, at.y + gap * .5f), look.divider);
+        ImGui::Dummy(ImVec2(1, gap));
+        float fs2 = ImGui::GetFontSize();
+        float text_h = ImGui::CalcTextSize(g_bv_help.c_str(), nullptr, false, width).y;
+        ImGui::BeginChild("##bvhelp", ImVec2(width, std::min(text_h + 2, fs2 * 7.5f)), false,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoBackground);
+        ImGui::TextWrapped("%s", g_bv_help.c_str());
+        ImGui::EndChild();
+    }
 }
 void reset_section() {
     Config f = config_defaults(), &c = s.draft;
@@ -2067,7 +2076,7 @@ std::vector<Row> main_rows() {
         action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
         r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons, for moving and for the item bar, and the chat key.");
         action(r, "actions", tr("Game actions"), []() { push(View::Actions, "act.enable"); });
-        r.back().help = tr("Rebind the game itself: every action of a hunt, of the town and of the menus on the controller button, key or mouse button you choose, also per weapon. Off by default.");
+        r.back().help = tr("Rebind the game itself: every action of a hunt, of the town and of the menus on the controller button, key or mouse button you choose, also per weapon, with the controller or the keyboard drawn beside the list. The keys for moving, the item bar and chat are there too (Keys). Off by default.");
         add_bool(r, "menu.chord", "Plus + Minus opens this menu", &c.menu_chord, ini("MenuChord"));
         r.back().help = tr("Pressing Plus and Minus together (Start + Back on a controller) opens this menu. Turn it off to keep that combination for the game or a cheat, for example when you play with a keyboard and mouse. F1 still opens the menu.");
         break;
@@ -2767,7 +2776,7 @@ void draw_bind_window(ImVec2 pos, float width, float min_h, float scale, float m
                      ImGuiWindowFlags_NoNavInputs | ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoFocusOnAppearing);
     ImGui::SetWindowFontScale(scale);
     float fs = ImGui::GetFontSize();
-    draw_bind_view(ImGui::GetContentRegionAvail().x, vp->WorkSize.y - 2 * margin - fs * 9);
+    draw_bind_view(ImGui::GetContentRegionAvail().x, vp->WorkSize.y - 2 * margin - fs * 14.f, true);
     draw_frame(ImGui::GetCurrentWindow(), look);
     ImGui::End();
 }
@@ -2929,12 +2938,16 @@ void settings_panel(bool *open) {
     int bv_mode = 0;  // 0 none, 1 in the window, 2 beside it
     float bv_gap = std::max(6.f, base * scale * .6f), bv_width = 0;
     if (bv_view) {
-        float least = base * scale * 30;
-        float room = vp->WorkSize.x - 2 * margin - (sized ? s.custom_size.x : width) - bv_gap;
+        float least = base * scale * 30, list_min = base * scale * 40, want = base * scale * 72;
+        float whole = vp->WorkSize.x - 2 * margin;
+        if (!sized && !s.floating && whole >= list_min + bv_gap + least)  // (the list a little narrower: the drawing is the wider of the two)
+            width = std::clamp(whole - bv_gap - want, list_min, width);
+        float list = sized ? s.custom_size.x : width;
+        float room = whole - list - bv_gap;
         if (s.floating)
-            room = vp->WorkPos.x + vp->WorkSize.x - margin - (s.move_position.x + (sized ? s.custom_size.x : width)) - bv_gap;
+            room = vp->WorkPos.x + vp->WorkSize.x - margin - (s.move_position.x + list) - bv_gap;
         bv_mode = room >= least ? 2 : 1;
-        bv_width = std::min(room, std::max((sized ? s.custom_size.x : width) * 1.2f, base * scale * 46));
+        bv_width = std::min(room, base * scale * 120);
     }
     if (sized) {
         ImVec2 least(std::min(base * scale * 26, vp->WorkSize.x), std::min(base * scale * 14, vp->WorkSize.y));
@@ -3171,8 +3184,20 @@ void settings_panel(bool *open) {
     }
     g_bv_pointing = false;
     if (bv_mode == 1)
-        draw_bind_view(ImGui::GetContentRegionAvail().x, std::max(base * scale * 18, (vp->WorkSize.y - 2 * margin) * .5f));
+        draw_bind_view(ImGui::GetContentRegionAvail().x, std::max(base * scale * 18, (vp->WorkSize.y - 2 * margin) * .5f), false);
     auto rows = rows_for_view(open);
+    if (bv_view && s.view == View::Actions) {  // (the help of the row moved to, or pointed at, for under the drawing)
+        static std::string last_focus, help_row;
+        if (s.focus != last_focus)
+            last_focus = help_row = s.focus;
+        ImVec2 moved = ImGui::GetIO().MouseDelta;
+        if ((moved.x || moved.y) && !s.hovered.empty())
+            help_row = s.hovered;
+        g_bv_help.clear();
+        for (const Row &r : rows)
+            if (r.id == help_row)
+                g_bv_help = help_text(r);
+    }
     std::vector<Row> options;  // (a dropdown open: the controller moves in it)
     if (s.dropdown.open)
         options = dropdown_rows();
