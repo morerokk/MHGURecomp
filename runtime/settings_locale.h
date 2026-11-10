@@ -511,6 +511,18 @@ static inline const char *settings_text(int language, const char *english) {
         {"With Crouch bound, or Dodge and Interact on one input, Dodge works only while moving when the weapon is away (the roll); weapon B-actions with the weapon out are as before.", "Con Agacharse asignado, o Esquivar e Interactuar en una misma entrada, Esquivar solo funciona en movimiento con el arma guardada (la voltereta); las acciones B del arma con el arma desenvainada no cambian."},
         {"May share an input with Dodge: standing still it only interacts, moving it rolls. Never share it with Crouch.", "Puede compartir entrada con Esquivar: quieto solo interactúa, en movimiento rueda. No la compartas con Agacharse."},
         {"While L is held and the item bar is open, A (next) and Y (previous) scroll the bar and do nothing else: only these two count then, whatever the other actions are bound to.", "Con L pulsado y la barra de objetos abierta, A (siguiente) e Y (anterior) solo mueven la barra: solo cuentan estas dos, sea lo que sea lo que tengan asignado las demás acciones."},
+        // the drawing of the controller and the keyboard (Game actions)
+        {"Click to give it to: %s", "Clic para dárselo a: %s"},
+        {"Inputs you press light up. Point at one to see what is on it.", "Las entradas que pulsas se iluminan. Señala una para ver qué tiene asignado."},
+        {"Keys", "Teclas"},
+        {"Pressing Plus and Minus together (Start + Back on a controller) opens this menu. F1 does on a keyboard.", "Pulsar Más y Menos a la vez (Start + Back en un mando) abre este menú. F1 lo hace en un teclado."},
+        {"Select a row of the list first, then click the input for it.", "Selecciona primero una fila de la lista y luego haz clic en la entrada."},
+        {"Settings menu", "Menú de ajustes"},
+        {"Show", "Mostrar"},
+        {"The sticks' directions can't be bound yet: the game reads each stick as a whole.", "Las direcciones de los sticks aún no se pueden asignar: el juego lee cada stick como un todo."},
+        {"Walk slows the left stick's movement while it is held. The keys move the stick, so the game's own Control Type options apply.", "Caminar frena el movimiento del stick izquierdo mientras se mantiene. Las teclas mueven el stick, así que se aplican las opciones de tipo de control del juego."},
+        {"What a key presses on the Switch controller. An action left on Default reads these; an action with a key of its own does not.", "Lo que una tecla pulsa en el mando de Switch. Una acción en Predeterminado lee estas; una acción con tecla propia no."},
+        {"What the list and the drawing show: one part of the game at a time. L1 / R1 on a controller go through them. Keys: the keys that are not actions (movement, the item bar, chat).", "Lo que muestran la lista y el dibujo: una parte del juego cada vez. L1 / R1 en un mando las recorren. Teclas: las teclas que no son acciones (movimiento, barra de objetos, chat)."},
     };
     for (unsigned i = 0; i < sizeof messages / sizeof *messages; ++i)
         if (!strcmp(english, messages[i].en)) return messages[i].es;

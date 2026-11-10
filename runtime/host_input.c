@@ -976,6 +976,26 @@ static int pad_capture_poll(bool capturing) {
 // For the settings menu's Game actions screen: which scheme to show first, and what Tier 0 reads for a Switch button
 int host_input_last_device(void) { return g_last_dev >= 0 ? g_last_dev : pad ? 0 : 1; }
 int host_input_sw_sources(int btn, int dev, int *out, int max) { return act_sw_sources(NULL, btn, dev, out, max); }
+// The inputs that are down right now, for the settings menu's drawing of the controller or the keyboard (it lights them):
+// SDL scancodes, KEY_MOUSE + button, the wheel while a notch is a press, and ACT_PAD + the controller's buttons
+int host_input_held(int *out, int max) {
+    int n = 0;
+    static const int pad_codes[] = {
+        ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH, ACT_PAD + SDL_GAMEPAD_BUTTON_EAST, ACT_PAD + SDL_GAMEPAD_BUTTON_WEST,
+        ACT_PAD + SDL_GAMEPAD_BUTTON_NORTH, ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
+        ACT_PAD_LT, ACT_PAD_RT, ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_STICK, ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_STICK,
+        ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_UP, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_DOWN, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_LEFT,
+        ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_RIGHT, ACT_PAD + SDL_GAMEPAD_BUTTON_START, ACT_PAD + SDL_GAMEPAD_BUTTON_BACK};
+    for (int i = 0; i < (int)(sizeof pad_codes / sizeof *pad_codes) && n < max; i++)
+        if (act_phys_held(NULL, pad_codes[i])) out[n++] = pad_codes[i];
+    for (int sc = 1; sc < SDL_SCANCODE_COUNT && n < max; sc++)
+        if (keys[sc]) out[n++] = sc;
+    for (int b = 1; b <= SDL_BUTTON_X2 && n < max; b++)
+        if (mouse_held >> b & 1) out[n++] = KEY_MOUSE + b;
+    for (int w = KEY_WHEEL_UP; w <= KEY_WHEEL_DOWN && n < max; w++)
+        if (act_phys_held(NULL, w)) out[n++] = w;
+    return n;
+}
 
 static void act_update(uint64_t b, uint64_t script_b, bool suppress) {
     if (!act_enabled()) return;

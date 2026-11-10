@@ -295,7 +295,7 @@ struct Builder {
     }
 };
 
-void build_controller(Layout &L, float fs, float W, float chip_w, float gutter, float pad) {
+void build_controller(Layout &L, float fs, float W, float chip_w, float gutter, float pad, bool columns) {
     float dw = W - 2 * (chip_w + gutter);
     float S = std::min(dw / CW, .085f * fs);
     S = std::max(S, .12f);
@@ -379,6 +379,8 @@ void build_controller(Layout &L, float fs, float W, float chip_w, float gutter, 
     // centre
     b.circle(PAD_BTN(SDL_GAMEPAD_BUTTON_BACK), 432, 272, 17, "", SIDE_B, 1.f, ICON_BACK);
     b.circle(PAD_BTN(SDL_GAMEPAD_BUTTON_START), 568, 272, 17, "", SIDE_B, 1.f, ICON_START);
+    if (!columns)  // (a narrow drawing: chips above and below instead of beside: the upper half of the controller above)
+        for (Shape &sh : L.shapes) sh.side = sh.c.y < b.O.y + 262 * S ? SIDE_T : SIDE_B;
 }
 
 // ---------------------------------------------------------------------------------------------- the keyboard
@@ -753,11 +755,12 @@ void build_layout(Layout &L, const BVParams &p, float W) {
     L.W = W, L.fs = fs, L.scheme = p.scheme;
     float pad = fs * .8f, gutter = fs * 2.6f;
     float gap = fs * .5f;
+    bool columns = p.scheme == BV_CONTROLLER && W >= fs * 64;  // chips beside the controller; narrower: above and below
 
     if (p.scheme == BV_CONTROLLER) {
-        float chip_w = std::clamp(W * .19f, fs * 8.f, fs * 13.f);
-        gutter = fs * 2.2f;
-        build_controller(L, fs, W, chip_w, gutter, pad);
+        float chip_w = columns ? std::clamp(W * .19f, fs * 8.f, fs * 13.f) : 0.f;
+        gutter = columns ? fs * 2.2f : pad;
+        build_controller(L, fs, W, chip_w, gutter, pad, columns);
     } else {
         // keyboard and mouse
         std::vector<KeyDef> keys;
@@ -863,11 +866,11 @@ void build_layout(Layout &L, const BVParams &p, float W) {
         Chip &c = L.chips.back();
         c.shape = it->second;
         c.side = L.shapes[c.shape].side;
-        float max_w = p.scheme == BV_CONTROLLER ? std::clamp(W * .19f, fs * 8.f, fs * 13.f) : fs * 11.f;
-        make_chip(c, in, fs, max_w, p.scheme == BV_CONTROLLER ? 2 : 1);
+        float max_w = columns ? std::clamp(W * .19f, fs * 8.f, fs * 13.f) : fs * 13.5f;
+        make_chip(c, in, fs, max_w, columns ? 2 : 1);
     }
     L.extras = extras;
-    if (p.scheme == BV_CONTROLLER) {  // (the chips of a column are as wide as the widest, so their edges line up)
+    if (columns) {  // (the chips of a column are as wide as the widest, so their edges line up)
         float cw[2] = {0, 0};
         for (const Chip &c : L.chips)
             if (c.side != SIDE_B) cw[c.side == SIDE_L ? 0 : 1] = std::max(cw[c.side == SIDE_L ? 0 : 1], c.size.x);
@@ -887,7 +890,7 @@ void build_layout(Layout &L, const BVParams &p, float W) {
         }
 
     float need = diag_hi_y + pad;
-    if (p.scheme == BV_CONTROLLER) {
+    if (columns) {
         // the columns of chips beside the drawing, in the order of the inputs they name
         for (int pass = 0; pass < 2; pass++) {
             std::vector<Chip *> col[2];
@@ -1085,6 +1088,18 @@ BVResult bv_draw(const char *id, float width, float height, const BVParams &p) {
             if (p.held[i] == code) return true;
         return false;
     };
+    auto is_sel = [&](int code) {
+        if (code && code == p.selected_input) return true;
+        for (int i = 0; i < p.n_selected; i++)
+            if (p.selected_list[i] == code) return true;
+        return false;
+    };
+    auto is_foc = [&](int code) {
+        if (code && code == p.focus_input) return true;
+        for (int i = 0; i < p.n_focus; i++)
+            if (p.focus_list[i] == code) return true;
+        return false;
+    };
     std::unordered_map<int, bool> action_selected;
     for (int i = 0; i < p.n_inputs; i++)
         for (int k = 0; k < p.inputs[i].n; k++)
@@ -1111,21 +1126,16 @@ BVResult bv_draw(const char *id, float width, float height, const BVParams &p) {
         t.c = t.c + off, t.lo = t.lo + off, t.hi = t.hi + off;
         return t;
     };
-    int sel_shape = -1, focus_shape = -1;
-    for (size_t i = 0; i < L.shapes.size(); i++) {
-        if (L.shapes[i].code == p.selected_input) sel_shape = (int)i;
-        if (L.shapes[i].code == p.focus_input) focus_shape = (int)i;
-    }
 
     // the arrows, under the inputs
     auto emphasised = [&](const Chip &c) {
-        return c.code == p.selected_input || c.code == p.focus_input || (hover >= 0 && L.shapes[hover].code == c.code) || is_held(c.code);
+        return is_sel(c.code) || is_foc(c.code) || (hover >= 0 && L.shapes[hover].code == c.code) || is_held(c.code);
     };
     for (int pass = 0; pass < 2; pass++)
         for (const Chip &c : L.chips) {
             bool em = emphasised(c);
             if ((pass == 1) != em) continue;
-            bool sel = c.code == p.selected_input;
+            bool sel = is_sel(c.code);
             ImU32 col = sel ? C.accent_bright : c.conflict ? C.warn : em ? C.accent : C.text_dim;
             float a = em ? 1.f : .62f;
             Poly r = c.route;
@@ -1141,7 +1151,7 @@ BVResult bv_draw(const char *id, float width, float height, const BVParams &p) {
         Shape s = shifted(s0);
         auto cit = chip_of.find(s0.code);
         const Chip *chip = cit != chip_of.end() ? &L.chips[cit->second] : nullptr;
-        bool bound = chip != nullptr, sel = s0.code == p.selected_input, foc = s0.code == p.focus_input;
+        bool bound = chip != nullptr, sel = is_sel(s0.code), foc = is_foc(s0.code);
         bool hov = (int)i == hover, held = is_held(s0.code), conflict = chip && chip->conflict;
         float spread = fs * (sel ? 1.7f : .8f);
         ImU32 outline = bound ? C.text : C.line;
@@ -1179,7 +1189,7 @@ BVResult bv_draw(const char *id, float width, float height, const BVParams &p) {
     // the dots where the arrows leave the inputs
     for (const Chip &c : L.chips) {
         bool em = emphasised(c);
-        bool sel = c.code == p.selected_input;
+        bool sel = is_sel(c.code);
         ImU32 col = c.conflict ? C.warn : C.text;
         ImVec2 d = c.dot + off;
         float r = fs * (em ? .26f : .2f);
@@ -1192,7 +1202,7 @@ BVResult bv_draw(const char *id, float width, float height, const BVParams &p) {
     for (const Chip &c : L.chips) {
         ImVec2 lo = c.pos + off, hi = lo + c.size;
         bool em = emphasised(c);
-        bool sel = c.code == p.selected_input;
+        bool sel = is_sel(c.code);
         ImU32 border = c.conflict ? C.warn : sel ? C.accent_bright : em ? C.accent : with_alpha(C.line, .85f);
         ImU32 fillc = with_alpha(mix(C.panel | 0xFF000000u, C.line, .16f), .96f);
         float rr = fs * .38f;
@@ -1263,6 +1273,5 @@ BVResult bv_draw(const char *id, float width, float height, const BVParams &p) {
         for (size_t i = 0; i < lines.size(); i++)
             fg->AddText(ImGui::GetFont(), ts, at + ImVec2(pd, pd + i * ts * 1.25f), i == 0 ? C.accent_bright : C.text, lines[i].c_str());
     }
-    (void)sel_shape, (void)focus_shape;
     return res;
 }

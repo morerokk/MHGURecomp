@@ -75,6 +75,7 @@ bool act_crouch_split(void);
 bool act_crouch_split_in(const struct ActProfile *p);
 uint32_t act_virtual_bits(uint64_t active);  // the virtual bits the gameplay word gets (any thread): 0 unless split
 int act_default_switch(int id);           // the Switch button (input.h BTN_*, ACT_KCR, ACT_KCZR) Tier 0 gives it; -1: none
+int act_default_button(int id, bool dash_zr);  // the same, the dash role turned into R or ZR: a Switch button (input.h BTN_*); -1: none
 const char *act_shared_with(int id);      // "" or the actions that are the same game input (documented, not an error)
 // The actions whose binding this one uses while it has none of its own, in order (-1 ends the list): TownInteract
 // follows MenuConfirm, then Interact, which follows AttackA. With none bound it is the default (Tier 0).

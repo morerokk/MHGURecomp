@@ -148,6 +148,7 @@ static int role_btn(int btn, bool dash_zr) {
     if (btn == ROLE_OTHER || btn == ACT_KCZR) return dash_zr ? S_R : S_ZR;
     return btn;
 }
+int act_default_button(int id, bool dash_zr) { return defs[id].def_sw < 0 ? -1 : role_btn(defs[id].def_sw, dash_zr); }
 uint32_t act_ew_bits(int id, bool dash_zr) {
     const ActDef *d = &defs[id];
     if (d->btn == ROLE_VIRTUAL) return 0;

@@ -1,6 +1,7 @@
 #include "settings_panel.h"
 #include "actions.h"
 #include "android_files.h"
+#include "binding_view.h"
 #include "config.h"
 #include "menu_confirm.h"
 #include "settings_locale.h"
@@ -21,8 +22,11 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <climits>
 #include <cstring>
+#include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <strings.h>
@@ -96,6 +100,7 @@ struct State {
     bool position_override = false;
     int capture_bind = -1;     // the keybind (BIND_*) a key is being chosen for; -1: the chat key
     bool capture_add = false;  // the key chosen is that keybind's second, else its only one
+    bool capture_from_actions = false;  // the keybind or chat key is being chosen from the Game actions screen (Keys)
 } s;
 std::atomic<bool> request_exit, request_back, is_dirty, is_confirming, is_capturing, capture_mouse, capture_wheel,
     capture_pointing, capture_pad;
@@ -104,6 +109,7 @@ std::atomic<bool> request_exit, request_back, is_dirty, is_confirming, is_captur
 // weapon, 1..15 that class's own bindings; capture: the action an input is being chosen for (-1: none)
 struct ActionTab {
     ActProfile draft, saved;
+    int tab = 0;  // what the list and the drawing show: an index into tab_defs()
     int dev = 0, weapon = 0, capture = -1, capture_row = -1, layout = ACT_LAYOUT_SIMPLE;  // layout: the one shown (a profile without a Layout key is Advanced once it has bindings: not while it is edited)
      // (capture_row: a merged row of the Simple layout)
     bool capture_add = false;
@@ -735,6 +741,7 @@ void capture(int bind, bool add) {
     acts().capture = -1;
     s.capture_bind = bind;
     s.capture_add = add;
+    s.capture_from_actions = s.view == View::Actions;
     captured_key = -1;
     push(View::KeyCapture, "capture.cancel");
 }
@@ -753,17 +760,10 @@ void chat_key_row(std::vector<Row> &rows) {
     r.activate = []() { capture(-1, false); };
     rows.push_back(std::move(r));
 }
-// The Keybinds submenu: a row per keybind (its keys; red where one does something else too), the chat key
-void keybind_rows(std::vector<Row> &r) {
-    for (int i = 0; i < BINDS; i++) {
-        if (i == BIND_MOVE_UP)
-            header(r, "bind.movement", tr("Movement"));
-        if (i == BIND_A)
-            header(r, "bind.buttons", tr("Buttons"));
-        if (i == BIND_ITEM_LEFT)
-            header(r, "bind.items", tr("Item bar"));
+// One keybind as a row (the Keybinds submenu's, and the Keys of the Game actions screen)
+Row bind_row(int i, const std::string &id) {
         Row row;
-        row.id = "bind." + std::to_string(i);
+        row.id = id;
         row.title = tr(bind_titles[i]);
         for (int k = 0; k < BIND_KEYS; k++) {
             int code = s.draft.binds[i][k];
@@ -801,7 +801,18 @@ void keybind_rows(std::vector<Row> &r) {
                     capture(i, v == 1);
             });
         };
-        r.push_back(std::move(row));
+    return row;
+}
+// The Keybinds submenu: a row per keybind (its keys; red where one does something else too), the chat key
+void keybind_rows(std::vector<Row> &r) {
+    for (int i = 0; i < BINDS; i++) {
+        if (i == BIND_MOVE_UP)
+            header(r, "bind.movement", tr("Movement"));
+        if (i == BIND_A)
+            header(r, "bind.buttons", tr("Buttons"));
+        if (i == BIND_ITEM_LEFT)
+            header(r, "bind.items", tr("Item bar"));
+        r.push_back(bind_row(i, "bind." + std::to_string(i)));
     }
     header(r, "bind.other", tr("Chat"));
     chat_key_row(r);
@@ -863,6 +874,50 @@ void action_capture(int id, bool add) {
 int panel_sources(void *, int btn, int dev, int *out, int max);
 const char *scheme_name(int dev);
 void row_chosen(int row, int code, uint64_t changed);
+bool bind_take(int key);
+// Takes an input for the action or merged row being set (acts().capture, capture_row, capture_add). false: refused
+// (s.error says why when it is worth saying)
+bool action_take(int code) {
+    ActionTab &a = acts();
+    if (code <= 0 || act_input_device(code) != a.dev)
+        return false;
+    if (code >= BV_STICK_L_UP && code <= BV_STICK_R_RIGHT) {
+        s.error = tr("The sticks' directions can't be bound yet: the game reads each stick as a whole.");
+        return false;
+    }
+    const char *reserved = code < SDL_SCANCODE_COUNT ? key_reserved(code) : nullptr;
+    if (reserved) {
+        s.error = fmt("That key is the recomp's own (%s).", tr(reserved));
+        return false;
+    }
+    ActBinding row_binding, &b = a.capture_row >= 0 ? row_binding : action_slot(a.capture);
+    if (a.capture_row >= 0) {
+        ActRowState st = act_row_state(&a.draft, a.dev, a.capture_row, &row_binding);
+        if (!a.capture_add || st != ACT_ROW_BOUND)
+            memset(&row_binding, 0, sizeof row_binding);
+        row_binding.set = true;
+    } else if (!a.capture_add || !b.set || !b.n) {
+        memset(&b, 0, sizeof b);
+        b.set = true;
+    }
+    bool have = false;
+    for (int i = 0; i < b.n; i++)
+        have |= b.alt[i].n == 1 && b.alt[i].code[0] == code;
+    if (!have && b.n < ACT_ALTS) {
+        b.alt[b.n].n = 1;
+        b.alt[b.n].code[0] = code;
+        b.n++;
+    }
+    if (a.capture_row >= 0) {  // Simple: the row's actions, then the other rows lose the input
+        int row = a.capture_row;
+        act_row_set(&a.draft, a.dev, row, &row_binding);
+        uint64_t took = act_row_claim(&a.draft, a.dev, row, code, panel_sources, nullptr, input_view_dash_zr());
+        row_chosen(row, code, took);
+        return true;
+    }
+    action_touch();
+    return true;
+}
 void action_capture_rows(std::vector<Row> &r) {
     ActionTab &a = acts();
     int code = captured_key.exchange(-1);
@@ -870,46 +925,15 @@ void action_capture_rows(std::vector<Row> &r) {
     bool done = false;
     if (code == SDL_SCANCODE_ESCAPE || (pad && SDL_GetTicks() - a.capture_start > 8000))
         done = true;
-    else if (code > 0 && act_input_device(code) == a.dev) {
-        const char *reserved = code < SDL_SCANCODE_COUNT ? key_reserved(code) : nullptr;
-        if (reserved)
-            s.error = fmt("That key is the recomp's own (%s).", tr(reserved));
-        else {
-            ActBinding row_binding, &b = a.capture_row >= 0 ? row_binding : action_slot(a.capture);
-            if (a.capture_row >= 0) {
-                ActRowState st = act_row_state(&a.draft, a.dev, a.capture_row, &row_binding);
-                if (!a.capture_add || st != ACT_ROW_BOUND)
-                    memset(&row_binding, 0, sizeof row_binding);
-                row_binding.set = true;
-            } else if (!a.capture_add || !b.set || !b.n) {
-                memset(&b, 0, sizeof b);
-                b.set = true;
-            }
-            bool have = false;
-            for (int i = 0; i < b.n; i++)
-                have |= b.alt[i].n == 1 && b.alt[i].code[0] == code;
-            if (!have && b.n < ACT_ALTS) {
-                b.alt[b.n].n = 1;
-                b.alt[b.n].code[0] = code;
-                b.n++;
-            }
-            if (a.capture_row >= 0) {  // Simple: the row's actions, then the other rows lose the input
-                int row = a.capture_row;
-                act_row_set(&a.draft, a.dev, row, &row_binding);
-                uint64_t took = act_row_claim(&a.draft, a.dev, row, code, panel_sources, nullptr, input_view_dash_zr());
-                a.capture = -1, a.capture_row = -1;
-                pop();
-                row_chosen(row, code, took);
-                return;
-            }
-            action_touch();
-            done = true;
-        }
-    }
+    else if (code > 0 && action_take(code))
+        done = true;
     if (done) {
+        std::string note = s.error;  // (what the choice did to the other rows: pop() clears it)
         a.capture = -1;
         a.capture_row = -1;
         pop();
+        if (code != SDL_SCANCODE_ESCAPE)
+            s.error = note;
         return;
     }
     action(r, "capture.cancel", tr("Cancel"), []() {
@@ -980,6 +1004,58 @@ void row_chosen(int row, int code, uint64_t changed) {
             names += (names.empty() ? "" : ", ") + std::string(tr(act_row(i)->label));
     s.error = fmt("Taken from: %s. Choose a new button for it.", names.c_str());
 }
+// What the list and the drawing show: a context at a time (Simple merges the hunt and the town), and the keys that are not
+// actions (movement, the item bar, chat) with the keyboard
+enum { TAB_HUNT, TAB_TOWN, TAB_MENUS, TAB_KEYS };
+struct TabDef {
+    int kind;
+    const char *label;
+};
+std::vector<TabDef> tab_defs() {
+    std::vector<TabDef> t;
+    if (acts().layout == ACT_LAYOUT_SIMPLE) {
+        t.push_back({TAB_HUNT, "Hunt and town"});
+        t.push_back({TAB_MENUS, "Menus"});
+    } else {
+        t.push_back({TAB_HUNT, "Hunt"});
+        t.push_back({TAB_TOWN, "Town and Hub"});
+        t.push_back({TAB_MENUS, "Menus"});
+    }
+    if (acts().dev == 1)
+        t.push_back({TAB_KEYS, "Keys"});
+    return t;
+}
+int tab_kind() {
+    std::vector<TabDef> t = tab_defs();
+    acts().tab = std::clamp(acts().tab, 0, (int)t.size() - 1);
+    return t[acts().tab].kind;
+}
+int tab_view(int kind) { return kind == TAB_TOWN ? ACT_VIEW_TOWN : kind == TAB_MENUS ? ACT_VIEW_MB2 : ACT_VIEW_MB1; }
+void tab_step(int d) {
+    int n = (int)tab_defs().size();
+    acts().tab = (acts().tab + d + n) % n;
+    focus("act.tab");
+}
+// The keys of the Keys tab: the movement, the item bar and the chat key; Advanced also the keys of the Switch buttons
+bool key_in_simple(int i) { return i <= BIND_WALK || i == BIND_ITEM_LEFT || i == BIND_ITEM_RIGHT; }
+void key_rows(std::vector<Row> &r) {
+    bool simple = acts().layout == ACT_LAYOUT_SIMPLE;
+    header(r, "key.h.move", tr("Movement"));
+    for (int i = BIND_MOVE_UP; i <= BIND_WALK; i++)
+        r.push_back(bind_row(i, "key." + std::to_string(i)));
+    r.back().help = tr("Walk slows the left stick's movement while it is held. The keys move the stick, so the game's own Control Type options apply.");
+    header(r, "key.h.items", tr("Item bar"));
+    for (int i = BIND_ITEM_LEFT; i <= BIND_ITEM_RIGHT; i++)
+        r.push_back(bind_row(i, "key." + std::to_string(i)));
+    header(r, "key.h.chat", tr("Chat"));
+    chat_key_row(r);
+    if (!simple) {
+        header(r, "key.h.buttons", tr("Buttons"));
+        for (int i = BIND_A; i <= BIND_RSTICK; i++)
+            r.push_back(bind_row(i, "key." + std::to_string(i)));
+        r.back().help = tr("What a key presses on the Switch controller. An action left on Default reads these; an action with a key of its own does not.");
+    }
+}
 void simple_rows(std::vector<Row> &r) {
     ActionTab &a = acts();
     ActProfile &p = a.draft;
@@ -998,6 +1074,8 @@ void simple_rows(std::vector<Row> &r) {
     int last_group = -1;
     for (int i = 0; i < act_row_count(); i++) {
         const ActRow *ar = act_row(i);
+        if (ar->group != (tab_kind() == TAB_MENUS ? 1 : 0))
+            continue;
         if (ar->group != last_group) {
             header(r, "act.g" + std::to_string(ar->group), tr(act_row_group_name(ar->group)));
             last_group = ar->group;
@@ -1035,17 +1113,20 @@ void simple_rows(std::vector<Row> &r) {
 void advanced_rows(std::vector<Row> &r) {
     ActionTab &a = acts();
     ActProfile &p = a.draft;
-    std::vector<std::string> weapons = {tr("All weapons")};
-    for (int w = 0; w < ACT_WEAPONS; w++)
-        weapons.push_back(act_weapon_name(w));
-    add_choice(r, "act.weapon", "For", a.weapon, weapons, [](int v) { acts().weapon = v; });
-    r.back().help = tr("All weapons, or one weapon class: a binding set for a class is used instead of the general one while a hunter holds that weapon.");
-    int var = a.weapon;
+    int kind = tab_kind();
+    if (kind == TAB_HUNT) {
+        std::vector<std::string> weapons = {tr("All weapons")};
+        for (int w = 0; w < ACT_WEAPONS; w++)
+            weapons.push_back(act_weapon_name(w));
+        add_choice(r, "act.weapon", "For", a.weapon, weapons, [](int v) { acts().weapon = v; });
+        r.back().help = tr("All weapons, or one weapon class: a binding set for a class is used instead of the general one while a hunter holds that weapon.");
+    }
+    int var = kind == TAB_HUNT ? a.weapon : 0;
     static const int views[] = {ACT_VIEW_MB1, ACT_VIEW_TOWN, ACT_VIEW_MB2};
     static const char *const titles[] = {"Hunt", "Town and Hub", "Menus"};
     for (int vi = 0; vi < 3; vi++) {
-        if (var > 0 && views[vi] != ACT_VIEW_MB1)
-            continue;  // (a weapon class only matters in a hunt)
+        if (views[vi] != tab_view(kind))
+            continue;  // (one context at a time)
         header(r, "act.h" + std::to_string(vi), tr(titles[vi]));
         int ids[ACT_COUNT], n = act_order(views[vi], ids, ACT_COUNT);
         for (int k = 0; k < n; k++) {
@@ -1135,20 +1216,375 @@ void action_rows(std::vector<Row> &r) {
                    acts().draft.scheme = v == 0 ? ACT_SCHEME_PAD : ACT_SCHEME_KBM;
                });
     r.back().help = tr("Which bindings the list shows and edits: the controller's, or the keyboard and mouse's. They are separate: an action can have both.");
-    if (!simple) {
-        toggle("act.sheathed", "Attack A also interacts", &p.sheathed_attack,
-               "Only matters once Interact has a binding of its own. Off: with the weapon away only Interact presses the game's A (gather, carve, talk), with it out only Attack A does. On: Attack A presses it in both cases.");
-        toggle("act.split", "Split Dash from weapon R-action", &p.split,
-               "On: Dash and the weapon's R-action (guard, charge, aim) are two actions you can put on two buttons. Binding Weapon R-action turns it on by itself. Off: they are one button, as in the game.");
+    int kind = tab_kind();
+    {
+        std::vector<std::string> names;
+        for (const TabDef &d : tab_defs())
+            names.push_back(tr(d.label));
+        add_choice(r, "act.tab", "Show", a.tab, names, [](int v) { acts().tab = v; });
+        r.back().help = tr("What the list and the drawing show: one part of the game at a time. L1 / R1 on a controller go through them. Keys: the keys that are not actions (movement, the item bar, chat).");
+    }
+    if (kind == TAB_KEYS)
+        key_rows(r);
+    else if (!simple) {
+        if (kind == TAB_HUNT) {
+            toggle("act.sheathed", "Attack A also interacts", &p.sheathed_attack,
+                   "Only matters once Interact has a binding of its own. Off: with the weapon away only Interact presses the game's A (gather, carve, talk), with it out only Attack A does. On: Attack A presses it in both cases.");
+            toggle("act.split", "Split Dash from weapon R-action", &p.split,
+                   "On: Dash and the weapon's R-action (guard, charge, aim) are two actions you can put on two buttons. Binding Weapon R-action turns it on by itself. Off: they are one button, as in the game.");
+        }
         advanced_rows(r);
     } else
         simple_rows(r);
+    if (a.dev == 0 && kind == TAB_MENUS) {
+        header(r, "act.h.menu", tr("Settings menu"));
+        add_bool(r, "menu.chord", "Plus + Minus opens this menu", &s.draft.menu_chord, ini("MenuChord"));
+        r.back().help = tr("Pressing Plus and Minus together (Start + Back on a controller) opens this menu. F1 does on a keyboard.");
+    }
     action(r, "act.reset", tr("Reset game actions"), []() {
         ActProfile &p = acts().draft;
         memset(p.dev, 0, sizeof p.dev);
     });
     r.back().help = tr("Every action of both devices and all weapons back to Default.");
     action(r, "act.back", tr("Back"), []() { pop(); });
+}
+// ---- the drawing of the controller, or of the keyboard and the mouse, beside the list (runtime/binding_view.h)
+// What the focused row (or the one being set) reads is lit on it with an arrow to its label; the row under the pointer is
+// ringed; every input down right now glows; an input clicked on it goes to the row being set.
+const int BV_KEY_CHAT = 999;  // (the chat key's id among the keys of the Keys tab)
+bool g_bv_pointing;           // the pointer is on the drawing: a click there is the drawing's, not a button chosen
+std::string short_label(const std::string &full) {
+    std::string t = full;
+    size_t cut = t.find_first_of(",:");
+    if (cut != std::string::npos)
+        t.resize(cut);
+    size_t par = t.rfind(" (");
+    if (par != std::string::npos && !t.empty() && t.back() == ')')
+        t.resize(par);
+    while (!t.empty() && t.back() == ' ')
+        t.pop_back();
+    return t;
+}
+// The physical inputs of a device a binding reads (a sw: token is what Tier 0 gives that Switch button), and those an
+// action reads while it has no binding (Tier 0's)
+void binding_inputs(const ActBinding &b, int dev, std::vector<int> &out) {
+    bool zr = input_view_dash_zr();
+    for (int a = 0; a < b.n; a++)
+        for (int k = 0; k < b.alt[a].n; k++) {
+            int c = b.alt[a].code[k];
+            if (c >= ACT_SW && c < ACT_SW + 0x60) {
+                int d = (c - ACT_SW) / 0x20, btn = (c - ACT_SW) % 0x20;
+                if (btn == ACT_KCR)
+                    btn = zr ? 9 : 7;
+                else if (btn == ACT_KCZR)
+                    btn = zr ? 7 : 9;
+                int buf[16];
+                if (d == 2 || d == dev) {
+                    int n = host_input_sw_sources(btn, dev, buf, 16);
+                    out.insert(out.end(), buf, buf + n);
+                }
+            } else if (act_input_device(c) == dev)
+                out.push_back(c);
+        }
+}
+void default_inputs(int id, int dev, std::vector<int> &out) {
+    int btn = act_default_button(id, input_view_dash_zr());
+    if (btn < 0)
+        return;
+    int buf[16];
+    int n = host_input_sw_sources(btn, dev, buf, 16);
+    out.insert(out.end(), buf, buf + n);
+}
+// What a row of the list is: an action (Advanced), a merged row (Simple), a keybind or the chat key (Keys)
+struct FocusTarget {
+    int kind;  // 0 none, 1 action, 2 merged row, 3 keybind, 4 chat key
+    int key;
+};
+FocusTarget focus_target(const std::string &id) {
+    if (id.rfind("act.row.", 0) == 0) {
+        for (int i = 0; i < act_row_count(); i++)
+            if (id.compare(8, std::string::npos, act_row(i)->name) == 0)
+                return {2, i};
+    } else if (id.rfind("act.", 0) == 0) {
+        int a = act_find(id.c_str() + 4);
+        if (a >= 0)
+            return {1, a};
+    } else if (id.rfind("key.", 0) == 0 && id.size() > 4 && id[4] >= '0' && id[4] <= '9')
+        return {3, atoi(id.c_str() + 4)};
+    else if (id == "chat.key")
+        return {4, BV_KEY_CHAT};
+    return {0, -1};
+}
+int key_of(const std::string &id, int kind) {
+    FocusTarget t = focus_target(id);
+    if (kind == TAB_KEYS)
+        return t.kind == 3 || t.kind == 4 ? t.key : -1;
+    if (acts().layout == ACT_LAYOUT_SIMPLE)
+        return t.kind == 2 ? t.key : -1;
+    return t.kind == 1 ? t.key : -1;
+}
+int selected_key(int kind) {
+    ActionTab &a = acts();
+    if (s.view == View::KeyCapture) {
+        if (a.capture >= 0)
+            return a.capture_row >= 0 ? a.capture_row : a.capture;
+        return s.capture_bind >= 0 ? s.capture_bind : BV_KEY_CHAT;
+    }
+    return key_of(s.focus, kind);
+}
+std::string key_label(int key, int kind) {
+    if (key < 0)
+        return "";
+    if (kind == TAB_KEYS)
+        return key == BV_KEY_CHAT ? tr("Chat key") : tr(bind_titles[key]);
+    if (acts().layout == ACT_LAYOUT_SIMPLE)
+        return short_label(tr(act_row(key)->label));
+    return short_label(tr(act_label(key)));
+}
+struct BvEntry {
+    int key;
+    std::string label;
+    int from;
+};
+struct BvStore {
+    std::deque<std::string> text;
+    std::vector<BVAction> acts;
+    std::vector<BVInput> ins;
+    std::map<int, std::vector<int>> inputs_of;  // a row's key -> the inputs it reads
+};
+// The inputs of the shown part and what is on each, from the draft (so the drawing follows an edit at once)
+void bv_collect(BvStore &st, int kind, int sel_key) {
+    ActionTab &a = acts();
+    const ActProfile &p = a.draft;
+    int dev = a.dev;
+    bool simple = a.layout == ACT_LAYOUT_SIMPLE;
+    std::map<int, std::vector<BvEntry>> by_code;
+    auto add = [&](int code, int key, const std::string &label, int from) {
+        std::vector<BvEntry> &v = by_code[code];
+        for (const BvEntry &e : v)
+            if (e.key == key)
+                return;
+        v.push_back({key, label, from});
+        st.inputs_of[key].push_back(code);
+    };
+    if (kind == TAB_KEYS) {
+        for (int i = 0; i < BINDS; i++) {
+            if (simple && !key_in_simple(i))
+                continue;
+            for (int k = 0; k < BIND_KEYS; k++)
+                if (s.draft.binds[i][k])
+                    add(s.draft.binds[i][k], i, tr(bind_titles[i]), i);
+        }
+        SDL_Scancode chat = SDL_GetScancodeFromName(s.draft.chat_key);
+        if (chat != SDL_SCANCODE_UNKNOWN)
+            add((int)chat, BV_KEY_CHAT, tr("Chat key"), BV_KEY_CHAT);
+    } else {
+        struct Item {
+            int key, from;
+            std::string label;
+            bool by_default;
+            std::vector<int> codes;
+        };
+        std::vector<Item> items;
+        if (simple) {
+            for (int i = 0; i < act_row_count(); i++) {
+                const ActRow *ar = act_row(i);
+                if (ar->group != (kind == TAB_MENUS ? 1 : 0))
+                    continue;
+                ActBinding shown;
+                ActRowState st2 = act_row_state(&p, dev, i, &shown);
+                Item it{i, i, short_label(tr(ar->label)), st2 == ACT_ROW_DEFAULT, {}};
+                if (st2 == ACT_ROW_BOUND)
+                    binding_inputs(shown, dev, it.codes);
+                else if (st2 == ACT_ROW_DEFAULT)
+                    default_inputs(ar->head, dev, it.codes);
+                else if (st2 == ACT_ROW_CUSTOM) {
+                    int from = ar->head;
+                    const ActBinding *b = act_effective(&p, dev, ar->head, 0, &from);
+                    if (b)
+                        binding_inputs(*b, dev, it.codes);
+                    else
+                        it.by_default = true, default_inputs(ar->head, dev, it.codes);
+                }
+                items.push_back(it);
+            }
+        } else {
+            int view = tab_view(kind), var = kind == TAB_HUNT ? a.weapon : 0;
+            int ids[ACT_COUNT], n = act_order(view, ids, ACT_COUNT);
+            for (int k = 0; k < n; k++) {
+                int id = ids[k], from = id;
+                const ActBinding *b = act_effective(&p, dev, id, var, &from);
+                Item it{id, from, short_label(tr(act_label(id))), b == nullptr, {}};
+                if (b)
+                    binding_inputs(*b, dev, it.codes);
+                else
+                    default_inputs(id, dev, it.codes);
+                items.push_back(it);
+            }
+        }
+        // an input some action has chosen is no longer what the others read by default
+        for (const Item &it : items)
+            for (int code : it.codes) {
+                bool taken = false;
+                if (it.by_default)
+                    for (const Item &o : items)
+                        if (!o.by_default && o.from != it.from && std::find(o.codes.begin(), o.codes.end(), code) != o.codes.end())
+                            taken = true;
+                if (!taken)
+                    add(code, it.key, it.label, it.from);
+            }
+    }
+    auto conflict = [&](const std::vector<BvEntry> &e) {
+        for (size_t i = 0; i < e.size(); i++)
+            for (size_t j = i + 1; j < e.size(); j++) {
+                if (e[i].from == e[j].from)
+                    continue;
+                if (kind == TAB_KEYS)
+                    return true;
+                if (simple ? act_rows_clash(&p, dev, e[i].key, e[j].key) : !shares_by_design(e[i].key, e[j].key, p.sheathed_attack))
+                    return true;
+            }
+        return false;
+    };
+    size_t total = 0;
+    for (auto &kv : by_code)
+        total += kv.second.size();
+    st.acts.reserve(total);
+    st.ins.reserve(by_code.size());
+    for (auto &kv : by_code) {
+        size_t first = st.acts.size();
+        for (const BvEntry &e : kv.second) {
+            st.text.push_back(e.label);
+            st.acts.push_back({e.key, st.text.back().c_str(), e.key == sel_key});
+        }
+        st.ins.push_back({kv.first, st.acts.data() + first, (int)kv.second.size(), conflict(kv.second)});
+    }
+}
+BVColors bv_colors(const Theme &look) {
+    ImU32 live = s.draft.menu_theme == THEME_BLUE ? IM_COL32(120, 240, 170, 255)
+                 : s.draft.menu_theme == THEME_HUNTER ? IM_COL32(110, 220, 255, 255) : IM_COL32(150, 214, 150, 255);
+    return bv_colors_from(look.panel | IM_COL32_A_MASK, look.text_dim, look.text, look.text_dim, look.accent,
+                          look.accent_bright, look.warn, live);
+}
+// An input clicked on the drawing: while one is being chosen it is that press; else the focused row takes it
+void bv_click(int code) {
+    if (s.view == View::KeyCapture) {
+        captured_key = code;
+        return;
+    }
+    if (s.view != View::Actions)
+        return;
+    FocusTarget t = focus_target(s.focus);
+    ActionTab &a = acts();
+    s.error.clear();
+    if (t.kind == 1 || t.kind == 2) {
+        a.capture = t.kind == 1 ? t.key : act_row(t.key)->head;
+        a.capture_row = t.kind == 2 ? t.key : -1;
+        a.capture_add = false;
+        action_take(code);
+        a.capture = -1;
+        a.capture_row = -1;
+    } else if (t.kind == 3 || t.kind == 4) {
+        s.capture_bind = t.kind == 3 ? t.key : -1;
+        s.capture_add = false;
+        bind_take(code);
+        s.capture_bind = -1;
+    } else
+        s.error = tr("Select a row of the list first, then click the input for it.");
+}
+// The tabs over the drawing: what the list and the drawing show (L1 / R1 on a controller)
+void draw_bind_tabs(float width) {
+    ActionTab &a = acts();
+    const Theme &look = theme();
+    std::vector<TabDef> defs = tab_defs();
+    tab_kind();  // (the current tab is one of them)
+    float fs = ImGui::GetFontSize(), gap = fs * .4f, h = fs * 2.f;
+    ImVec2 at = ImGui::GetCursorScreenPos();
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    float icon = fs * 1.5f, x = at.x + icon + gap * 2, room = width - 2 * (icon + gap * 2);
+    std::vector<float> pw;
+    float total = 0;
+    for (const TabDef &d : defs) {
+        pw.push_back(ImGui::CalcTextSize(tr(d.label)).x + fs * 1.6f);
+        total += pw.back() + gap;
+    }
+    float shrink = total > room ? room / total : 1.f;
+    SettingsIcons::draw(dl, ImVec2(at.x, at.y + (h - fs) * .5f), fs, s.draft.button_icons, SettingsIcons::Left, 0);
+    SettingsIcons::draw(dl, ImVec2(at.x + width - icon, at.y + (h - fs) * .5f), fs, s.draft.button_icons, SettingsIcons::Right, 0);
+    bool capturing = s.view == View::KeyCapture;
+    for (int i = 0; i < (int)defs.size(); i++) {
+        float w = pw[i] * shrink;
+        ImGui::SetCursorScreenPos(ImVec2(x, at.y));
+        ImGui::PushID(i);
+        ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+        bool clicked = ImGui::InvisibleButton("##tab", ImVec2(w, h));
+        ImGui::PopItemFlag();
+        bool hovered = ImGui::IsItemHovered();
+        ImGui::PopID();
+        g_bv_pointing |= hovered;
+        bool active = a.tab == i;
+        dl->AddRectFilled(ImVec2(x, at.y), ImVec2(x + w, at.y + h),
+                          active ? look.tab_active : hovered && !capturing ? look.row_hover : look.tab, look.rounding);
+        const char *name = tr(defs[i].label);
+        ImVec2 sz = ImGui::CalcTextSize(name);
+        float size = fs * (sz.x > w - fs * .4f ? (w - fs * .4f) / sz.x : 1.f);
+        dl->AddText(ImGui::GetFont(), size, ImVec2(x + (w - sz.x * size / fs) * .5f, at.y + (h - size) * .5f),
+                    active ? look.accent_bright : look.text, name);
+        if (active)
+            dl->AddRectFilled(ImVec2(x + w * .15f, at.y + h - 3), ImVec2(x + w * .85f, at.y + h), look.accent);
+        if (clicked && !capturing) {
+            a.tab = i;
+            focus("act.tab");
+        }
+        x += w + gap;
+    }
+    ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + h + gap));
+    ImGui::Dummy(ImVec2(width, 1));
+}
+void draw_bind_view(float width, float max_h) {
+    ActionTab &a = acts();
+    const Theme &look = theme();
+    int kind = tab_kind();
+    draw_bind_tabs(width);
+    int sel_key = selected_key(kind);
+    BvStore st;
+    bv_collect(st, kind, sel_key);
+    std::vector<int> sel, foc;
+    auto it = st.inputs_of.find(sel_key);
+    if (sel_key >= 0 && it != st.inputs_of.end())
+        sel = it->second;
+    int hov_key = s.view == View::Actions ? key_of(s.hovered, kind) : -1;
+    it = st.inputs_of.find(hov_key);
+    if (hov_key >= 0 && hov_key != sel_key && it != st.inputs_of.end())
+        foc = it->second;
+    int held[64];
+    int n_held = host_input_held(held, 64);
+    std::string hint = sel_key >= 0 ? fmt("Click to give it to: %s", key_label(sel_key, kind).c_str()) : "";
+    BVParams p;
+    p.scheme = a.dev == 0 ? BV_CONTROLLER : BV_KEYBOARD;
+    p.inputs = st.ins.data(), p.n_inputs = (int)st.ins.size();
+    p.selected_list = sel.data(), p.n_selected = (int)sel.size();
+    p.focus_list = foc.data(), p.n_focus = (int)foc.size();
+    p.capturing = s.view == View::KeyCapture;
+    p.held = held, p.n_held = n_held;
+    p.time_s = (float)ImGui::GetTime();
+    p.click_hint = hint.empty() ? nullptr : hint.c_str();
+    p.colors = bv_colors(look);
+    p.font_px = ImGui::GetFontSize();
+    float fs = p.font_px;
+    float w = width, h = bv_height(p, w);
+    if (max_h > 0 && h > max_h) {  // (a short window: a smaller drawing)
+        w = std::max(fs * 24, w * max_h / h);
+        h = bv_height(p, w);
+    }
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (width - w) * .5f);
+    BVResult r = bv_draw("##bindview", w, h, p);
+    g_bv_pointing |= ImGui::IsItemHovered();
+    if (r.clicked)
+        bv_click(r.clicked);
+    ImGui::PushStyleColor(ImGuiCol_Text, vec(look.text_dim));
+    ImGui::TextWrapped("%s", tr("Inputs you press light up. Point at one to see what is on it."));
+    ImGui::PopStyleColor();
 }
 void reset_section() {
     Config f = config_defaults(), &c = s.draft;
@@ -1888,6 +2324,34 @@ bool save() {
     }
     return true;
 }
+// Takes a key (or a mouse button) for the keybind (s.capture_bind) or the chat key (-1) being chosen. false: refused
+bool bind_take(int key) {
+    const char *name = key > 0 && key < KEY_MOUSE ? SDL_GetScancodeName((SDL_Scancode)key) : "";
+    const char *reserved = key > 0 && key < KEY_MOUSE ? key_reserved(key) : nullptr;
+    if (s.capture_bind >= 0 && key > 0) {
+        int *keys = s.draft.binds[s.capture_bind];
+        if (reserved) {
+            s.error = fmt("That key is the recomp's own (%s).", tr(reserved));
+            return false;
+        }
+        if (!*config_key_name(key)) {
+            s.error = tr("That key can't be used.");
+            return false;
+        }
+        if (!s.capture_add)
+            keys[0] = key, keys[1] = 0;
+        else if (keys[0] != key)
+            keys[1] = key;
+        return true;
+    }
+    if (key > 0 && *name && strlen(name) < sizeof s.draft.chat_key && !strpbrk(name, ";#")) {
+        SDL_strlcpy(s.draft.chat_key, name, sizeof s.draft.chat_key);
+        return true;
+    }
+    if (key > 0)
+        s.error = tr("That key can't be used for chat.");
+    return false;
+}
 std::vector<Row> rows_for_view(bool *open) {
     if (s.view == View::Main)
         return main_rows();
@@ -1929,28 +2393,10 @@ std::vector<Row> rows_for_view(bool *open) {
         action_capture_rows(r);
     } else if (s.view == View::KeyCapture) {
         int key = captured_key.exchange(-1);
-        const char *name = key > 0 && key < KEY_MOUSE ? SDL_GetScancodeName((SDL_Scancode)key) : "";
-        const char *reserved = key > 0 && key < KEY_MOUSE ? key_reserved(key) : nullptr;
         if (key == SDL_SCANCODE_ESCAPE)
             pop();
-        else if (s.capture_bind >= 0 && key > 0) {
-            int *keys = s.draft.binds[s.capture_bind];
-            if (reserved)
-                s.error = fmt("That key is the recomp's own (%s).", tr(reserved));
-            else if (!*config_key_name(key))
-                s.error = tr("That key can't be used.");
-            else {
-                if (!s.capture_add)
-                    keys[0] = key, keys[1] = 0;
-                else if (keys[0] != key)
-                    keys[1] = key;
-                pop();
-            }
-        } else if (key > 0 && *name && strlen(name) < sizeof s.draft.chat_key && !strpbrk(name, ";#")) {
-            SDL_strlcpy(s.draft.chat_key, name, sizeof s.draft.chat_key);
+        else if (key > 0 && bind_take(key))
             pop();
-        } else if (key > 0)
-            s.error = tr("That key can't be used for chat.");
         if (s.view == View::KeyCapture) {
             action(r, "capture.none", tr("None"), []() {
                 if (s.capture_bind >= 0)
@@ -2309,6 +2755,22 @@ void draw_grip(ImGuiWindow *w, const Theme &look) {
 }
 // The mouse on the menu, before it is drawn: a press on its top part (the tabs, or a dialog's title) and a drag moves
 // it, one on the grip at its bottom right corner sizes it. Either one detaches it (Menu Options: Attach menu puts it back).
+// The drawing in a window of its own beside the list, when the screen is wide enough
+void draw_bind_window(ImVec2 pos, float width, float min_h, float scale, float margin, const Theme &look) {
+    ImGuiViewport *vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(width, std::min(min_h, vp->WorkSize.y - 2 * margin)),
+                                        ImVec2(width, std::max(min_h, vp->WorkSize.y - 2 * margin)));
+    ImGui::Begin("Settings##bind", nullptr,
+                 ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
+                     ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                     ImGuiWindowFlags_NoNavInputs | ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoFocusOnAppearing);
+    ImGui::SetWindowFontScale(scale);
+    float fs = ImGui::GetFontSize();
+    draw_bind_view(ImGui::GetContentRegionAvail().x, vp->WorkSize.y - 2 * margin - fs * 9);
+    draw_frame(ImGui::GetCurrentWindow(), look);
+    ImGui::End();
+}
 void mouse_drag(ImGuiViewport *vp, float width) {
     ImGuiIO &io = ImGui::GetIO();
     auto *w = ImGui::FindWindowByName("Settings##main");
@@ -2432,6 +2894,7 @@ void settings_panel(bool *open) {
         acts().draft = acts().saved;
         acts().capture = -1;
         acts().capture_row = -1;
+        acts().tab = 0;
         acts().dev = acts().saved.scheme == ACT_SCHEME_KBM ? 1 : acts().saved.scheme == ACT_SCHEME_PAD ? 0 : host_input_last_device();
         acts().weapon = 0;
         acts().layout = act_layout(&acts().saved);
@@ -2461,6 +2924,18 @@ void settings_panel(bool *open) {
     float margin = std::min(16.f, vp->WorkSize.x * .025f);
     float width = std::min(vp->WorkSize.x - 2 * margin, base * scale * 56);
     bool sized = s.custom_size.x > 0;
+    // the drawing of the controller or the keyboard: above the list in the same window, or beside it in a window of its own
+    bool bv_view = s.view == View::Actions || (s.view == View::KeyCapture && (acts().capture >= 0 || s.capture_from_actions));
+    int bv_mode = 0;  // 0 none, 1 in the window, 2 beside it
+    float bv_gap = std::max(6.f, base * scale * .6f), bv_width = 0;
+    if (bv_view) {
+        float least = base * scale * 30;
+        float room = vp->WorkSize.x - 2 * margin - (sized ? s.custom_size.x : width) - bv_gap;
+        if (s.floating)
+            room = vp->WorkPos.x + vp->WorkSize.x - margin - (s.move_position.x + (sized ? s.custom_size.x : width)) - bv_gap;
+        bv_mode = room >= least ? 2 : 1;
+        bv_width = std::min(room, std::max((sized ? s.custom_size.x : width) * 1.2f, base * scale * 46));
+    }
     if (sized) {
         ImVec2 least(std::min(base * scale * 26, vp->WorkSize.x), std::min(base * scale * 14, vp->WorkSize.y));
         s.custom_size.x = std::clamp(s.custom_size.x, least.x, vp->WorkSize.x);
@@ -2490,9 +2965,10 @@ void settings_panel(bool *open) {
         ImGui::SetNextWindowPos(s.move_position, ImGuiCond_Always);
         s.position_override = false;
     }
-    if (!s.floating)
-        ImGui::SetNextWindowPos(
-            ImVec2(vp->WorkPos.x + (vp->WorkSize.x - width) * .5f, vp->WorkPos.y + margin), ImGuiCond_Always);
+    if (!s.floating) {
+        float pair = width + (bv_mode == 2 ? bv_gap + bv_width : 0);
+        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - pair) * .5f, vp->WorkPos.y + margin), ImGuiCond_Always);
+    }
     const Theme &look = theme();
     ImGui::PushStyleColor(ImGuiCol_WindowBg, vec(look.panel));
     ImGui::PushStyleColor(ImGuiCol_Text, vec(look.text));
@@ -2512,6 +2988,12 @@ void settings_panel(bool *open) {
     }
     if (request_back.exchange(false) || pressed(ImGuiKey_GamepadFaceRight) || pressed(ImGuiKey_Escape))
         ask_back(open);
+    if (s.view == View::Actions && !s.dropdown.open) {  // (what the list and the drawing show)
+        if (pressed(ImGuiKey_GamepadR1))
+            tab_step(1);
+        if (pressed(ImGuiKey_GamepadL1))
+            tab_step(-1);
+    }
     if (s.dropdown.open && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !s.dropdown.hovered)
         close_dropdown();  // (a click elsewhere: on a row, it acts as it does with no dropdown open)
     bool pinned_guides = s.view == View::Main;
@@ -2687,6 +3169,9 @@ void settings_panel(bool *open) {
             ImGui::TextWrapped("%s", text.c_str());
         }
     }
+    g_bv_pointing = false;
+    if (bv_mode == 1)
+        draw_bind_view(ImGui::GetContentRegionAvail().x, std::max(base * scale * 18, (vp->WorkSize.y - 2 * margin) * .5f));
     auto rows = rows_for_view(open);
     std::vector<Row> options;  // (a dropdown open: the controller moves in it)
     if (s.dropdown.open)
@@ -2781,7 +3266,13 @@ void settings_panel(bool *open) {
         s.header_bottom = ImGui::GetStyle().WindowPadding.y + ImGui::GetFontSize() * 1.5f;
     draw_frame(window, look);
     draw_grip(window, look);
+    ImVec2 main_pos = window->Pos, main_size = window->Size;
     ImGui::End();
+    if (bv_mode == 2) {
+        draw_bind_window(ImVec2(main_pos.x + main_size.x + bv_gap, main_pos.y), bv_width, main_size.y, scale, margin, look);
+        if (g_bv_pointing && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            ImGui::SetWindowFocus("Settings##main");  // (a click on the drawing does not take the list's keyboard and controller)
+    }
     if (s.dropdown.open && s.dropdown.anchored && !options.empty())
         draw_dropdown(options, scale, base);
     else
@@ -2795,7 +3286,7 @@ void settings_panel(bool *open) {
     // mouse button chosen)
     bool for_action = is_capturing && acts().capture >= 0;
     capture_mouse = is_capturing && (for_action ? acts().dev == 1 : s.capture_bind >= 0);
-    capture_pointing = s.pointing;
+    capture_pointing = s.pointing || g_bv_pointing;
     capture_wheel = capture_mouse.load();  // (the capture view doesn't scroll)
     capture_pad = for_action && acts().dev == 0;
     if (!*open)

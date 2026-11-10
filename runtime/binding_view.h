@@ -99,8 +99,12 @@ struct BVParams {
     int scheme = BV_CONTROLLER;
     const BVInput *inputs = nullptr;
     int n_inputs = 0;
-    int selected_input = 0;
-    int focus_input = 0;
+    int selected_input = 0;   // one input that glows (0: none) ...
+    const int *selected_list = nullptr;  // ... and these: everything the selected row reads (an alternative, a chord)
+    int n_selected = 0;
+    int focus_input = 0;      // ring: the input the controller-only focus or the pointer is on, and a list of them
+    const int *focus_list = nullptr;
+    int n_focus = 0;
     bool capturing = false;
     const int *held = nullptr;
     int n_held = 0;
