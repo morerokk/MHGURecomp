@@ -2777,6 +2777,7 @@ void draw_bind_window(ImVec2 pos, float width, float min_h, float scale, float m
     ImGui::SetWindowFontScale(scale);
     float fs = ImGui::GetFontSize();
     draw_bind_view(ImGui::GetContentRegionAvail().x, vp->WorkSize.y - 2 * margin - fs * 14.f, true);
+    g_bv_pointing |= ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);  // (a click anywhere in this window is not a mouse button chosen)
     draw_frame(ImGui::GetCurrentWindow(), look);
     ImGui::End();
 }

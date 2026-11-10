@@ -44,6 +44,11 @@
 #define B(x) (1ull << (x))
 
 static bool keys[SDL_SCANCODE_COUNT];
+// What is held on the keyboard and the mouse as the window got it, also while Forge's menu or the settings menu has the input
+// (keys[] and mouse_held are the game's: they stop then): the settings menu's drawing lights these
+static bool ui_keys[SDL_SCANCODE_COUNT];
+static uint32_t ui_mouse;
+static uint64_t ui_wheel_until[2];
 static SDL_Gamepad *pad;  // the controller read: of those open, the one a button was last pressed on
 #define MAX_PADS 8
 static struct { SDL_Gamepad *pad; uint64_t opened_ns; } pads[MAX_PADS];
@@ -459,15 +464,16 @@ static void control_poll(void) {
                 SDL_Event event = {0}; event.type = SDL_EVENT_QUIT; SDL_PushEvent(&event);
                 continue;
             }
-            if (!strcmp(cmd, "sdlkey")) {  // sdlkey [ctrl+]<SDL key name>: a key pressed and released (Insert: Forge's menu)
+            if (!strcmp(cmd, "sdlkey")) {  // sdlkey [ctrl+]<SDL key name> [down|up]: a key pressed and released, or only one (held)
                 bool ctrl = !SDL_strncasecmp(arg, "ctrl+", 5);
+                bool only_down = !strcmp(arg2, "down"), only_up = !strcmp(arg2, "up");
                 SDL_Scancode sc = SDL_GetScancodeFromName(arg + (ctrl ? 5 : 0));
                 SDL_Event e = {0};
                 e.key.type = SDL_EVENT_KEY_DOWN, e.key.scancode = sc, e.key.key = SDL_GetKeyFromScancode(sc, 0, false);
                 e.key.down = true, e.key.mod = ctrl ? SDL_KMOD_LCTRL : 0;
-                SDL_PushEvent(&e);
+                if (!only_up) SDL_PushEvent(&e);
                 e.key.type = SDL_EVENT_KEY_UP, e.key.down = false;
-                SDL_PushEvent(&e);
+                if (!only_down) SDL_PushEvent(&e);
                 if (ctrl) {  // (then Ctrl's own release, as a keyboard sends it: no modifier left)
                     e.key.scancode = SDL_SCANCODE_LCTRL, e.key.key = SDLK_LCTRL, e.key.mod = 0;
                     SDL_PushEvent(&e);
@@ -702,6 +708,12 @@ static volatile int g_last_dev = -1;  // the device a button was last pressed on
 void host_input_event(const SDL_Event *e) {
     if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) g_last_dev = 0, pad_pressed(e->gbutton.which);
     else if ((e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat) || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) g_last_dev = 1;
+    if (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_KEY_UP) {
+        if (e->key.scancode < SDL_SCANCODE_COUNT) ui_keys[e->key.scancode] = e->type == SDL_EVENT_KEY_DOWN;
+    } else if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) ui_mouse |= 1u << e->button.button;
+    else if (e->type == SDL_EVENT_MOUSE_BUTTON_UP) ui_mouse &= ~(1u << e->button.button);
+    else if (e->type == SDL_EVENT_MOUSE_WHEEL && e->wheel.integer_y) ui_wheel_until[e->wheel.integer_y > 0 ? 0 : 1] = plat_now_ns() + 150000000ull;
+    else if (e->type == SDL_EVENT_WINDOW_FOCUS_LOST) memset(ui_keys, 0, sizeof ui_keys), ui_mouse = 0;
     mods_mouse_event(e);  // (the mouse for mods: every event, whoever takes it)
     mods_key_event(e);
     if (overlay_event(e)) return;  // (Forge's menu open: keyboard and mouse are its)
@@ -989,11 +1001,11 @@ int host_input_held(int *out, int max) {
     for (int i = 0; i < (int)(sizeof pad_codes / sizeof *pad_codes) && n < max; i++)
         if (act_phys_held(NULL, pad_codes[i])) out[n++] = pad_codes[i];
     for (int sc = 1; sc < SDL_SCANCODE_COUNT && n < max; sc++)
-        if (keys[sc]) out[n++] = sc;
+        if (ui_keys[sc]) out[n++] = sc;
     for (int b = 1; b <= SDL_BUTTON_X2 && n < max; b++)
-        if (mouse_held >> b & 1) out[n++] = KEY_MOUSE + b;
-    for (int w = KEY_WHEEL_UP; w <= KEY_WHEEL_DOWN && n < max; w++)
-        if (act_phys_held(NULL, w)) out[n++] = w;
+        if (ui_mouse >> b & 1) out[n++] = KEY_MOUSE + b;
+    for (int w = 0; w < 2 && n < max; w++)
+        if (plat_now_ns() < ui_wheel_until[w]) out[n++] = KEY_WHEEL_UP + w;
     return n;
 }
 
