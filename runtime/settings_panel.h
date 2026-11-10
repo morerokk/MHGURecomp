@@ -17,6 +17,9 @@ bool settings_panel_mouse(int button); // Choosing a keybind: takes the mouse bu
 extern "C" {
 #endif
 bool settings_panel_pad_capture(void); // Choosing a controller input for a game action: the host gives the next press.
+int host_input_last_device(void); // (runtime/host_input.c) 0 the controller, 1 keyboard and mouse: the last one a button was pressed on.
+int host_input_sw_sources(int btn, int dev, int *out, int max); // What Tier 0 reads for a Switch button (dev 0 controller, 1 keyboard).
+bool input_view_dash_zr(void); // (runtime/hle/input_view.c) The Control Type makes ZR the dash role.
 void settings_panel_pad(int code); // That press (runtime/actions.h ACT_PAD + ...; host update thread, C).
 void input_view_apply(void); // (runtime/hle/input_view.c) The profile in use changed: hook the game if it is on now.
 #ifdef __cplusplus

@@ -698,8 +698,10 @@ static bool chat_mouse(const SDL_Event *e) {
     return false;
 }
 
+static volatile int g_last_dev = -1;  // the device a button was last pressed on: 0 controller, 1 keyboard and mouse
 void host_input_event(const SDL_Event *e) {
-    if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) pad_pressed(e->gbutton.which);
+    if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) g_last_dev = 0, pad_pressed(e->gbutton.which);
+    else if ((e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat) || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) g_last_dev = 1;
     mods_mouse_event(e);  // (the mouse for mods: every event, whoever takes it)
     mods_key_event(e);
     if (overlay_event(e)) return;  // (Forge's menu open: keyboard and mouse are its)
@@ -944,27 +946,36 @@ static int act_sw_sources(void *user, int btn, int dev, int *out, int max) {
 // The settings menu is choosing a controller input for a game action (settings_panel_pad_capture): the next button or
 // trigger that goes down goes to it. What is down as the choice starts (the press that opened it, a trigger that rests
 // half way) does not count until it was let go.
+static const int pad_capture_codes[] = {ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH, ACT_PAD + SDL_GAMEPAD_BUTTON_EAST,
+                                        ACT_PAD + SDL_GAMEPAD_BUTTON_WEST, ACT_PAD + SDL_GAMEPAD_BUTTON_NORTH,
+                                        ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
+                                        ACT_PAD_LT, ACT_PAD_RT, ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_STICK,
+                                        ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_STICK, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_UP,
+                                        ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_DOWN, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_LEFT,
+                                        ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_RIGHT, ACT_PAD + SDL_GAMEPAD_BUTTON_START,
+                                        ACT_PAD + SDL_GAMEPAD_BUTTON_BACK};
+#define PAD_CAPTURE_N ((int)(sizeof pad_capture_codes / sizeof *pad_capture_codes))
+static bool pad_any_held(void) {
+    for (int i = 0; i < PAD_CAPTURE_N; i++)
+        if (act_phys_held(NULL, pad_capture_codes[i])) return true;
+    return false;
+}
 static int pad_capture_poll(bool capturing) {
-    static const int codes[] = {ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH, ACT_PAD + SDL_GAMEPAD_BUTTON_EAST,
-                                ACT_PAD + SDL_GAMEPAD_BUTTON_WEST, ACT_PAD + SDL_GAMEPAD_BUTTON_NORTH,
-                                ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
-                                ACT_PAD_LT, ACT_PAD_RT, ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_STICK,
-                                ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_STICK, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_UP,
-                                ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_DOWN, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_LEFT,
-                                ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_RIGHT, ACT_PAD + SDL_GAMEPAD_BUTTON_START,
-                                ACT_PAD + SDL_GAMEPAD_BUTTON_BACK};
-    enum { N = sizeof codes / sizeof *codes };
-    static bool was[N], started;
+    static bool was[PAD_CAPTURE_N], started;
     if (!capturing) return started = false, 0;
     int pressed = 0;
-    for (int i = 0; i < N; i++) {
-        bool held = act_phys_held(NULL, codes[i]);
-        if (started && held && !was[i] && !pressed) pressed = codes[i];
+    for (int i = 0; i < PAD_CAPTURE_N; i++) {
+        bool held = act_phys_held(NULL, pad_capture_codes[i]);
+        if (started && held && !was[i] && !pressed) pressed = pad_capture_codes[i];
         was[i] = held;
     }
     started = true;
     return pressed;
 }
+
+// For the settings menu's Game actions screen: which scheme to show first, and what Tier 0 reads for a Switch button
+int host_input_last_device(void) { return g_last_dev >= 0 ? g_last_dev : pad ? 0 : 1; }
+int host_input_sw_sources(int btn, int dev, int *out, int max) { return act_sw_sources(NULL, btn, dev, out, max); }
 
 static void act_update(uint64_t b, uint64_t script_b, bool suppress) {
     if (!act_enabled()) return;
@@ -1111,10 +1122,12 @@ void host_input_update(void) {
         OverlayPad p = {b & B(BTN_A), b & B(BTN_B), b & B(BTN_X), b & B(BTN_Y), b & B(BTN_UP), b & B(BTN_DOWN),
                         b & B(BTN_LEFT), b & B(BTN_RIGHT), b & B(BTN_L), b & B(BTN_R), b & B(BTN_PLUS),
                         b & B(BTN_MINUS), clamp_axis(lx) / 32767.0f, clamp_axis(ly) / 32767.0f};
+        static bool swallow;  // the button chosen stays down for a while: it is not a press in the menu either
         bool choosing = settings_panel_pad_capture();
         int chosen = pad_capture_poll(choosing);
-        if (chosen) settings_panel_pad(chosen);
-        if (choosing) memset(&p, 0, sizeof p);  // (the button chosen is not also a press in the menu)
+        if (chosen) settings_panel_pad(chosen), swallow = true;
+        else if (swallow && !pad_any_held()) swallow = false;
+        if (choosing || swallow) memset(&p, 0, sizeof p);
         overlay_pad(&p);
         b = 0, lx = ly = rx = ry = 0;
     }

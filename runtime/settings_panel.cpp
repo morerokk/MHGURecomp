@@ -104,7 +104,8 @@ std::atomic<bool> request_exit, request_back, is_dirty, is_confirming, is_captur
 // weapon, 1..15 that class's own bindings; capture: the action an input is being chosen for (-1: none)
 struct ActionTab {
     ActProfile draft, saved;
-    int dev = 0, weapon = 0, capture = -1;
+    int dev = 0, weapon = 0, capture = -1, capture_row = -1, layout = ACT_LAYOUT_SIMPLE;  // layout: the one shown (a profile without a Layout key is Advanced once it has bindings: not while it is edited)
+     // (capture_row: a merged row of the Simple layout)
     bool capture_add = false;
     Uint64 capture_start = 0;
 };
@@ -853,11 +854,15 @@ bool bindings_share(const ActBinding &x, const ActBinding &y) {
 // Choosing an input for an action (add: one more way to press it, else its only one)
 void action_capture(int id, bool add) {
     acts().capture = id;
+    acts().capture_row = -1;
     acts().capture_add = add;
     acts().capture_start = SDL_GetTicks();
     captured_key = -1;
     push(View::KeyCapture, "capture.cancel");
 }
+int panel_sources(void *, int btn, int dev, int *out, int max);
+const char *scheme_name(int dev);
+void row_chosen(int row, int code, uint64_t changed);
 void action_capture_rows(std::vector<Row> &r) {
     ActionTab &a = acts();
     int code = captured_key.exchange(-1);
@@ -870,8 +875,13 @@ void action_capture_rows(std::vector<Row> &r) {
         if (reserved)
             s.error = fmt("That key is the recomp's own (%s).", tr(reserved));
         else {
-            ActBinding &b = action_slot(a.capture);
-            if (!a.capture_add || !b.set || !b.n) {
+            ActBinding row_binding, &b = a.capture_row >= 0 ? row_binding : action_slot(a.capture);
+            if (a.capture_row >= 0) {
+                ActRowState st = act_row_state(&a.draft, a.dev, a.capture_row, &row_binding);
+                if (!a.capture_add || st != ACT_ROW_BOUND)
+                    memset(&row_binding, 0, sizeof row_binding);
+                row_binding.set = true;
+            } else if (!a.capture_add || !b.set || !b.n) {
                 memset(&b, 0, sizeof b);
                 b.set = true;
             }
@@ -883,43 +893,121 @@ void action_capture_rows(std::vector<Row> &r) {
                 b.alt[b.n].code[0] = code;
                 b.n++;
             }
+            if (a.capture_row >= 0) {  // Simple: the row's actions, then the other rows lose the input
+                int row = a.capture_row;
+                act_row_set(&a.draft, a.dev, row, &row_binding);
+                uint64_t took = act_row_claim(&a.draft, a.dev, row, code, panel_sources, nullptr, input_view_dash_zr());
+                a.capture = -1, a.capture_row = -1;
+                pop();
+                row_chosen(row, code, took);
+                return;
+            }
             action_touch();
             done = true;
         }
     }
     if (done) {
         a.capture = -1;
+        a.capture_row = -1;
         pop();
         return;
     }
     action(r, "capture.cancel", tr("Cancel"), []() {
         acts().capture = -1;
+        acts().capture_row = -1;
         pop();
     });
 }
-void action_rows(std::vector<Row> &r) {
+int panel_sources(void *, int btn, int dev, int *out, int max) { return host_input_sw_sources(btn, dev, out, max); }
+const char *scheme_name(int dev) { return tr(dev == 0 ? "Controller" : "Keyboard"); }
+// What a merged row shows (Simple layout)
+std::string row_value(int row, bool &warn) {
+    ActionTab &a = acts();
+    ActBinding shown;
+    switch (act_row_state(&a.draft, a.dev, row, &shown)) {
+    case ACT_ROW_DEFAULT: return tr("Default");
+    case ACT_ROW_UNSET: warn = true; return tr("Not set: choose a button");
+    case ACT_ROW_CUSTOM: warn = true; return tr("Custom (differs by context: see Advanced)");
+    default: break;
+    }
+    std::string text = binding_text(shown);
+    for (int o = 0; o < act_row_count(); o++)
+        if (o != row && act_rows_clash(&a.draft, a.dev, row, o)) {
+            text += std::string(" (") + tr("also:") + " " + act_row(o)->name + ")";
+            warn = true;
+            break;
+        }
+    return text;
+}
+// Choosing an input for a merged row
+void row_capture(int row, bool add) {
+    action_capture(act_row(row)->head, add);
+    acts().capture_row = row;
+}
+// What choosing an input did to the other rows: said once, in red, under the title
+void row_chosen(int row, int code, uint64_t changed) {
+    (void)row, (void)code;
+    if (!changed)
+        return;
+    std::string names;
+    for (int i = 0; i < act_row_count(); i++)
+        if (changed >> i & 1)
+            names += (names.empty() ? "" : ", ") + std::string(tr(act_row(i)->label));
+    s.error = fmt("Taken from: %s. Choose a new button for it.", names.c_str());
+}
+void simple_rows(std::vector<Row> &r) {
     ActionTab &a = acts();
     ActProfile &p = a.draft;
-    auto toggle = [&r](const char *id, const char *name, bool *value, const char *help) {
+    uint64_t unset = 0;
+    int n = act_rows_unset(&p, a.dev, &unset);
+    if (n) {
         Row row;
-        row.id = id;
-        row.title = tr(name);
-        row.value = tr(*value ? "On" : "Off");
-        row.help = tr(help);
-        row.adjust = [value](int d) { *value = d > 0; };
-        row.activate = [value]() { *value = !*value; };
+        row.id = "act.unset";
+        row.title = tr("Actions not set");
+        row.value = std::to_string(n);
+        row.warn = true;
+        row.enabled = false;
+        row.help = tr("Actions you have to give a button: something took theirs, or you set them to None.");
         r.push_back(std::move(row));
-    };
-    toggle("act.enable", "Rebind game actions", &p.enable,
-           "On: the game reads the bindings below instead of the controller's buttons and the keybinds. An action left on Default keeps the button it has now. Off: nothing of the game is changed.");
-    toggle("act.menus", "Also in the game's menus", &p.menus,
-           "On: the Menus actions below apply (confirm, cancel, moving, tabs). Off: the game's menus read the controller and the keybinds as before.");
-    toggle("act.sheathed", "Attack A also interacts", &p.sheathed_attack,
-           "Only matters once Interact has a binding of its own. Off: with the weapon away only Interact presses the game's A (gather, carve, talk), with it out only Attack A does. On: Attack A presses it in both cases.");
-    toggle("act.split", "Split Dash from weapon R-action", &p.split,
-           "On: Dash and the weapon's R-action (guard, charge, aim) are two actions you can put on two buttons. Binding Weapon R-action turns it on by itself. Off: they are one button, as in the game.");
-    add_choice(r, "act.device", "Bindings of", a.dev, {tr("Controller"), tr("Keyboard and mouse")}, [](int v) { acts().dev = v; });
-    r.back().help = tr("The controller's and the keyboard and mouse's bindings are separate: an action can have both.");
+    }
+    int last_group = -1;
+    for (int i = 0; i < act_row_count(); i++) {
+        const ActRow *ar = act_row(i);
+        if (ar->group != last_group) {
+            header(r, "act.g" + std::to_string(ar->group), tr(act_row_group_name(ar->group)));
+            last_group = ar->group;
+        }
+        Row row;
+        row.id = "act.row." + std::string(ar->name);
+        row.title = tr(ar->label);
+        row.value = row_value(i, row.warn);
+        row.help = tr("Merged with the same button of the town and the menus where it has one. Giving it a button another action of the same kind uses takes that button from it.");
+        Row copy = row;
+        row.menu = true;
+        row.activate = [copy, i]() {
+            ActBinding shown;
+            ActRowState st = act_row_state(&acts().draft, acts().dev, i, &shown);
+            bool more = st == ACT_ROW_BOUND && shown.n < ACT_ALTS;
+            std::vector<std::string> names = {tr("Set")};
+            if (more)
+                names.push_back(tr("Add another"));
+            names.push_back(tr("Not set"));
+            names.push_back(tr("Default"));
+            choices(copy, names, -1, [i, more](int v) {
+                if (v == 0 || (more && v == 1))
+                    return row_capture(i, v == 1);
+                ActBinding none;
+                memset(&none, 0, sizeof none);
+                act_row_set(&acts().draft, acts().dev, i, v == (more ? 2 : 1) ? &none : nullptr);
+            });
+        };
+        r.push_back(std::move(row));
+    }
+    header(r, "act.note", tr("Every action on its own, and bindings for one weapon, are in the Advanced layout."));
+}
+void advanced_rows(std::vector<Row> &r) {
+    ActionTab &a = acts();
+    ActProfile &p = a.draft;
     std::vector<std::string> weapons = {tr("All weapons")};
     for (int w = 0; w < ACT_WEAPONS; w++)
         weapons.push_back(act_weapon_name(w));
@@ -986,6 +1074,47 @@ void action_rows(std::vector<Row> &r) {
             r.push_back(std::move(row));
         }
     }
+}
+void action_rows(std::vector<Row> &r) {
+    ActionTab &a = acts();
+    ActProfile &p = a.draft;
+    bool simple = a.layout == ACT_LAYOUT_SIMPLE;
+    auto toggle = [&r](const char *id, const char *name, bool *value, const char *help) {
+        Row row;
+        row.id = id;
+        row.title = tr(name);
+        row.value = tr(*value ? "On" : "Off");
+        row.help = tr(help);
+        row.adjust = [value](int d) { *value = d > 0; };
+        row.activate = [value]() { *value = !*value; };
+        r.push_back(std::move(row));
+    };
+    toggle("act.enable", "Rebind game actions", &p.enable,
+           "On: the game reads the bindings below instead of the controller's buttons and the keybinds. An action left on Default keeps the button it has now. Off: nothing of the game is changed.");
+    toggle("act.menus", "Also in the game's menus", &p.menus,
+           "On: the Menus actions below apply (confirm, cancel, moving, tabs). Off: the game's menus read the controller and the keybinds as before.");
+    add_choice(r, "act.layout", "Layout", simple ? 0 : 1, {tr("Simple"), tr("Advanced")},
+               [](int v) {
+                   acts().draft.layout = acts().layout = v == 0 ? ACT_LAYOUT_SIMPLE : ACT_LAYOUT_ADVANCED;
+                   if (v == 0)
+                       acts().weapon = 0;
+        acts().layout = act_layout(&acts().saved);
+               });
+    r.back().help = tr("Simple: one button for what goes together (Confirm also talks in town, Cancel also backs out there), the same bindings underneath. Advanced: every action on its own, and per weapon.");
+    add_choice(r, "act.device", "Control scheme", a.dev, {tr("Controller"), tr("Keyboard")},
+               [](int v) {
+                   acts().dev = v;
+                   acts().draft.scheme = v == 0 ? ACT_SCHEME_PAD : ACT_SCHEME_KBM;
+               });
+    r.back().help = tr("Which bindings the list shows and edits: the controller's, or the keyboard and mouse's. They are separate: an action can have both.");
+    if (!simple) {
+        toggle("act.sheathed", "Attack A also interacts", &p.sheathed_attack,
+               "Only matters once Interact has a binding of its own. Off: with the weapon away only Interact presses the game's A (gather, carve, talk), with it out only Attack A does. On: Attack A presses it in both cases.");
+        toggle("act.split", "Split Dash from weapon R-action", &p.split,
+               "On: Dash and the weapon's R-action (guard, charge, aim) are two actions you can put on two buttons. Binding Weapon R-action turns it on by itself. Off: they are one button, as in the game.");
+        advanced_rows(r);
+    } else
+        simple_rows(r);
     action(r, "act.reset", tr("Reset game actions"), []() {
         ActProfile &p = acts().draft;
         memset(p.dev, 0, sizeof p.dev);
@@ -1701,7 +1830,9 @@ bool save() {
         }
         cheat_tab.saved = cheat_tab.draft;
     }
-    if (actions_dirty()) {  // (after config_save: it keeps the [Actions*] lines it finds, these replace them)
+    if (actions_dirty()) {
+        if (!acts().draft.layout) acts().draft.layout = acts().layout;  // (what was shown stays: bindings must not turn Simple into Advanced)
+        // (after config_save: it keeps the [Actions*] lines it finds, these replace them)
         char path[1100];
         config_path(path, sizeof path);
         if (!act_save(path, &acts().draft)) {
@@ -1715,6 +1846,18 @@ bool save() {
     s.saved = s.draft;
     s.saved_notice = true;
     s.error.clear();
+    if (acts().layout == ACT_LAYOUT_SIMPLE && acts().draft.enable) {  // (saved all the same: the player may mean it)
+        std::string names;
+        for (int d = 0; d < 2; d++) {
+            uint64_t which = 0;
+            act_rows_unset(&acts().draft, d, &which);
+            for (int i = 0; i < act_row_count(); i++)
+                if ((which >> i & 1) && (act_row(i)->head == ACT_MENU_CONFIRM || act_row(i)->head == ACT_MENU_CANCEL))
+                    names += (names.empty() ? "" : ", ") + std::string(tr(act_row(i)->label)) + " (" + scheme_name(d) + ")";
+        }
+        if (!names.empty())
+            s.error = fmt("Saved. Not set: %s. The menus cannot be used or left with the scheme that has it unset.", names.c_str());
+    }
     return true;
 }
 std::vector<Row> rows_for_view(bool *open) {
@@ -2260,6 +2403,9 @@ void settings_panel(bool *open) {
         act_get_profile(&acts().saved);
         acts().draft = acts().saved;
         acts().capture = -1;
+        acts().capture_row = -1;
+        acts().dev = acts().saved.scheme == ACT_SCHEME_KBM ? 1 : acts().saved.scheme == ACT_SCHEME_PAD ? 0 : host_input_last_device();
+        acts().weapon = 0;
         s.draft = s.saved = config_editable();
         s.editing = true;
         s.view = View::Main;
@@ -2457,8 +2603,8 @@ void settings_panel(bool *open) {
                             : s.view == View::KeyCapture && acts().capture >= 0
                                 ? fmt(acts().dev == 0 ? "Press a controller button for: %s (Esc or wait: cancel)"
                                                       : "Press a key or mouse button for: %s (Esc: cancel)",
-                                      tr(act_label(acts().capture)))
-                            : s.view == View::Actions ? std::string(tr("Game actions"))
+                                      tr(acts().capture_row >= 0 ? act_row(acts().capture_row)->label : act_label(acts().capture)))
+                            : s.view == View::Actions ? fmt("Game actions: %s", scheme_name(acts().dev))
                             : s.view == View::KeyCapture && s.capture_bind >= 0
                                 ? fmt("Press a key or mouse button for %s (Esc: cancel)", tr(bind_titles[s.capture_bind]))
                                 : tr(s.view == View::Exit         ? "Exit game?"
