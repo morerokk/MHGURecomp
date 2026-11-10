@@ -7,12 +7,14 @@
 #include <zlib.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -265,6 +267,52 @@ static Profile kbm_conflicts() {
     return p;
 }
 
+static Profile pad_heavy() {
+    static const char *names[] = {"Attack X", "Attack A", "Dodge", "Crouch", "Use item", "Sheathe", "Dash", "Weapon action"};
+    Profile p;
+    int codes[] = {PB(SOUTH), PB(EAST), PB(WEST), PB(NORTH), PB(LEFT_SHOULDER), PB(RIGHT_SHOULDER), PAD_BASE + 0x40, PAD_BASE + 0x41,
+                   PB(DPAD_UP), PB(DPAD_DOWN), PB(DPAD_LEFT), PB(DPAD_RIGHT), PB(LEFT_STICK), PB(RIGHT_STICK), PB(START), PB(BACK),
+                   BV_STICK_L_UP, BV_STICK_L_DOWN, BV_STICK_L_LEFT, BV_STICK_L_RIGHT, BV_STICK_R_UP, BV_STICK_R_DOWN, BV_STICK_R_LEFT,
+                   BV_STICK_R_RIGHT};
+    int k = 0;
+    for (int c : codes) {
+        Entry e;
+        e.code = c;
+        int n = 1 + k % 6;
+        for (int i = 0; i < n; i++) e.labels.push_back(names[(k + i) % 8]);
+        e.conflict = k % 4 == 1;
+        p.entries.push_back(e);
+        k++;
+    }
+    p.entries.push_back({SDL_SCANCODE_W, {"Not drawn on a controller"}});
+    return p;
+}
+static Profile kbm_heavy() {
+    static const char *names[] = {"Attack X", "Attack A", "Dodge / roll", "Crouch", "Use item", "Sheathe", "Dash", "Weapon action",
+                                  "Gather / open / talk", "Camera reset", "Quick action up", "Map"};
+    Profile p;
+    int k = 0;
+    auto add = [&](int code) {
+        Entry e;
+        e.code = code;
+        int n = 1 + (k % 5 == 0 ? 2 : 0);
+        for (int i = 0; i < n; i++) e.labels.push_back(names[(k + i) % 12]);
+        e.conflict = k % 9 == 4;
+        p.entries.push_back(e);
+        k++;
+    };
+    for (int sc = SDL_SCANCODE_A; sc <= SDL_SCANCODE_Z; sc++) add(sc);
+    for (int sc = SDL_SCANCODE_1; sc <= SDL_SCANCODE_0; sc++) add(sc);
+    for (int sc : std::initializer_list<int>{SDL_SCANCODE_TAB, SDL_SCANCODE_CAPSLOCK, SDL_SCANCODE_LSHIFT, SDL_SCANCODE_LCTRL, SDL_SCANCODE_LALT, SDL_SCANCODE_SPACE,
+                   SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT, SDL_SCANCODE_F2, SDL_SCANCODE_F3,
+                   SDL_SCANCODE_F4, SDL_SCANCODE_F5, SDL_SCANCODE_F6, SDL_SCANCODE_KP_1, SDL_SCANCODE_KP_2, SDL_SCANCODE_KP_ENTER,
+                   SDL_SCANCODE_BACKSPACE, SDL_SCANCODE_RETURN, SDL_SCANCODE_HOME, SDL_SCANCODE_END,
+                   KEY_MOUSE + SDL_BUTTON_LEFT, KEY_MOUSE + SDL_BUTTON_RIGHT, KEY_MOUSE + SDL_BUTTON_MIDDLE, KEY_MOUSE + SDL_BUTTON_X1,
+                   KEY_MOUSE + SDL_BUTTON_X2, KEY_WHEEL_UP, KEY_WHEEL_DOWN, SDL_SCANCODE_VOLUMEUP})
+        add(sc);
+    return p;
+}
+
 struct Scenario {
     std::string file, title;
     int W, H;           // the image
@@ -303,6 +351,7 @@ static void render(const Scenario &s, const char *dir) {
     for (int frame = 0; frame < 4; frame++) {
         p.time_s = 1.0f;
         if (s.mouse_x >= 0) io.AddMousePosEvent(margin + s.mouse_x, margin + s.font * 3 + s.mouse_y);
+        else io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);  // (no mouse)
         ImGui::NewFrame();
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(ImVec2((float)s.W, (float)s.H));
@@ -331,6 +380,102 @@ static void render(const Scenario &s, const char *dir) {
         fprintf(stderr, "cannot write %s\n", path);
         g_failed = true;
     }
+}
+
+// The mouse: hovering reports the input, a click on it comes back as clicked, a click on a reserved key does not
+static bool interaction_test() {
+    ImGuiIO &io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(1100, 860);
+    ImGui::GetStyle().FontSizeBase = 14;
+    Profile prof = pad_typical();
+    prof.build();
+    BVParams p;
+    p.scheme = BV_CONTROLLER;
+    p.inputs = prof.ins.data(), p.n_inputs = (int)prof.ins.size();
+    p.colors = bv_colors_from(IM_COL32(6, 10, 17, 255), IM_COL32(178, 192, 208, 255), IM_COL32(244, 247, 252, 255), IM_COL32(150, 166, 184, 255),
+                              IM_COL32(110, 217, 255, 255), IM_COL32(168, 236, 255, 255), IM_COL32(255, 150, 110, 255), IM_COL32(120, 240, 170, 255));
+    p.font_px = 14;
+    float w = 1000;
+    bool ok = true;
+    auto frames = [&](int scheme, ImVec2 mouse, bool down, BVResult *out) {
+        p.scheme = scheme;
+        io.AddMousePosEvent(mouse.x, mouse.y);
+        io.AddMouseButtonEvent(0, down);
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(ImVec2(1100, 860));
+        ImGui::Begin("##t", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove);
+        ImGui::SetCursorScreenPos(ImVec2(20, 20));
+        float h = bv_height(p, w);
+        *out = bv_draw("##bv", w, h, p);
+        ImGui::End();
+        ImGui::Render();
+    };
+    struct Case { int scheme; int code; bool want_click; bool want_reserved; };
+    Case cases[] = {{BV_CONTROLLER, PB(EAST), true, false}, {BV_CONTROLLER, PAD_BASE + 0x40, true, false},
+                    {BV_CONTROLLER, BV_STICK_L_UP, true, false}, {BV_KEYBOARD, SDL_SCANCODE_W, true, false},
+                    {BV_KEYBOARD, KEY_MOUSE + SDL_BUTTON_X1, true, false}, {BV_KEYBOARD, KEY_WHEEL_DOWN, true, false},
+                    {BV_KEYBOARD, SDL_SCANCODE_ESCAPE, false, true}, {BV_KEYBOARD, SDL_SCANCODE_F12, false, true}};
+    for (const Case &c : cases) {
+        p.scheme = c.scheme;
+        ImVec2 at;
+        if (!bv_input_center(p, w, c.code, &at)) {
+            fprintf(stderr, "interaction test: input %d has no place on the drawing\n", c.code);
+            ok = false;
+            continue;
+        }
+        ImVec2 m(20 + at.x, 20 + at.y);
+        BVResult r;
+        frames(c.scheme, ImVec2(5, 5), false, &r);
+        frames(c.scheme, m, false, &r);
+        frames(c.scheme, m, false, &r);
+        bool hovered = r.hovered == c.code && r.reserved == c.want_reserved;
+        frames(c.scheme, m, true, &r);
+        BVResult pressed = r;
+        frames(c.scheme, m, true, &r);
+        frames(c.scheme, m, false, &r);
+        bool clicked = c.want_click ? r.clicked == c.code : r.clicked == 0;
+        bool no_early = pressed.clicked == 0;
+        if (!hovered || !clicked || !no_early) {
+            fprintf(stderr, "interaction test: input %d: hovered %d (%d), clicked %d (want %d), early %d\n", c.code, r.hovered, hovered, r.clicked, c.want_click, pressed.clicked);
+            ok = false;
+        }
+        frames(c.scheme, ImVec2(5, 5), false, &r);
+        if (r.hovered != 0 || r.clicked != 0) {
+            fprintf(stderr, "interaction test: nothing should be hovered away from the drawing\n");
+            ok = false;
+        }
+    }
+    printf("interaction test: %s\n", ok ? "ok" : "FAILED");
+    return ok;
+}
+
+// What a layout costs: it is built when the width, the font or the bindings change, never for a hover or a selection
+static void layout_timing() {
+    ImGui::GetStyle().FontSizeBase = 14;
+    ImGuiIO &io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(1300, 900);
+    ImGui::NewFrame();  // (a frame is needed for the font)
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::Begin("##time");
+    struct { const char *name; int scheme; Profile prof; } sets[] = {{"controller, typical", BV_CONTROLLER, pad_typical()},
+                                                                      {"controller, 24 inputs", BV_CONTROLLER, pad_heavy()},
+                                                                      {"keyboard, typical", BV_KEYBOARD, kbm_typical()},
+                                                                      {"keyboard, 66 inputs", BV_KEYBOARD, kbm_heavy()}};
+    for (auto &set : sets) {
+        set.prof.build();
+        BVParams p;
+        p.scheme = set.scheme;
+        p.inputs = set.prof.ins.data(), p.n_inputs = (int)set.prof.ins.size();
+        p.font_px = 14;
+        Uint64 t0 = SDL_GetPerformanceCounter();
+        const int n = 20;
+        for (int i = 0; i < n; i++) bv_height(p, 900.f + i * 7);  // (a new width each time: a new layout)
+        double ms = (double)(SDL_GetPerformanceCounter() - t0) * 1000.0 / (double)SDL_GetPerformanceFrequency() / n;
+        printf("  layout %-22s %.2f ms\n", set.name, ms);
+    }
+    ImGui::End();
+    ImGui::EndFrame();
 }
 
 int main(int argc, char **argv) {
@@ -371,7 +516,7 @@ int main(int argc, char **argv) {
         s.selected_input = PB(SOUTH), s.selected_label = "Dodge / roll";
         add(s);
         s = mk("pad_hover", "Controller, mouse over East", 1100, 860, BV_CONTROLLER, pad_typical());
-        s.mouse_x = 780, s.mouse_y = 300;
+        s.mouse_x = 743, s.mouse_y = 341;
         add(s);
     }
     // keyboard and mouse
@@ -390,7 +535,19 @@ int main(int argc, char **argv) {
         s.held = {SDL_SCANCODE_W, SDL_SCANCODE_LSHIFT};
         add(s);
         s = mk("kbm_hover_reserved", "Keyboard, mouse over Esc (kept by the recomp)", 1300, 1000, BV_KEYBOARD, kbm_typical());
-        s.mouse_x = 40, s.mouse_y = 280;
+        s.mouse_x = 33, s.mouse_y = 365;
+        add(s);
+    }
+    // a profile with everything bound
+    {
+        Scenario s = mk("heavy_pad", "Controller, every input with several actions, conflicts, a stray input", 1300, 1000, BV_CONTROLLER, pad_heavy());
+        s.selected_input = PB(WEST), s.selected_label = "Attack X";
+        add(s);
+        s = mk("heavy_kbm", "Keyboard and mouse, 66 inputs bound", 1300, 1100, BV_KEYBOARD, kbm_heavy());
+        s.selected_input = SDL_SCANCODE_G, s.selected_label = "Attack X";
+        add(s);
+        s = mk("heavy_kbm_900", "Keyboard and mouse, 66 inputs bound, 900 px", 960, 1100, BV_KEYBOARD, kbm_heavy());
+        s.font = 12, s.region_w = 900;
         add(s);
     }
     // sizes, in the way the settings menu would host them
@@ -398,7 +555,7 @@ int main(int argc, char **argv) {
         Scenario s = mk("size_720p_pad", "Controller in a 560 px wide panel", 640, 720, BV_CONTROLLER, pad_typical());
         s.font = 12, s.region_w = 600;
         add(s);
-        s = mk("size_720p_kbm", "Keyboard in a 900 px wide panel", 960, 640, BV_KEYBOARD, kbm_typical());
+        s = mk("size_720p_kbm", "Keyboard in a 900 px wide panel", 960, 760, BV_KEYBOARD, kbm_typical());
         s.font = 12, s.region_w = 900;
         add(s);
         s = mk("size_1080p_pad", "Controller, 1080p menu", 1920, 1080, BV_CONTROLLER, pad_typical());
@@ -413,10 +570,10 @@ int main(int argc, char **argv) {
         s = mk("size_ultrawide_pad", "Controller, ultrawide 3440x1440", 3440, 1440, BV_CONTROLLER, pad_typical());
         s.font = 24, s.region_w = 2800, s.selected_input = PB(WEST), s.selected_label = "Use item / sheathe";
         add(s);
-        s = mk("size_narrow_pad", "Controller, a very narrow panel", 480, 720, BV_CONTROLLER, pad_typical());
+        s = mk("size_narrow_pad", "Controller, a very narrow panel", 480, 640, BV_CONTROLLER, pad_typical());
         s.font = 11, s.region_w = 440;
         add(s);
-        s = mk("size_narrow_kbm", "Keyboard, a narrow panel", 560, 640, BV_KEYBOARD, kbm_typical());
+        s = mk("size_narrow_kbm", "Keyboard, a narrow panel", 560, 760, BV_KEYBOARD, kbm_typical());
         s.font = 11, s.region_w = 520;
         add(s);
     }
@@ -441,5 +598,7 @@ int main(int argc, char **argv) {
         if (only && !strstr(s.file.c_str(), only)) continue;
         render(s, dir);
     }
+    if (!only && !interaction_test()) g_failed = true;
+    if (!only) layout_timing();
     return g_failed ? 1 : 0;
 }

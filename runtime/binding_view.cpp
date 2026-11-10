@@ -28,9 +28,6 @@
 #define PAD_LT (PAD_BASE + 0x40)
 #define PAD_RT (PAD_BASE + 0x41)
 
-static void T(const char *m) {
-    if (getenv("BVT")) fprintf(stderr, "[bv] %s\n", m);
-}
 namespace {
 typedef std::vector<ImVec2> Poly;
 const float PI = 3.14159265f;
@@ -330,9 +327,6 @@ void build_controller(Layout &L, float fs, float W, float chip_w, float gutter, 
         Decor w2;
         w2.pts = circle_poly(b.P(500, 214), b.R(13)), w2.alpha = .35f, w2.width = 1.f;
         L.decor.push_back(w2);
-        Decor mid;  // the seam between the grips
-        mid.pts = {b.P(430, 330), b.P(500, 352), b.P(570, 330)}, mid.closed = false, mid.alpha = .18f;
-        L.decor.push_back(mid);
     }
 
     // triggers and bumpers
@@ -371,7 +365,8 @@ void build_controller(Layout &L, float fs, float W, float chip_w, float gutter, 
             {PAD_BTN(SDL_GAMEPAD_BUTTON_DPAD_LEFT), ImVec2(x - 78, y - 19), ImVec2(x - 24, y + 19), ICON_LEFT},
             {PAD_BTN(SDL_GAMEPAD_BUTTON_DPAD_RIGHT), ImVec2(x + 24, y - 19), ImVec2(x + 78, y + 19), ICON_RIGHT}};
         for (auto &a : arms) {
-            Shape &s = b.add(a.code, rrect_poly(b.P(a.lo.x, a.lo.y), b.P(a.hi.x, a.hi.y), b.R(8)), "", SIDE_L);
+            bool below = a.icon == ICON_DOWN || a.icon == ICON_RIGHT;  // (their chips go under the drawing: nothing in the way)
+            Shape &s = b.add(a.code, rrect_poly(b.P(a.lo.x, a.lo.y), b.P(a.hi.x, a.hi.y), b.R(8)), "", below ? SIDE_B : SIDE_L);
             s.icon = a.icon;
             anchors_rect(s);
         }
@@ -654,7 +649,7 @@ struct Router {
                 if (q.size() < 2) continue;
                 float cst = cost(q, c.shape, chip_index);
                 bool straight = q.size() == 2;
-                if (straight && fabsf(q[0].x - q[1].x) > 1.f && fabsf(q[0].y - q[1].y) > 1.f) cst += 150;  // (a slanted line)
+                if (straight && fabsf(q[0].x - q[1].x) > 1.f && fabsf(q[0].y - q[1].y) > 1.f) cst += 250;  // (a slanted line)
                 if (cst < best_cost) best_cost = cst, best = q, best_dot = a, best_tip = t;
             }
         }
@@ -687,6 +682,71 @@ void shift_all(Layout &L, float dy) {
     for (Chip &c : L.chips) c.pos.y += dy;
 }
 
+// Packs the chips of one side of a drawing (above or below it) into tiers: each chip as near to the middle of its input
+// as it can be, tiers that fill up are stacked, and an arrow up a tier is not asked to pass through the chips of the
+// tiers below. Returns the height of each tier.
+std::vector<float> pack_row(Layout &L, std::vector<Chip *> &grp_g, float W, float pad, float gap, float fs) {
+    std::vector<float> tier_h;
+            std::sort(grp_g.begin(), grp_g.end(), [&](Chip *a, Chip *b) { return L.shapes[a->shape].c.x < L.shapes[b->shape].c.x; });
+            std::vector<float> right;  // where each tier is filled to
+            for (Chip *c : grp_g) {
+                float want = std::clamp(L.shapes[c->shape].c.x - c->size.x * .5f, pad * .5f, std::max(pad * .5f, W - pad * .5f - c->size.x));
+                int bt = -1;
+                float bx = want, bd = FLT_MAX;
+                float ax = L.shapes[c->shape].c.x;
+                for (size_t t = 0; t < right.size() + 1 && t < 8; t++) {
+                    float x = t < right.size() ? std::max(want, right[t] + gap) : want;
+                    if (x + c->size.x > W - pad * .5f) continue;
+                    float d = fabsf(x - want) + (float)t * fs * 12.f;
+                    for (Chip *o : grp_g) {  // (an arrow goes up past the chips of the tiers below its own)
+                        if (o == c) break;
+                        float oax = L.shapes[o->shape].c.x;
+                        if (o->tier < (int)t && ax >= o->pos.x && ax <= o->pos.x + o->size.x) d += 400;
+                        if (o->tier > (int)t && oax >= x && oax <= x + c->size.x) d += 400;
+                    }
+                    if (d < bd) bd = d, bt = (int)t, bx = x;
+                }
+                if (bt < 0) {  // (no room anywhere: the last tier, pushed left)
+                    bt = (int)std::min<size_t>(right.size(), 7);
+                    bx = std::max(pad * .5f, W - pad * .5f - c->size.x);
+                }
+                if (bt >= (int)right.size()) right.resize(bt + 1, -1e9f);
+                if (bt >= (int)tier_h.size()) tier_h.resize(bt + 1, 0.f);
+                c->tier = bt, c->pos.x = bx;
+                right[bt] = bx + c->size.x;
+                tier_h[bt] = std::max(tier_h[bt], c->size.y);
+            }
+            // a tier that ran past the right edge is pulled back, then pushed off the left edge again
+            for (size_t t = 0; t < right.size(); t++) {
+                std::vector<Chip *> row;
+                for (Chip *c : grp_g)
+                    if (c->tier == (int)t) row.push_back(c);
+                for (int i = (int)row.size() - 1; i >= 0; i--) {
+                    float lim = i + 1 < (int)row.size() ? row[i + 1]->pos.x - gap : W - pad * .5f;
+                    row[i]->pos.x = std::min(row[i]->pos.x, lim - row[i]->size.x);
+                }
+                for (size_t i = 0; i < row.size(); i++) {
+                    float lim = i ? row[i - 1]->pos.x + row[i - 1]->size.x + gap : pad * .5f;
+                    row[i]->pos.x = std::max(row[i]->pos.x, lim);
+                }
+            }
+    // a tier that was pushed to one side as a whole is slid back toward the middle of its inputs
+    for (size_t t = 0; t < tier_h.size(); t++) {
+        std::vector<Chip *> row;
+        for (Chip *c : grp_g)
+            if (c->tier == (int)t) row.push_back(c);
+        if (row.empty()) continue;
+        std::sort(row.begin(), row.end(), [](Chip *a, Chip *b) { return a->pos.x < b->pos.x; });
+        float sum = 0;
+        for (Chip *c : row) sum += L.shapes[c->shape].c.x - (c->pos.x + c->size.x * .5f);
+        float delta = sum / (float)row.size();
+        delta = std::max(delta, pad * .5f - row.front()->pos.x);
+        delta = std::min(delta, W - pad * .5f - (row.back()->pos.x + row.back()->size.x));
+        for (Chip *c : row) c->pos.x += delta;
+    }
+    return tier_h;
+}
+
 void build_layout(Layout &L, const BVParams &p, float W) {
     float fs = p.font_px;
     L = Layout();
@@ -694,7 +754,6 @@ void build_layout(Layout &L, const BVParams &p, float W) {
     float pad = fs * .8f, gutter = fs * 2.6f;
     float gap = fs * .5f;
 
-    T("build start");
     if (p.scheme == BV_CONTROLLER) {
         float chip_w = std::clamp(W * .19f, fs * 8.f, fs * 13.f);
         gutter = fs * 2.2f;
@@ -703,14 +762,19 @@ void build_layout(Layout &L, const BVParams &p, float W) {
         // keyboard and mouse
         std::vector<KeyDef> keys;
         keyboard_keys(keys);
-        float mouse_w = 3.6f, total = KBW + 1.4f + mouse_w;
+        float mouse_w = 3.6f, kbw = KBW, total = kbw + 1.4f + mouse_w;
         float u = std::min((W - 2 * pad) / total, fs * 3.6f);
+        if (u < fs * 2.5f) {  // (too narrow for the numpad: without it the keys are a fifth bigger)
+            kbw = 18.6f, total = kbw + 1.4f + mouse_w;
+            u = std::min((W - 2 * pad) / total, fs * 3.6f);
+            keys.erase(std::remove_if(keys.begin(), keys.end(), [](const KeyDef &k) { return k.x >= 19.f; }), keys.end());
+        }
         u = std::max(u, 6.f);
         float ox = (W - total * u) * .5f, oy = 0;
         {
             Decor plate;
             float m = u * .35f;
-            plate.pts = rrect_poly(ImVec2(ox - m, oy - m), ImVec2(ox + KBW * u + m, oy + KBH * u + m), u * .4f);
+            plate.pts = rrect_poly(ImVec2(ox - m, oy - m), ImVec2(ox + kbw * u + m, oy + KBH * u + m), u * .4f);
             plate.fill = true, plate.alpha = .32f, plate.width = 1.2f;
             L.decor.push_back(plate);
         }
@@ -732,7 +796,7 @@ void build_layout(Layout &L, const BVParams &p, float W) {
             anchors_rect(s);
         }
         // the mouse
-        float mx = ox + (KBW + 1.4f) * u, my = oy + .4f * u, mw = mouse_w * u, mh = 5.6f * u;
+        float mx = ox + (kbw + 1.4f) * u, my = oy + .4f * u, mw = mouse_w * u, mh = 5.6f * u;
         {
             Decor body;
             body.pts = rrect_poly(ImVec2(mx, my), ImVec2(mx + mw, my + mh), mw * .42f);
@@ -780,7 +844,6 @@ void build_layout(Layout &L, const BVParams &p, float W) {
 
     for (Shape &sh : L.shapes) dedupe(sh.pts, .9f);
     for (Decor &d : L.decor) dedupe(d.pts, .9f);
-    T("shapes done");
     // chips for what is bound
     std::unordered_map<int, int> by_code;
     for (size_t i = 0; i < L.shapes.size(); i++) by_code[L.shapes[i].code] = (int)i;
@@ -859,19 +922,18 @@ void build_layout(Layout &L, const BVParams &p, float W) {
                 }
             }
         }
-        // the centre buttons' chips, side by side under the drawing
+        // the chips of the buttons under the drawing (the centre ones and two of the d-pad's), in tiers
         {
-            float lane = fs * 1.8f, bottom_y = diag_hi_y + lane;
+            float lane = fs * 1.9f, bottom_y = diag_hi_y + lane;
             std::vector<Chip *> row;
             for (Chip &c : L.chips)
                 if (c.side == SIDE_B) row.push_back(&c);
-            std::sort(row.begin(), row.end(), [&](Chip *a, Chip *b) { return L.shapes[a->shape].c.x < L.shapes[b->shape].c.x; });
-            float cx = (diag_lo_x + diag_hi_x) * .5f;
+            std::vector<float> th = pack_row(L, row, W, pad, gap, fs);
             for (Chip *c : row) {
-                float ax = L.shapes[c->shape].c.x;
-                float x = ax < cx ? std::min(ax - c->size.x * .5f, cx - gap * .5f - c->size.x) : std::max(ax - c->size.x * .5f, cx + gap * .5f);
-                c->pos = ImVec2(x, bottom_y);
-                need = std::max(need, bottom_y + c->size.y + pad);
+                float above = 0;
+                for (int k = 0; k < c->tier; k++) above += th[k] + gap;
+                c->pos.y = bottom_y + above;
+                need = std::max(need, c->pos.y + c->size.y + pad);
             }
         }
     } else {
@@ -879,51 +941,7 @@ void build_layout(Layout &L, const BVParams &p, float W) {
         std::vector<Chip *> grp[2];
         for (Chip &c : L.chips) grp[c.side == SIDE_T ? 0 : 1].push_back(&c);
         std::vector<float> tier_h[2];
-        for (int g = 0; g < 2; g++) {
-            std::sort(grp[g].begin(), grp[g].end(), [&](Chip *a, Chip *b) { return L.shapes[a->shape].c.x < L.shapes[b->shape].c.x; });
-            std::vector<float> right;  // where each tier is filled to
-            for (Chip *c : grp[g]) {
-                float want = std::clamp(L.shapes[c->shape].c.x - c->size.x * .5f, pad * .5f, std::max(pad * .5f, W - pad * .5f - c->size.x));
-                int bt = -1;
-                float bx = want, bd = FLT_MAX;
-                float ax = L.shapes[c->shape].c.x;
-                for (size_t t = 0; t < right.size() + 1 && t < 8; t++) {
-                    float x = t < right.size() ? std::max(want, right[t] + gap) : want;
-                    if (x + c->size.x > W - pad * .5f) continue;
-                    float d = fabsf(x - want) + (float)t * fs * 12.f;
-                    for (Chip *o : grp[g]) {  // (an arrow goes up past the chips of the tiers below its own)
-                        if (o == c) break;
-                        float oax = L.shapes[o->shape].c.x;
-                        if (o->tier < (int)t && ax >= o->pos.x && ax <= o->pos.x + o->size.x) d += 400;
-                        if (o->tier > (int)t && oax >= x && oax <= x + c->size.x) d += 400;
-                    }
-                    if (d < bd) bd = d, bt = (int)t, bx = x;
-                }
-                if (bt < 0) {  // (no room anywhere: the last tier, pushed left)
-                    bt = (int)std::min<size_t>(right.size(), 7);
-                    bx = std::max(pad * .5f, W - pad * .5f - c->size.x);
-                }
-                if (bt >= (int)right.size()) right.resize(bt + 1, -1e9f);
-                if (bt >= (int)tier_h[g].size()) tier_h[g].resize(bt + 1, 0.f);
-                c->tier = bt, c->pos.x = bx;
-                right[bt] = bx + c->size.x;
-                tier_h[g][bt] = std::max(tier_h[g][bt], c->size.y);
-            }
-            // a tier that ran past the right edge is pulled back, then pushed off the left edge again
-            for (size_t t = 0; t < right.size(); t++) {
-                std::vector<Chip *> row;
-                for (Chip *c : grp[g])
-                    if (c->tier == (int)t) row.push_back(c);
-                for (int i = (int)row.size() - 1; i >= 0; i--) {
-                    float lim = i + 1 < (int)row.size() ? row[i + 1]->pos.x - gap : W - pad * .5f;
-                    row[i]->pos.x = std::min(row[i]->pos.x, lim - row[i]->size.x);
-                }
-                for (size_t i = 0; i < row.size(); i++) {
-                    float lim = i ? row[i - 1]->pos.x + row[i - 1]->size.x + gap : pad * .5f;
-                    row[i]->pos.x = std::max(row[i]->pos.x, lim);
-                }
-            }
-        }
+        for (int g = 0; g < 2; g++) tier_h[g] = pack_row(L, grp[g], W, pad, gap, fs);
         float lane = fs * 2.6f;  // between the keyboard and the nearest chips: where the arrows turn
         auto stack_h = [&](int g) {
             float h = 0;
@@ -948,14 +966,12 @@ void build_layout(Layout &L, const BVParams &p, float W) {
     }
     if (!L.extras.empty()) need += fs * 1.4f;
 
-    T("placed");
     // the arrows
     Router r{L, fs, {}};
     std::vector<int> order(L.chips.size());
     for (size_t i = 0; i < order.size(); i++) order[i] = (int)i;
     for (int i : order) r.route(L.chips[i], i);
     L.need_h = need;
-    T("routed");
 }
 
 Layout &layout_for(const BVParams &p, float W) {
@@ -1015,6 +1031,16 @@ float bv_height(const BVParams &p, float width) {
     return L.need_h;
 }
 
+bool bv_input_center(const BVParams &p, float width, int code, ImVec2 *out) {
+    Layout &L = layout_for(p, width);
+    for (const Shape &sh : L.shapes)
+        if (sh.code == code) {
+            if (out) *out = sh.c;
+            return true;
+        }
+    return false;
+}
+
 BVResult bv_draw(const char *id, float width, float height, const BVParams &p) {
     BVResult res;
     ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -1066,7 +1092,6 @@ BVResult bv_draw(const char *id, float width, float height, const BVParams &p) {
     ImU32 on_accent = dark_accent ? IM_COL32(255, 255, 255, 255) : (C.panel | 0xFF000000u);
     if (!dark_accent) on_accent = mix(C.panel | 0xFF000000u, IM_COL32(0, 0, 0, 255), .5f);
 
-    T("draw start");
     // the body, wells and other decoration
     for (const Decor &d : L.decor) {
         Poly pts = d.pts;
@@ -1104,7 +1129,6 @@ BVResult bv_draw(const char *id, float width, float height, const BVParams &p) {
             arrow_head(dl, r.back(), c.dir, fs * (em ? .62f : .5f), with_alpha(col, a));
         }
 
-    T("arrows done");
     // the inputs
     for (size_t i = 0; i < L.shapes.size(); i++) {
         const Shape &s0 = L.shapes[i];
@@ -1157,7 +1181,6 @@ BVResult bv_draw(const char *id, float width, float height, const BVParams &p) {
         dl->AddCircleFilled(d, r, sel || em ? (c.conflict ? C.warn : C.accent_bright) : with_alpha(col, .95f), 16);
     }
 
-    T("inputs done");
     // the chips
     float pad = chip_pad(fs), lh = chip_line_h(fs);
     for (const Chip &c : L.chips) {
@@ -1214,12 +1237,12 @@ BVResult bv_draw(const char *id, float width, float height, const BVParams &p) {
         lines.push_back(nm);
         auto cit = chip_of.find(s.code);
         if (s.reserved) lines.push_back(std::string("Kept by the recomp: ") + s.reserved_use);
-        else if (cit == chip_of.end()) lines.push_back("Nothing on it. Click to give it to the selected action.");
+        else if (cit == chip_of.end()) lines.push_back(p.click_hint ? std::string("Nothing on it. ") + p.click_hint : std::string("Nothing on it."));
         else {
             for (int i = 0; i < p.n_inputs; i++)
                 if (p.inputs[i].code == s.code)
                     for (int k = 0; k < p.inputs[i].n; k++) lines.push_back(std::string("  ") + p.inputs[i].actions[k].label);
-            lines.push_back("Click to give it to the selected action.");
+            if (p.click_hint) lines.push_back(p.click_hint);
         }
         float ts = fs * .95f, w = 0;
         for (auto &l : lines) w = std::max(w, text_size(ts, l.c_str()).x);

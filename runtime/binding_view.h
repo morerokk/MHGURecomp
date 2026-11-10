@@ -37,10 +37,18 @@
 //      BVResult r = bv_draw("##bindview", w, h, p);   // advances the cursor by w x h
 //      if (r.clicked)  -> bind r.clicked to the selected action (the same path as a captured press)
 //      r.hovered       -> the input under the mouse (0 none), to show its text in the help box if wanted
-//    Clicking a reserved key (BV_RESERVED) is reported in r.reserved and never as clicked.
+//    Clicking a key the recomp keeps for itself (Esc, F1, Insert, F7-F12: key_reserved) is reported in r.reserved
+//    and never as clicked; those keys are drawn dimmed. p.click_hint is the last line of the tooltip ("Click to bind
+//    it to Dodge", or nullptr when no row is being edited). bv_input_center() gives where an input is drawn.
 // 4. Controller-only menus: nothing is focusable in the drawing (it takes no navigation focus); set p.focus_input
 //    to the input of the focused row and p.selected_input to the input of the row being captured.
-// 5. Preview without the game: make preview-bindings renders every state to PNG files (obj/binding-preview/).
+// 5. Theme colours (settings_panel.cpp Theme): panel = t.panel, line = t.text_dim, text = t.text, text_dim = t.text_dim
+//    (a notch darker is fine), accent = t.accent, accent_bright = t.accent_bright, warn = t.warn, live = a green or
+//    blue that is not the accent (the previews use (120,240,170), (150,214,150), (110,220,255) and (24,124,170)).
+// 6. Preview without the game: `make preview-bindings` renders every state to PNG files (obj/binding-preview/, one
+//    scenario: make preview-bindings ONLY=pad_typical) and runs a mouse test (hover, click, reserved key).
+//    Cost: a layout is built when the width, the font size or the bindings change (about 1 to 6 ms, 17 ms for 66
+//    keys bound), never for a hover, a selection or a held key; drawing is a few hundred draw-list shapes.
 // ---------------------------------------------------------------------------------------------------------------
 #pragma once
 #include "imgui.h"
@@ -89,6 +97,7 @@ struct BVParams {
     const int *held = nullptr;
     int n_held = 0;
     float time_s = 0;
+    const char *click_hint = "Click to give it to the selected action.";  // last line of an input's tooltip (nullptr: none)
     BVColors colors = {};
     float font_px = 13.f;
 };
@@ -99,6 +108,9 @@ struct BVResult {
 };
 
 float bv_height(const BVParams &p, float width);
+// Where an input is drawn, relative to the widget's top left corner (for height == bv_height): false if it has no
+// place on this drawing (a key the keyboard does not show). For a pointer, a tooltip or a test.
+bool bv_input_center(const BVParams &p, float width, int code, ImVec2 *out);
 BVResult bv_draw(const char *id, float width, float height, const BVParams &p);
 // "South button", "Left Shift", "Mouse 4", "Wheel up": what the chip's first line says
 void bv_input_name(int code, char *buf, int size);
