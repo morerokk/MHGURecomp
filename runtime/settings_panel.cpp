@@ -344,6 +344,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(face_buttons);
     SAME(ldn_port);
     SAME(sync_small_monsters);
+    SAME(lag_compensation);
     SAME(ldn_direct);
     SAME(bonus_content);
     SAME(village_in_hub);
@@ -864,6 +865,7 @@ void reset_section() {
         break;
     case 4:
         c.sync_small_monsters = f.sync_small_monsters;
+        c.lag_compensation = f.lag_compensation;
         c.village_in_hub = f.village_in_hub;
         c.share_urgent = f.share_urgent;
         c.hp = f.hp;
@@ -1301,6 +1303,7 @@ std::vector<Row> main_rows() {
             tr("HP multipliers for single quests, by their quest ID: in those quests they are used instead of the ones above.");
         header(r, "hub.header", tr("Hub"));
         add_bool(r, "sync", "Sync small monsters", &c.sync_small_monsters, ini("SyncSmallMonsters"));
+        add_bool(r, "lagcomp", "Lag compensation (experimental)", &c.lag_compensation, ini("LagCompensation"));
         add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, ini("VillageQuestsInHub"));
         add_bool(r, "urgent", "Urgent quests count for all", &c.share_urgent, ini("ShareUrgentCredit"));
         header(r, "hp.header", tr("Monster HP Scaling"));

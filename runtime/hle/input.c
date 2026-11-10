@@ -49,6 +49,7 @@ uint64_t input_npad_state(int32_t sticks[4]) {
 static void fill_state(Cpu *c) {
     emsync_tick();  // (multiplayer small monster sync: on the game's thread, once a frame is plenty)
     hpscale_tick();  // (the hub host's [Monster HP] settings to the others)
+    hitsync_tick();  // (multiplayer: tells the others this game reports its hunter's hits)
     chat_tick(c);  // (a line typed after "/": sent as a shoutout is, runtime/hle/chat.c)
     presence_tick();  // (Discord Rich Presence, once a second: runtime/hle/presence.c)
     uint8_t *s = ARGP(0);
