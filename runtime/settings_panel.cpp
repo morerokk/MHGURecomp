@@ -1098,7 +1098,6 @@ void action_rows(std::vector<Row> &r) {
                    acts().draft.layout = acts().layout = v == 0 ? ACT_LAYOUT_SIMPLE : ACT_LAYOUT_ADVANCED;
                    if (v == 0)
                        acts().weapon = 0;
-        acts().layout = act_layout(&acts().saved);
                });
     r.back().help = tr("Simple: one button for what goes together (Confirm also talks in town, Cancel also backs out there), the same bindings underneath. Advanced: every action on its own, and per weapon.");
     add_choice(r, "act.device", "Control scheme", a.dev, {tr("Controller"), tr("Keyboard")},
@@ -2406,6 +2405,7 @@ void settings_panel(bool *open) {
         acts().capture_row = -1;
         acts().dev = acts().saved.scheme == ACT_SCHEME_KBM ? 1 : acts().saved.scheme == ACT_SCHEME_PAD ? 0 : host_input_last_device();
         acts().weapon = 0;
+        acts().layout = act_layout(&acts().saved);
         s.draft = s.saved = config_editable();
         s.editing = true;
         s.view = View::Main;

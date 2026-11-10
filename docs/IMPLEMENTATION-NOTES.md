@@ -125,15 +125,47 @@ the actions that deliver that button (so quickhunt still gets through the title 
 
 ## The Game actions screen (settings menu, Controls > Game actions)
 
-Rows: Rebind game actions (Enable), Also in the game's menus (ManageMenus), Attack A also interacts (SheathedAttackA),
-Bindings of (Controller / Keyboard and mouse), For (All weapons / one class: then only the hunt's actions), then every
-action by context with what it reads now: its inputs, `Default`, or the inputs of the action it follows (`same as <Name>`);
-red with `also: <Name>` when another action of that context is on the same input. Confirm on a row: Set (press the input:
-any controller button or trigger; a key, mouse button or wheel notch; Esc cancels, the controller's choice also after 8 s),
-Add another (up to 3 ways to press it), None (unbound on purpose), Default. Chords (`a+b`) are ini-only. The bindings are a
-draft like the other settings: Save writes the `[Actions*]` sections (every other line of the ini is kept) and they are in
-use from the next frame; turning Enable on hooks the game then, with no restart, and turning it off makes the hooks pass
-the pad through.
+The screen shows the bindings of **one control scheme** at a time, named in its title ("Game actions: Controller" /
+"Game actions: Keyboard"), and has two layouts. Top rows: Rebind game actions (Enable), Also in the game's menus
+(ManageMenus), **Layout** (Simple / Advanced), **Control scheme** (Controller / Keyboard). Both are kept in the ini:
+`[Actions] Scheme=Controller|Keyboard`, `Layout=Simple|Advanced`, written only once the player picked them. Without a
+`Scheme` the screen opens on the device a button was last pressed on (`host_input_last_device`: the controller if the menu
+was opened with Plus + Minus, the keyboard after F1). Without a `Layout` a fresh profile is Simple and one that already has
+bindings is Advanced (`act_layout`); the layout shown is fixed when the screen opens, and Save writes it, so binding
+something in Simple does not turn it into Advanced next time.
+
+**Advanced** is the screen as it was: Attack A also interacts, Split Dash from weapon R-action, For (All weapons / one
+class: then only the hunt's actions), then every action by context (Hunt / Town and Hub / Menus) with what it reads now:
+its inputs, `Default`, or the inputs of the action it follows (`same as <Name>`); red with `also: <Name>` when another
+action of that context is on the same input (no automatic change).
+
+**Simple** (`ActRow`, `act_row_*` in actions.c: pure, host-tested) lists 30 merged rows in two groups. Hunt and town:
+Attack X (+ the town's X), Attack A, X + A, Dodge, Use item (+ the town's Y), **Gather / open / talk, weapon away** (the
+hunt's `Interact`, ini name unchanged), **Sprint** (`Dash` + the town's run) and **Weapon action: guard, charge, aim**
+(`WeaponR`), always two rows, L / ZL / ZR (+ the town's), the four D-pad directions (+ the town's), L3 and R3 (+ the town's and
+the menus'). Menus: **Confirm / talk / examine** (`MenuConfirm` + the town's `TownInteract`), **Cancel / back**
+(`MenuCancel` + `TownCancel`), Start menu (+) and Minus (-) (the hunt's, the menus' and the town's), menu X / Y, the four menu
+directions, tab left / right and page left / right. Every action is in exactly one row (host test). A row is its head and its
+members; setting it writes the head and clears the members so that they keep **following** it (the follow chain), and gives a
+copy to a member that does not follow (the menus' L3). A row whose members read something else (edited apart in Advanced)
+shows "Custom (differs by context: see Advanced)"; Set overwrites all of them. No per-weapon rows (a note points to
+Advanced).
+
+**Taking an input away (Simple only).** After a row is given an input, every other row that is read in a common context
+(hunt, town or menus; a row's contexts are its members') and holds that exact input as a single-input alternative loses it;
+a row left with no input is **not set** (`None` in the ini; the engine then gets nothing for it). The input is also taken
+from a row that reads it **by default** (what Tier 0 gives that Switch button for the scheme: `host_input_sw_sources`, so
+Confirm on the bottom button takes Cancel's default). Left alone: rows that follow another (the owner is the one that
+changes), and the hunt's `Interact`, which may share an input with other hunt actions by design (the Interact-first gate).
+Not set rows are red ("Not set: choose a button"), counted in a red "Actions not set" row at the top, and the choice itself
+says which rows lost the button. Save works but warns, in red, when Confirm or Cancel is not set (the menus could not be used
+or left with that scheme). Advanced and the engine never see any of this: both layouts write the same per-action keys.
+
+Rows' editing: Set (press the input: any controller button or trigger; a key, mouse button or wheel notch; Esc cancels, the
+controller's choice also after 8 s; the button chosen is not also a press in the menu), Add another (up to 3), Not set
+(`None` in Advanced), Default. Chords (`a+b`) are ini-only. The bindings are a draft like the other settings: Save writes
+the `[Actions*]` sections (every other line of the ini is kept) and they are in use from the next frame; turning Enable on
+hooks the game then, with no restart, and turning it off makes the hooks pass the pad through.
 
 ## Control commands (control file, `MHGU_CONTROL`)
 
@@ -207,6 +239,16 @@ smithy, equipment box, item box, shop, map, options: hover there is unknown (the
   (Pad North) and with the keyboard (Space), Save: the ini has `[Actions]`, `[Actions.Pad]`, `[Actions.Kbm]`, the log says
   `translators hooked`, and in the town north is `Dodge TownCancel`, south no longer the game's B. Started again, the
   bindings are loaded; with the controller alone (no mouse): Controls > Game actions > Dodge > Set > west: `Pad West`.
+
+* **Simple / Advanced screen** (hidden, virtual controller): a fresh ini opens Simple with the scheme of the device the menu
+  was opened from; Confirm set to the bottom button gives `Confirm = Pad South`, "Actions not set: 1" and Cancel red "Not
+  set: choose a button"; Save wrote `[Actions] Enable=1 ManageMenus=1 Scheme=Controller Layout=Simple`, `MenuConfirm =
+  pad:south`, `MenuCancel = None` and warned about Cancel. With that ini in the town at the Item Box: the game's old A
+  (east) does nothing, south opens the box and confirms, east (Cancel not set) does not close it. The same ini opened again:
+  Layout and Scheme switch to Advanced and Keyboard and back (titles and rows follow). Host: 2,753,433 checks, 0 failures
+  (rows, following, custom rows, claiming defaults and explicit inputs, the Interact exemption, scheme / layout parse and
+  format, defaults for old profiles); `test-settings`, `test-settings-panel` and `test-settings-locale` (now also every
+  action and row label of `actions.c`) pass.
 
 ## Differences from the spec (and why)
 
