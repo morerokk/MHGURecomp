@@ -541,7 +541,7 @@ static void test_gate(void) {
     p = parse("[Actions]\nEnable=1\n[Actions.Kbm]\nInteract = key:e\nDodge = key:leftctrl+key:e\nAttackX = key:q\n");
     act_use_profile(&p);
     CHECK(act_interact_share(0) == D, "a chord that holds the input shares it: %llx", (unsigned long long)act_interact_share(0));
-    CHECK(act_shared_frames() == 5, "default frames");
+    CHECK(act_shared_frames() == 1, "default frames");
 
     // not ambiguous: nothing changes
     ActGate g = {0};

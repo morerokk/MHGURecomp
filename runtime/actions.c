@@ -487,7 +487,7 @@ static ActProfile prof;
 static bool prof_on;
 static atomic_bool prof_split;  // act_split_in(prof), for the game thread
 static atomic_ullong share_tab[ACT_VARS];  // act_interact_share, per weapon variant
-static atomic_int shared_frames_now = 5;
+static atomic_int shared_frames_now = 1;
 static atomic_flag prof_lock = ATOMIC_FLAG_INIT;
 static void lock(void) { while (atomic_flag_test_and_set_explicit(&prof_lock, memory_order_acquire)) {} }
 static void unlock(void) { atomic_flag_clear_explicit(&prof_lock, memory_order_release); }
@@ -556,7 +556,7 @@ void act_use_profile(const ActProfile *p) {
     prof_on = p->enable;
     atomic_store(&prof_split, act_split_in(p));
     for (int v = 0; v < ACT_VARS; v++) atomic_store(&share_tab[v], share_in(p, v));
-    atomic_store(&shared_frames_now, p->shared_frames > 0 ? p->shared_frames : 5);
+    atomic_store(&shared_frames_now, p->shared_frames > 0 ? p->shared_frames : 1);
     unlock();
 }
 // Dash and the weapon R-action are one game input (the R-role getter) unless the profile asks for two: the flag, or a

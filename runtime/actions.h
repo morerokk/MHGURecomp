@@ -94,7 +94,7 @@ typedef struct ActProfile {
     bool pointer;   // Pointer: feed the engine's pointer block
     bool split;     // SplitDashWeaponR: Dash and the weapon R-action are two inputs (also when WeaponR has a binding)
     bool sheathed_attack;  // SheathedAttackA: AttackA presses A with the weapon put away too (default: only Interact does)
-    int shared_frames;     // SharedInteractFrames: how long Interact is tried first on an input other hunt actions share (0: 5)
+    int shared_frames;     // SharedInteractFrames: how long Interact is tried first on an input other hunt actions share (0: 1)
     bool log;       // Log: one line per frame
     ActDevice dev[2];  // 0 [Actions.Pad], 1 [Actions.Kbm]
 } ActProfile;
