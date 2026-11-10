@@ -58,6 +58,10 @@ void vsock_network_down(void);      // the network is gone: every connection end
 void emsync_tick(void);             // each frame, from the game's input polling
 void emsync_aux_received(const void *data, uint32_t len);  // an F_AUX message from another game
 
+// hitsync.c: melee hits reported by the hunter who made them
+void hitsync_tick(void);            // each frame, from the game's input polling
+void hitsync_aux_received(const void *data, uint32_t len);
+
 // hle/hpscale.c: large monster HP by the number of hunters; the host's settings go to the others
 void hpscale_tick(void);            // each frame, from the game's input polling
 void hpscale_aux_received(const void *data, uint32_t len);

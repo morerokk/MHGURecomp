@@ -312,6 +312,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Your hub is listed online again.", "Tu sala vuelve a aparecer en línea."},
         {"The host did not answer through the hub server.", "El anfitrión no respondió a través del servidor de salas."},
         {"Sync small monsters", "Sincronizar monstruos pequeños"},
+        {"Lag compensation (experimental)", "Compensación de latencia (experimental)"},
         {"Village quests in Hub", "Misiones de aldea en sala"},
         {"Urgent quests count for all", "Las misiones urgentes cuentan para todos"},
         {"Discord Rich Presence", "Presencia en Discord"},
