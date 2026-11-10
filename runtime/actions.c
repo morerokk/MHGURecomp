@@ -44,6 +44,9 @@ static const ActDef defs[ACT_COUNT] = {
                    "weapon B-actions (Lance, Switch Axe, Insect Glaive, bowguns, Prowler)"},
     [ACT_DASH] = {"Dash", ACT_VIEW_MB1, ROLE_DASH, 0, ACT_KCR, NOFB, "Dash (R)",
                   "the weapon R-action (guard, charge, aim) until WeaponR is bound or SplitDashWeaponR=1"},
+    [ACT_CROUCH] = {"Crouch", ACT_VIEW_MB1, S_B, 0, S_B, FB1(ACT_DODGE), "Crouch, standing still (B)", ""},
+    [ACT_ITEMBAR_RIGHT] = {"ItemBarRight", ACT_VIEW_MB1, S_A, 0, S_A, NOFB, "Item bar: next item, L held (A)", ""},
+    [ACT_ITEMBAR_LEFT] = {"ItemBarLeft", ACT_VIEW_MB1, S_B, 0, S_B, NOFB, "Item bar: previous item, L held (B)", ""},
     [ACT_WEAPON_R] = {"WeaponR", ACT_VIEW_MB1, ROLE_VIRTUAL, 0, ACT_KCR, FB1(ACT_DASH), "Weapon R-action: guard, charge, aim (R)", ""},
     [ACT_ATTACK_X] = {"AttackX", ACT_VIEW_MB1, S_X, 0, S_X, NOFB, "Attack X / draw weapon (X)", ""},
     [ACT_ATTACK_A] = {"AttackA", ACT_VIEW_MB1, S_A, 0, S_A, NOFB, "Attack A, weapon out (A)", ""},
@@ -74,37 +77,53 @@ static const ActDef defs[ACT_COUNT] = {
     [ACT_MENU_Y] = {"MenuY", ACT_VIEW_MB2, S_Y, 0, S_Y, NOFB, "Menu action Y (Y)", ""},
     [ACT_MENU_PAGE_L] = {"MenuPageL", ACT_VIEW_MB2, S_ZL, 0, S_ZL, NOFB, "Page left (ZL)", ""},
     [ACT_MENU_PAGE_R] = {"MenuPageR", ACT_VIEW_MB2, S_ZR, 0, S_ZR, NOFB, "Page right (ZR)", ""},
-    [ACT_MENU_PLUS] = {"MenuPlus", ACT_VIEW_MB2, S_PLUS, 0, S_PLUS, FB1(ACT_PAUSE), "Plus in menus (+)", ""},
-    [ACT_MENU_MINUS] = {"MenuMinus", ACT_VIEW_MB2, S_MINUS, 0, S_MINUS, FB1(ACT_MAP), "Minus in menus (-)", ""},
+    [ACT_MENU_PLUS] = {"MenuPlus", ACT_VIEW_MB2, S_PLUS, 0, S_PLUS, NOFB, "Plus in menus (+)", ""},
+    [ACT_MENU_MINUS] = {"MenuMinus", ACT_VIEW_MB2, S_MINUS, 0, S_MINUS, NOFB, "Minus in menus (-)", ""},
     [ACT_MENU_L3] = {"MenuL3", ACT_VIEW_MB2, S_LSTICK, 0, S_LSTICK, NOFB, "Left stick click in menus (L3)", ""},
     [ACT_MENU_R3] = {"MenuR3", ACT_VIEW_MB2, S_RSTICK, 0, S_RSTICK, NOFB, "Right stick click in menus (R3)", ""},
     // a town
-    [ACT_TOWN_INTERACT] = {"TownInteract", ACT_VIEW_TOWN, S_A, 0, S_A, FB2(ACT_MENU_CONFIRM, ACT_INTERACT), "Talk / interact (A)", ""},
-    [ACT_TOWN_CANCEL] = {"TownCancel", ACT_VIEW_TOWN, S_B, 0, S_B, FB2(ACT_MENU_CANCEL, ACT_DODGE), "B button in town (B)", ""},
-    [ACT_TOWN_X] = {"TownX", ACT_VIEW_TOWN, S_X, 0, S_X, FB1(ACT_ATTACK_X), "X button in town (X)", ""},
-    [ACT_TOWN_Y] = {"TownY", ACT_VIEW_TOWN, S_Y, 0, S_Y, FB1(ACT_ITEM_USE), "Y button in town (Y)", ""},
-    [ACT_TOWN_L] = {"TownL", ACT_VIEW_TOWN, S_L, 0, S_L, FB1(ACT_FIELD_L), "L button in town (L)", ""},
-    [ACT_TOWN_RUN] = {"TownRun", ACT_VIEW_TOWN, ROLE_DASH, 0, ACT_KCR, FB1(ACT_DASH), "Run (R)", ""},
-    [ACT_TOWN_ZL] = {"TownZL", ACT_VIEW_TOWN, S_ZL, 0, S_ZL, FB1(ACT_FIELD_ZL), "ZL button in town (ZL)", ""},
-    [ACT_TOWN_ZR] = {"TownZR", ACT_VIEW_TOWN, ROLE_OTHER, 0, ACT_KCZR, FB1(ACT_FIELD_ZR), "ZR button in town (ZR)", ""},
-    [ACT_TOWN_UP] = {"TownUp", ACT_VIEW_TOWN, S_UP, 0, S_UP, FB1(ACT_CROSS_UP), "D-pad up in town", ""},
-    [ACT_TOWN_DOWN] = {"TownDown", ACT_VIEW_TOWN, S_DOWN, 0, S_DOWN, FB1(ACT_CROSS_DOWN), "D-pad down in town", ""},
-    [ACT_TOWN_LEFT] = {"TownLeft", ACT_VIEW_TOWN, S_LEFT, 0, S_LEFT, FB1(ACT_CROSS_LEFT), "D-pad left in town", ""},
-    [ACT_TOWN_RIGHT] = {"TownRight", ACT_VIEW_TOWN, S_RIGHT, 0, S_RIGHT, FB1(ACT_CROSS_RIGHT), "D-pad right in town", ""},
-    [ACT_TOWN_L3] = {"TownL3", ACT_VIEW_TOWN, S_LSTICK, 0, S_LSTICK, FB1(ACT_FIELD_L3), "Left stick click in town (L3)", ""},
-    [ACT_TOWN_R3] = {"TownR3", ACT_VIEW_TOWN, S_RSTICK, 0, S_RSTICK, FB1(ACT_FIELD_R3), "Right stick click in town (R3)", ""},
-    [ACT_TOWN_PLUS] = {"TownPlus", ACT_VIEW_TOWN, S_PLUS, 0, S_PLUS, FB1(ACT_PAUSE), "Start menu in town (+)", ""},
-    [ACT_TOWN_MINUS] = {"TownMinus", ACT_VIEW_TOWN, S_MINUS, 0, S_MINUS, FB1(ACT_MAP), "Minus button in town (-)", ""},
+    [ACT_TOWN_INTERACT] = {"TownInteract", ACT_VIEW_TOWN, S_A, 0, S_A, NOFB, "Talk / interact (A)", ""},
+    [ACT_TOWN_CANCEL] = {"TownCancel", ACT_VIEW_TOWN, S_B, 0, S_B, NOFB, "B button in town (B)", ""},
+    [ACT_TOWN_X] = {"TownX", ACT_VIEW_TOWN, S_X, 0, S_X, NOFB, "X button in town (X)", ""},
+    [ACT_TOWN_Y] = {"TownY", ACT_VIEW_TOWN, S_Y, 0, S_Y, NOFB, "Y button in town (Y)", ""},
+    [ACT_TOWN_L] = {"TownL", ACT_VIEW_TOWN, S_L, 0, S_L, NOFB, "L button in town (L)", ""},
+    [ACT_TOWN_RUN] = {"TownRun", ACT_VIEW_TOWN, ROLE_DASH, 0, ACT_KCR, NOFB, "Run (R)", ""},
+    [ACT_TOWN_ZL] = {"TownZL", ACT_VIEW_TOWN, S_ZL, 0, S_ZL, NOFB, "ZL button in town (ZL)", ""},
+    [ACT_TOWN_ZR] = {"TownZR", ACT_VIEW_TOWN, ROLE_OTHER, 0, ACT_KCZR, NOFB, "ZR button in town (ZR)", ""},
+    [ACT_TOWN_UP] = {"TownUp", ACT_VIEW_TOWN, S_UP, 0, S_UP, NOFB, "D-pad up in town", ""},
+    [ACT_TOWN_DOWN] = {"TownDown", ACT_VIEW_TOWN, S_DOWN, 0, S_DOWN, NOFB, "D-pad down in town", ""},
+    [ACT_TOWN_LEFT] = {"TownLeft", ACT_VIEW_TOWN, S_LEFT, 0, S_LEFT, NOFB, "D-pad left in town", ""},
+    [ACT_TOWN_RIGHT] = {"TownRight", ACT_VIEW_TOWN, S_RIGHT, 0, S_RIGHT, NOFB, "D-pad right in town", ""},
+    [ACT_TOWN_L3] = {"TownL3", ACT_VIEW_TOWN, S_LSTICK, 0, S_LSTICK, NOFB, "Left stick click in town (L3)", ""},
+    [ACT_TOWN_R3] = {"TownR3", ACT_VIEW_TOWN, S_RSTICK, 0, S_RSTICK, NOFB, "Right stick click in town (R3)", ""},
+    [ACT_TOWN_PLUS] = {"TownPlus", ACT_VIEW_TOWN, S_PLUS, 0, S_PLUS, NOFB, "Start menu in town (+)", ""},
+    [ACT_TOWN_MINUS] = {"TownMinus", ACT_VIEW_TOWN, S_MINUS, 0, S_MINUS, NOFB, "Minus button in town (-)", ""},
 };
 // The order a controls screen lists them in
 static const int order[] = {
-    ACT_ATTACK_X, ACT_ATTACK_A, ACT_CHORD_XA, ACT_DODGE, ACT_ITEM_USE, ACT_INTERACT, ACT_DASH, ACT_WEAPON_R, ACT_FIELD_ZR, ACT_FIELD_L,
-    ACT_FIELD_ZL, ACT_CROSS_UP, ACT_CROSS_DOWN, ACT_CROSS_LEFT, ACT_CROSS_RIGHT, ACT_FIELD_L3, ACT_FIELD_R3, ACT_PAUSE,
+    ACT_ATTACK_X, ACT_ATTACK_A, ACT_CHORD_XA, ACT_DODGE, ACT_CROUCH, ACT_ITEM_USE, ACT_INTERACT, ACT_DASH, ACT_WEAPON_R, ACT_FIELD_ZR, ACT_FIELD_L,
+    ACT_ITEMBAR_RIGHT, ACT_ITEMBAR_LEFT, ACT_FIELD_ZL, ACT_CROSS_UP, ACT_CROSS_DOWN, ACT_CROSS_LEFT, ACT_CROSS_RIGHT, ACT_FIELD_L3, ACT_FIELD_R3, ACT_PAUSE,
     ACT_MAP,
     ACT_MENU_CONFIRM, ACT_MENU_CANCEL, ACT_MENU_X, ACT_MENU_Y, ACT_MENU_UP, ACT_MENU_DOWN, ACT_MENU_LEFT, ACT_MENU_RIGHT,
     ACT_MENU_TAB_L, ACT_MENU_TAB_R, ACT_MENU_PAGE_L, ACT_MENU_PAGE_R, ACT_MENU_PLUS, ACT_MENU_MINUS, ACT_MENU_L3, ACT_MENU_R3,
     ACT_TOWN_INTERACT, ACT_TOWN_CANCEL, ACT_TOWN_X, ACT_TOWN_Y, ACT_TOWN_RUN, ACT_TOWN_ZR, ACT_TOWN_L, ACT_TOWN_ZL,
     ACT_TOWN_UP, ACT_TOWN_DOWN, ACT_TOWN_LEFT, ACT_TOWN_RIGHT, ACT_TOWN_L3, ACT_TOWN_R3, ACT_TOWN_PLUS, ACT_TOWN_MINUS,
+};
+// ---- state-scoped actions. The hunter's state (weapon out / away, item bar open, left stick pushed or not) decides which
+// actions deliver a bit: an action's scope says in which states it does (req: all of these flags, forbid: none of
+// them) and for which bits of its own (0: all of them); in any other state those bits are silent. This is how one game
+// bit (A: attack, interact, the item bar's next item; B: dodge, crouch, the bar's previous item) is told apart by what
+// the game is doing with it, with no timing involved.
+enum { ST_OUT = 1, ST_AWAY = 2, ST_BAR = 4, ST_MOVING = 8, ST_STILL = 16, ST_AWAY_MOVING = 32, ST_AWAY_STILL = 64 };
+typedef struct { uint8_t req, forbid; uint32_t bits; } ActScope;
+static const ActScope scopes[ACT_COUNT] = {
+    [ACT_ATTACK_A] = {0, ST_BAR, 0x2000},          // (A with the weapon away: act_view's draw-attack rule)
+    [ACT_CHORD_XA] = {0, ST_BAR, 0x2000},          // (its X is not the bar's)
+    [ACT_INTERACT] = {ST_AWAY, ST_BAR, 0x2000},    // (gather, carve, talk: weapon away)
+    [ACT_DODGE] = {0, ST_BAR, 0x4000},
+    [ACT_CROUCH] = {0, ST_BAR, 0x4000},
+    [ACT_ITEMBAR_RIGHT] = {ST_BAR, 0, 0x2000},
+    [ACT_ITEMBAR_LEFT] = {ST_BAR, 0, 0x4000},
 };
 static const char *const weapon_names[ACT_WEAPONS] = {"GreatSword", "SnS", "Hammer", "Lance", "HBG", "LBG", "LongSword",
                                                       "SwitchAxe", "Gunlance", "Bow", "DualBlades", "Horn",
@@ -494,6 +513,8 @@ bool act_save(const char *path, const ActProfile *p) {
 static ActProfile prof;
 static bool prof_on;
 static atomic_bool prof_split;  // act_split_in(prof), for the game thread
+static atomic_bool crouch_split_on;  // act_crouch_split_in(prof)
+static atomic_bool crouch_clash;     // Interact and Crouch end up on one input for some device or weapon class
 static atomic_ullong share_tab[ACT_VARS];  // act_interact_share, per weapon variant
 static atomic_int shared_frames_now = 1;
 static atomic_flag prof_lock = ATOMIC_FLAG_INIT;
@@ -516,12 +537,14 @@ static bool chords_overlap(const ActChord *x, const ActChord *y) {
 // pair: with the weapon away it is not delivered anyway; actions that are the same binding by following are not shared)
 static uint64_t share_in(const ActProfile *p, int v) {
     uint64_t m = 0;
+    bool split = act_crouch_split_in(p);
     for (int d = 0; d < 2; d++) {
         int fi = ACT_INTERACT;
         const ActBinding *bi = binding_in(p, d, ACT_INTERACT, v, &fi);
         if (!bi) continue;
         for (int j = 0; j < ACT_COUNT; j++) {
             if (j == ACT_INTERACT || j == ACT_ATTACK_A || defs[j].view != ACT_VIEW_MB1 || j == ACT_WEAPON_R) continue;
+            if (split && (j == ACT_DODGE || j == ACT_CROUCH)) continue;  // (told apart by the stick: nothing to try first)
             int fj = j;
             const ActBinding *bj = binding_in(p, d, j, v, &fj);
             if (!bj || fj == fi) continue;
@@ -558,11 +581,37 @@ uint64_t act_gate(ActGate *g, uint64_t active, uint64_t share, bool changed, uin
     if (g->phase == 3) return active & ~I;
     return active & ~share;
 }
+// Crouch (its own binding, or Dodge's that it follows) and Interact on one input, for some device or weapon class; the
+// split profile only. *which gets a short description of the first one found
+static bool act_crouch_clash_in(const ActProfile *p, char *which) {
+    if (!act_crouch_split_in(p)) return false;
+    for (int d = 0; d < 2; d++)
+        for (int v = 0; v < ACT_VARS; v++) {
+            if (v > 0 && !p->dev[d].has_weapon[v - 1]) continue;
+            int fi = ACT_INTERACT, fc = ACT_CROUCH;
+            const ActBinding *bi = binding_in(p, d, ACT_INTERACT, v, &fi), *bc = binding_in(p, d, ACT_CROUCH, v, &fc);
+            if (!bi || !bc) continue;
+            for (int a = 0; a < bi->n; a++)
+                for (int e = 0; e < bc->n; e++)
+                    if (chords_overlap(&bi->alt[a], &bc->alt[e])) {
+                        if (which) {
+                            char one[64];
+                            act_format_input(bc->alt[e].code[0], one, sizeof one);
+                            snprintf(which, 160, "%s%s%s", one, fc != ACT_CROUCH ? " (Crouch follows " : "", fc != ACT_CROUCH ? act_name(fc) : "");
+                            if (fc != ACT_CROUCH) strncat(which, ")", 160 - strlen(which) - 1);
+                        }
+                        return true;
+                    }
+        }
+    return false;
+}
 void act_use_profile(const ActProfile *p) {
     lock();
     prof = *p;
     prof_on = p->enable;
     atomic_store(&prof_split, act_split_in(p));
+    atomic_store(&crouch_split_on, act_crouch_split_in(p));
+    atomic_store(&crouch_clash, act_crouch_clash_in(p, NULL));
     for (int v = 0; v < ACT_VARS; v++) atomic_store(&share_tab[v], share_in(p, v));
     atomic_store(&shared_frames_now, p->shared_frames > 0 ? p->shared_frames : 1);
     unlock();
@@ -579,6 +628,32 @@ bool act_split_in(const ActProfile *p) {
     return false;
 }
 bool act_split(void) { return prof_on && atomic_load(&prof_split); }
+// Crouch is told apart from Dodge once Crouch has a binding of its own for any device or weapon class, or Dodge and
+// Interact are on one input (then the state, not a delay, decides which of them the press is)
+static bool dodge_interact_overlap(const ActProfile *p) {
+    for (int d = 0; d < 2; d++)
+        for (int v = 0; v < ACT_VARS; v++) {
+            if (v > 0 && !p->dev[d].has_weapon[v - 1]) continue;
+            int fi = ACT_INTERACT, fd = ACT_DODGE;
+            const ActBinding *bi = binding_in(p, d, ACT_INTERACT, v, &fi), *bd = binding_in(p, d, ACT_DODGE, v, &fd);
+            if (!bi || !bd || fi == fd) continue;
+            for (int a = 0; a < bi->n; a++)
+                for (int e = 0; e < bd->n; e++)
+                    if (chords_overlap(&bi->alt[a], &bd->alt[e])) return true;
+        }
+    return false;
+}
+bool act_crouch_split_in(const ActProfile *p) {
+    if (dodge_interact_overlap(p)) return true;
+    for (int d = 0; d < 2; d++) {
+        if (p->dev[d].base[ACT_CROUCH].set) return true;
+        for (int w = 0; w < ACT_WEAPONS; w++)
+            if (p->dev[d].weapon[w][ACT_CROUCH].set) return true;
+    }
+    return false;
+}
+bool act_crouch_split(void) { return prof_on && atomic_load(&crouch_split_on); }
+
 uint32_t act_virtual_bits(uint64_t active) {
     return act_split() && (active >> ACT_WEAPON_R & 1) ? ACT_VBIT_WEAPON_R : 0;
 }
@@ -654,6 +729,12 @@ int act_validate(const ActProfile *p) {
                 }
             }
         }
+    {
+        char which[160];
+        if (act_crouch_clash_in(p, which))
+            say(strstr(which, "follows") ? "[actions] note: Crouch is on %s, which Interact has too: standing still that input only interacts; bind Crouch to an input of its own to crouch"
+                                         : "[actions] conflict: Crouch and Interact are both on %s: standing still Interact wins and Crouch does not fire", which), warnings++;
+    }
     for (int i = 0; i < ACT_COUNT; i++)
         if (*defs[i].shared && (p->dev[0].base[i].set || p->dev[1].base[i].set) && defs[i].view == ACT_VIEW_MB1 &&
             !(i == ACT_DASH && act_split_in(p)))
@@ -683,6 +764,9 @@ static const ActRow rows[] = {
     {"AttackA", "Attack A, weapon out (A)", 0, ACT_ATTACK_A, {-1, -1, -1}},
     {"ChordXA", "X + A together on one input", 0, ACT_CHORD_XA, {-1, -1, -1}},
     {"Dodge", "Dodge / roll (B)", 0, ACT_DODGE, {-1, -1, -1}},
+    {"Crouch", "Crouch, standing still (B)", 0, ACT_CROUCH, {-1, -1, -1}},
+    {"ItemBarRight", "Item bar: next item, L held (A)", 0, ACT_ITEMBAR_RIGHT, {-1, -1, -1}},
+    {"ItemBarLeft", "Item bar: previous item, L held (B)", 0, ACT_ITEMBAR_LEFT, {-1, -1, -1}},
     {"ItemUse", "Use item / sheathe (Y)", 0, ACT_ITEM_USE, {ACT_TOWN_Y, -1, -1}},
     {"Interact", "Gather / open / talk, weapon away (A)", 0, ACT_INTERACT, {-1, -1, -1}},
     {"Sprint", "Sprint (R)", 0, ACT_DASH, {ACT_TOWN_RUN, -1, -1}},
@@ -775,7 +859,12 @@ static bool shares_input(const ActBinding *a, const ActBinding *b) {
 // Rows a and b are read in a common context, and Simple should keep them apart
 static bool rows_overlap(int a, int b) {
     if (a == b || !(act_row_views(a) & act_row_views(b))) return false;
-    if (rows[a].head == ACT_INTERACT || rows[b].head == ACT_INTERACT) return false;  // (shares by design: act_gate)
+    int ha = rows[a].head, hb = rows[b].head;
+    if ((ha == ACT_CROUCH && hb == ACT_DODGE) || (ha == ACT_DODGE && hb == ACT_CROUCH)) return false;  // (the game's own B: roll moving, crouch standing)
+    if ((ha == ACT_CROUCH && hb == ACT_INTERACT) || (ha == ACT_INTERACT && hb == ACT_CROUCH)) return true;  // (never share)
+    if (ha == ACT_ITEMBAR_RIGHT || ha == ACT_ITEMBAR_LEFT || hb == ACT_ITEMBAR_RIGHT || hb == ACT_ITEMBAR_LEFT)
+        return (ha == ACT_ITEMBAR_RIGHT && hb == ACT_ITEMBAR_LEFT) || (ha == ACT_ITEMBAR_LEFT && hb == ACT_ITEMBAR_RIGHT);  // (a state of its own: only the bar's two clash)
+    if (ha == ACT_INTERACT || hb == ACT_INTERACT) return false;  // (shares by design: the gate, or Dodge once Crouch is split)
     return true;
 }
 bool act_rows_clash(const ActProfile *p, int dev, int a, int b) {
@@ -871,10 +960,13 @@ bool act_uses_input(int code) {
 // The physical inputs the bindings of a context (for a weapon variant) use: Tier 0's default for any action of that
 // context doesn't read them (a button given to Dodge no longer also attacks).
 typedef struct { int n; int code[400]; } Claims;
+// (the item bar's two actions claim among themselves only: giving the bar's next item an input does not take it from
+// the hunt's other actions' defaults, and the other way round)
+static int claim_group(int i) { return i == ACT_ITEMBAR_RIGHT || i == ACT_ITEMBAR_LEFT ? ACT_VIEWS : defs[i].view; }
 static void claims_of(int view, int v, Claims *cl) {
     cl->n = 0;
     for (int i = 0; i < ACT_COUNT; i++) {
-        if (defs[i].view != view) continue;
+        if (claim_group(i) != view) continue;
         for (int d = 0; d < 2; d++) {
             const ActBinding *b = binding_of(d, i, v);
             for (int a = 0; b && a < b->n; a++)
@@ -930,10 +1022,10 @@ void act_sample(const ActHost *h, ActSnap *out) {
             continue;
         }
         if (!h->suppress && prof_on) {
-            static Claims cl[ACT_VIEWS];  // (window thread only, under the lock)
-            for (int w = 0; w < ACT_VIEWS; w++) claims_of(w, v, &cl[w]);
+            static Claims cl[ACT_VIEWS + 1];  // (window thread only, under the lock)
+            for (int w = 0; w <= ACT_VIEWS; w++) claims_of(w, v, &cl[w]);
             for (int i = 0; i < ACT_COUNT; i++) {
-                const Claims *c = &cl[defs[i].view];
+                const Claims *c = &cl[claim_group(i)];
                 for (int d = 0; d < 2; d++) {
                     const ActBinding *b = binding_of(d, i, v);
                     if (b) {
@@ -975,14 +1067,46 @@ uint32_t act_view_managed(int view, bool dash_zr) {
     return m;
 }
 
+// With the weapon away and Crouch split from Dodge (act_crouch_split): B comes from Crouch while the left stick is
+// not pushed (the crouch) and from Dodge while it is (the roll). Where Interact and Crouch are on one input, Interact
+// wins: that press is only A. With the weapon out both deliver B as before: weapon B-actions need it standing.
+static uint32_t state_of(int view, uint32_t ew, bool bar) {
+    uint32_t st = 0;
+    if (view == ACT_VIEW_MB1 || view == ACT_VIEW_HUNT_ANY) st |= ST_OUT;
+    if (view == ACT_VIEW_SHEATHED || view == ACT_VIEW_HUNT_ANY) st |= ST_AWAY;
+    if (bar) st |= ST_BAR;
+    st |= (ew & ACT_STICK_L_DIRS) ? ST_MOVING : ST_STILL;
+    if (view == ACT_VIEW_SHEATHED) st |= (ew & ACT_STICK_L_DIRS) ? ST_AWAY_MOVING : ST_AWAY_STILL;  // (not when the state is a guess)
+    return st;
+}
+// The bits of action i that count in this state (see scopes[]); where Crouch is split from Dodge the weapon-away
+// state also tells them apart by the stick, and Interact wins an input it has with Crouch
+static uint32_t scoped_bits(int i, uint32_t bits, uint32_t st, uint64_t active) {
+    ActScope s = scopes[i];
+    uint32_t forbid = s.forbid;
+    if (act_crouch_split()) {
+        if (i == ACT_DODGE) forbid |= ST_AWAY_STILL;
+        if (i == ACT_CROUCH) {
+            forbid |= ST_AWAY_MOVING;
+            if ((st & ST_AWAY_STILL) && (active >> ACT_INTERACT & 1) && atomic_load(&crouch_clash)) forbid |= ST_AWAY_STILL;
+        }
+    }
+    bool ok = (st & s.req) == s.req && !(st & forbid);
+    return ok ? bits : bits & ~(s.bits ? s.bits : bits);
+}
+
 uint32_t act_view(int view, uint32_t ew, uint64_t active, bool dash_zr) {
     uint32_t managed = 0, on = 0;
+    bool bar = (view & ACT_VIEW_BAR) != 0;
+    view &= ~ACT_VIEW_BAR;
     int base = base_view(view);
+    uint32_t st = base == ACT_VIEW_MB1 ? state_of(view, ew, bar) : 0;
     for (int i = 0; i < ACT_COUNT; i++) {
         if (defs[i].view != base) continue;
         uint32_t bits = act_ew_bits(i, dash_zr);
         managed |= bits;
-        if ((active >> i & 1) && applies(view, i, active)) on |= bits;
+        if (!(active >> i & 1) || !applies(view, i, active)) continue;
+        on |= base == ACT_VIEW_MB1 ? scoped_bits(i, bits, st, active) : bits;
     }
     return (ew & ~managed) | on;
 }

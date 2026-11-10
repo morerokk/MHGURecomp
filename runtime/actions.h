@@ -32,6 +32,10 @@ typedef enum {
     ACT_FIELD_L3, ACT_FIELD_R3, ACT_PAUSE, ACT_MAP,
     // a hunt: the weapon's R-action (guard, charge, aim), apart from Dash once split (act_split)
     ACT_WEAPON_R,
+    // a hunt: crouching (B while the hunter stands still), apart from Dodge once split (act_crouch_split)
+    ACT_CROUCH,
+    // a hunt, while the item bar is open (L held): the bar's next / previous item, apart from AttackA / Dodge ...
+    ACT_ITEMBAR_RIGHT, ACT_ITEMBAR_LEFT,
     // the menus, the rest of the pad
     ACT_MENU_PLUS, ACT_MENU_MINUS, ACT_MENU_L3, ACT_MENU_R3,
     // a town or the Hub (the gameplay view while the town avatar plays)
@@ -45,6 +49,9 @@ typedef enum {
 enum { ACT_VIEW_MB1, ACT_VIEW_MB2, ACT_VIEW_TOWN, ACT_VIEWS };
 #define ACT_VIEW_SHEATHED ACT_VIEWS
 #define ACT_VIEW_HUNT_ANY (ACT_VIEWS + 1)
+// OR-ed into a hunt view for act_view: the hunter's item bar is open (L held). A and B then come only from ItemBarRight /
+// ItemBarLeft and every other action that delivers them is silent: state-scoped actions (actions.c, scopes[])
+#define ACT_VIEW_BAR 0x100
 #define ACT_KCR  16  // "the Switch button of the dash role": R, or ZR with the game's second Control Type (options +0x446E)
 #define ACT_KCZR 17  // the other one of the two: ZR, or R
 
@@ -59,6 +66,13 @@ uint32_t act_ew_bits(int id, bool dash_zr);  // the engine-word bits (INPUTS-MAS
 #define ACT_VBIT_WEAPON_R 0x8000u
 bool act_split(void);                     // Dash and the weapon R-action are two inputs (SplitDashWeaponR=1, or WeaponR is bound)
 bool act_split_in(const struct ActProfile *p);
+// The hunter's B button is the roll while the left stick is pushed and the crouch while it is not. With Crouch bound
+// to an input of its own (any device or weapon class), or with Dodge and Interact on one input, the two are told apart: with the weapon away Crouch delivers B
+// only while the stick is not pushed and Dodge only while it is, so an input shared by Interact and Dodge is a pure
+// interaction standing still (nothing crouches, nothing waits) and a roll while moving. Crouch never shares with Interact.
+#define ACT_STICK_L_DIRS 0xf0000u  // the left stick pushed past half way, in the engine word (INPUTS-MASTER B.1)
+bool act_crouch_split(void);
+bool act_crouch_split_in(const struct ActProfile *p);
 uint32_t act_virtual_bits(uint64_t active);  // the virtual bits the gameplay word gets (any thread): 0 unless split
 int act_default_switch(int id);           // the Switch button (input.h BTN_*, ACT_KCR, ACT_KCZR) Tier 0 gives it; -1: none
 const char *act_shared_with(int id);      // "" or the actions that are the same game input (documented, not an error)

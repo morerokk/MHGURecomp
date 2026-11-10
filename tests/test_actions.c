@@ -110,7 +110,7 @@ static void test_validate(void) {
     CHECK(strstr(logbuf, "Dodge is the same game input as"), "shared-input note");
     CHECK(!strstr(logbuf, "Dodge and Interact"), "an action that follows another is not a second conflict: %s", logbuf);
     CHECK(!strstr(logbuf, "AttackA and Interact"), "A with the weapon out and away are not read together");
-    CHECK(strstr(logbuf, "conflict: TownInteract and TownCancel"), "a conflict that only exists in the town: %s", logbuf);
+    CHECK(!strstr(logbuf, "TownInteract and TownCancel"), "the town's actions follow nothing: no conflict that was not asked for: %s", logbuf);
     CHECK(n >= 4, "count %d", n);
     act_set_log(quiet);
 }
@@ -135,6 +135,8 @@ static void test_golden(void) {
                 CHECK(act_view(ACT_VIEW_MB1, in, act, zr) == in, "T0 mb1 b=%04x zr=%d noise=%x", b, zr, noise[k]);
                 CHECK(act_view(ACT_VIEW_MB2, in, act, zr) == in, "T0 mb2 b=%04x zr=%d noise=%x", b, zr, noise[k]);
                 CHECK(act_view(ACT_VIEW_TOWN, in, act, zr) == in, "T0 town b=%04x zr=%d noise=%x", b, zr, noise[k]);
+                CHECK(act_view(ACT_VIEW_SHEATHED, in, act, zr) == in && act_view(ACT_VIEW_HUNT_ANY, in, act, zr) == in, "T0 hunt states b=%04x zr=%d noise=%x", b, zr, noise[k]);
+                CHECK(act_view(ACT_VIEW_MB1 | ACT_VIEW_BAR, in, act, zr) == in && act_view(ACT_VIEW_SHEATHED | ACT_VIEW_BAR, in, act, zr) == in, "T0 item bar b=%04x zr=%d noise=%x", b, zr, noise[k]);
                 if (failures > 20) return;
             }
         }
@@ -271,7 +273,8 @@ static void test_chord_alt(void) {
     CHECK(act_uses_input(KEY_WHEEL_UP) && !act_uses_input(KEY_WHEEL_DOWN), "act_uses_input");
 }
 
-// The town: its A / B follow the menus' Confirm / Cancel while they have no binding of their own; the hunt is untouched
+// The town and the menus are independent: rebinding one never moves the other, or the hunt (the Simple layout's merged
+// rows write both, see test_rows); with nothing of its own an action reads the button the game has
 static void test_town(void) {
     CHECK(act_find("Confirm") == ACT_MENU_CONFIRM && act_find("cancel") == ACT_MENU_CANCEL, "Confirm / Cancel names");
     ActProfile p = parse("[Actions]\nEnable=1\nManageMenus=1\n[Actions.Pad]\nConfirm = pad:south\nCancel = pad:east\n");
@@ -281,12 +284,12 @@ static void test_town(void) {
     ActSnap s;
     ActHost h;
     release_all();
-    press(S);  // Switch B's position: Confirm now
+    press(S);  // Switch B's position: Confirm now, in the menus
     h = (ActHost){NULL, fake_held, map_sources, map_word(), 0, false, false, 300};
     act_sample(&h, &s);
     uint32_t in = ew_of_word(map_word());  // the engine word Tier 0 gives: B (0x4000)
     CHECK(act_view(ACT_VIEW_MB2, in, s.hold[0], false) == 0x2000, "menu: south confirms: %x", act_view(ACT_VIEW_MB2, in, s.hold[0], false));
-    CHECK(act_view(ACT_VIEW_TOWN, in, s.hold[0], false) == 0x2000, "town: south is A: %x", act_view(ACT_VIEW_TOWN, in, s.hold[0], false));
+    CHECK(act_view(ACT_VIEW_TOWN, in, s.hold[0], false) == 0x4000, "town: south is still B (nothing was merged): %x", act_view(ACT_VIEW_TOWN, in, s.hold[0], false));
     CHECK(act_view(ACT_VIEW_MB1, in, s.hold[0], false) == 0x4000, "hunt: south is still B (dodge)");
     CHECK(act_view(ACT_VIEW_SHEATHED, in, s.hold[0], false) == 0x4000, "hunt, weapon away: south is still B");
     release_all();
@@ -294,36 +297,44 @@ static void test_town(void) {
     h.sw_word = map_word();
     act_sample(&h, &s);
     in = ew_of_word(map_word());  // 0x2000
-    CHECK(act_view(ACT_VIEW_TOWN, in, s.hold[0], false) == 0x4000, "town: east is B, no A: %x", act_view(ACT_VIEW_TOWN, in, s.hold[0], false));
+    CHECK(act_view(ACT_VIEW_TOWN, in, s.hold[0], false) == 0x2000, "town: east is still A: %x", act_view(ACT_VIEW_TOWN, in, s.hold[0], false));
     CHECK(act_view(ACT_VIEW_MB2, in, s.hold[0], false) == 0x4000, "menu: east cancels");
     CHECK(act_view(ACT_VIEW_MB1, in, s.hold[0], false) == 0x2000, "hunt: east still attacks (A)");
     CHECK(act_view(ACT_VIEW_SHEATHED, in, s.hold[0], false) == 0x2000, "hunt, weapon away: east still interacts (A)");
     int from = -1;
-    CHECK(act_effective(&p, 0, ACT_TOWN_INTERACT, 0, &from) && from == ACT_MENU_CONFIRM, "TownInteract follows MenuConfirm");
-    CHECK(!act_effective(&p, 1, ACT_TOWN_INTERACT, 0, NULL), "the keyboard half is still the default");
-    // its own binding wins over the one it follows
-    p = parse("[Actions]\nEnable=1\nManageMenus=1\n[Actions.Pad]\nConfirm = pad:south\nCancel = pad:east\nTownInteract = pad:north\n");
+    CHECK(!act_effective(&p, 0, ACT_TOWN_INTERACT, 0, &from), "TownInteract follows nothing");
+    // the town's own bindings
+    p = parse("[Actions]\nEnable=1\nManageMenus=1\n[Actions.Pad]\nConfirm = pad:south\nCancel = pad:east\nTownInteract = pad:south\nTownCancel = pad:east\n");
     act_use_profile(&p);
-    release_all();
-    press(N);
-    h.sw_word = map_word();
-    act_sample(&h, &s);
-    CHECK(act_view(ACT_VIEW_TOWN, 0, s.hold[0], false) == 0x2000, "town: north talks, and is no longer X there: %x", act_view(ACT_VIEW_TOWN, 0, s.hold[0], false));
-    CHECK(act_view(ACT_VIEW_MB1, 0, s.hold[0], false) == 0x1000, "hunt: north is still X");
     release_all();
     press(S);
     h.sw_word = map_word();
     act_sample(&h, &s);
-    CHECK(act_view(ACT_VIEW_TOWN, 0, s.hold[0], false) == 0, "town: south is free (Interact has its own button, B follows Cancel to east): %x", act_view(ACT_VIEW_TOWN, 0, s.hold[0], false));
-    // the hunt's actions are followed in the town too: a moved Dodge and AttackX move the town's B and X
+    in = ew_of_word(map_word());
+    CHECK(act_view(ACT_VIEW_TOWN, in, s.hold[0], false) == 0x2000, "town: south talks once TownInteract is bound: %x", act_view(ACT_VIEW_TOWN, in, s.hold[0], false));
+    release_all();
+    press(E);
+    h.sw_word = map_word();
+    act_sample(&h, &s);
+    in = ew_of_word(map_word());
+    CHECK(act_view(ACT_VIEW_TOWN, in, s.hold[0], false) == 0x4000, "town: east is B once TownCancel is bound: %x", act_view(ACT_VIEW_TOWN, in, s.hold[0], false));
+    // the hunt's actions do not move the town's: a moved Dodge and AttackX
     p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nDodge = pad:north\nAttackX = pad:south\n");
     act_use_profile(&p);
     release_all();
     press(N);
     h.sw_word = map_word();
     act_sample(&h, &s);
-    CHECK(act_view(ACT_VIEW_TOWN, 0, s.hold[0], false) == 0x4000, "town: B follows Dodge to north");
+    CHECK(act_view(ACT_VIEW_TOWN, 0, s.hold[0], false) == 0x1000, "town: north is still X there (the hunt's Dodge moved, not the town's): %x", act_view(ACT_VIEW_TOWN, 0, s.hold[0], false));
     CHECK(act_view(ACT_VIEW_MB1, 0, s.hold[0], false) == 0x4000, "dodge presses B in the hunt");
+    release_all();
+    press(S);
+    h.sw_word = map_word();
+    act_sample(&h, &s);
+    CHECK(act_view(ACT_VIEW_TOWN, 0, s.hold[0], false) == 0x4000, "town: south is still B there: %x", act_view(ACT_VIEW_TOWN, 0, s.hold[0], false));
+    // the menus' Plus does not follow the hunt's Pause
+    p = parse("[Actions]\nEnable=1\nManageMenus=1\n[Actions.Pad]\nPause = pad:south\n");
+    CHECK(!act_effective(&p, 0, ACT_MENU_PLUS, 0, NULL) && !act_effective(&p, 0, ACT_TOWN_PLUS, 0, NULL), "menu and town Plus follow nothing");
 }
 
 // A hunt's A button: AttackA with the weapon out, Interact with it away; one button until Interact is bound
@@ -359,7 +370,7 @@ static void test_interact(void) {
     CHECK(act_view(ACT_VIEW_MB1, 0, s.hold[0], false) == 0, "weapon out: Interact presses nothing: %x", act_view(ACT_VIEW_MB1, 0, s.hold[0], false));
     CHECK(act_view(ACT_VIEW_SHEATHED, 0, s.hold[0], false) == 0x2000, "weapon away: Interact is A");
     CHECK(act_view(ACT_VIEW_HUNT_ANY, 0, s.hold[0], false) == 0x2000, "Prowler / unknown: Interact is A");
-    CHECK(act_view(ACT_VIEW_TOWN, 0, s.hold[0], false) == 0x2000, "town: TownInteract follows Interact");
+    CHECK(act_view(ACT_VIEW_TOWN, 0, s.hold[0], false) == 0, "town: the hunt's Interact is not the town's: nothing there");
     release_all();
     press(E);
     act_sample(&h, &s);
@@ -392,9 +403,14 @@ static void test_all_buttons(void) {
             CHECK(act_view_of(ids[k]) == view && *act_label(ids[k]), "order and label of %s", act_name(ids[k]));
             for (int j = 0; j < k; j++) CHECK(ids[j] != ids[k], "%s listed twice", act_name(ids[k]));
             int v = view == ACT_VIEW_MB1 ? ACT_VIEW_HUNT_ANY : view;
+            bool bar_action = ids[k] == ACT_ITEMBAR_RIGHT || ids[k] == ACT_ITEMBAR_LEFT;  // (only while the bar is open)
             uint32_t w = act_view(v, 0xFFFF | 0x10000, 1ull << ids[k], false);
-            CHECK(w == (act_ew_bits(ids[k], false) | 0x10000), "%s alone: %x", act_name(ids[k]), w);
-            all |= w;
+            CHECK(w == ((bar_action ? 0u : act_ew_bits(ids[k], false)) | 0x10000), "%s alone: %x", act_name(ids[k]), w);
+            if (bar_action) {
+                w = act_view(v | ACT_VIEW_BAR, 0x10000, 1ull << ids[k], false);
+                CHECK(w == (act_ew_bits(ids[k], false) | 0x10000), "%s alone, bar open: %x", act_name(ids[k]), w);
+            }
+            all |= bar_action ? act_ew_bits(ids[k], false) : w;
         }
         int count = 0;
         for (int i = 0; i < ACT_COUNT; i++) count += act_view_of(i) == view;
@@ -527,7 +543,8 @@ static void test_gate(void) {
     const uint64_t I = 1ull << ACT_INTERACT, D = 1ull << ACT_DODGE, X = 1ull << ACT_ATTACK_X;
     ActProfile p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nInteract = pad:west\nDodge = pad:west\n");
     act_use_profile(&p);
-    CHECK(act_interact_share(0) == D, "Dodge shares the input with Interact: %llx", (unsigned long long)act_interact_share(0));
+    CHECK(act_interact_share(0) == 0, "Dodge and Interact on one input: told apart by the state, nothing to try first: %llx", (unsigned long long)act_interact_share(0));
+    CHECK(act_crouch_split(), "and that splits the crouch from the roll");
     p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nInteract = pad:west\nDodge = pad:east\n");
     act_use_profile(&p);
     CHECK(act_interact_share(0) == 0, "separate inputs share nothing");
@@ -536,11 +553,11 @@ static void test_gate(void) {
     CHECK(act_interact_share(0) == 0, "Interact following AttackA, which is not a contender");
     p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nInteract = pad:west\nDodge = pad:west\nAttackX = pad:west\n[Actions.Pad.Weapon.Bow]\nDodge = pad:south\n");
     act_use_profile(&p);
-    CHECK(act_interact_share(0) == (D | X), "several: %llx", (unsigned long long)act_interact_share(0));
+    CHECK(act_interact_share(0) == X, "AttackX still waits for Interact: %llx", (unsigned long long)act_interact_share(0));
     CHECK(act_interact_share(10) == X, "the Bow's own Dodge is elsewhere: %llx", (unsigned long long)act_interact_share(10));
     p = parse("[Actions]\nEnable=1\n[Actions.Kbm]\nInteract = key:e\nDodge = key:leftctrl+key:e\nAttackX = key:q\n");
     act_use_profile(&p);
-    CHECK(act_interact_share(0) == D, "a chord that holds the input shares it: %llx", (unsigned long long)act_interact_share(0));
+    CHECK(act_interact_share(0) == 0 && act_crouch_split(), "a chord that holds the input is the same: %llx", (unsigned long long)act_interact_share(0));
     CHECK(act_shared_frames() == 1, "default frames");
 
     // not ambiguous: nothing changes
@@ -612,24 +629,24 @@ static void test_rows(void) {
     b.set = true, b.n = 1, b.alt[0].n = 1, b.alt[0].code[0] = ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH;
     CHECK(act_row_state(&p, 0, confirm, &shown) == ACT_ROW_DEFAULT, "a fresh row is the default");
     act_row_set(&p, 0, confirm, &b);
-    CHECK(p.dev[0].base[ACT_MENU_CONFIRM].set && !p.dev[0].base[ACT_TOWN_INTERACT].set, "Confirm writes the head, the town follows");
+    CHECK(p.dev[0].base[ACT_MENU_CONFIRM].set && p.dev[0].base[ACT_TOWN_INTERACT].set, "Confirm writes the head and the town's talk (a merged row)");
     CHECK(act_row_state(&p, 0, confirm, &shown) == ACT_ROW_BOUND && shown.alt[0].code[0] == b.alt[0].code[0], "Confirm is bound");
     int from = -1;
     CHECK(act_effective(&p, 1, ACT_TOWN_INTERACT, 0, &from) == NULL, "the other device is untouched");
-    CHECK(act_effective(&p, 0, ACT_TOWN_INTERACT, 0, &from) && from == ACT_MENU_CONFIRM, "the town's talk reads it");
+    CHECK(act_effective(&p, 0, ACT_TOWN_INTERACT, 0, &from) && from == ACT_TOWN_INTERACT, "the town's talk has its own copy");
     act_row_set(&p, 0, confirm, NULL);
-    CHECK(act_row_state(&p, 0, confirm, NULL) == ACT_ROW_DEFAULT && !p.dev[0].base[ACT_MENU_CONFIRM].set, "Default clears it");
+    CHECK(act_row_state(&p, 0, confirm, NULL) == ACT_ROW_DEFAULT && !p.dev[0].base[ACT_MENU_CONFIRM].set && !p.dev[0].base[ACT_TOWN_INTERACT].set, "Default clears it");
     // members that do not follow the head get a copy (the left stick click of the menus), those that do are cleared
     act_row_set(&p, 0, l3, &b);
-    CHECK(p.dev[0].base[ACT_FIELD_L3].set && p.dev[0].base[ACT_MENU_L3].set && !p.dev[0].base[ACT_TOWN_L3].set, "L3: a copy for the menus, the town follows");
+    CHECK(p.dev[0].base[ACT_FIELD_L3].set && p.dev[0].base[ACT_MENU_L3].set && p.dev[0].base[ACT_TOWN_L3].set, "L3: a copy for the menus and the town");
     act_row_set(&p, 0, plus, &b);
-    CHECK(p.dev[0].base[ACT_PAUSE].set && !p.dev[0].base[ACT_MENU_PLUS].set && !p.dev[0].base[ACT_TOWN_PLUS].set, "Start: the menus and the town follow");
+    CHECK(p.dev[0].base[ACT_PAUSE].set && p.dev[0].base[ACT_MENU_PLUS].set && p.dev[0].base[ACT_TOWN_PLUS].set, "Start: a copy for the menus and the town");
     CHECK(act_row_state(&p, 0, plus, NULL) == ACT_ROW_BOUND && act_row_state(&p, 0, l3, NULL) == ACT_ROW_BOUND, "merged rows read as one");
     // edited apart in Advanced: Custom, and Set overwrites all of them
     p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nMenuConfirm = pad:south\nTownInteract = pad:north\n");
     CHECK(act_row_state(&p, 0, confirm, NULL) == ACT_ROW_CUSTOM, "members that differ: custom");
     act_row_set(&p, 0, confirm, &b);
-    CHECK(act_row_state(&p, 0, confirm, NULL) == ACT_ROW_BOUND && !p.dev[0].base[ACT_TOWN_INTERACT].set, "Set overwrites the town's too");
+    CHECK(act_row_state(&p, 0, confirm, NULL) == ACT_ROW_BOUND && p.dev[0].base[ACT_TOWN_INTERACT].set && p.dev[0].base[ACT_TOWN_INTERACT].alt[0].code[0] == b.alt[0].code[0], "Set overwrites the town's too");
     // None is "not set"
     memset(&b, 0, sizeof b);
     b.set = true;
@@ -660,7 +677,7 @@ static void test_claim(void) {
     act_row_claim(&p, 0, confirm, S, map_sources, NULL, false);
     ActBinding shown;
     CHECK(act_row_state(&p, 0, cancel, &shown) == ACT_ROW_BOUND && shown.n == 1 && shown.alt[0].code[0] == N, "Cancel keeps its other input");
-    CHECK(!p.dev[0].base[ACT_TOWN_CANCEL].set, "and the town's B still follows it");
+    CHECK(p.dev[0].base[ACT_TOWN_CANCEL].set && p.dev[0].base[ACT_TOWN_CANCEL].n == 1 && p.dev[0].base[ACT_TOWN_CANCEL].alt[0].code[0] == N, "and the town's B keeps it too (the merged row)");
     // two rows on one input in one context clash, in different contexts they do not
     p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nMenuConfirm = pad:south\nMenuCancel = pad:south\nDodge = pad:south\n");
     CHECK(act_rows_clash(&p, 0, confirm, cancel), "Confirm and Cancel clash");
@@ -708,6 +725,95 @@ static void test_scheme_layout(void) {
     CHECK(!strstr(text, "Scheme") && !strstr(text, "Layout"), "nothing written while auto");
 }
 
+// State-scoped actions: the item bar's A / B, the crouch and the roll, interact and attack
+static void test_scopes(void) {
+    int E = ACT_PAD + SDL_GAMEPAD_BUTTON_EAST, S = ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH, N = ACT_PAD + SDL_GAMEPAD_BUTTON_NORTH,
+        W = ACT_PAD + SDL_GAMEPAD_BUTTON_WEST;
+    const uint32_t MOVING = 0x10000;
+    ActSnap s;
+    ActHost h = (ActHost){NULL, fake_held, map_sources, 0, 0, false, false, 700};
+    #define SAMPLE(code) do { release_all(); press(code); h.sw_word = map_word(); act_sample(&h, &s); } while (0)
+    #define VIEW(view, ew) act_view((view), (ew), s.hold[0], false)
+    // ---- Interact and Dodge on one input, Crouch on its own: no delay, the state decides
+    ActProfile p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nInteract = pad:south\nDodge = pad:south\nCrouch = pad:west\n");
+    act_use_profile(&p);
+    CHECK(act_crouch_split() && act_interact_share(0) == 0, "split, and nothing waits");
+    SAMPLE(S);
+    CHECK(VIEW(ACT_VIEW_SHEATHED, 0) == 0x2000, "weapon away, standing: only A (a pure interaction): %x", VIEW(ACT_VIEW_SHEATHED, 0));
+    CHECK(VIEW(ACT_VIEW_SHEATHED, MOVING) == (MOVING | 0x6000), "weapon away, moving: A and B (the roll wins): %x", VIEW(ACT_VIEW_SHEATHED, MOVING));
+    CHECK(VIEW(ACT_VIEW_MB1, 0) == 0x4000, "weapon out, standing: B as ever (weapon B-actions): %x", VIEW(ACT_VIEW_MB1, 0));
+    CHECK(VIEW(ACT_VIEW_HUNT_ANY, 0) == 0x6000, "no state known: both, as before: %x", VIEW(ACT_VIEW_HUNT_ANY, 0));
+    SAMPLE(W);  // the crouch's own input
+    CHECK(VIEW(ACT_VIEW_SHEATHED, 0) == 0x4000, "weapon away, standing: Crouch is B: %x", VIEW(ACT_VIEW_SHEATHED, 0));
+    CHECK(VIEW(ACT_VIEW_SHEATHED, MOVING) == MOVING, "moving: Crouch does nothing: %x", VIEW(ACT_VIEW_SHEATHED, MOVING));
+    CHECK(VIEW(ACT_VIEW_MB1, MOVING) == (MOVING | 0x4000) || VIEW(ACT_VIEW_MB1, MOVING) == MOVING, "weapon out: not scoped by the stick of the sheathed state");
+    // ---- Crouch never shares with Interact: Interact wins standing
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nInteract = pad:west\nCrouch = pad:west\n");
+    act_use_profile(&p);
+    SAMPLE(W);
+    CHECK(VIEW(ACT_VIEW_SHEATHED, 0) == 0x2000, "Crouch and Interact on one input: Interact wins standing: %x", VIEW(ACT_VIEW_SHEATHED, 0));
+    act_set_log(collect);
+    logbuf[0] = 0;
+    act_validate(&p);
+    CHECK(strstr(logbuf, "conflict: Crouch and Interact are both on"), "and it is said: %s", logbuf);
+    act_set_log(quiet);
+    // ---- Dodge and Interact on one input, Crouch following Dodge: the input only interacts standing
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nInteract = pad:south\nDodge = pad:south\n");
+    act_use_profile(&p);
+    CHECK(act_crouch_split(), "Dodge and Interact on one input splits");
+    SAMPLE(S);
+    CHECK(VIEW(ACT_VIEW_SHEATHED, 0) == 0x2000 && VIEW(ACT_VIEW_SHEATHED, MOVING) == (MOVING | 0x6000), "no crouch and no delay: %x %x", VIEW(ACT_VIEW_SHEATHED, 0), VIEW(ACT_VIEW_SHEATHED, MOVING));
+    // ---- Dodge alone: as before
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nDodge = pad:south\n");
+    act_use_profile(&p);
+    CHECK(!act_crouch_split(), "Dodge alone does not split");
+    SAMPLE(S);
+    CHECK(VIEW(ACT_VIEW_SHEATHED, 0) == 0x4000 && VIEW(ACT_VIEW_SHEATHED, MOVING) == (MOVING | 0x4000), "B standing and moving");
+    // ---- the item bar: A and B are the bar's only
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nDodge = pad:south\nInteract = pad:south\nAttackA = pad:east\n");
+    act_use_profile(&p);
+    SAMPLE(S);  // Tier 0's B
+    CHECK(VIEW(ACT_VIEW_SHEATHED | ACT_VIEW_BAR, 0) == 0x4000, "bar open, south: the bar's previous item (B), not Interact's A: %x", VIEW(ACT_VIEW_SHEATHED | ACT_VIEW_BAR, 0));
+    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0x4000, "bar open, weapon out, south: B");
+    CHECK(VIEW(ACT_VIEW_SHEATHED, 0) == 0x2000, "bar closed: Interact as set: %x", VIEW(ACT_VIEW_SHEATHED, 0));
+    SAMPLE(E);  // Tier 0's A
+    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0x2000, "bar open, east: the bar's next item (A): %x", VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0));
+    // the bar's actions bound: only the bar moves
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nItemBarLeft = pad:north\nItemBarRight = pad:west\n");
+    act_use_profile(&p);
+    SAMPLE(N);
+    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0x5000, "bar open, north: the bar's B, and X is still X (not claimed): %x", VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0));
+    CHECK(VIEW(ACT_VIEW_MB1, 0) == 0x1000, "bar closed: north is X as ever: %x", VIEW(ACT_VIEW_MB1, 0));
+    SAMPLE(S);  // Tier 0's B: no longer the bar's
+    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0, "bar open, south: nothing (the bar's B moved), and not Dodge's: %x", VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0));
+    CHECK(VIEW(ACT_VIEW_MB1, 0) == 0x4000, "bar closed: south is still Dodge: %x", VIEW(ACT_VIEW_MB1, 0));
+    SAMPLE(W);
+    CHECK(VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0) == 0xA000, "bar open, west: the bar's A, and Y is still Y: %x", VIEW(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0));
+    CHECK(VIEW(ACT_VIEW_MB1, 0) == 0x8000, "bar closed: west is Y (Tier 0's): %x", VIEW(ACT_VIEW_MB1, 0));
+    // the chord's X is not the bar's
+    ActProfile q = parse("[Actions]\nEnable=1\n");
+    act_use_profile(&q);
+    CHECK(act_view(ACT_VIEW_MB1 | ACT_VIEW_BAR, 0, 1ull << ACT_CHORD_XA, false) == 0x1000, "chord with the bar open: X only");
+    // ---- town and menus are not state-scoped
+    CHECK(act_view(ACT_VIEW_TOWN, 0, 1ull << ACT_TOWN_INTERACT, false) == 0x2000 && act_view(ACT_VIEW_MB2, 0, 1ull << ACT_MENU_CANCEL, false) == 0x4000, "town and menus as ever");
+    #undef SAMPLE
+    #undef VIEW
+}
+
+// The Simple layout: Crouch is its own row and never clashes with Dodge, always with Interact
+static void test_crouch_rows(void) {
+    int crouch = row_named("Crouch"), dodge = row_named("Dodge"), interact = row_named("Interact"), left = row_named("ItemBarLeft"),
+        right = row_named("ItemBarRight"), attacka = row_named("AttackA");
+    CHECK(crouch >= 0 && left >= 0 && right >= 0 && act_row(crouch)->head == ACT_CROUCH, "rows exist");
+    ActProfile p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nCrouch = pad:south\nDodge = pad:south\nInteract = pad:south\nItemBarLeft = pad:south\nAttackA = pad:south\n");
+    CHECK(!act_rows_clash(&p, 0, crouch, dodge), "Crouch and Dodge on one input is the game's B");
+    CHECK(act_rows_clash(&p, 0, crouch, interact), "Crouch and Interact clash");
+    CHECK(!act_rows_clash(&p, 0, left, attacka) && !act_rows_clash(&p, 0, left, dodge), "the bar's actions are a state of their own");
+    CHECK(act_rows_clash(&p, 0, left, right) == false, "(different inputs)");
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nItemBarLeft = pad:south\nItemBarRight = pad:south\n");
+    CHECK(act_rows_clash(&p, 0, left, right), "the bar's two clash with each other");
+}
+
 int main(void) {
     act_set_log(quiet);
     test_registry();
@@ -718,6 +824,8 @@ int main(void) {
     test_weapon();
     test_chord_alt();
     test_town();
+    test_scopes();
+    test_crouch_rows();
     test_interact();
     test_all_buttons();
     test_script();

@@ -48,6 +48,7 @@
 #define PL_ACT_NO      0x250au    // weapon move, 1 a common one
 #define PL_DRAWN       0x114cu    // u8: 1 the weapon is out, 0 put away (constant over idle, walk, roll and attacks of
                                   // either state: compared in memory snapshots of a Hammer hunt, 2026-11-10)
+#define VF_BAR_OPEN    0x25cu     // vfunc (player, 1) 1: the item bar is open (L held; hle/itembar.c)
 #define CLS_PROWLER    14         // (no weapon to put away: its A button attacks and gathers)
 
 // The callers of the R-role getter (return addresses; f_XXXXXX = main + 0x200000) that are the weapon's R-action
@@ -69,6 +70,7 @@ static volatile bool g_dash_zr;
 static volatile int g_weapon_pub = -1;
 static uint32_t g_act_st, g_act_no, g_player;
 static bool g_drawn;
+static bool g_bar;              // the item bar was open at the hunter's last update
 static int g_view;              // the context the gameplay word was last built for
 static bool g_log;
 static uint32_t g_in[2], g_out[2];  // the words last given to / from the translators of each view
@@ -127,6 +129,8 @@ static void player_update(Cpu *c) {
         g_pl_frame = g_frame;
         g_player = pl, g_act_st = LD16(pl + PL_ACT_ST), g_act_no = LD16(pl + PL_ACT_NO);
         g_drawn = LD8(pl + PL_DRAWN) != 0;
+        uint32_t vt = LD32(pl), fn = sane(vt) ? LD32(vt + VF_BAR_OPEN) : 0;  // (vtables are in main's image)
+        g_bar = fn && call(c, fn, pl, 1, 0) == 1;
     }
     fnhook_call_original(c, FN_PLAYER);
 }
@@ -189,6 +193,8 @@ static uint32_t live_action(void) { return g_player ? ((uint32_t)LD16(g_player +
 static void tr_view(Cpu *c, int view, int slot, uint32_t fn) {
     uint32_t in = c->r[1];
     uint64_t active = g_snap.hold[g_var] | g_snap.pulse[g_var];
+    bool bar = g_bar && g_pl_frame && g_frame - g_pl_frame <= 3 && view != ACT_VIEW_MB2 && view != ACT_VIEW_TOWN;
+    if (bar) view |= ACT_VIEW_BAR;  // (the bar's own state: A and B are the bar's, whatever else is bound to them)
     if (view == ACT_VIEW_SHEATHED) {  // an input for Interact and for other hunt actions: Interact first (actions.h)
         static ActGate gate;
         static uint32_t base;

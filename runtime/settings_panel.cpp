@@ -920,6 +920,31 @@ void action_capture_rows(std::vector<Row> &r) {
 }
 int panel_sources(void *, int btn, int dev, int *out, int max) { return host_input_sw_sources(btn, dev, out, max); }
 const char *scheme_name(int dev) { return tr(dev == 0 ? "Controller" : "Keyboard"); }
+// What an action says of itself beyond its name (state-scoped actions: runtime/actions.c scopes[])
+const char *action_note(int id) {
+    switch (id) {
+    case ACT_CROUCH:
+        return "B while the hunter stands still. Give it an input of its own and it is told apart from the roll: with the weapon away it works only standing still and Dodge only while moving. It cannot share an input with Interact.";
+    case ACT_DODGE:
+        return "With Crouch bound, or Dodge and Interact on one input, Dodge works only while moving when the weapon is away (the roll); weapon B-actions with the weapon out are as before.";
+    case ACT_INTERACT:
+        return "May share an input with Dodge: standing still it only interacts, moving it rolls. Never share it with Crouch.";
+    case ACT_ITEMBAR_RIGHT:
+    case ACT_ITEMBAR_LEFT:
+        return "While L is held and the item bar is open, A and B scroll the bar and do nothing else: only these two count then, whatever the other actions are bound to.";
+    default:
+        return nullptr;
+    }
+}
+// Two actions of one context on one input by design (not a conflict): Interact with Dodge, Crouch with Dodge (the game's
+// own B), AttackA with Interact; the item bar's two actions are a state of their own
+bool shares_by_design(int a, int b, bool sheathed_attack) {
+    auto pair = [&](int x, int y) { return (a == x && b == y) || (a == y && b == x); };
+    if (pair(ACT_INTERACT, ACT_DODGE) || pair(ACT_CROUCH, ACT_DODGE) || (!sheathed_attack && pair(ACT_ATTACK_A, ACT_INTERACT)))
+        return true;
+    bool bar_a = a == ACT_ITEMBAR_RIGHT || a == ACT_ITEMBAR_LEFT, bar_b = b == ACT_ITEMBAR_RIGHT || b == ACT_ITEMBAR_LEFT;
+    return (bar_a || bar_b) && !(bar_a && bar_b);
+}
 // What a merged row shows (Simple layout)
 std::string row_value(int row, bool &warn) {
     ActionTab &a = acts();
@@ -982,6 +1007,8 @@ void simple_rows(std::vector<Row> &r) {
         row.title = tr(ar->label);
         row.value = row_value(i, row.warn);
         row.help = tr("Merged with the same button of the town and the menus where it has one. Giving it a button another action of the same kind uses takes that button from it.");
+        if (const char *note = action_note(ar->head))
+            row.help += std::string(" ") + tr(note);
         Row copy = row;
         row.menu = true;
         row.activate = [copy, i]() {
@@ -1041,7 +1068,7 @@ void advanced_rows(std::vector<Row> &r) {
                     const ActBinding *ob = other != id ? act_effective(&p, a.dev, other, var, &ofrom) : nullptr;
                     if (!ob || ofrom == from || !bindings_share(*b, *ob))
                         continue;
-                    if (!p.sheathed_attack && ((id == ACT_ATTACK_A && other == ACT_INTERACT) || (id == ACT_INTERACT && other == ACT_ATTACK_A)))
+                    if (shares_by_design(id, other, p.sheathed_attack))
                         continue;
                     row.value += std::string(" (") + tr("also:") + " " + act_name(other) + ")";
                     row.warn = true;
@@ -1049,6 +1076,8 @@ void advanced_rows(std::vector<Row> &r) {
                 }
             }
             row.help = fmt("Ini name: %s. Default: the button it has without rebinding. An action with no binding of its own can follow another one (shown as \"same as\").", act_name(id));
+            if (const char *note = action_note(id))
+                row.help += std::string(" ") + tr(note);
             Row copy = row;
             row.menu = true;
             row.activate = [copy, id]() {

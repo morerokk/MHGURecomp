@@ -504,6 +504,13 @@ static inline const char *settings_text(int language, const char *english) {
         {"Menu down", "Menú abajo"},
         {"Menu left", "Menú izquierda"},
         {"Menu right", "Menú derecha"},
+        {"Crouch, standing still (B)", "Agacharse, quieto (B)"},
+        {"Item bar: next item, L held (A)", "Barra de objetos: objeto siguiente, con L (A)"},
+        {"Item bar: previous item, L held (B)", "Barra de objetos: objeto anterior, con L (B)"},
+        {"B while the hunter stands still. Give it an input of its own and it is told apart from the roll: with the weapon away it works only standing still and Dodge only while moving. It cannot share an input with Interact.", "B mientras el cazador está quieto. Dale una entrada propia y se distingue de la voltereta: con el arma guardada solo funciona quieto y Esquivar solo en movimiento. No puede compartir entrada con Interactuar."},
+        {"With Crouch bound, or Dodge and Interact on one input, Dodge works only while moving when the weapon is away (the roll); weapon B-actions with the weapon out are as before.", "Con Agacharse asignado, o Esquivar e Interactuar en una misma entrada, Esquivar solo funciona en movimiento con el arma guardada (la voltereta); las acciones B del arma con el arma desenvainada no cambian."},
+        {"May share an input with Dodge: standing still it only interacts, moving it rolls. Never share it with Crouch.", "Puede compartir entrada con Esquivar: quieto solo interactúa, en movimiento rueda. No la compartas con Agacharse."},
+        {"While L is held and the item bar is open, A and B scroll the bar and do nothing else: only these two count then, whatever the other actions are bound to.", "Con L pulsado y la barra de objetos abierta, A y B solo mueven la barra: solo cuentan estas dos, sea lo que sea lo que tengan asignado las demás acciones."},
     };
     for (unsigned i = 0; i < sizeof messages / sizeof *messages; ++i)
         if (!strcmp(english, messages[i].en)) return messages[i].es;
