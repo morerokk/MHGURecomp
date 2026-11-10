@@ -581,6 +581,133 @@ static void test_gate(void) {
     CHECK(act_gate(&g, both, D | X, false, 700, 5) == I, "next press: Interact first again");
 }
 
+// The Simple layout: merged rows, what setting one writes, and what claiming an input does to the others
+static int row_named(const char *name) {
+    for (int i = 0; i < act_row_count(); i++)
+        if (!strcmp(act_row(i)->name, name)) return i;
+    return -1;
+}
+static void test_rows(void) {
+    // every action is in exactly one row, and a row's actions share a button (their defaults are one Switch button)
+    int seen[ACT_COUNT] = {0};
+    for (int i = 0; i < act_row_count(); i++) {
+        const ActRow *r = act_row(i);
+        CHECK(*r->label && *r->name, "row %d has a name and a label", i);
+        seen[r->head]++;
+        for (int k = 0; k < 3 && r->members[k] >= 0; k++) seen[r->members[k]]++;
+        CHECK(act_row_of(r->head) == i, "row_of head of %s", r->name);
+    }
+    for (int a = 0; a < ACT_COUNT; a++) CHECK(seen[a] == 1, "%s is in %d rows", act_name(a), seen[a]);
+    CHECK(act_row_group_name(0)[0] && act_row_group_name(1)[0], "group names");
+    int confirm = row_named("MenuConfirm"), cancel = row_named("MenuCancel"), plus = row_named("Pause"), l3 = row_named("FieldL3");
+    int sprint = row_named("Sprint"), weaponr = row_named("WeaponR"), interact = row_named("Interact"), dodge = row_named("Dodge");
+    CHECK(confirm >= 0 && cancel >= 0 && plus >= 0 && l3 >= 0 && sprint >= 0 && weaponr >= 0 && interact >= 0 && dodge >= 0, "rows exist");
+    CHECK(act_row(sprint)->head == ACT_DASH && act_row(weaponr)->head == ACT_WEAPON_R && sprint != weaponr, "Sprint and the weapon action are two rows");
+    CHECK(act_row_of(ACT_TOWN_INTERACT) == confirm && act_row_of(ACT_TOWN_RUN) == sprint, "town members");
+    CHECK((act_row_views(confirm) >> ACT_VIEW_MB2 & 1) && (act_row_views(confirm) >> ACT_VIEW_TOWN & 1) && !(act_row_views(confirm) >> ACT_VIEW_MB1 & 1), "Confirm is read in the menus and the town");
+
+    ActProfile p = parse("[Actions]\nEnable=1\nManageMenus=1\n");
+    ActBinding b, shown;
+    memset(&b, 0, sizeof b);
+    b.set = true, b.n = 1, b.alt[0].n = 1, b.alt[0].code[0] = ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH;
+    CHECK(act_row_state(&p, 0, confirm, &shown) == ACT_ROW_DEFAULT, "a fresh row is the default");
+    act_row_set(&p, 0, confirm, &b);
+    CHECK(p.dev[0].base[ACT_MENU_CONFIRM].set && !p.dev[0].base[ACT_TOWN_INTERACT].set, "Confirm writes the head, the town follows");
+    CHECK(act_row_state(&p, 0, confirm, &shown) == ACT_ROW_BOUND && shown.alt[0].code[0] == b.alt[0].code[0], "Confirm is bound");
+    int from = -1;
+    CHECK(act_effective(&p, 1, ACT_TOWN_INTERACT, 0, &from) == NULL, "the other device is untouched");
+    CHECK(act_effective(&p, 0, ACT_TOWN_INTERACT, 0, &from) && from == ACT_MENU_CONFIRM, "the town's talk reads it");
+    act_row_set(&p, 0, confirm, NULL);
+    CHECK(act_row_state(&p, 0, confirm, NULL) == ACT_ROW_DEFAULT && !p.dev[0].base[ACT_MENU_CONFIRM].set, "Default clears it");
+    // members that do not follow the head get a copy (the left stick click of the menus), those that do are cleared
+    act_row_set(&p, 0, l3, &b);
+    CHECK(p.dev[0].base[ACT_FIELD_L3].set && p.dev[0].base[ACT_MENU_L3].set && !p.dev[0].base[ACT_TOWN_L3].set, "L3: a copy for the menus, the town follows");
+    act_row_set(&p, 0, plus, &b);
+    CHECK(p.dev[0].base[ACT_PAUSE].set && !p.dev[0].base[ACT_MENU_PLUS].set && !p.dev[0].base[ACT_TOWN_PLUS].set, "Start: the menus and the town follow");
+    CHECK(act_row_state(&p, 0, plus, NULL) == ACT_ROW_BOUND && act_row_state(&p, 0, l3, NULL) == ACT_ROW_BOUND, "merged rows read as one");
+    // edited apart in Advanced: Custom, and Set overwrites all of them
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nMenuConfirm = pad:south\nTownInteract = pad:north\n");
+    CHECK(act_row_state(&p, 0, confirm, NULL) == ACT_ROW_CUSTOM, "members that differ: custom");
+    act_row_set(&p, 0, confirm, &b);
+    CHECK(act_row_state(&p, 0, confirm, NULL) == ACT_ROW_BOUND && !p.dev[0].base[ACT_TOWN_INTERACT].set, "Set overwrites the town's too");
+    // None is "not set"
+    memset(&b, 0, sizeof b);
+    b.set = true;
+    act_row_set(&p, 0, cancel, &b);
+    CHECK(act_row_state(&p, 0, cancel, NULL) == ACT_ROW_UNSET && act_rows_unset(&p, 0, NULL) == 1, "not set is counted");
+}
+
+static void test_claim(void) {
+    int S = ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH, N = ACT_PAD + SDL_GAMEPAD_BUTTON_NORTH, W = ACT_PAD + SDL_GAMEPAD_BUTTON_WEST;
+    int confirm = row_named("MenuConfirm"), cancel = row_named("MenuCancel"), interact = row_named("Interact"), dodge = row_named("Dodge");
+    int sprint = row_named("Sprint"), weaponr = row_named("WeaponR"), attacka = row_named("AttackA");
+    ActBinding on_south;
+    memset(&on_south, 0, sizeof on_south);
+    on_south.set = true, on_south.n = 1, on_south.alt[0].n = 1, on_south.alt[0].code[0] = S;
+    // Tier 0's B is south (map_sources): Confirm on south takes it from Cancel's default, which is then not set
+    ActProfile p = parse("[Actions]\nEnable=1\nManageMenus=1\n");
+    act_row_set(&p, 0, confirm, &on_south);
+    uint64_t ch = act_row_claim(&p, 0, confirm, S, map_sources, NULL, false);
+    CHECK(ch == 1ull << cancel, "only Cancel changed: %llx", (unsigned long long)ch);
+    CHECK(act_row_state(&p, 0, cancel, NULL) == ACT_ROW_UNSET, "Cancel is not set");
+    CHECK(act_row_state(&p, 0, dodge, NULL) == ACT_ROW_DEFAULT, "the hunt's Dodge (B, another context) is untouched");
+    uint64_t which = 0;
+    CHECK(act_rows_unset(&p, 0, &which) == 1 && which == 1ull << cancel, "one row not set");
+    CHECK(act_row_state(&p, 1, cancel, NULL) == ACT_ROW_DEFAULT, "the other device is untouched");
+    // an input that was one of several alternatives is only taken off
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nMenuCancel = pad:south | pad:north\n");
+    act_row_set(&p, 0, confirm, &on_south);
+    act_row_claim(&p, 0, confirm, S, map_sources, NULL, false);
+    ActBinding shown;
+    CHECK(act_row_state(&p, 0, cancel, &shown) == ACT_ROW_BOUND && shown.n == 1 && shown.alt[0].code[0] == N, "Cancel keeps its other input");
+    CHECK(!p.dev[0].base[ACT_TOWN_CANCEL].set, "and the town's B still follows it");
+    // two rows on one input in one context clash, in different contexts they do not
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nMenuConfirm = pad:south\nMenuCancel = pad:south\nDodge = pad:south\n");
+    CHECK(act_rows_clash(&p, 0, confirm, cancel), "Confirm and Cancel clash");
+    CHECK(!act_rows_clash(&p, 0, confirm, dodge) && !act_rows_clash(&p, 0, cancel, dodge), "Dodge is another context");
+    // Interact shares an input with other hunt actions by design (it is tried first), both ways
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nInteract = pad:west\nDodge = pad:west\nAttackA = pad:west\n");
+    CHECK(!act_rows_clash(&p, 0, interact, dodge) && !act_rows_clash(&p, 0, interact, attacka), "Interact is exempt");
+    ActBinding on_west = on_south;
+    on_west.alt[0].code[0] = W;
+    act_row_set(&p, 0, dodge, &on_west);
+    uint64_t took = act_row_claim(&p, 0, dodge, W, map_sources, NULL, false);
+    CHECK((took >> attacka & 1) && (took >> row_named("ItemUse") & 1) && !(took >> interact & 1), "Dodge on west takes it from Attack A and Use item's default (west is Y), not from Interact: %llx", (unsigned long long)took);
+    CHECK(act_row_state(&p, 0, interact, NULL) == ACT_ROW_BOUND, "Interact keeps it");
+    // a row that follows another is not touched (the weapon action follows Sprint)
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nDash = pad:rshoulder\n");
+    ActBinding on_r = on_south;
+    on_r.alt[0].code[0] = ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
+    CHECK(act_row_claim(&p, 0, sprint, on_r.alt[0].code[0], map_sources, NULL, false) == 0, "nothing follows into a conflict");
+    CHECK(act_row_state(&p, 0, weaponr, NULL) == ACT_ROW_DEFAULT || act_row_state(&p, 0, weaponr, NULL) == ACT_ROW_BOUND, "the weapon action still follows Sprint");
+    // the dash role: ZR with the second Control Type
+    p = parse("[Actions]\nEnable=1\n");
+    act_row_set(&p, 0, row_named("FieldZR"), &on_south);
+    CHECK(act_row_claim(&p, 0, row_named("FieldZR"), S, map_sources, NULL, true) == (1ull << dodge | 1ull << row_named("MenuCancel")), "ZR on south takes the default B of the hunt's Dodge and the town's Cancel");
+}
+
+static void test_scheme_layout(void) {
+    ActProfile p = parse("");
+    CHECK(p.scheme == ACT_SCHEME_AUTO && p.layout == ACT_LAYOUT_AUTO, "no keys: auto");
+    CHECK(act_layout(&p) == ACT_LAYOUT_SIMPLE, "a fresh profile is Simple");
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nDodge = pad:north\n");
+    CHECK(act_layout(&p) == ACT_LAYOUT_ADVANCED, "a profile with bindings stays Advanced");
+    p = parse("[Actions]\nEnable=1\nLayout=Simple\n[Actions.Pad]\nDodge = pad:north\n");
+    CHECK(act_layout(&p) == ACT_LAYOUT_SIMPLE, "an explicit Layout wins");
+    p = parse("[Actions]\nEnable=1\nScheme=Keyboard\nLayout = advanced\n");
+    CHECK(p.scheme == ACT_SCHEME_KBM && p.layout == ACT_LAYOUT_ADVANCED && act_layout(&p) == ACT_LAYOUT_ADVANCED, "keys parse");
+    CHECK(parse("[Actions]\nScheme=pad\n").scheme == ACT_SCHEME_PAD && parse("[Actions]\nScheme=Controller\n").scheme == ACT_SCHEME_PAD, "Controller");
+    CHECK(parse("[Actions]\nScheme=nonsense\n").scheme == ACT_SCHEME_AUTO, "unknown: auto");
+    char text[4096], text2[4096];
+    act_format(&p, text, sizeof text);
+    CHECK(strstr(text, "Scheme=Keyboard") && strstr(text, "Layout=Advanced"), "formatted: %s", text);
+    ActProfile q = parse(text);
+    act_format(&q, text2, sizeof text2);
+    CHECK(!strcmp(text, text2) && q.scheme == p.scheme && q.layout == p.layout, "round trip");
+    act_format(&(ActProfile){.enable = true}, text, sizeof text);
+    CHECK(!strstr(text, "Scheme") && !strstr(text, "Layout"), "nothing written while auto");
+}
+
 int main(void) {
     act_set_log(quiet);
     test_registry();
@@ -595,6 +722,9 @@ int main(void) {
     test_all_buttons();
     test_script();
     test_save();
+    test_rows();
+    test_claim();
+    test_scheme_layout();
     test_weapon_r();
     test_gate();
     printf("test_actions: %d checks, %d failures\n", checks, failures);

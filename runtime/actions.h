@@ -96,8 +96,38 @@ typedef struct ActProfile {
     bool sheathed_attack;  // SheathedAttackA: AttackA presses A with the weapon put away too (default: only Interact does)
     int shared_frames;     // SharedInteractFrames: how long Interact is tried first on an input other hunt actions share (0: 1)
     bool log;       // Log: one line per frame
+    int scheme;     // Scheme: which control scheme the settings screen shows (ACT_SCHEME_*; 0: the device last used)
+    int layout;     // Layout: Simple or Advanced (ACT_LAYOUT_*; 0: Simple, unless the profile already has bindings)
     ActDevice dev[2];  // 0 [Actions.Pad], 1 [Actions.Kbm]
 } ActProfile;
+
+enum { ACT_SCHEME_AUTO, ACT_SCHEME_PAD, ACT_SCHEME_KBM };           // [Actions] Scheme = Controller | Keyboard
+enum { ACT_LAYOUT_AUTO, ACT_LAYOUT_SIMPLE, ACT_LAYOUT_ADVANCED };  // [Actions] Layout = Simple | Advanced
+int act_layout(const ActProfile *p);  // SIMPLE or ADVANCED: the profile's, else Advanced if it has any binding, else Simple
+
+// ---- the Simple layout: merged rows (the settings screen; the engine only ever sees the actions)
+// A row is one action (its head) and the actions that go with it in other contexts: Confirm is MenuConfirm and the
+// town's TownInteract. Setting a row writes the head and clears its members so that they keep following it; a member
+// that does not follow the head gets a copy.
+typedef struct { const char *name; const char *label; int group; int head; int members[3]; } ActRow;
+int act_row_count(void);
+const ActRow *act_row(int i);
+const char *act_row_group_name(int group);  // 0 "Hunt and town", 1 "Menus"
+int act_row_of(int id);                     // the row an action is in
+uint32_t act_row_views(int row);            // bit per ACT_VIEW_* the row's actions are read in
+typedef enum { ACT_ROW_DEFAULT, ACT_ROW_BOUND, ACT_ROW_UNSET, ACT_ROW_CUSTOM } ActRowState;
+// What a row reads for a device: *shown is its head's binding (NULL-like: n 0 and set false for Default); CUSTOM when
+// a member reads something else (edited apart in Advanced)
+ActRowState act_row_state(const ActProfile *p, int dev, int row, ActBinding *shown);
+void act_row_set(ActProfile *p, int dev, int row, const ActBinding *b);  // b NULL: Default; b with n 0: not set
+// Another row in the same contexts has this input: Simple does not allow two (the Interact row, which may share an
+// input with other hunt actions by design, and rows that follow another are left alone)
+bool act_rows_clash(const ActProfile *p, int dev, int a, int b);
+// After row was set to an input: every other row of the same contexts that reads it (an alternative, or its default)
+// loses it and is left not set when that was its last one. Returns the rows changed (bit per row).
+uint64_t act_row_claim(ActProfile *p, int dev, int row, int code, int (*sw_sources)(void *, int, int, int *, int),
+                       void *user, bool dash_zr);
+int act_rows_unset(const ActProfile *p, int dev, uint64_t *which);  // how many rows are not set (and which)
 
 // ---- ini
 void act_set_log(void (*fn)(const char *line));  // where messages go (default stderr)

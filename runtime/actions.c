@@ -49,7 +49,7 @@ static const ActDef defs[ACT_COUNT] = {
     [ACT_ATTACK_A] = {"AttackA", ACT_VIEW_MB1, S_A, 0, S_A, NOFB, "Attack A, weapon out (A)", ""},
     [ACT_ITEM_USE] = {"ItemUse", ACT_VIEW_MB1, S_Y, 0, S_Y, NOFB, "Use item / sheathe (Y)", ""},
     [ACT_CHORD_XA] = {"ChordXA", ACT_VIEW_MB1, S_X, 0x2000, -1, NOFB, "X + A together on one input", ""},
-    [ACT_INTERACT] = {"Interact", ACT_VIEW_MB1, S_A, 0, S_A, FB1(ACT_ATTACK_A), "Interact, weapon away: gather, carve, talk (A)", ""},
+    [ACT_INTERACT] = {"Interact", ACT_VIEW_MB1, S_A, 0, S_A, FB1(ACT_ATTACK_A), "Gather / open / talk, weapon away (A)", ""},
     [ACT_FIELD_L] = {"FieldL", ACT_VIEW_MB1, S_L, 0, S_L, NOFB, "L button: camera, item select (L)", ""},
     [ACT_FIELD_ZL] = {"FieldZL", ACT_VIEW_MB1, S_ZL, 0, S_ZL, NOFB, "ZL button (ZL)", ""},
     [ACT_FIELD_ZR] = {"FieldZR", ACT_VIEW_MB1, ROLE_OTHER, 0, ACT_KCZR, NOFB, "ZR button (ZR)", ""},
@@ -382,6 +382,12 @@ void act_parse(const char *text, ActProfile *p) {
             else if (same_name(key, "SheathedAttackA")) p->sheathed_attack = parse_bool(val);
             else if (same_name(key, "SharedInteractFrames")) p->shared_frames = atoi(val) < 0 ? 0 : atoi(val) > 30 ? 30 : atoi(val);
             else if (same_name(key, "Log")) p->log = parse_bool(val);
+            else if (same_name(key, "Scheme"))
+                p->scheme = same_name(val, "controller") || same_name(val, "pad") ? ACT_SCHEME_PAD
+                            : same_name(val, "keyboard") || same_name(val, "kbm") || same_name(val, "keyboardandmouse") ? ACT_SCHEME_KBM
+                                                                                                                        : ACT_SCHEME_AUTO;
+            else if (same_name(key, "Layout"))
+                p->layout = same_name(val, "simple") ? ACT_LAYOUT_SIMPLE : same_name(val, "advanced") ? ACT_LAYOUT_ADVANCED : ACT_LAYOUT_AUTO;
             else say("[actions] line %d: unknown setting \"%s\" in [Actions] (ignored)", line_no, key);
             continue;
         }
@@ -426,6 +432,8 @@ size_t act_format(const ActProfile *p, char *buf, size_t size) {
     if (p->sheathed_attack) PUT("SheathedAttackA=1\n");
     if (p->shared_frames) PUT("SharedInteractFrames=%d\n", p->shared_frames);
     if (p->log) PUT("Log=1\n");
+    if (p->scheme) PUT("Scheme=%s\n", p->scheme == ACT_SCHEME_PAD ? "Controller" : "Keyboard");
+    if (p->layout) PUT("Layout=%s\n", p->layout == ACT_LAYOUT_SIMPLE ? "Simple" : "Advanced");
     static const char *const sect[2] = {"Pad", "Kbm"};
     for (int d = 0; d < 2; d++) {
         for (int w = -1; w < ACT_WEAPONS; w++) {
@@ -666,6 +674,167 @@ void act_init(const char *ini_path) {
         say("[actions] on (menus %s, pointer %s)", p.menus ? "on" : "off", p.pointer ? "on" : "off");
         act_validate(&p);
     }
+}
+
+// ---- the Simple layout
+static const ActRow rows[] = {
+    // hunt and town
+    {"AttackX", "Attack X / draw weapon (X)", 0, ACT_ATTACK_X, {ACT_TOWN_X, -1, -1}},
+    {"AttackA", "Attack A, weapon out (A)", 0, ACT_ATTACK_A, {-1, -1, -1}},
+    {"ChordXA", "X + A together on one input", 0, ACT_CHORD_XA, {-1, -1, -1}},
+    {"Dodge", "Dodge / roll (B)", 0, ACT_DODGE, {-1, -1, -1}},
+    {"ItemUse", "Use item / sheathe (Y)", 0, ACT_ITEM_USE, {ACT_TOWN_Y, -1, -1}},
+    {"Interact", "Gather / open / talk, weapon away (A)", 0, ACT_INTERACT, {-1, -1, -1}},
+    {"Sprint", "Sprint (R)", 0, ACT_DASH, {ACT_TOWN_RUN, -1, -1}},
+    {"WeaponR", "Weapon action: guard, charge, aim (R)", 0, ACT_WEAPON_R, {-1, -1, -1}},
+    {"FieldL", "L button: camera, item select (L)", 0, ACT_FIELD_L, {ACT_TOWN_L, -1, -1}},
+    {"FieldZL", "ZL button (ZL)", 0, ACT_FIELD_ZL, {ACT_TOWN_ZL, -1, -1}},
+    {"FieldZR", "ZR button (ZR)", 0, ACT_FIELD_ZR, {ACT_TOWN_ZR, -1, -1}},
+    {"CrossUp", "D-pad up", 0, ACT_CROSS_UP, {ACT_TOWN_UP, -1, -1}},
+    {"CrossDown", "D-pad down", 0, ACT_CROSS_DOWN, {ACT_TOWN_DOWN, -1, -1}},
+    {"CrossLeft", "D-pad left", 0, ACT_CROSS_LEFT, {ACT_TOWN_LEFT, -1, -1}},
+    {"CrossRight", "D-pad right", 0, ACT_CROSS_RIGHT, {ACT_TOWN_RIGHT, -1, -1}},
+    {"FieldL3", "Left stick click (L3)", 0, ACT_FIELD_L3, {ACT_TOWN_L3, ACT_MENU_L3, -1}},
+    {"FieldR3", "Right stick click (R3)", 0, ACT_FIELD_R3, {ACT_TOWN_R3, ACT_MENU_R3, -1}},
+    // menus and talking
+    {"MenuConfirm", "Confirm / talk / examine (A)", 1, ACT_MENU_CONFIRM, {ACT_TOWN_INTERACT, -1, -1}},
+    {"MenuCancel", "Cancel / back (B)", 1, ACT_MENU_CANCEL, {ACT_TOWN_CANCEL, -1, -1}},
+    {"Pause", "Start menu (+)", 1, ACT_PAUSE, {ACT_MENU_PLUS, ACT_TOWN_PLUS, -1}},
+    {"Map", "Minus button (-)", 1, ACT_MAP, {ACT_MENU_MINUS, ACT_TOWN_MINUS, -1}},
+    {"MenuX", "Menu action X (X)", 1, ACT_MENU_X, {-1, -1, -1}},
+    {"MenuY", "Menu action Y (Y)", 1, ACT_MENU_Y, {-1, -1, -1}},
+    {"MenuUp", "Menu up", 1, ACT_MENU_UP, {-1, -1, -1}},
+    {"MenuDown", "Menu down", 1, ACT_MENU_DOWN, {-1, -1, -1}},
+    {"MenuLeft", "Menu left", 1, ACT_MENU_LEFT, {-1, -1, -1}},
+    {"MenuRight", "Menu right", 1, ACT_MENU_RIGHT, {-1, -1, -1}},
+    {"MenuTabL", "Tab left (L)", 1, ACT_MENU_TAB_L, {-1, -1, -1}},
+    {"MenuTabR", "Tab right (R)", 1, ACT_MENU_TAB_R, {-1, -1, -1}},
+    {"MenuPageL", "Page left (ZL)", 1, ACT_MENU_PAGE_L, {-1, -1, -1}},
+    {"MenuPageR", "Page right (ZR)", 1, ACT_MENU_PAGE_R, {-1, -1, -1}},
+};
+int act_row_count(void) { return (int)(sizeof rows / sizeof *rows); }
+const ActRow *act_row(int i) { return i >= 0 && i < act_row_count() ? &rows[i] : NULL; }
+const char *act_row_group_name(int g) { return g == 0 ? "Hunt and town" : "Menus"; }
+int act_row_of(int id) {
+    for (int i = 0; i < act_row_count(); i++) {
+        if (rows[i].head == id) return i;
+        for (int k = 0; k < 3 && rows[i].members[k] >= 0; k++)
+            if (rows[i].members[k] == id) return i;
+    }
+    return -1;
+}
+uint32_t act_row_views(int row) {
+    uint32_t v = 1u << defs[rows[row].head].view;
+    for (int k = 0; k < 3 && rows[row].members[k] >= 0; k++) v |= 1u << defs[rows[row].members[k]].view;
+    return v;
+}
+static bool bind_eq(const ActBinding *a, const ActBinding *b) {
+    if (!a || !b) return a == b;
+    if (a->n != b->n) return false;
+    for (int i = 0; i < a->n; i++) {
+        if (a->alt[i].n != b->alt[i].n) return false;
+        for (int k = 0; k < a->alt[i].n; k++)
+            if (a->alt[i].code[k] != b->alt[i].code[k]) return false;
+    }
+    return true;
+}
+static bool in_row(int row, int id) { return act_row_of(id) == row; }
+
+ActRowState act_row_state(const ActProfile *p, int dev, int row, ActBinding *shown) {
+    const ActRow *r = &rows[row];
+    const ActBinding *h = binding_in(p, dev, r->head, 0, NULL);
+    if (shown) {
+        if (h) *shown = *h;
+        else memset(shown, 0, sizeof *shown);
+    }
+    for (int k = 0; k < 3 && r->members[k] >= 0; k++)
+        if (!bind_eq(h, binding_in(p, dev, r->members[k], 0, NULL))) return ACT_ROW_CUSTOM;
+    return !h ? ACT_ROW_DEFAULT : h->n ? ACT_ROW_BOUND : ACT_ROW_UNSET;
+}
+
+void act_row_set(ActProfile *p, int dev, int row, const ActBinding *b) {
+    const ActRow *r = &rows[row];
+    ActBinding copy;
+    if (b) copy = *b, copy.set = true;
+    ActDevice *d = &p->dev[dev];
+    if (b) d->base[r->head] = copy;
+    else memset(&d->base[r->head], 0, sizeof d->base[r->head]);
+    for (int k = 0; k < 3 && r->members[k] >= 0; k++) {
+        int m = r->members[k], from = m;
+        memset(&d->base[m], 0, sizeof d->base[m]);  // (it follows the head, if it does)
+        if (b && (!binding_in(p, dev, m, 0, &from) || from != r->head)) d->base[m] = copy;
+    }
+}
+
+static bool shares_input(const ActBinding *a, const ActBinding *b) {
+    for (int x = 0; x < a->n; x++)
+        for (int y = 0; y < b->n; y++)
+            if (a->alt[x].n == 1 && b->alt[y].n == 1 && a->alt[x].code[0] == b->alt[y].code[0]) return true;
+    return false;
+}
+// Rows a and b are read in a common context, and Simple should keep them apart
+static bool rows_overlap(int a, int b) {
+    if (a == b || !(act_row_views(a) & act_row_views(b))) return false;
+    if (rows[a].head == ACT_INTERACT || rows[b].head == ACT_INTERACT) return false;  // (shares by design: act_gate)
+    return true;
+}
+bool act_rows_clash(const ActProfile *p, int dev, int a, int b) {
+    if (!rows_overlap(a, b)) return false;
+    int fa = rows[a].head, fb2 = rows[b].head;
+    const ActBinding *x = binding_in(p, dev, rows[a].head, 0, &fa), *y = binding_in(p, dev, rows[b].head, 0, &fb2);
+    if (!x || !y || fa != rows[a].head || fb2 != rows[b].head) return false;  // (a default, or one that follows another)
+    return shares_input(x, y);
+}
+
+uint64_t act_row_claim(ActProfile *p, int dev, int row, int code, int (*sw_sources)(void *, int, int, int *, int),
+                       void *user, bool dash_zr) {
+    uint64_t changed = 0;
+    for (int o = 0; o < act_row_count(); o++) {
+        if (!rows_overlap(row, o)) continue;
+        int from = rows[o].head;
+        const ActBinding *b = binding_in(p, dev, rows[o].head, 0, &from);
+        if (from != rows[o].head) continue;  // (it follows another row: that one is the owner)
+        if (b && !b->n) continue;            // (already not set)
+        ActBinding nb;
+        bool hit = false;
+        if (b) {
+            memset(&nb, 0, sizeof nb);
+            nb.set = true;
+            for (int a = 0; a < b->n; a++) {
+                if (b->alt[a].n == 1 && b->alt[a].code[0] == code) hit = true;
+                else nb.alt[nb.n++] = b->alt[a];
+            }
+        } else if (sw_sources && defs[rows[o].head].def_sw >= 0) {  // its default: the button Tier 0 reads
+            int src[16], n = sw_sources(user, role_btn(defs[rows[o].head].def_sw, dash_zr), dev, src, 16);
+            for (int i = 0; i < n; i++) hit |= src[i] == code;
+            memset(&nb, 0, sizeof nb);
+            nb.set = true;
+        }
+        if (!hit) continue;
+        act_row_set(p, dev, o, &nb);
+        changed |= 1ull << o;
+    }
+    return changed;
+}
+
+int act_rows_unset(const ActProfile *p, int dev, uint64_t *which) {
+    int n = 0;
+    uint64_t w = 0;
+    for (int i = 0; i < act_row_count(); i++)
+        if (act_row_state(p, dev, i, NULL) == ACT_ROW_UNSET) n++, w |= 1ull << i;
+    if (which) *which = w;
+    return n;
+}
+
+int act_layout(const ActProfile *p) {
+    if (p->layout) return p->layout;
+    for (int d = 0; d < 2; d++) {
+        for (int i = 0; i < ACT_COUNT; i++)
+            if (p->dev[d].base[i].set) return ACT_LAYOUT_ADVANCED;
+        for (int w = 0; w < ACT_WEAPONS; w++)
+            if (p->dev[d].has_weapon[w]) return ACT_LAYOUT_ADVANCED;
+    }
+    return ACT_LAYOUT_SIMPLE;
 }
 
 // ---- sampling
