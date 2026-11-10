@@ -916,7 +916,8 @@ static int act_sw_sources(void *user, int btn, int dev, int *out, int max) {
     return n;
 }
 // The settings menu is choosing a controller input for a game action (settings_panel_pad_capture): the next button or
-// trigger pressed, once everything was let go (the press that opened the choice is still down), goes to it
+// trigger that goes down goes to it. What is down as the choice starts (the press that opened it, a trigger that rests
+// half way) does not count until it was let go.
 static int pad_capture_poll(bool capturing) {
     static const int codes[] = {ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH, ACT_PAD + SDL_GAMEPAD_BUTTON_EAST,
                                 ACT_PAD + SDL_GAMEPAD_BUTTON_WEST, ACT_PAD + SDL_GAMEPAD_BUTTON_NORTH,
@@ -926,14 +927,17 @@ static int pad_capture_poll(bool capturing) {
                                 ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_DOWN, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_LEFT,
                                 ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_RIGHT, ACT_PAD + SDL_GAMEPAD_BUTTON_START,
                                 ACT_PAD + SDL_GAMEPAD_BUTTON_BACK};
-    static bool armed;
-    if (!capturing) return armed = false, 0;
-    int held = 0;
-    for (unsigned i = 0; i < sizeof codes / sizeof *codes && !held; i++)
-        if (act_phys_held(NULL, codes[i])) held = codes[i];
-    if (!armed) return armed = !held, 0;
-    if (held) armed = false;
-    return held;
+    enum { N = sizeof codes / sizeof *codes };
+    static bool was[N], started;
+    if (!capturing) return started = false, 0;
+    int pressed = 0;
+    for (int i = 0; i < N; i++) {
+        bool held = act_phys_held(NULL, codes[i]);
+        if (started && held && !was[i] && !pressed) pressed = codes[i];
+        was[i] = held;
+    }
+    started = true;
+    return pressed;
 }
 
 static void act_update(uint64_t b, uint64_t script_b, bool suppress) {

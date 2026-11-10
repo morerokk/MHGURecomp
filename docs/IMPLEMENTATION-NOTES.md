@@ -1,8 +1,9 @@
-# Game-action rebinding: implementation notes (prototype of M1 and the non-hover part of M2)
+# Game-action rebinding: implementation notes (M1, the non-hover part of M2, and the Game actions screen)
 
 Branch `input-impl` (on upstream 0.15.5+2). Written against `docs/input-rework/ACTIONS.md` of the research branch (section 4,
-"prototype spec"). Everything here is **off** unless `[Actions] Enable=1` is in the ini: with it off nothing is hooked, no
-guest code is touched and the only changes on the input path are two mutex-guarded copies in `hle/input.c`.
+"prototype spec"). Everything here is **off** unless `[Actions] Enable=1` is in the ini (or it is turned on in the settings
+menu, Controls > Game actions): with it off nothing is hooked, no guest code is touched and the only changes on the input
+path are two mutex-guarded copies in `hle/input.c`.
 
 ## What it is
 
@@ -15,19 +16,44 @@ delivers R or ZR (the game's own dash role) accordingly.
 
 | file | what |
 |---|---|
-| `runtime/actions.h`, `actions.c` | registry (18 actions), input names, `[Actions*]` parse / format / validate, sampling of the bindings into the active set, `act_view`. Pure C (needs only `config.c`'s key names), host-testable |
-| `runtime/hle/input_view.c`, `.h` | the game side: hooks `f_5de064`, `f_5de4b0`, `f_5de4f8`, the player update `f_4a79cc`, the town update `f_48d1f0` and the 15 weapon mappers; context, weapon class, current action, the optional pointer feed |
+| `runtime/actions.h`, `actions.c` | registry (50 actions), input names, `[Actions*]` parse / format / save / validate, sampling of the bindings into the active set, `act_view`. Pure C (needs only `config.c`'s key names), host-testable |
+| `runtime/hle/input_view.c`, `.h` | the game side: hooks `f_5de064`, `f_5de4b0`, `f_5de4f8`, the player update `f_4a79cc`, the town update `f_48d1f0` and the 15 weapon mappers; context (hunt with the weapon out / away, town), weapon class, current action, the optional pointer feed. `input_view_apply` hooks the first time the layer is on |
+| `runtime/settings_panel.cpp` | Controls > Game actions: the bindings as a draft, press-to-bind for the controller and for keyboard / mouse / wheel, saved with the other settings (`act_save`) and in use at once |
 | `runtime/hle/input.c`, `.h` | the mailbox: the host stages the action set, `input_set` publishes it with the buttons, `GetNpadState` copies it into the set the game latches (so the buttons the engine saw and the actions come from the same host update) |
-| `runtime/host_input.c` | sampler glue: physical state callbacks, the Tier 0 sources of each Switch button, wheel queue, control commands `act`, `ptr`, `actstat` |
-| `runtime/config.c` | skips the `[Actions*]` sections (they are read by `actions.c`) so they don't log "unknown setting" |
+| `runtime/host_input.c` | sampler glue: physical state callbacks, the Tier 0 sources of each Switch button, wheel queue, the controller press for the settings menu's capture, control commands `act`, `ptr`, `actstat` |
+| `runtime/config.c`, `config_store.c` | skip the `[Actions*]` sections (they are read and written by `actions.c`): no "unknown setting", and saving the settings keeps their lines as they are |
 | `tests/test_actions.c`, `make test-actions` | host-only tests (no game files) |
 
 ## Actions
 
-mb1 (field and town): `Dodge` (B), `Dash` (the R-role: R, or ZR with the second Control Type), `AttackX` (X), `AttackA` (A),
-`ItemUse` (Y), `ChordXA` (X and A in one frame). mb2 (menus, needs `ManageMenus=1`): `MenuConfirm` (A), `MenuCancel` (B),
-`MenuUp/Down/Left/Right`, `MenuTabL/R` (L/R), `MenuX`, `MenuY`, `MenuPageL/R` (ZL/ZR). Weapon classes for per-class overrides:
-GreatSword SnS Hammer Lance HBG LBG LongSword SwitchAxe Gunlance Bow DualBlades Horn InsectGlaive ChargeBlade Prowler.
+Every one of the pad's 16 buttons is an action in each of three contexts (50 actions; `act_order` lists them per context):
+
+* **Hunt** (the gameplay view while a hunter plays): `AttackX` (X), `AttackA` (A, weapon out), `ChordXA` (X and A in one
+  frame, no default), `Dodge` (B), `ItemUse` (Y), `Interact` (A, weapon away), `Dash` (the R-role: R, or ZR with the second
+  Control Type), `FieldZR` (the other one of R / ZR), `FieldL`, `FieldZL`, `CrossUp/Down/Left/Right` (D-pad), `FieldL3`,
+  `FieldR3`, `Pause` (Plus), `Map` (Minus).
+* **Town / Hub** (the gameplay view while the town avatar plays): `TownInteract` (A), `TownCancel` (B), `TownX`, `TownY`,
+  `TownRun` (the R-role), `TownZR`, `TownL`, `TownZL`, `TownUp/Down/Left/Right`, `TownL3`, `TownR3`, `TownPlus`, `TownMinus`.
+* **Menus** (the menu view, needs `ManageMenus=1`): `MenuConfirm` (A; also `Confirm`), `MenuCancel` (B; also `Cancel`),
+  `MenuX`, `MenuY`, `MenuUp/Down/Left/Right`, `MenuTabL/R` (L/R), `MenuPageL/R` (ZL/ZR), `MenuPlus`, `MenuMinus`, `MenuL3`,
+  `MenuR3`.
+
+**Following.** An action with no binding of its own uses the binding of the first action it follows that has one (per
+device), else its default (Tier 0): `Interact` follows `AttackA`; `TownInteract` follows `MenuConfirm`, then `Interact`;
+`TownCancel` follows `MenuCancel`, then `Dodge`; every other `Town*` follows the hunt's action of the same button;
+`MenuPlus` / `MenuMinus` follow `Pause` / `Map`. So: nothing bound = the game as it is; only `MenuConfirm` / `MenuCancel`
+bound = the menus **and** the town's talk / back swap (the first play test's complaint) while the hunt is untouched; and each
+of them can still be bound on its own.
+
+**The hunt's A button** is one of two actions by the hunter's state, read from `player+0x114C` (u8: 1 weapon out, 0 away;
+found by comparing memory snapshots of sheathed / drawn idle, walk, roll and attacks, see Tests): weapon out, A is `AttackA`;
+weapon away, A is `Interact` (gather, carve, talk, open). While `Interact` follows `AttackA` they are one button, as in the
+game. Once split, `AttackA` with the weapon away presses A only together with `AttackX` or `Dash` (the draw attacks that
+need both), or always with `[Actions] SheathedAttackA=1`. The Prowler (no weapon to put away) and a screen that reads the
+gameplay view with no hunter get both.
+
+Weapon classes for per-class overrides: GreatSword SnS Hammer Lance HBG LBG LongSword SwitchAxe Gunlance Bow DualBlades Horn
+InsectGlaive ChargeBlade Prowler.
 
 ## ini
 
@@ -35,6 +61,7 @@ GreatSword SnS Hammer Lance HBG LBG LongSword SwitchAxe Gunlance Bow DualBlades 
 [Actions]
 Enable=1                  ; 0 (default, and no section at all): nothing hooked, bit-for-bit today's behaviour
 ManageMenus=1             ; the menu view too
+SheathedAttackA=0         ; 1: AttackA presses A with the weapon away too (only matters once Interact is bound)
 Pointer=0                 ; feed the engine's (dormant) pointer block: experiment, see P1 below
 Log=0                     ; one line per frame (env MHGU_ACTION_LOG=1); env MHGU_ACTIONS=0|1 overrides Enable
 
@@ -50,7 +77,9 @@ MenuCancel  = mouse:right
 MenuUp = mouse:wheelup
 MenuDown = mouse:wheeldown
 
-[Actions.Pad.Weapon.Hammer]   ; sparse override for one class, resolution: Weapon.<Class> > base > default
+Interact = key:f              ; gather / carve / talk on F, Attack A stays where it is
+
+[Actions.Pad.Weapon.Hammer]   ; sparse override for one class, resolution: Weapon.<Class> > base > followed action > default
 AttackA = pad:north
 ```
 
@@ -60,10 +89,26 @@ and of `[Keybinds]`, scripted input included), so `Enable=1` with no bindings pl
 list overrides that device's half only: `[Actions.Pad] Dodge = ...` leaves the keyboard's Dodge on `[Keybinds]`' B. A physical
 input bound to an action is **claimed** in that view: the default of the other actions of the same view no longer reads it, so a
 swap needs no second line (Dodge on north no longer also attacks with X, which north was).
-`act_validate` (at startup, in the log) warns about: two actions on one input in one view (the other view is not a conflict), a key
-the recomp keeps for itself (Esc, F1, Insert, F7-F12), an input that is also an unmanaged Switch button (it still reaches the game,
-for example `ChordXA = pad:lshoulder` also presses L), and notes that Dash / AttackA / Dodge share their game input with
-another action (Weapon R-action, interact, weapon B-actions): they are rebound together until the research's split (not done).
+`act_validate` (at startup, in the log) warns about: two actions on one input in one context (another context is not a
+conflict; `AttackA` and `Interact` on one input are not one either), a key the recomp keeps for itself (Esc, F1, Insert,
+F7-F12), and notes that Dash and Dodge share their game input with another action (Weapon R-action, weapon B-actions): those
+are rebound together (the research's split is not done). Every button is an action now, so a controller button given to an
+action no longer also reaches the game as its own Switch button in that context.
+
+A scripted press (`MHGU_INPUT`, the control file's `A 8`, quickhunt) is the game's own button whatever is bound: it presses
+the actions that deliver that button (so quickhunt still gets through the title with `MenuConfirm` rebound).
+
+## The Game actions screen (settings menu, Controls > Game actions)
+
+Rows: Rebind game actions (Enable), Also in the game's menus (ManageMenus), Attack A also interacts (SheathedAttackA),
+Bindings of (Controller / Keyboard and mouse), For (All weapons / one class: then only the hunt's actions), then every
+action by context with what it reads now: its inputs, `Default`, or the inputs of the action it follows (`same as <Name>`);
+red with `also: <Name>` when another action of that context is on the same input. Confirm on a row: Set (press the input:
+any controller button or trigger; a key, mouse button or wheel notch; Esc cancels, the controller's choice also after 8 s),
+Add another (up to 3 ways to press it), None (unbound on purpose), Default. Chords (`a+b`) are ini-only. The bindings are a
+draft like the other settings: Save writes the `[Actions*]` sections (every other line of the ini is kept) and they are in
+use from the next frame; turning Enable on hooks the game then, with no restart, and turning it off makes the hooks pass
+the pad through.
 
 ## Control commands (control file, `MHGU_CONTROL`)
 
@@ -114,6 +159,30 @@ the pointer does. So the vanilla list controllers and these screens do not use t
 experiment (default 0), there is no real-mouse feed, no cursor and no hover. Screens not probed: title, quest board, counter,
 smithy, equipment box, item box, shop, map, options: hover there is unknown (the readers could be live in one of them).
 
+## Tests of 2026-11-10 (this machine; hidden window, a copy of the save, the TeleportTool mod for the town spot)
+
+* **Host** (`make test-actions`): 2,753,209 checks, 0 failures: the golden property now over the hunt (weapon out, away,
+  either), the town and the menus; following; the Interact / AttackA states; every action alone delivers exactly its button
+  and each context owns all 16; all 50 actions through the ini and back; scripted presses; `act_save` (other sections kept,
+  saving twice changes nothing). `make test-settings test-settings-panel test-settings-locale` pass.
+* **Weapon out / away flag**: `MHGU_PLSNAP` snapshots of the player (0x3800 bytes, 20 updates each) in 12 phases of a Hammer
+  hunt (quest 101): sheathed idle / walk / roll, drawn idle / roll / X attack / A attack / walk, sheathed again. Exactly
+  three bytes are constant in every sheathed snapshot and constant and different in every drawn one: `+0x4B5` (0 / 5),
+  **`+0x114C` (0 / 1)** and `+0x120E`. `act_st:act_no` (`+0x2506/0x250A`) is not usable: idle is 1:0 and a roll 1:x in both.
+* **Golden in the game** (`Enable=1 ManageMenus=1`, no bindings, scripted A B X Y L R ZL ZR D-pad Plus Minus L3 R3, quest
+  101): 3170 frames (408 with input), the word given to both translators equals the one that comes out in every frame;
+  1293 frames built as weapon out, 609 as weapon away, 53 as town.
+* **Town** (`Confirm = pad:south`, `Cancel = pad:east`, SDL virtual controller, at the Soaratorium's item box): east (the
+  game's A) does nothing; south opens the Item Box and confirms Store Items; east backs out of both (screenshots).
+* **Interact split** (`AttackA = pad:rshoulder`, `Interact = pad:lshoulder`, Hammer, quest 101): weapon away, rshoulder gives
+  the game nothing and lshoulder gives A; after drawing, rshoulder gives A and the hunter attacks (`0010:000`), lshoulder
+  gives nothing; the old A position gives nothing in either state; sheathed again, lshoulder is A again. A real gather /
+  carve / field NPC was not reached (no spot): what is verified is that A is delivered only in the right state.
+* **The screen** (started with no `[Actions]` at all): Enable and menus turned on, Dodge bound with the virtual controller
+  (Pad North) and with the keyboard (Space), Save: the ini has `[Actions]`, `[Actions.Pad]`, `[Actions.Kbm]`, the log says
+  `translators hooked`, and in the town north is `Dodge TownCancel`, south no longer the game's B. Started again, the
+  bindings are loaded; with the controller alone (no mouse): Controls > Game actions > Dodge > Set > west: `Pad West`.
+
 ## Differences from the spec (and why)
 
 * The per-frame latch is in the **first `f_5de064` call of the frame** (mb1), not `f_5ddf1c`: the engine polls the pad inside
@@ -123,11 +192,13 @@ smithy, equipment box, item box, shop, map, options: hover there is unknown (the
 * The sPad address is `LD32(LD32(0x1a3cbfc))` (the GOT entry points at the global that holds it), the option object `LD32(0x1a97f78)`.
 * Defaults are `sw:` tokens (Tier 0 sources evaluated at sampling time) instead of a generated explicit profile: the same result
   follows `FaceButtons`, `[Keybinds]` and scripted input live, which a generated file would not.
-* No `ctx` gating: the mb1 view applies in every context (the context is detected and logged: `FIELD` while `f_4a79cc` ran in the
-  last frames, `TOWN` for `f_48d1f0`, else `MENU`), mb2 whenever `ManageMenus=1`. Gates (drawn / sheathed), the virtual bit 0x8000 with
-  the `f_85f93c` getter override (`SplitDashWeaponR`, parsed and ignored with a log line), intent edits and the mapper wrapper
-  (L3-L5) are **not** done: Dash/AttackA/Dodge are still the same input as the weapon R-action / interact / weapon B-action.
-* The player's drawn/sheathed state is only logged (`act_st:act_no` at `P+0x2506/0x250A`, as `movelog.c` names them).
+* Contexts: the gameplay word is built for the hunt (`f_4a79cc` ran in the last frames; weapon out or away by
+  `player+0x114C`), else the town (`f_48d1f0`), else the hunt's actions with both A actions; mb2 whenever `ManageMenus=1`.
+  The virtual bit 0x8000 with the `f_85f93c` getter override (`SplitDashWeaponR`, parsed and ignored with a log line),
+  intent edits and the mapper wrapper (L3-L5) are **not** done: Dash and Dodge are still the same input as the weapon
+  R-action / weapon B-actions.
+* The research's drawn discriminator (`P+0x2506 == 0x10`) is not what is used: it is the current action's group, 1 in a
+  roll with the weapon out. `player+0x114C` (the KB's flag, which the static pass found no reader of) is constant per state.
 
 ## Not verified / known limits
 
@@ -139,31 +210,44 @@ smithy, equipment box, item box, shop, map, options: hover there is unknown (the
   press `mouse:*` bindings, the wheel only while captured. Menus with a free pointer are not done (no hover anyway).
 * The wheel does not move menus while the item bar handler ran in the last 200 ms (wheel ownership as in the spec, not tested live).
 * `MHGU_INPUT` / control-file button presses count as the `sw:` sources of the controller half only.
-* An unmanaged button bound as an input (`pad:lshoulder` for `ChordXA`) still reaches the game as its own Switch button (warned at
-  startup); keyboard keys that are also `[Keybinds]` of an unmanaged button are not warned about.
+* With `ManageMenus=0` the menus read Tier 0: a controller button given to a hunt action is still that Switch button there.
+* Both views are live at once: in a hunt the menu view still reads its own actions (a button moved in the hunt keeps its
+  menu meaning until the menu action is moved too; `MenuPlus` / `MenuMinus` follow `Pause` / `Map` for that reason).
+* The sticks are not actions (moving, the camera; the keyboard's are `[Keybinds]`), nor the item bar's keys.
+* The weapon-out flag was checked with the Hammer only; the Prowler is treated as "either" without having been run.
+* The Plus + Minus chord that opens the settings menu reads Tier 0's Plus and Minus, not `Pause` / `Map`.
 * Hooked functions that the interpreter runs (cheats, `interpwatch`) bypass hooks. A mod that hooks one of the same functions before
   this layer starts stops the layer (log line); mods that hook later chain behind it (Forge keeps a hook already there).
 * Performance was not measured: the added cost is three extra hooked entries and ~20 ns of table work per frame, plus the
   15 mapper hooks and the player/town update hooks (one `f_47bcd0` guest call each per frame).
-* The settings UI (docs/SETTINGS_UI.md) was not started; this is ini-only. Keyboard glyphs in prompts, M3 (mouse aim audit) and the
-  "stick-equivalent" actions were not started either.
+* The game's own button prompts still show the Switch button of an action, not what it is bound to. Keyboard glyphs in
+  prompts, M3 (mouse aim audit) and the "stick-equivalent" actions were not started. The screen's capture takes one input:
+  chords are ini-only. Its new texts have Spanish translations that no native speaker has read.
 
 ## How to try
 
-1. Build as usual (`make`), then add to `mhgurecomp.ini` (any of the examples above; menus + mouse wheel preset):
+1. Build as usual (`make`). In the game: F1 (or Plus + Minus) > Controls > Game actions. Turn "Rebind game actions" and
+   "Also in the game's menus" on, choose Controller or Keyboard and mouse, Confirm on an action > Set > press the input.
+   Back, Save. It applies at once.
+2. Or in `mhgurecomp.ini`, for example Confirm on the bottom button and Cancel on the right one (menus and town), a
+   separate Interact, and mouse menus:
    ```ini
    [Actions]
    Enable=1
    ManageMenus=1
+   [Actions.Pad]
+   Confirm  = pad:south
+   Cancel   = pad:east
+   Interact = pad:south
    [Actions.Kbm]
    MenuConfirm = mouse:left | key:return
    MenuCancel  = mouse:right
    MenuUp      = mouse:wheelup | key:up
    MenuDown    = mouse:wheeldown | key:down
    ```
-   (click once in the window so that the mouse is captured; Esc releases it.) The log (`log` / stderr) shows `[actions] on ...`,
-   the warnings, and `[actions] translators hooked`.
-2. A swap on the controller: `[Actions.Pad]` `Dodge = pad:north`, `AttackX = pad:south` (and so on; no two actions on one button).
-3. `Log=1` then a script: `MHGU_CONTROL=<file>` with `act Dodge 8`, `actstat`, `wheel -3`; or `python`-free checks in the log:
-   per frame `f<n> <ctx> w<weapon> mb1 in <engine word> out <word given to the game> cur <mb1 translation> | mb2 ...`.
-4. Host tests: `make test-actions test-settings`.
+   (click once in the window so that the mouse is captured; Esc releases it.) The log shows `[actions] on ...`, the
+   warnings, and `[actions] translators hooked`.
+3. `Log=1` then a script: `MHGU_CONTROL=<file>` with `act Dodge 8`, `actstat`, `wheel -3`; per frame the log has
+   `f<n> <ctx> w<weapon> mb1 in <engine word> out <word given to the game> cur <mb1 translation> | mb2 ... | act <set> v<context>`
+   (v0 weapon out, v3 weapon away, v2 town, v4 no hunter).
+4. Host tests: `make test-actions test-settings test-settings-panel test-settings-locale`.
