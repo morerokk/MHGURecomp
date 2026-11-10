@@ -613,6 +613,13 @@ test-settings-panel: $(O)/rt/settings_panel.o $(O)/rt/actions.o $(O)/rt/modorder
 	$(CXX) $(IMGUIFLAGS) -Iruntime tests/test_settings_panel.cpp $(filter %.o,$^) $(SDL_LIBS) -o $(O)/settings-test/test-settings-panel$(if $(filter windows,$(PLATFORM)),.exe)
 	$(O)/settings-test/test-settings-panel$(if $(filter windows,$(PLATFORM)),.exe)
 
+# The binding view (runtime/binding_view.cpp) rendered to PNG files by a software rasteriser: obj/binding-preview/*.png
+.PHONY: preview-bindings
+preview-bindings: $(O)/imgui/imgui/imgui.o $(O)/imgui/imgui/imgui_draw.o $(O)/imgui/imgui/imgui_tables.o $(O)/imgui/imgui/imgui_widgets.o $(LIB_STAMPS)
+	@mkdir -p $(O)/binding-preview
+	$(CXX) $(IMGUIFLAGS) -Wall -Iruntime tests/preview_bindings.cpp runtime/binding_view.cpp $(filter %.o,$^) $(SDL_LIBS) -lz -o $(O)/binding-preview/preview-bindings$(if $(filter windows,$(PLATFORM)),.exe)
+	$(O)/binding-preview/preview-bindings $(O)/binding-preview $(ONLY)
+
 # Translation coverage for both host-menu languages; no game files required.
 .PHONY: test-settings-locale
 test-settings-locale:
