@@ -107,9 +107,10 @@ static void test_validate(void) {
     CHECK(strstr(logbuf, "conflict: Dodge and AttackA"), "conflict in one view: %s", logbuf);
     CHECK(!strstr(logbuf, "MenuConfirm and Dodge"), "no conflict across views");
     CHECK(strstr(logbuf, "ItemUse uses Escape"), "reserved key warned: %s", logbuf);
-    CHECK(strstr(logbuf, "AttackA is the same game input as"), "shared-input note");
-    CHECK(strstr(logbuf, "ChordXA is on pad:lshoulder, which is also the Switch L"), "unmanaged button leak warned: %s", logbuf);
-    CHECK(!strstr(logbuf, "Dash is on pad:rshoulder"), "R is the dash role: no leak warning");
+    CHECK(strstr(logbuf, "Dodge is the same game input as"), "shared-input note");
+    CHECK(!strstr(logbuf, "Dodge and Interact"), "an action that follows another is not a second conflict: %s", logbuf);
+    CHECK(!strstr(logbuf, "AttackA and Interact"), "A with the weapon out and away are not read together");
+    CHECK(strstr(logbuf, "conflict: TownInteract and TownCancel"), "a conflict that only exists in the town: %s", logbuf);
     CHECK(n >= 4, "count %d", n);
     act_set_log(quiet);
 }
@@ -133,6 +134,7 @@ static void test_golden(void) {
                 uint64_t act = s.hold[0] | s.pulse[0];
                 CHECK(act_view(ACT_VIEW_MB1, in, act, zr) == in, "T0 mb1 b=%04x zr=%d noise=%x", b, zr, noise[k]);
                 CHECK(act_view(ACT_VIEW_MB2, in, act, zr) == in, "T0 mb2 b=%04x zr=%d noise=%x", b, zr, noise[k]);
+                CHECK(act_view(ACT_VIEW_TOWN, in, act, zr) == in, "T0 town b=%04x zr=%d noise=%x", b, zr, noise[k]);
                 if (failures > 20) return;
             }
         }
@@ -224,7 +226,11 @@ static void test_rebind2(void) {
     w = act_view(ACT_VIEW_MB1, 0, 1ull << ACT_DASH, true);
     CHECK(w == 0x800, "dash on ZR %x", w);
     w = act_view(ACT_VIEW_MB1, 0x200, 0, true);
-    CHECK(w == 0x200, "R is not the dash role with ZR: unmanaged, passes %x", w);
+    CHECK(w == 0, "with ZR the dash role, R is FieldZR's: not held %x", w);
+    w = act_view(ACT_VIEW_MB1, 0, 1ull << ACT_FIELD_ZR, true);
+    CHECK(w == 0x200, "FieldZR is the other one of R / ZR %x", w);
+    w = act_view(ACT_VIEW_MB1, 0, 1ull << ACT_FIELD_ZR, false);
+    CHECK(w == 0x800, "FieldZR %x", w);
 }
 
 static void test_weapon(void) {
@@ -265,6 +271,194 @@ static void test_chord_alt(void) {
     CHECK(act_uses_input(KEY_WHEEL_UP) && !act_uses_input(KEY_WHEEL_DOWN), "act_uses_input");
 }
 
+// The town: its A / B follow the menus' Confirm / Cancel while they have no binding of their own; the hunt is untouched
+static void test_town(void) {
+    CHECK(act_find("Confirm") == ACT_MENU_CONFIRM && act_find("cancel") == ACT_MENU_CANCEL, "Confirm / Cancel names");
+    ActProfile p = parse("[Actions]\nEnable=1\nManageMenus=1\n[Actions.Pad]\nConfirm = pad:south\nCancel = pad:east\n");
+    CHECK(p.dev[0].base[ACT_MENU_CONFIRM].set && p.dev[0].base[ACT_MENU_CANCEL].set, "aliases parse");
+    act_use_profile(&p);
+    int E = ACT_PAD + SDL_GAMEPAD_BUTTON_EAST, S = ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH, N = ACT_PAD + SDL_GAMEPAD_BUTTON_NORTH;
+    ActSnap s;
+    ActHost h;
+    release_all();
+    press(S);  // Switch B's position: Confirm now
+    h = (ActHost){NULL, fake_held, map_sources, map_word(), 0, false, false, 300};
+    act_sample(&h, &s);
+    uint32_t in = ew_of_word(map_word());  // the engine word Tier 0 gives: B (0x4000)
+    CHECK(act_view(ACT_VIEW_MB2, in, s.hold[0], false) == 0x2000, "menu: south confirms: %x", act_view(ACT_VIEW_MB2, in, s.hold[0], false));
+    CHECK(act_view(ACT_VIEW_TOWN, in, s.hold[0], false) == 0x2000, "town: south is A: %x", act_view(ACT_VIEW_TOWN, in, s.hold[0], false));
+    CHECK(act_view(ACT_VIEW_MB1, in, s.hold[0], false) == 0x4000, "hunt: south is still B (dodge)");
+    CHECK(act_view(ACT_VIEW_SHEATHED, in, s.hold[0], false) == 0x4000, "hunt, weapon away: south is still B");
+    release_all();
+    press(E);  // the old A position
+    h.sw_word = map_word();
+    act_sample(&h, &s);
+    in = ew_of_word(map_word());  // 0x2000
+    CHECK(act_view(ACT_VIEW_TOWN, in, s.hold[0], false) == 0x4000, "town: east is B, no A: %x", act_view(ACT_VIEW_TOWN, in, s.hold[0], false));
+    CHECK(act_view(ACT_VIEW_MB2, in, s.hold[0], false) == 0x4000, "menu: east cancels");
+    CHECK(act_view(ACT_VIEW_MB1, in, s.hold[0], false) == 0x2000, "hunt: east still attacks (A)");
+    CHECK(act_view(ACT_VIEW_SHEATHED, in, s.hold[0], false) == 0x2000, "hunt, weapon away: east still interacts (A)");
+    int from = -1;
+    CHECK(act_effective(&p, 0, ACT_TOWN_INTERACT, 0, &from) && from == ACT_MENU_CONFIRM, "TownInteract follows MenuConfirm");
+    CHECK(!act_effective(&p, 1, ACT_TOWN_INTERACT, 0, NULL), "the keyboard half is still the default");
+    // its own binding wins over the one it follows
+    p = parse("[Actions]\nEnable=1\nManageMenus=1\n[Actions.Pad]\nConfirm = pad:south\nCancel = pad:east\nTownInteract = pad:north\n");
+    act_use_profile(&p);
+    release_all();
+    press(N);
+    h.sw_word = map_word();
+    act_sample(&h, &s);
+    CHECK(act_view(ACT_VIEW_TOWN, 0, s.hold[0], false) == 0x2000, "town: north talks, and is no longer X there: %x", act_view(ACT_VIEW_TOWN, 0, s.hold[0], false));
+    CHECK(act_view(ACT_VIEW_MB1, 0, s.hold[0], false) == 0x1000, "hunt: north is still X");
+    release_all();
+    press(S);
+    h.sw_word = map_word();
+    act_sample(&h, &s);
+    CHECK(act_view(ACT_VIEW_TOWN, 0, s.hold[0], false) == 0, "town: south is free (Interact has its own button, B follows Cancel to east): %x", act_view(ACT_VIEW_TOWN, 0, s.hold[0], false));
+    // the hunt's actions are followed in the town too: a moved Dodge and AttackX move the town's B and X
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nDodge = pad:north\nAttackX = pad:south\n");
+    act_use_profile(&p);
+    release_all();
+    press(N);
+    h.sw_word = map_word();
+    act_sample(&h, &s);
+    CHECK(act_view(ACT_VIEW_TOWN, 0, s.hold[0], false) == 0x4000, "town: B follows Dodge to north");
+    CHECK(act_view(ACT_VIEW_MB1, 0, s.hold[0], false) == 0x4000, "dodge presses B in the hunt");
+}
+
+// A hunt's A button: AttackA with the weapon out, Interact with it away; one button until Interact is bound
+static void test_interact(void) {
+    int E = ACT_PAD + SDL_GAMEPAD_BUTTON_EAST, S = ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH, N = ACT_PAD + SDL_GAMEPAD_BUTTON_NORTH,
+        R = ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
+    ActSnap s;
+    ActHost h = (ActHost){NULL, fake_held, map_sources, 0, 0, false, false, 500};
+    // AttackA alone moves both, as in the game
+    ActProfile p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nAttackA = pad:rshoulder\n");
+    act_use_profile(&p);
+    release_all();
+    press(R);
+    act_sample(&h, &s);
+    CHECK(act_view(ACT_VIEW_MB1, 0, s.hold[0], false) == 0x2000, "weapon out: rshoulder is A");
+    CHECK(act_view(ACT_VIEW_SHEATHED, 0, s.hold[0], false) == 0x2000, "weapon away: Interact follows AttackA: %x", act_view(ACT_VIEW_SHEATHED, 0, s.hold[0], false));
+    CHECK(act_view(ACT_VIEW_HUNT_ANY, 0, s.hold[0], false) == 0x2000, "no state: A");
+    // split
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nAttackA = pad:rshoulder\nInteract = pad:south\nDodge = pad:east\nAttackX = pad:north\n");
+    act_use_profile(&p);
+    release_all();
+    press(R);
+    act_sample(&h, &s);
+    CHECK(act_view(ACT_VIEW_MB1, 0, s.hold[0], false) == 0x2000, "weapon out: AttackA is A");
+    CHECK(act_view(ACT_VIEW_SHEATHED, 0, s.hold[0], false) == 0, "weapon away: AttackA alone presses nothing: %x", act_view(ACT_VIEW_SHEATHED, 0, s.hold[0], false));
+    CHECK(act_view(ACT_VIEW_HUNT_ANY, 0, s.hold[0], false) == 0x2000, "Prowler / unknown: AttackA is A");
+    press(N);  // with AttackX: the draw attacks that need both
+    act_sample(&h, &s);
+    CHECK(act_view(ACT_VIEW_SHEATHED, 0, s.hold[0], false) == 0x3000, "weapon away: AttackX + AttackA is X+A: %x", act_view(ACT_VIEW_SHEATHED, 0, s.hold[0], false));
+    release_all();
+    press(S);
+    act_sample(&h, &s);
+    CHECK(act_view(ACT_VIEW_MB1, 0, s.hold[0], false) == 0, "weapon out: Interact presses nothing: %x", act_view(ACT_VIEW_MB1, 0, s.hold[0], false));
+    CHECK(act_view(ACT_VIEW_SHEATHED, 0, s.hold[0], false) == 0x2000, "weapon away: Interact is A");
+    CHECK(act_view(ACT_VIEW_HUNT_ANY, 0, s.hold[0], false) == 0x2000, "Prowler / unknown: Interact is A");
+    CHECK(act_view(ACT_VIEW_TOWN, 0, s.hold[0], false) == 0x2000, "town: TownInteract follows Interact");
+    release_all();
+    press(E);
+    act_sample(&h, &s);
+    CHECK(act_view(ACT_VIEW_SHEATHED, 0, s.hold[0], false) == 0x4000 && act_view(ACT_VIEW_MB1, 0, s.hold[0], false) == 0x4000, "east dodges in both");
+    // SheathedAttackA=1: AttackA is A in both states
+    p = parse("[Actions]\nEnable=1\nSheathedAttackA=1\n[Actions.Pad]\nAttackA = pad:rshoulder\nInteract = pad:south\n");
+    act_use_profile(&p);
+    release_all();
+    press(R);
+    act_sample(&h, &s);
+    CHECK(act_view(ACT_VIEW_SHEATHED, 0, s.hold[0], false) == 0x2000, "SheathedAttackA");
+    // no conflict warning for the pair on one input, a conflict with the option on
+    act_set_log(collect);
+    logbuf[0] = 0;
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nAttackA = pad:east\nInteract = pad:east\n");
+    act_validate(&p);
+    CHECK(!strstr(logbuf, "conflict"), "AttackA and Interact on one input: %s", logbuf);
+    act_set_log(quiet);
+}
+
+// Every button of the pad is an action in each context: each action alone delivers exactly its button
+static void test_all_buttons(void) {
+    ActProfile p = parse("[Actions]\nEnable=1\nManageMenus=1\n");
+    act_use_profile(&p);
+    for (int view = 0; view < ACT_VIEWS; view++) {
+        CHECK(act_view_managed(view, false) == 0xFFFF && act_view_managed(view, true) == 0xFFFF, "%s owns the 16 buttons: %x", act_view_name(view), act_view_managed(view, false));
+        int ids[ACT_COUNT], n = act_order(view, ids, ACT_COUNT);
+        uint32_t all = 0;
+        for (int k = 0; k < n; k++) {
+            CHECK(act_view_of(ids[k]) == view && *act_label(ids[k]), "order and label of %s", act_name(ids[k]));
+            for (int j = 0; j < k; j++) CHECK(ids[j] != ids[k], "%s listed twice", act_name(ids[k]));
+            int v = view == ACT_VIEW_MB1 ? ACT_VIEW_HUNT_ANY : view;
+            uint32_t w = act_view(v, 0xFFFF | 0x10000, 1ull << ids[k], false);
+            CHECK(w == (act_ew_bits(ids[k], false) | 0x10000), "%s alone: %x", act_name(ids[k]), w);
+            all |= w;
+        }
+        int count = 0;
+        for (int i = 0; i < ACT_COUNT; i++) count += act_view_of(i) == view;
+        CHECK(n == count, "%s: every action is listed (%d of %d)", act_view_name(view), n, count);
+        CHECK((all & 0xFFFF) == 0xFFFF, "%s reaches every button: %x", act_view_name(view), all);
+    }
+    // every action can be bound and comes back from the ini; a binding of one device leaves the other's default
+    char text[16384] = "[Actions]\nEnable=1\nManageMenus=1\n[Actions.Kbm]\n";
+    for (int i = 0; i < ACT_COUNT; i++) snprintf(text + strlen(text), sizeof text - strlen(text), "%s = key:%c\n", act_name(i), 'a' + i % 26);
+    p = parse(text);
+    for (int i = 0; i < ACT_COUNT; i++)
+        CHECK(p.dev[1].base[i].set && p.dev[1].base[i].alt[0].code[0] == SDL_SCANCODE_A + i % 26 && !p.dev[0].base[i].set, "%s parsed", act_name(i));
+    static char out[65536], out2[65536];
+    act_format(&p, out, sizeof out);
+    ActProfile q = parse(out);
+    act_format(&q, out2, sizeof out2);
+    CHECK(!strcmp(out, out2) && !memcmp(&p, &q, sizeof p), "all actions round trip");
+}
+
+// Scripted presses (MHGU_INPUT, the control file, quickhunt) are the game's buttons whatever is bound
+static void test_script(void) {
+    ActProfile p = parse("[Actions]\nEnable=1\nManageMenus=1\n[Actions.Pad]\nConfirm = pad:south\nCancel = pad:east\nDodge = pad:north\n");
+    act_use_profile(&p);
+    release_all();
+    ActSnap s;
+    ActHost h = (ActHost){NULL, fake_held, map_sources, 1ull << 0, 1ull << 0, false, false, 600};  // a scripted A
+    act_sample(&h, &s);
+    CHECK(act_view(ACT_VIEW_MB2, 0x2000, s.hold[0], false) == 0x2000, "scripted A confirms in the menus with Confirm rebound: %x", act_view(ACT_VIEW_MB2, 0x2000, s.hold[0], false));
+    CHECK(act_view(ACT_VIEW_TOWN, 0x2000, s.hold[0], false) == 0x2000 && act_view(ACT_VIEW_MB1, 0x2000, s.hold[0], false) == 0x2000, "and is A in the town and the hunt");
+    h.sw_word = h.sw_script = 1ull << 1;  // a scripted B
+    act_sample(&h, &s);
+    CHECK(act_view(ACT_VIEW_MB1, 0x4000, s.hold[0], false) == 0x4000 && act_view(ACT_VIEW_MB2, 0x4000, s.hold[0], false) == 0x4000, "scripted B");
+}
+
+// act_save: the [Actions*] sections of an ini are replaced, the rest of the file is kept
+static void test_save(void) {
+    const char *path = "obj/settings-test/actions-save-test.ini";
+    FILE *f = fopen(path, "wb");
+    CHECK(f != NULL, "temp ini");
+    if (!f) return;
+    fputs("; a comment\n[Display]\nResolution = 1280x720\n\n[Actions]\nEnable=1\n[Actions.Pad]\nDodge = pad:north\n\n[Keybinds]\nA = Mouse Left\n", f);
+    fclose(f);
+    ActProfile p = parse("[Actions]\nEnable=1\nManageMenus=1\n[Actions.Pad]\nInteract = pad:south\n[Actions.Kbm.Weapon.Bow]\nAttackA = mouse:right\n");
+    CHECK(act_save(path, &p), "act_save");
+    static ActProfile q;
+    CHECK(act_load(path, &q) && !memcmp(&p, &q, sizeof p), "saved profile reads back the same");
+    char buf[4096] = "";
+    f = fopen(path, "rb");
+    if (f) { size_t n = fread(buf, 1, sizeof buf - 1, f); buf[n] = 0; fclose(f); }
+    CHECK(strstr(buf, "; a comment\n[Display]\nResolution = 1280x720\n") && strstr(buf, "[Keybinds]\nA = Mouse Left\n"), "other sections kept: %s", buf);
+    CHECK(!strstr(buf, "Dodge") && strstr(buf, "Interact = pad:south") && strstr(buf, "[Actions.Kbm.Weapon.Bow]"), "actions replaced: %s", buf);
+    const char *first = strstr(buf, "[Actions]");
+    CHECK(first && !strstr(first + 1, "[Actions]"), "one [Actions] section");
+    CHECK(act_save(path, &p), "act_save again");
+    char buf2[4096] = "";
+    f = fopen(path, "rb");
+    if (f) { size_t n = fread(buf2, 1, sizeof buf2 - 1, f); buf2[n] = 0; fclose(f); }
+    CHECK(!strcmp(buf, buf2), "saving twice changes nothing");
+    remove(path);
+    char label[64];
+    act_input_label(ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH, label, sizeof label);
+    CHECK(!strcmp(label, "Pad South") && act_input_device(ACT_PAD_LT) == 0 && act_input_device(SDL_SCANCODE_SPACE) == 1 && act_input_device(KEY_WHEEL_UP) == 1, "labels and devices");
+}
+
 int main(void) {
     act_set_log(quiet);
     test_registry();
@@ -274,6 +468,11 @@ int main(void) {
     test_rebind2();
     test_weapon();
     test_chord_alt();
+    test_town();
+    test_interact();
+    test_all_buttons();
+    test_script();
+    test_save();
     printf("test_actions: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

@@ -1,4 +1,5 @@
 #include "settings_panel.h"
+#include "actions.h"
 #include "android_files.h"
 #include "config.h"
 #include "menu_confirm.h"
@@ -29,7 +30,7 @@
 #include <vector>
 
 namespace {
-enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds };
+enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, Actions };
 enum class Command { None, Save };
 struct Row {
     std::string id, title, value;
@@ -97,7 +98,20 @@ struct State {
     bool capture_add = false;  // the key chosen is that keybind's second, else its only one
 } s;
 std::atomic<bool> request_exit, request_back, is_dirty, is_confirming, is_capturing, capture_mouse, capture_wheel,
-    capture_pointing;
+    capture_pointing, capture_pad;
+// The game actions (runtime/actions.h, the [Actions*] sections of the ini): edited as a draft like the settings, saved
+// with them. dev: the device whose bindings the rows show (0 the controller, 1 keyboard and mouse); weapon: 0 every
+// weapon, 1..15 that class's own bindings; capture: the action an input is being chosen for (-1: none)
+struct ActionTab {
+    ActProfile draft, saved;
+    int dev = 0, weapon = 0, capture = -1;
+    bool capture_add = false;
+    Uint64 capture_start = 0;
+};
+ActionTab &acts() {
+    static ActionTab *tab = new ActionTab();  // (two profiles: too big for the stack, and zeroed)
+    return *tab;
+}
 // (the key pressed while a key is being chosen, or KEY_MOUSE + a mouse button; -1: none yet)
 std::atomic<int> captured_key{-1};
 bool forge_requested;  // the Mods tab's "Open the Forge menu" (game thread, as the rest of the panel)
@@ -388,7 +402,8 @@ bool equal(const Config &a, const Config &b) {
     }
     return true;
 }
-bool dirty() { return !equal(s.draft, s.saved) || mods_dirty() || cheats_dirty(); }
+bool actions_dirty() { return memcmp(&acts().draft, &acts().saved, sizeof(ActProfile)) != 0; }
+bool dirty() { return !equal(s.draft, s.saved) || mods_dirty() || cheats_dirty() || actions_dirty(); }
 bool pending_text() {
     bool editing = s.view == View::Keyboard;
     for (const auto &o : s.origins)
@@ -450,6 +465,7 @@ void first_page(int page) {
 }
 void discard() {
     s.draft = s.saved;
+    acts().draft = acts().saved;
     mods.draft = mods.saved;
     cheat_tab.draft = cheat_tab.saved;
     quest_keys();
@@ -715,6 +731,7 @@ const char *key_use(int code, int skip) {
 }
 // Choosing a key: for a keybind (BIND_*, add: its second key) or the chat key (-1)
 void capture(int bind, bool add) {
+    acts().capture = -1;
     s.capture_bind = bind;
     s.capture_add = add;
     captured_key = -1;
@@ -793,6 +810,186 @@ void keybind_rows(std::vector<Row> &r) {
         SDL_strlcpy(s.draft.chat_key, f.chat_key, sizeof s.draft.chat_key);
     });
     action(r, "bind.back", tr("Back"), []() { pop(); });
+}
+// ---- the Game actions submenu (runtime/actions.h)
+// The binding the rows edit for an action: the chosen weapon class's own, or the one for every weapon
+ActBinding &action_slot(int id) {
+    ActionTab &a = acts();
+    ActDevice &d = a.draft.dev[a.dev];
+    return a.weapon > 0 ? d.weapon[a.weapon - 1][id] : d.base[id];
+}
+// (after an edit: a class counts as having bindings of its own while any of its actions is set)
+void action_touch() {
+    for (int d = 0; d < 2; d++)
+        for (int w = 0; w < ACT_WEAPONS; w++) {
+            bool any = false;
+            for (int i = 0; i < ACT_COUNT; i++)
+                any |= acts().draft.dev[d].weapon[w][i].set;
+            acts().draft.dev[d].has_weapon[w] = any;
+        }
+}
+std::string binding_text(const ActBinding &b) {
+    if (!b.n)
+        return tr("None");
+    std::string text;
+    for (int a = 0; a < b.n; a++) {
+        if (a)
+            text += " / ";
+        for (int k = 0; k < b.alt[a].n; k++) {
+            char one[64];
+            act_input_label(b.alt[a].code[k], one, sizeof one);
+            text += (k ? " + " : "") + std::string(one);
+        }
+    }
+    return text;
+}
+bool bindings_share(const ActBinding &x, const ActBinding &y) {
+    for (int a = 0; a < x.n; a++)
+        for (int e = 0; e < y.n; e++)
+            if (x.alt[a].n == 1 && y.alt[e].n == 1 && x.alt[a].code[0] == y.alt[e].code[0])
+                return true;
+    return false;
+}
+// Choosing an input for an action (add: one more way to press it, else its only one)
+void action_capture(int id, bool add) {
+    acts().capture = id;
+    acts().capture_add = add;
+    acts().capture_start = SDL_GetTicks();
+    captured_key = -1;
+    push(View::KeyCapture, "capture.cancel");
+}
+void action_capture_rows(std::vector<Row> &r) {
+    ActionTab &a = acts();
+    int code = captured_key.exchange(-1);
+    bool pad = a.dev == 0;
+    bool done = false;
+    if (code == SDL_SCANCODE_ESCAPE || (pad && SDL_GetTicks() - a.capture_start > 8000))
+        done = true;
+    else if (code > 0 && act_input_device(code) == a.dev) {
+        const char *reserved = code < SDL_SCANCODE_COUNT ? key_reserved(code) : nullptr;
+        if (reserved)
+            s.error = fmt("That key is the recomp's own (%s).", tr(reserved));
+        else {
+            ActBinding &b = action_slot(a.capture);
+            if (!a.capture_add || !b.set || !b.n) {
+                memset(&b, 0, sizeof b);
+                b.set = true;
+            }
+            bool have = false;
+            for (int i = 0; i < b.n; i++)
+                have |= b.alt[i].n == 1 && b.alt[i].code[0] == code;
+            if (!have && b.n < ACT_ALTS) {
+                b.alt[b.n].n = 1;
+                b.alt[b.n].code[0] = code;
+                b.n++;
+            }
+            action_touch();
+            done = true;
+        }
+    }
+    if (done) {
+        a.capture = -1;
+        pop();
+        return;
+    }
+    action(r, "capture.cancel", tr("Cancel"), []() {
+        acts().capture = -1;
+        pop();
+    });
+}
+void action_rows(std::vector<Row> &r) {
+    ActionTab &a = acts();
+    ActProfile &p = a.draft;
+    auto toggle = [&r](const char *id, const char *name, bool *value, const char *help) {
+        Row row;
+        row.id = id;
+        row.title = tr(name);
+        row.value = tr(*value ? "On" : "Off");
+        row.help = tr(help);
+        row.adjust = [value](int d) { *value = d > 0; };
+        row.activate = [value]() { *value = !*value; };
+        r.push_back(std::move(row));
+    };
+    toggle("act.enable", "Rebind game actions", &p.enable,
+           "On: the game reads the bindings below instead of the controller's buttons and the keybinds. An action left on Default keeps the button it has now. Off: nothing of the game is changed.");
+    toggle("act.menus", "Also in the game's menus", &p.menus,
+           "On: the Menus actions below apply (confirm, cancel, moving, tabs). Off: the game's menus read the controller and the keybinds as before.");
+    toggle("act.sheathed", "Attack A also interacts", &p.sheathed_attack,
+           "Only matters once Interact has a binding of its own. Off: with the weapon away only Interact presses the game's A (gather, carve, talk), with it out only Attack A does. On: Attack A presses it in both cases.");
+    add_choice(r, "act.device", "Bindings of", a.dev, {tr("Controller"), tr("Keyboard and mouse")}, [](int v) { acts().dev = v; });
+    r.back().help = tr("The controller's and the keyboard and mouse's bindings are separate: an action can have both.");
+    std::vector<std::string> weapons = {tr("All weapons")};
+    for (int w = 0; w < ACT_WEAPONS; w++)
+        weapons.push_back(act_weapon_name(w));
+    add_choice(r, "act.weapon", "For", a.weapon, weapons, [](int v) { acts().weapon = v; });
+    r.back().help = tr("All weapons, or one weapon class: a binding set for a class is used instead of the general one while a hunter holds that weapon.");
+    int var = a.weapon;
+    static const int views[] = {ACT_VIEW_MB1, ACT_VIEW_TOWN, ACT_VIEW_MB2};
+    static const char *const titles[] = {"Hunt", "Town and Hub", "Menus"};
+    for (int vi = 0; vi < 3; vi++) {
+        if (var > 0 && views[vi] != ACT_VIEW_MB1)
+            continue;  // (a weapon class only matters in a hunt)
+        header(r, "act.h" + std::to_string(vi), tr(titles[vi]));
+        int ids[ACT_COUNT], n = act_order(views[vi], ids, ACT_COUNT);
+        for (int k = 0; k < n; k++) {
+            int id = ids[k], from = id;
+            Row row;
+            row.id = "act." + std::string(act_name(id));
+            row.title = tr(act_label(id));
+            const ActBinding *b = act_effective(&p, a.dev, id, var, &from);
+            const ActBinding &own = action_slot(id);
+            if (!b)
+                row.value = tr("Default");
+            else {
+                row.value = binding_text(*b);
+                if (from != id)
+                    row.value += std::string(" (") + tr("same as") + " " + act_name(from) + ")";
+                else if (var > 0 && !own.set)
+                    row.value += std::string(" (") + tr("all weapons") + ")";
+                for (int m = 0; m < n; m++) {  // another action of this context on the same input
+                    int other = ids[m], ofrom = other;
+                    const ActBinding *ob = other != id ? act_effective(&p, a.dev, other, var, &ofrom) : nullptr;
+                    if (!ob || ofrom == from || !bindings_share(*b, *ob))
+                        continue;
+                    if (!p.sheathed_attack && ((id == ACT_ATTACK_A && other == ACT_INTERACT) || (id == ACT_INTERACT && other == ACT_ATTACK_A)))
+                        continue;
+                    row.value += std::string(" (") + tr("also:") + " " + act_name(other) + ")";
+                    row.warn = true;
+                    break;
+                }
+            }
+            row.help = fmt("Ini name: %s. Default: the button it has without rebinding. An action with no binding of its own can follow another one (shown as \"same as\").", act_name(id));
+            Row copy = row;
+            row.menu = true;
+            row.activate = [copy, id]() {
+                const ActBinding &own = action_slot(id);
+                bool more = own.set && own.n > 0 && own.n < ACT_ALTS;
+                std::vector<std::string> names = {tr("Set")};
+                if (more)
+                    names.push_back(tr("Add another"));
+                names.push_back(tr("None"));
+                names.push_back(tr("Default"));
+                choices(copy, names, -1, [id, more](int v) {
+                    int base = more ? 2 : 1;
+                    ActBinding &b = action_slot(id);
+                    if (v == 0 || (more && v == 1))
+                        action_capture(id, v == 1);
+                    else {
+                        memset(&b, 0, sizeof b);
+                        b.set = v == base;  // None: bound to nothing on purpose; Default: no binding of its own
+                        action_touch();
+                    }
+                });
+            };
+            r.push_back(std::move(row));
+        }
+    }
+    action(r, "act.reset", tr("Reset game actions"), []() {
+        ActProfile &p = acts().draft;
+        memset(p.dev, 0, sizeof p.dev);
+    });
+    r.back().help = tr("Every action of both devices and all weapons back to Default.");
+    action(r, "act.back", tr("Back"), []() { pop(); });
 }
 void reset_section() {
     Config f = config_defaults(), &c = s.draft;
@@ -1274,6 +1471,8 @@ std::vector<Row> main_rows() {
         number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, ini("MouseSensitivity"));
         action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
         r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons, for moving and for the item bar, and the chat key.");
+        action(r, "actions", tr("Game actions"), []() { push(View::Actions, "act.enable"); });
+        r.back().help = tr("Rebind the game itself: every action of a hunt, of the town and of the menus on the controller button, key or mouse button you choose, also per weapon. Off by default.");
         add_bool(r, "menu.chord", "Plus + Minus opens this menu", &c.menu_chord, ini("MenuChord"));
         r.back().help = tr("Pressing Plus and Minus together (Start + Back on a controller) opens this menu. Turn it off to keep that combination for the game or a cheat, for example when you play with a keyboard and mouse. F1 still opens the menu.");
         break;
@@ -1500,6 +1699,17 @@ bool save() {
         }
         cheat_tab.saved = cheat_tab.draft;
     }
+    if (actions_dirty()) {  // (after config_save: it keeps the [Actions*] lines it finds, these replace them)
+        char path[1100];
+        config_path(path, sizeof path);
+        if (!act_save(path, &acts().draft)) {
+            s.error = tr("Could not save the game actions.");
+            return false;
+        }
+        act_use_profile(&acts().draft);  // in use from the next frame
+        input_view_apply();
+        acts().saved = acts().draft;
+    }
     s.saved = s.draft;
     s.saved_notice = true;
     s.error.clear();
@@ -1540,6 +1750,10 @@ std::vector<Row> rows_for_view(bool *open) {
         action(r, "conflicts.back", tr("Back"), []() { pop(); });
     } else if (s.view == View::Keybinds) {
         keybind_rows(r);
+    } else if (s.view == View::Actions) {
+        action_rows(r);
+    } else if (s.view == View::KeyCapture && acts().capture >= 0) {
+        action_capture_rows(r);
     } else if (s.view == View::KeyCapture) {
         int key = captured_key.exchange(-1);
         const char *name = key > 0 && key < KEY_MOUSE ? SDL_GetScancodeName((SDL_Scancode)key) : "";
@@ -1987,6 +2201,11 @@ bool settings_panel_mouse(int button) {
     captured_key = KEY_MOUSE + button;
     return true;
 }
+bool settings_panel_pad_capture() { return capture_pad.load(); }
+void settings_panel_pad(int code) {
+    if (capture_pad.load())
+        captured_key = code;
+}
 bool settings_panel_wheel(int notches) {
     if (!capture_wheel.load() || !notches)
         return false;
@@ -2032,9 +2251,13 @@ void settings_panel(bool *open) {
         is_confirming = false;
         is_capturing = false;
         capture_mouse = false;
+        capture_pad = false;
         return;
     }
     if (!s.editing) {
+        act_get_profile(&acts().saved);
+        acts().draft = acts().saved;
+        acts().capture = -1;
         s.draft = s.saved = config_editable();
         s.editing = true;
         s.view = View::Main;
@@ -2229,6 +2452,11 @@ void settings_panel(bool *open) {
         clipped_body = true;
     } else {
         std::string title = s.view == View::Keyboard ? s.keyboard.title
+                            : s.view == View::KeyCapture && acts().capture >= 0
+                                ? fmt(acts().dev == 0 ? "Press a controller button for: %s (Esc or wait: cancel)"
+                                                      : "Press a key or mouse button for: %s (Esc: cancel)",
+                                      tr(act_label(acts().capture)))
+                            : s.view == View::Actions ? std::string(tr("Game actions"))
                             : s.view == View::KeyCapture && s.capture_bind >= 0
                                 ? fmt("Press a key or mouse button for %s (Esc: cancel)", tr(bind_titles[s.capture_bind]))
                                 : tr(s.view == View::Exit         ? "Exit game?"
@@ -2388,9 +2616,11 @@ void settings_panel(bool *open) {
     is_capturing = *open && s.view == View::KeyCapture;
     // (a left click on the capture view's buttons is theirs; any other button, or a left click anywhere else, is the
     // mouse button chosen)
-    capture_mouse = is_capturing && s.capture_bind >= 0;
+    bool for_action = is_capturing && acts().capture >= 0;
+    capture_mouse = is_capturing && (for_action ? acts().dev == 1 : s.capture_bind >= 0);
     capture_pointing = s.pointing;
-    capture_wheel = is_capturing && s.capture_bind >= 0;  // (the capture view doesn't scroll)
+    capture_wheel = capture_mouse.load();  // (the capture view doesn't scroll)
+    capture_pad = for_action && acts().dev == 0;
     if (!*open)
         s.editing = false;
 }

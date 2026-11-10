@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+void input_view_apply(void);         // (game thread) the profile in use changed: hook the game if it is on now and was not
 void input_view_init(void);          // loads [Actions*] and, with Enable=1, hooks the translators (nothing otherwise)
 bool input_view_dash_zr(void);       // the game's Control Type makes ZR the dash role (any thread; a frame late)
 int input_view_weapon(void);         // the weapon class the local hunter holds, 0..14 (-1: none seen)

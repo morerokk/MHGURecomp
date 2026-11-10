@@ -37,6 +37,7 @@
 #include "keymap.h"
 #include "mods.h"
 #include "overlay.h"
+#include "settings_panel.h"
 #include "rt.h"
 #include "textinput.h"
 
@@ -914,6 +915,27 @@ static int act_sw_sources(void *user, int btn, int dev, int *out, int max) {
     }
     return n;
 }
+// The settings menu is choosing a controller input for a game action (settings_panel_pad_capture): the next button or
+// trigger pressed, once everything was let go (the press that opened the choice is still down), goes to it
+static int pad_capture_poll(bool capturing) {
+    static const int codes[] = {ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH, ACT_PAD + SDL_GAMEPAD_BUTTON_EAST,
+                                ACT_PAD + SDL_GAMEPAD_BUTTON_WEST, ACT_PAD + SDL_GAMEPAD_BUTTON_NORTH,
+                                ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
+                                ACT_PAD_LT, ACT_PAD_RT, ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_STICK,
+                                ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_STICK, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_UP,
+                                ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_DOWN, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_LEFT,
+                                ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_RIGHT, ACT_PAD + SDL_GAMEPAD_BUTTON_START,
+                                ACT_PAD + SDL_GAMEPAD_BUTTON_BACK};
+    static bool armed;
+    if (!capturing) return armed = false, 0;
+    int held = 0;
+    for (unsigned i = 0; i < sizeof codes / sizeof *codes && !held; i++)
+        if (act_phys_held(NULL, codes[i])) held = codes[i];
+    if (!armed) return armed = !held, 0;
+    if (held) armed = false;
+    return held;
+}
+
 static void act_update(uint64_t b, uint64_t script_b, bool suppress) {
     if (!act_enabled()) return;
     act_wheel_step();
@@ -1059,6 +1081,10 @@ void host_input_update(void) {
         OverlayPad p = {b & B(BTN_A), b & B(BTN_B), b & B(BTN_X), b & B(BTN_Y), b & B(BTN_UP), b & B(BTN_DOWN),
                         b & B(BTN_LEFT), b & B(BTN_RIGHT), b & B(BTN_L), b & B(BTN_R), b & B(BTN_PLUS),
                         b & B(BTN_MINUS), clamp_axis(lx) / 32767.0f, clamp_axis(ly) / 32767.0f};
+        bool choosing = settings_panel_pad_capture();
+        int chosen = pad_capture_poll(choosing);
+        if (chosen) settings_panel_pad(chosen);
+        if (choosing) memset(&p, 0, sizeof p);  // (the button chosen is not also a press in the menu)
         overlay_pad(&p);
         b = 0, lx = ly = rx = ry = 0;
     }

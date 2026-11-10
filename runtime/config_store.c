@@ -369,7 +369,9 @@ bool config_save(const Config *c, char *error, size_t error_size) {
             flush_section(out, entries, n, section, newline);
             snprintf(section, sizeof section, "%.*s", (int)(strchr(s, ']') - s - 1), s + 1);
         }
-        char *eq = (*s && *s != ';' && *s != '#' && *s != '[') ? strchr(s, '=') : NULL;
+        // (the [Actions*] sections are runtime/actions.c's: their lines are kept as they are)
+        bool own = !strncasecmp(section, "Actions", 7) && (!section[7] || section[7] == '.');
+        char *eq = (!own && *s && *s != ';' && *s != '#' && *s != '[') ? strchr(s, '=') : NULL;
         bool handled = false;
         if (eq) {
             char key[128];

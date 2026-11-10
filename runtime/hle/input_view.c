@@ -10,6 +10,8 @@
 // The actions come from the host (runtime/hle/input.c): the set active when the game polled the pad this frame.
 // The context (field / town / menu) and the weapon class come from the engine's own code running: the player's
 // update f_4a79cc, the town avatar's f_48d1f0, and the 15 class mappers ([[player]+0x22C], one per weapon type).
+// The gameplay word is built for one of: a hunt with the weapon out (A is AttackA), a hunt with it away (A is
+// Interact), a town (the Town* actions).
 //
 // Pointer feed (Pointer=1, runtime-only probe P1 of the research): before f_5de064 the host's pointer is written to
 // sPad+0x68DC / +0x68E0 and the pad's held word gets bit 24 while it is down; f_5de064 copies both into the button
@@ -40,7 +42,10 @@
 #define PAD_PTR_X      0x68dcu
 #define PAD_PTR_Y      0x68e0u
 #define PL_ACT_ST      0x2506u    // u16: the hunter's current action (act_st, act_no; hle/movelog.c): act_st 0x10 a
-#define PL_ACT_NO      0x250au    // weapon move, 1 a common one; the drawn / sheathed discriminator is in these (P3)
+#define PL_ACT_NO      0x250au    // weapon move, 1 a common one
+#define PL_DRAWN       0x114cu    // u8: 1 the weapon is out, 0 put away (constant over idle, walk, roll and attacks of
+                                  // either state: compared in memory snapshots of a Hammer hunt, 2026-11-10)
+#define CLS_PROWLER    14         // (no weapon to put away: its A button attacks and gathers)
 
 static const uint32_t mappers[ACT_WEAPONS] = {0x1360058, 0x1369554, 0x136f404, 0x137731c, 0x137eb58, 0x138c920, 0x1399114,
                                               0x13a03a8, 0x13aa60c, 0x13b1dc8, 0x13baef0, 0x13c2d54, 0x13cbd88, 0x13d42b0,
@@ -53,9 +58,13 @@ static uint64_t g_var_frame, g_pl_frame, g_town_frame;
 static volatile bool g_dash_zr;
 static volatile int g_weapon_pub = -1;
 static uint32_t g_act_st, g_act_no, g_player;
+static bool g_drawn;
+static int g_view;              // the context the gameplay word was last built for
 static bool g_log;
 static uint32_t g_in[2], g_out[2];  // the words last given to / from the translators of each view
 static bool g_menus, g_pointer;
+static bool g_on;      // the layer is on this frame ([Actions] Enable; the settings menu can turn it on and off)
+static bool g_hooked;  // the hooks are in (from the first time it was on)
 
 static bool sane(uint32_t a) { return a >= 0x08000000u && a < 0xF0000000u && !(a & 3); }
 
@@ -83,14 +92,18 @@ const char *input_view_context(void) {
     if (g_frame - g_town_frame <= 3 && g_town_frame) return "TOWN";
     return "MENU";
 }
+static const char *view_tag(int view) {
+    return view == ACT_VIEW_MB1 ? "hunt, weapon out" : view == ACT_VIEW_SHEATHED ? "hunt, weapon away" : view == ACT_VIEW_TOWN ? "town" : "hunt";
+}
 void input_view_status(void) {
     uint64_t act = g_snap.hold[g_var] | g_snap.pulse[g_var];
     char names[400] = "";
     for (int i = 0; i < ACT_COUNT; i++)
         if (act >> i & 1) snprintf(names + strlen(names), sizeof names - strlen(names), "%s ", act_name(i));
-    LOG("[actions] frame %llu ctx %s weapon %d (%s) player %08x act %x:%x dash %s active: %s\n", (unsigned long long)g_frame,
-        input_view_context(), g_weapon_pub, g_weapon_pub >= 0 ? act_weapon_name(g_weapon_pub) : "-", g_player, g_act_st,
-        g_act_no, g_dash_zr ? "ZR" : "R", names);
+    LOG("[actions] frame %llu ctx %s (%s) weapon %d (%s) player %08x act %x:%x %s dash %s active: %s\n",
+        (unsigned long long)g_frame, input_view_context(), view_tag(g_view), g_weapon_pub,
+        g_weapon_pub >= 0 ? act_weapon_name(g_weapon_pub) : "-", g_player, g_act_st, g_act_no, g_drawn ? "drawn" : "sheathed",
+        g_dash_zr ? "ZR" : "R", names);
 }
 
 // ---- context and weapon
@@ -99,6 +112,7 @@ static void player_update(Cpu *c) {
     if (sane(pl) && call(c, FN_PL_IS_LOCAL, pl, 0, 0) == 1) {
         g_pl_frame = g_frame;
         g_player = pl, g_act_st = LD16(pl + PL_ACT_ST), g_act_no = LD16(pl + PL_ACT_NO);
+        g_drawn = LD8(pl + PL_DRAWN) != 0;
     }
     fnhook_call_original(c, FN_PLAYER);
 }
@@ -122,6 +136,14 @@ static void mb_update(Cpu *c) {
     uint32_t mb = c->r[0], sp = spad();
     bool first = sp && mb == sp + MB1_OFF;
     if (first) {
+        const ActProfile *p = act_profile();  // (replaced only on this thread: the settings menu's Save)
+        g_on = act_enabled(), g_menus = p->menus, g_log = p->log, g_pointer = p->pointer;
+    }
+    if (!g_on) {  // (turned off in the settings menu: the game reads the pad as it is)
+        fnhook_call_original(c, FN_MB_UPDATE);
+        return;
+    }
+    if (first) {
         g_frame++;
         input_act_latch(&g_snap);
         if (g_var && g_frame - g_var_frame > 3) g_var = 0, g_weapon_pub = -1;  // (no hunter for a while)
@@ -139,23 +161,34 @@ static void mb_update(Cpu *c) {
     }
     fnhook_call_original(c, FN_MB_UPDATE);
     if (g_log && first) {
-        LOG("[actions] f%llu %s w%d mb1 in %08x out %08x cur %08x | mb2 in %08x out %08x cur %08x | act %llx\n",
+        LOG("[actions] f%llu %s w%d mb1 in %08x out %08x cur %08x | mb2 in %08x out %08x cur %08x | act %llx v%d\n",
             (unsigned long long)g_frame, input_view_context(), g_weapon_pub, g_in[0], g_out[0], LD32(mb + 4), g_in[1],
-            g_out[1], LD32(sp + MB2_OFF + 4), (unsigned long long)(g_snap.hold[g_var] | g_snap.pulse[g_var]));
+            g_out[1], LD32(sp + MB2_OFF + 4), (unsigned long long)(g_snap.hold[g_var] | g_snap.pulse[g_var]), g_view);
     }
 }
 
 // ---- the translators
-static void tr_view(Cpu *c, int view, uint32_t fn) {
+static void tr_view(Cpu *c, int view, int slot, uint32_t fn) {
     uint32_t in = c->r[1];
     uint32_t out = act_view(view, in, g_snap.hold[g_var] | g_snap.pulse[g_var], g_dash_zr);
-    g_in[view] = in, g_out[view] = out;
+    g_in[slot] = in, g_out[slot] = out;
     c->r[1] = out;
     fnhook_call_original(c, fn);
 }
-static void tr_mb1(Cpu *c) { tr_view(c, ACT_VIEW_MB1, FN_TR_MB1); }
+// The context of the gameplay word: a hunter updated in the last frames (weapon out or away; the Prowler has neither),
+// else the town avatar, else no one (a screen that reads the gameplay word with nobody playing: the hunt's actions)
+static int gameplay_view(void) {
+    if (g_pl_frame && g_frame - g_pl_frame <= 3)
+        return g_weapon_pub == CLS_PROWLER ? ACT_VIEW_HUNT_ANY : g_drawn ? ACT_VIEW_MB1 : ACT_VIEW_SHEATHED;
+    if (g_town_frame && g_frame - g_town_frame <= 3) return ACT_VIEW_TOWN;
+    return ACT_VIEW_HUNT_ANY;
+}
+static void tr_mb1(Cpu *c) {
+    if (g_on) tr_view(c, g_view = gameplay_view(), 0, FN_TR_MB1);
+    else fnhook_call_original(c, FN_TR_MB1);
+}
 static void tr_mb2(Cpu *c) {
-    if (g_menus) tr_view(c, ACT_VIEW_MB2, FN_TR_MB2);
+    if (g_on && g_menus) tr_view(c, ACT_VIEW_MB2, 1, FN_TR_MB2);
     else fnhook_call_original(c, FN_TR_MB2);
 }
 
@@ -166,7 +199,13 @@ void input_view_init(void) {
     config_path(path, sizeof path);
     act_set_log(log_line);
     act_init(path);
-    if (!act_enabled()) return;
+    input_view_apply();
+}
+
+// Hooks the game the first time the layer is on: at startup with [Actions] Enable=1, or when the settings menu turns it
+// on (game thread, as Forge's plugins hook while the game runs). Turned off later, the hooks stay and pass through.
+void input_view_apply(void) {
+    if (!act_enabled() || g_hooked) return;
     const ActProfile *p = act_profile();
     g_log = p->log, g_menus = p->menus, g_pointer = p->pointer;
     if (p->split) LOG("[actions] SplitDashWeaponR is not implemented in this version (ignored)\n");
@@ -188,5 +227,6 @@ void input_view_init(void) {
         snprintf(name, sizeof name, "inputview:mapper%d", i);
         if (!fnhook_get(mappers[i])) fnhook_set(mappers[i], hle_register(name, mapper_fn[i]));
     }
+    g_hooked = true;
     LOG("[actions] translators hooked\n");
 }

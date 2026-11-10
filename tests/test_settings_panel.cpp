@@ -21,6 +21,7 @@ extern "C" const char *g_game_dir = "obj/settings-test/game";  // (modorder.c co
 extern "C" volatile uint64_t g_present_count = 0;  // (runtime/ui.c's frame counter: config.c's model previews read it)
 extern "C" void ui_request_action(bool restart) { requested = restart ? 2 : 1; }
 extern "C" bool ui_action_failed(void) { return false; }
+extern "C" void input_view_apply(void) {}  // (the game side of the action layer: nothing to hook here)
 static int import_requested;
 static const char *picked_folder;  // (what the folder picker "chose": ui_take_picked_folder hands it out once)
 extern "C" void ui_request_import(int what) { import_requested = what; }
