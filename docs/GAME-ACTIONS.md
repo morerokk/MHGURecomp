@@ -529,6 +529,47 @@ the bottom of the screen selected nothing) and a scan of the finished frame for 
 pointer (slow scrolling, a bug in the Save menu). In menus a captured mouse is therefore the right stick, the wheel and
 its buttons, as above.
 
+### List menus with the mouse (2026-11-11)
+
+What made it possible: most list menus move a shared cursor object (`docs/research/title-menu.md`: update `0x74ee98(cursor,
+pad bits)`, +0xd the row on the page, +0xe rows a page, +0x10 / +0x12 page / pages, +0x14 items). The recompiled code
+calls it from 408 places; a menu is told apart by its call's return address (a hunt's pause menu `0x86f8ec`: 13 items,
+7 a page; Up 0x10, Down 0x40; greyed-out rows are not skipped; Gestures `0x874af0`). The cursor's +0xd is the real row
+(the pause menu's +0xe4 is a copy, which is why writing that did nothing): `runtime/hle/menuptr.c` sets it to the row
+beside the one under the pointer and gives that update one Up or Down bit, so the game makes one ordinary step onto it
+(highlight, sound and help line follow) - a jump in one update, top to bottom included. The menu in focus is the cursor
+that last moved or last appeared.
+
+Where the rows are is learned (`runtime/menulearn.c`): the renderer hands it every HUD piece of a frame (`cbuf_info`: a
+2D piece's matrix, m[12] / m[13] its top left at 1280x720, m[14] its layer, m[0] / m[5] half its size). When the menu in
+focus keeps a row for 12 frames and then keeps another, the two frames are compared: the highlight bar is what moved by
+a whole number of row steps along one axis with its size and layer kept (in the pause menu exactly one piece moves:
+layer 97, 282 x 34 at 970,101, +36 a row; the 3D name tags also move, but change place, size and layer at once). Two
+changes that agree make the menu's geometry, kept in `menus_learned.txt` beside the settings file and used at once; the
+learner found the pause menu's measured geometry exactly, and Gestures (928,101 324 x 34, +36) without any measuring.
+Learning is always on: moving a menu's cursor twice with keys or a controller is enough. Built-in geometries (the pause
+menu, with its page arrows) are not overridden; `MHGU_MENUPTR_NO_BUILTIN=1` leaves them out (to test the learner).
+
+A first playthrough showed three things a fixed place per call can't do: a popup that opens beside the row it came from
+(`0x86fc98`, from the pause menu's Hunter's Notes and others: learned at six heights), calls shared by several screens
+(`0x873e50`: three different lists), and screens in sections, which run a section cursor (one row a page, the page is the
+section: `0x873e60`, `0x876c14` / `0x876c38`, `0x877038` / `0x877078`, `0x749754`) beside their list every frame. So a
+geometry also keeps its bar's signature (the biggest piece's layer and size, and where the bar's box starts from it):
+every frame the renderer looks for that piece and places the rows from it (`menulearn.c` `follow`), a call keeps up to
+four geometries (the one whose bar is on screen is used), and the menu the pointer works on is the open cursor with
+known rows that last moved or appeared, while learning watches only cursors of more than one row (a section cursor
+never takes the focus). menus_learned.txt lines: `lr x y w h dx dy` (a fixed place, older) or with `z kw kh ox oy` after.
+
+`host_input.c` lets the mouse go while a known menu is open (and, in a hunt, while a screen it opened is: the pause
+handler `f_86eeec` is still stopped), puts the pointer on the selected row when the mouse was captured, and makes a left
+click pick a row (Confirm once it is selected; the pause menu's arrows turn its page), a right click Cancel, the wheel
+move the selection. Wider than 16:9 a menu is mapped to the canvas side its rows are on (exec.c `ui_group_hside`'s rule,
+by the whole list: untested). Tested in hidden runs with `menuat`: hover, the pause menu's arrows, Quest Info opened and
+closed by right clicks, the pause menu learned from scratch, Gestures learned and a gesture performed by a click. Not
+done: menus whose highlight doesn't move (lists that scroll under a fixed bar), grids and other cursor types (the item
+pouch, item box, smithy), page arrows other than the pause menu's, a list laid out across (the step would be Left /
+Right: untested). `MHGU_MENUPTR_PROBE=1` logs every cursor of the class with its call ("(known)" once its rows are).
+
 ### The settings panel's drawing tabs and mouse clicks (2026-11-11)
 
 The tabs over the controller / keyboard drawing (Hunt | Town and Hub | Menus | Keys) and the drawing's inputs lit up under the

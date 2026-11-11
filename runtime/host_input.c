@@ -33,6 +33,7 @@
 #include "hle/input.h"
 #include "hle/input_view.h"
 #include "hle/itembar.h"
+#include "hle/menuptr.h"
 #include "hle/mousecam.h"
 #include "keymap.h"
 #include "mods.h"
@@ -121,6 +122,15 @@ static bool mouse_captured;   // relative mode on now (grabbed, and no Forge men
 static bool mouse_no_capture; // relative mode refused (WSLg, some Wayland compositors): clicks are buttons, no mouse look
 void host_input_mouse_status(void);
 static bool mouse_released;   // Esc / focus lost: no automatic capture (MouseCapture = Hunt) until a click or the hunt is over
+// A list menu whose rows are known has the pointer (runtime/hle/menuptr.c): the mouse is let go while it is open
+// (captured again after, if it was), the row under the pointer is selected as it moves, a left click picks a row (or
+// turns the pause menu's page), a right click is Cancel (also in the screens it opens, in a hunt). Clicks there are not
+// the game's buttons.
+static bool menu_ptr;         // (mouse_update) such a menu (or, in a hunt, a screen it opened) is open, nothing else has the mouse
+static bool menu_ptr_live;    // the mouse is in use there: it was captured when the menu opened, or it moved since
+static bool menu_ptr_warp;    // put the pointer on the selected row once the capture is off
+static int menu_ptr_hover = MENUPTR_NONE;  // the row the pointer was last over
+static bool menu_ptr_geometry(SDL_Window *w, float *left, float *top, float *sx, float *sy);
 static float mouse_dx, mouse_dy;  // counts moved since the last update
 // (tests: the control file's "mousemove <x> <y> <ms>", a mouse moving at that many counts a second, captured or not)
 static float test_vx, test_vy;
@@ -278,6 +288,8 @@ static void script_parse(void) {
 //   type <text>            type into the game's text entry (runtime/textinput.c); textkey enter|escape|backspace
 //   mousemove <x> <y> <ms> mouse look as if the mouse moved at that many counts a second (y down) for that long
 //   wheel <notches>        the mouse wheel turned that far (> 0 up; by default the item bar to the left)
+//   menuat <x> <y> [btn]   the free pointer moved to that point of the 1280x720 screen (placed as the menu in focus is),
+//                          then that mouse button (1 left, 3 right) clicked there
 char g_shot_request[256];  // (runtime/nvn/vulkan/device.c saves it)
 char g_burst_name[200];
 int g_burst_left, g_burst_index;
@@ -308,6 +320,7 @@ static void control_poll(void) {
             if (!strcmp(cmd, "msaa")) { void vk_set_msaa(uint32_t); vk_set_msaa((uint32_t)atoi(arg)); continue; }
             if (!strcmp(cmd, "gpuprof")) { extern volatile int g_gpuprof_request; g_gpuprof_request = 1; continue; }
             if (!strcmp(cmd, "hudtrace")) { g_hudtrace_request = 1; continue; }
+            if (!strcmp(cmd, "pieces")) { void menulearn_request_log(void); menulearn_request_log(); continue; }
             if (!strcmp(cmd, "dump")) { g_dump_request = atoi(arg) > 0 ? atoi(arg) : 1; continue; }
             if (!strcmp(cmd, "memsave")) {  // memsave <guest hex address> <hex bytes> <file>: raw guest memory to a file
                 char path[200] = "";
@@ -557,6 +570,26 @@ static void control_poll(void) {
             }
             if (!strcmp(cmd, "actstat")) { input_view_status(); continue; }
             if (!strcmp(cmd, "camstat")) { mousecam_status(); host_input_mouse_status(); continue; }
+            if (!strcmp(cmd, "menuat")) {  // menuat <x> <y> [button]: (tests) the pointer moved to that point of the 1280x720
+                int btn = 0;                // screen as the menu in focus is placed, then that button clicked there
+                sscanf(line, "%*s %*s %*s %d", &btn);
+                float left, top, sx, sy;
+                if (!menu_ptr_geometry(ui_window(), &left, &top, &sx, &sy)) continue;
+                float wx = left + (float)atof(arg) * sx, wy = top + (float)atof(arg2) * sy;
+                SDL_Event m = {0};
+                m.motion.type = SDL_EVENT_MOUSE_MOTION, m.motion.x = wx, m.motion.y = wy, m.motion.xrel = 1;
+                SDL_PushEvent(&m);
+                if (btn > 0) {
+                    SDL_Event b = {0};
+                    b.button.type = SDL_EVENT_MOUSE_BUTTON_DOWN, b.button.button = (Uint8)btn, b.button.down = true;
+                    b.button.clicks = 1, b.button.x = wx, b.button.y = wy;
+                    SDL_PushEvent(&b);
+                    b.button.type = SDL_EVENT_MOUSE_BUTTON_UP, b.button.down = false;
+                    SDL_PushEvent(&b);
+                }
+                LOG("[control] menuat %s %s (window %.0f, %.0f) button %d\n", arg, arg2, wx, wy, btn);
+                continue;
+            }
             if (!strcmp(cmd, "mousebtn")) {  // mousebtn <1-5> <0|1>: that mouse button pressed / released (tests: SDL's own event)
                 SDL_Event b = {0};
                 int down = atoi(arg2);
@@ -722,6 +755,69 @@ static bool chat_mouse(const SDL_Event *e) {
     return false;
 }
 
+// The menu in focus's place in the window. The game's picture is fitted into the window by its shape and centred (as
+// forge.c window_to_screen); the HUD canvas (g_ui_anchor_aspect wide) is centred on it, and wider than 16:9 a menu goes
+// to the canvas's side its rows are on, or stays centred when they are (nvn/vulkan/exec.c ui_group_hside, by the whole
+// list here). Narrower than 16:9 the screen spans the picture. Window x = left + screen x * sx, y = top + screen y * sy.
+static bool menu_ptr_geometry(SDL_Window *w, float *left, float *top, float *sx, float *sy) {
+    int ww = 0, wh = 0;
+    if (!w || !SDL_GetWindowSize(w, &ww, &wh) || ww <= 0 || wh <= 0) return false;
+    float asp = g_render_aspect > 0 ? g_render_aspect : 16.0f / 9.0f;
+    float pw = (float)ww, ph = (float)wh;
+    if (pw / ph > asp) pw = ph * asp;
+    else ph = pw / asp;
+    float anchor = g_ui_anchor_aspect > 0 && g_ui_anchor_aspect < asp ? g_ui_anchor_aspect : asp;
+    float pic = 720.0f * asp, canvas = 720.0f * anchor;  // (in screen pixels)
+    *top = ((float)wh - ph) / 2, *sy = ph / 720.0f;
+    if (canvas <= 1280.0f) {
+        *left = ((float)ww - pw) / 2, *sx = pw / 1280.0f;
+        return true;
+    }
+    float x0 = 0, x1 = 1280;  // (the list's sideways extent: its first and last row)
+    MenuGeom g;
+    if (menuptr_geometry(&g)) {
+        float a0, b0, a1, b1, y;
+        int rows = menuptr_rows();
+        menuptr_row_rect(&g, 0, &a0, &y, &a1, &y);
+        menuptr_row_rect(&g, rows > 1 ? rows - 1 : 0, &b0, &y, &b1, &y);
+        x0 = fminf(a0, b0), x1 = fmaxf(a1, b1);
+    }
+    bool centred = x0 <= 640.0f && x1 >= 640.0f && fabsf(x0 + x1 - 1280.0f) < 8.0f;
+    float shift = centred ? (canvas - 1280.0f) / 2 : x0 + x1 < 1280.0f ? 0.0f : canvas - 1280.0f;
+    *sx = *sy;
+    *left = ((float)ww - pw) / 2 + ((pic - canvas) / 2 + shift) * *sx;
+    return true;
+}
+static int menu_ptr_hit(float mx, float my) {
+    float left, top, sx, sy;
+    if (!menu_ptr_geometry(ui_window(), &left, &top, &sx, &sy)) return MENUPTR_NONE;
+    return menuptr_hit((mx - left) / sx, (my - top) / sy);
+}
+static void menu_ptr_move(float mx, float my) {
+    menu_ptr_live = true;
+    int hit = menu_ptr_hit(mx, my);
+    if (hit >= 0 && hit != menu_ptr_hover) menuptr_select(hit, false);
+    menu_ptr_hover = hit;
+}
+static void menu_ptr_click(int btn, float mx, float my) {
+    menu_ptr_live = true;
+    if (btn == SDL_BUTTON_RIGHT) {
+        host_input_press("B", 12);  // (Cancel: back, or the menu closed)
+        return;
+    }
+    if (btn != SDL_BUTTON_LEFT) return;
+    int hit = menu_ptr_hit(mx, my);
+    if (hit >= 0) menuptr_select(hit, true);
+    else if (hit == MENUPTR_PAGE_LEFT) host_input_press("LEFT", 12);
+    else if (hit == MENUPTR_PAGE_RIGHT) host_input_press("RIGHT", 12);
+}
+static void menu_ptr_wheel(int n) {  // (n > 0 up: the row above)
+    int row = menuptr_row(), rows = menuptr_rows();
+    if (row < 0 || rows <= 0) return;
+    int to = row - n;
+    menuptr_select(to < 0 ? 0 : to >= rows ? rows - 1 : to, false);
+}
+
 static volatile int g_last_dev = -1;  // the device a button was last pressed on: 0 controller, 1 keyboard and mouse
 void host_input_event(const SDL_Event *e) {
     if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) g_last_dev = 0, pad_pressed(e->gbutton.which);
@@ -779,12 +875,15 @@ void host_input_event(const SDL_Event *e) {
         break;
     case SDL_EVENT_MOUSE_MOTION:
         // (only a captured mouse: the hunt camera's counts, elsewhere the right stick. A free pointer moves nothing: the
-        // game's menus can't be pointed at, so a pointer passing over the window must not turn the stick)
+        // game's menus can't be pointed at, so a pointer passing over the window must not turn the stick; a menu whose rows
+        // are known is the exception: it selects the row under it)
         if (mouse_captured) mouse_dx += e->motion.xrel, mouse_dy += e->motion.yrel;
+        else if (menu_ptr) menu_ptr_move(e->motion.x, e->motion.y);
         break;
     case SDL_EVENT_MOUSE_WHEEL: {  // (what [Keybinds] says: by default the item bar)
         int n = wheel_notches(e);
         if (mouse_captured && n) wheel_turn(n);
+        else if (menu_ptr && n) menu_ptr_wheel(n);
         break;
     }
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: {
@@ -794,6 +893,8 @@ void host_input_event(const SDL_Event *e) {
             mouse_held &= ~(1u << btn);
         } else if (host_input_mouse_free()) {
             break;  // (a mod's free pointer: the click is the mod's only)
+        } else if (menu_ptr && !mouse_captured) {
+            menu_ptr_click(btn, e->button.x, e->button.y);  // (the menu's: not a capture, not a button)
         } else if (!mouse_captured && !mouse_no_capture) {  // (the click that captures the mouse is not a button press)
             if (!mouse_grab) LOG("[input] capturing the mouse\n");
             mouse_grab = true, mouse_released = false;
@@ -843,7 +944,18 @@ static void mouse_update(int *rx, int *ry) {
     bool hunt_menu = hunt && input_view_hunt_menu_open();  // the hunt's pause menu: no automatic capture meanwhile
     bool auto_cap = config_live_mouse_capture() == MOUSE_CAPTURE_HUNT && mousecam_active() && !hunt_menu && !mouse_released && !mouse_no_capture;
     if (auto_cap && !mouse_captured && !mouse_grab) LOG("[input] capturing the mouse (a hunt)\n");
-    bool want = (mouse_grab || auto_cap) && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
+    // A menu whose rows are known: the mouse is let go while it is open (menu_ptr), and in a hunt also while a screen it
+    // opened is (Quest Info, the pouch...: the hunt's pause handler is still stopped; a right click is Cancel there). A mouse
+    // that was captured as the menu opened is the one in use: the pointer is put on the selected row and shown;
+    // otherwise it shows once it moves.
+    static bool menu_tree;
+    if (menuptr_open()) menu_tree = true;
+    else if (!input_view_hunt_menu_open()) menu_tree = false;
+    bool menu = menu_tree && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
+    if (menu && !menu_ptr) menu_ptr_live = menu_ptr_warp = mouse_captured, menu_ptr_hover = MENUPTR_NONE;
+    if (!menu) menu_ptr_live = menu_ptr_warp = false;
+    menu_ptr = menu;
+    bool want = (mouse_grab || auto_cap) && !menu && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
     SDL_Window *w = ui_window();
     if (want != mouse_captured && w) {
         if (SDL_SetWindowRelativeMouseMode(w, want) || !want) {
@@ -854,9 +966,17 @@ static void mouse_update(int *rx, int *ry) {
         }
         mouse_dx = mouse_dy = 0;
     }
-    // (full screen hides the pointer: shown while the chat box can be dragged or a mod has the mouse free)
+    if (menu_ptr_warp && !mouse_captured && w) {
+        int row = menuptr_row();
+        float x, y, left, top, sx, sy;
+        menuptr_row_centre(row < 0 ? 0 : row, &x, &y);
+        if (menu_ptr_geometry(w, &left, &top, &sx, &sy)) SDL_WarpMouseInWindow(w, left + x * sx, top + y * sy);
+        menu_ptr_warp = false;
+    }
+    // (full screen hides the pointer: shown while the chat box can be dragged, a mod has the mouse free or the pause
+    // menu's pointer is in use)
     static bool pointer_shown;
-    bool show = chat_active() || host_input_mouse_free();
+    bool show = chat_active() || host_input_mouse_free() || (menu_ptr && menu_ptr_live);
     if (show != pointer_shown && w) {
         pointer_shown = show;
         if (show) SDL_ShowCursor();
@@ -1060,6 +1180,7 @@ static void act_update(uint64_t b, uint64_t script_b, bool suppress) {
 void host_input_update(void) {
     if (nscript < 0) script_parse();
     rumble_update();
+    if (menuptr_take_confirm()) host_input_press("A", 12);  // (a menu's row clicked and now selected)
     control_poll();
     quickhunt_poll();  // (debug, MHGU_QUICKHUNT: runtime/hle/quickhunt.c)
     textinput_update();
