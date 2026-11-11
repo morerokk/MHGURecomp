@@ -570,11 +570,12 @@ static void control_poll(void) {
             }
             if (!strcmp(cmd, "actstat")) { input_view_status(); continue; }
             if (!strcmp(cmd, "camstat")) { mousecam_status(); host_input_mouse_status(); continue; }
-            if (!strcmp(cmd, "menuat")) {  // menuat <x> <y> [button]: (tests) the pointer moved to that point of the 1280x720
-                int btn = 0;                // screen as the menu in focus is placed, then that button clicked there
-                sscanf(line, "%*s %*s %*s %d", &btn);
-                float left, top, sx, sy;
-                if (!menu_ptr_geometry(ui_window(), &left, &top, &sx, &sy)) continue;
+            if (!strcmp(cmd, "menuat") || !strcmp(cmd, "mouseat")) {  // menuat <x> <y> [button]: (tests) the pointer moved to
+                int btn = 0;  // that point of the 1280x720 layout as the menu in focus is placed, then that button clicked
+                int clicks = 1;  // [clicks]: 2 a double click
+                sscanf(line, "%*s %*s %*s %d %d", &btn, &clicks);  // there; mouseat: to that point of the window itself (the mapping
+                float left = 0, top = 0, sx = 1, sy = 1;  // not taken: what checks it)
+                if (!strcmp(cmd, "menuat") && !menu_ptr_geometry(ui_window(), &left, &top, &sx, &sy)) continue;
                 float wx = left + (float)atof(arg) * sx, wy = top + (float)atof(arg2) * sy;
                 SDL_Event m = {0};
                 m.motion.type = SDL_EVENT_MOUSE_MOTION, m.motion.x = wx, m.motion.y = wy, m.motion.xrel = 1;
@@ -582,7 +583,7 @@ static void control_poll(void) {
                 if (btn > 0) {
                     SDL_Event b = {0};
                     b.button.type = SDL_EVENT_MOUSE_BUTTON_DOWN, b.button.button = (Uint8)btn, b.button.down = true;
-                    b.button.clicks = 1, b.button.x = wx, b.button.y = wy;
+                    b.button.clicks = (Uint8)clicks, b.button.x = wx, b.button.y = wy;
                     SDL_PushEvent(&b);
                     b.button.type = SDL_EVENT_MOUSE_BUTTON_UP, b.button.down = false;
                     SDL_PushEvent(&b);
@@ -756,9 +757,10 @@ static bool chat_mouse(const SDL_Event *e) {
 }
 
 // The menu in focus's place in the window. The game's picture is fitted into the window by its shape and centred (as
-// forge.c window_to_screen); the HUD canvas (g_ui_anchor_aspect wide) is centred on it, and wider than 16:9 a menu goes
-// to the canvas's side its rows are on, or stays centred when they are (nvn/vulkan/exec.c ui_group_hside, by the whole
-// list here). Narrower than 16:9 the screen spans the picture. Window x = left + screen x * sx, y = top + screen y * sy.
+// forge.c window_to_screen), and its HUD is placed on it by the renderer: on a picture not 16:9, narrowed toward a side
+// or flattened toward the top or bottom, a window at a time (nvn/vulkan/exec.c). Where it put this menu comes from the
+// renderer itself (menuptr_screen_map: a piece of the menu, where it was laid out and where it ended up); until it has
+// one, the menu is taken as centred. Window x = left + layout x * sx, y = top + layout y * sy.
 static bool menu_ptr_geometry(SDL_Window *w, float *left, float *top, float *sx, float *sy) {
     int ww = 0, wh = 0;
     if (!w || !SDL_GetWindowSize(w, &ww, &wh) || ww <= 0 || wh <= 0) return false;
@@ -766,53 +768,62 @@ static bool menu_ptr_geometry(SDL_Window *w, float *left, float *top, float *sx,
     float pw = (float)ww, ph = (float)wh;
     if (pw / ph > asp) pw = ph * asp;
     else ph = pw / asp;
-    float anchor = g_ui_anchor_aspect > 0 && g_ui_anchor_aspect < asp ? g_ui_anchor_aspect : asp;
-    float pic = 720.0f * asp, canvas = 720.0f * anchor;  // (in screen pixels)
-    *top = ((float)wh - ph) / 2, *sy = ph / 720.0f;
-    if (canvas <= 1280.0f) {
-        *left = ((float)ww - pw) / 2, *sx = pw / 1280.0f;
-        return true;
+    float m[4];  // (layout -> the picture's 1280 x 720: x' = m[0] x + m[1], y' = m[2] y + m[3])
+    if (!menuptr_screen_map(m)) {
+        m[0] = asp > 16.0f / 9.0f ? (16.0f / 9.0f) / asp : 1.0f, m[1] = 640.0f * (1.0f - m[0]);
+        m[2] = asp < 16.0f / 9.0f ? asp / (16.0f / 9.0f) : 1.0f, m[3] = 360.0f * (1.0f - m[2]);
     }
-    float x0 = 0, x1 = 1280;  // (the menu's sideways extent: its first row's first and last cells, and its last cell)
-    MenuGeom g;
-    if (menuptr_geometry(&g)) {
-        float a0, b0, c0, a1, b1, c1, y;
-        int cells = menuptr_rows(), cols = menuptr_cols();
-        menuptr_row_rect(&g, 0, cols, &a0, &y, &a1, &y);
-        menuptr_row_rect(&g, (cells < cols ? cells : cols) - 1 > 0 ? (cells < cols ? cells : cols) - 1 : 0, cols, &b0, &y, &b1, &y);
-        menuptr_row_rect(&g, cells > 1 ? cells - 1 : 0, cols, &c0, &y, &c1, &y);
-        x0 = fminf(a0, fminf(b0, c0)), x1 = fmaxf(a1, fmaxf(b1, c1));
-    }
-    bool centred = x0 <= 640.0f && x1 >= 640.0f && fabsf(x0 + x1 - 1280.0f) < 8.0f;
-    float shift = centred ? (canvas - 1280.0f) / 2 : x0 + x1 < 1280.0f ? 0.0f : canvas - 1280.0f;
-    *sx = *sy;
-    *left = ((float)ww - pw) / 2 + ((pic - canvas) / 2 + shift) * *sx;
+    *sx = m[0] * pw / 1280.0f, *left = ((float)ww - pw) / 2 + m[1] * pw / 1280.0f;
+    *sy = m[2] * ph / 720.0f, *top = ((float)wh - ph) / 2 + m[3] * ph / 720.0f;
     return true;
 }
+static float menu_ptr_gx = -1, menu_ptr_gy = -1;  // (the last point looked at, in the layout)
 static int menu_ptr_hit(float mx, float my) {
     float left, top, sx, sy;
     if (!menu_ptr_geometry(ui_window(), &left, &top, &sx, &sy)) return MENUPTR_NONE;
-    return menuptr_hit((mx - left) / sx, (my - top) / sy);
+    menu_ptr_gx = (mx - left) / sx, menu_ptr_gy = (my - top) / sy;
+    return menuptr_hit(menu_ptr_gx, menu_ptr_gy);
+}
+// Skin Tone's slider (character creation): a press on its gradient sets the tone there, and while the button stays down
+// the tone follows the pointer sideways (anywhere, not only over the gradient); a double click there also keeps it
+// (Confirm), as does a click elsewhere on its panel - B, a right click, drops the change on this screen
+static bool menu_ptr_drag;
+static bool menu_ptr_slider(float mx, float my, int clicks) {  // (clicks 0: a move)
+    float left, top, sx, sy;
+    if (!menuptr_slider_open() || !menu_ptr_geometry(ui_window(), &left, &top, &sx, &sy)) return false;
+    float x = (mx - left) / sx, y = (my - top) / sy;
+    if (clicks) {
+        menu_ptr_drag = menuptr_slider_hit(x, y);
+        if (!menu_ptr_drag && menuptr_slider_panel(x, y)) host_input_press("A", 12);
+    }
+    if (menu_ptr_drag) menuptr_slider_set(x, clicks >= 2);
+    return true;
 }
 static void menu_ptr_move(float mx, float my) {
     menu_ptr_live = true;
+    if (menu_ptr_slider(mx, my, 0)) return;
+    static uint64_t menu_id;  // (another menu in focus: the pointer is over none of its cells yet)
+    uint64_t id = menuptr_menu_id();
+    if (id != menu_id) menu_id = id, menu_ptr_hover = MENUPTR_NONE;
     int hit = menu_ptr_hit(mx, my);
-    if (hit >= 0 && hit != menu_ptr_hover) menuptr_select(hit, false);
+    if (hit >= 0 && hit != menu_ptr_hover) menuptr_select_at(hit, false, menu_ptr_gx, menu_ptr_gy);
     menu_ptr_hover = hit;
 }
-static void menu_ptr_click(int btn, float mx, float my) {
+static void menu_ptr_click(int btn, float mx, float my, int clicks) {
     menu_ptr_live = true;
     if (btn == SDL_BUTTON_RIGHT) {
         host_input_press("B", 12);  // (Cancel: back, or the menu closed)
         return;
     }
     if (btn != SDL_BUTTON_LEFT) return;
+    if (menu_ptr_slider(mx, my, clicks > 0 ? clicks : 1)) return;
     int hit = menu_ptr_hit(mx, my);
-    if (hit >= 0) menuptr_select(hit, true);
+    if (hit >= 0) menuptr_select_at(hit, true, menu_ptr_gx, menu_ptr_gy);
     else if (hit == MENUPTR_PAGE_LEFT) host_input_press("LEFT", 12);
     else if (hit == MENUPTR_PAGE_RIGHT) host_input_press("RIGHT", 12);
 }
 static void menu_ptr_wheel(int n) {  // (n > 0 up: a menu of pages turns to the previous one; else the row above)
+    if (menuptr_slider_open()) return menuptr_slider_step(n > 0 ? 1 : -1);  // (Skin Tone: a tone a notch)
     if (menuptr_pages() > 1) return menuptr_page_turn(n > 0 ? -1 : 1);
     int cell = menuptr_row(), cells = menuptr_rows(), cols = menuptr_cols();
     if (cell < 0 || cells <= 0) return;
@@ -894,10 +905,11 @@ void host_input_event(const SDL_Event *e) {
         if (btn < 1 || btn > SDL_BUTTON_X2) break;
         if (!e->button.down) {
             mouse_held &= ~(1u << btn);
+            if (btn == SDL_BUTTON_LEFT) menu_ptr_drag = false;
         } else if (host_input_mouse_free()) {
             break;  // (a mod's free pointer: the click is the mod's only)
         } else if (menu_ptr && !mouse_captured) {
-            menu_ptr_click(btn, e->button.x, e->button.y);  // (the menu's: not a capture, not a button)
+            menu_ptr_click(btn, e->button.x, e->button.y, e->button.clicks);  // (the menu's: not a capture, not a button)
         } else if (!mouse_captured && !mouse_no_capture) {  // (the click that captures the mouse is not a button press)
             if (!mouse_grab) LOG("[input] capturing the mouse\n");
             mouse_grab = true, mouse_released = false;
@@ -931,6 +943,14 @@ static int32_t clamp_axis(int v) { return v < -32767 ? -32767 : v > 32767 ? 3276
 void host_input_mouse_status(void) {
     LOG("[mouse] hunt camera %d, hunt menu %d, captured %d, grab %d, released %d\n", mousecam_active(),
         input_view_hunt_menu_open(), mouse_captured, mouse_grab, mouse_released);
+    MenuGeom g;
+    float m[4] = {0};
+    bool mapped = menuptr_screen_map(m);
+    if (menuptr_geometry(&g))
+        LOG("[mouse] menu %08x: cell %d of %d, %d columns, pages %d; first %.0f,%.0f %.0fx%.0f step %+.0f,%+.0f column %+.0f,%+.0f; "
+            "pointer mode %d; map %s %.3f %+.1f %.3f %+.1f\n", g.lr, menuptr_row(), menuptr_rows(), menuptr_cols(), menuptr_pages(), g.x,
+            g.y, g.w, g.h, g.dx, g.dy, g.cdx, g.cdy, menu_ptr, mapped ? "renderer" : "none", m[0], m[1], m[2], m[3]);
+    else LOG("[mouse] no menu for the pointer (slider %d), pointer mode %d\n", menuptr_slider_open(), menu_ptr);
 }
 
 static void mouse_update(int *rx, int *ry) {
@@ -972,8 +992,10 @@ static void mouse_update(int *rx, int *ry) {
     if (menu_ptr_warp && !mouse_captured && w) {
         int row = menuptr_row();
         float x, y, left, top, sx, sy;
+        MenuGeom g;
         menuptr_row_centre(row < 0 ? 0 : row, &x, &y);
-        if (menu_ptr_geometry(w, &left, &top, &sx, &sy)) SDL_WarpMouseInWindow(w, left + x * sx, top + y * sy);
+        // (a menu with no cells - Skin Tone's slider - leaves the pointer where it was)
+        if (menuptr_geometry(&g) && menu_ptr_geometry(w, &left, &top, &sx, &sy)) SDL_WarpMouseInWindow(w, left + x * sx, top + y * sy);
         menu_ptr_warp = false;
     }
     // (full screen hides the pointer: shown while the chat box can be dragged, a mod has the mouse free or the pause
@@ -1184,6 +1206,11 @@ void host_input_update(void) {
     if (nscript < 0) script_parse();
     rumble_update();
     if (menuptr_take_confirm()) host_input_press("A", 12);  // (a menu's row clicked and now selected)
+    {   // (a menu that runs its cursor only on a press: a short Down makes it run, and the jump or page goes with it)
+        static uint64_t nudged;
+        uint64_t now = plat_now_ns();
+        if (menuptr_needs_nudge() && now - nudged > 60000000ull) host_input_press("DOWN", 3), menuptr_nudged(), nudged = now;
+    }
     control_poll();
     quickhunt_poll();  // (debug, MHGU_QUICKHUNT: runtime/hle/quickhunt.c)
     textinput_update();

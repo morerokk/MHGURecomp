@@ -3563,6 +3563,10 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 VkSpan sp = vk_transient_copy(G2H((uint32_t)r.addr), size, 256);  // (all of it, the matrix changed)
                 memcpy(sp.ptr, m, 64);
                 if (grouped) ui_group_add((float *)sp.ptr, pos_z, pos_x, pos_y, vgroup);
+                {   // (where the piece ends up: read at the frame's end, once its group has its anchor - runtime/menulearn.c)
+                    void menulearn_piece_final(const float *m);
+                    menulearn_piece_final((const float *)sp.ptr);
+                }
                 // The game clips some windows (a list, the help windows' body) with a scissor laid out for the 16:9 window:
                 // it moves with the piece, as its group was anchored last frame (the group is not complete yet), or for a
                 // group not seen before as the pieces so far are.

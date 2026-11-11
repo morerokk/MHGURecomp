@@ -13,7 +13,7 @@ import argparse
 import os
 import sys
 
-BUILTIN = {0x86F8EC}  # (menuptr.c builtin[])
+BUILTIN = {0x86F8EC, 0x87D824, 0x880798, 0x5E29A0, 0x87F8A0, 0x8874CC}  # (menuptr.c builtin[]: the pause menu, the front end's)
 MAX_VARIANTS = 4
 ROWS = 16
 
@@ -23,9 +23,10 @@ def near(a, b, tol=0.5):
 
 
 class Geom:
-    def __init__(self, lr, x, y, w, h, dx, dy, z=0.0, kw=0.0, kh=0.0, ox=0.0, oy=0.0, cdx=0.0, cdy=0.0):
+    def __init__(self, lr, x, y, w, h, dx, dy, z=0.0, kw=0.0, kh=0.0, ox=0.0, oy=0.0, cdx=0.0, cdy=0.0, cols=0.0):
         self.lr, self.x, self.y, self.w, self.h, self.dx, self.dy = lr, x, y, w, h, dx, dy
         self.z, self.kw, self.kh, self.ox, self.oy, self.cdx, self.cdy = z, kw, kh, ox, oy, cdx, cdy
+        self.cols = int(cols)
         self.off = {}  # row -> (x, y) from the first row's bar
 
     def same_kind(self, o):  # (menuptr.c same_kind)
@@ -51,6 +52,8 @@ def put(table, g):  # (menuptr.c geom_put)
                 o.dx, o.dy = g.dx, g.dy
             if not o.cdx and not o.cdy and (g.cdx or g.cdy):
                 o.cdx, o.cdy = g.cdx, g.cdy
+            if not o.cols and g.cols:
+                o.cols = g.cols
             o.x, o.y = g.x, g.y
             return
     if len(variants) >= MAX_VARIANTS:
@@ -79,9 +82,9 @@ def read(table, lines):  # (menuptr.c geoms_load)
             v = list(map(float, t[1:]))
         except ValueError:
             continue
-        if len(v) not in (6, 11, 13) or lr in BUILTIN:
+        if len(v) not in (6, 11, 13, 14) or lr in BUILTIN:
             continue
-        v += [0.0] * (13 - len(v))
+        v += [0.0] * (14 - len(v))
         put(table, Geom(lr, *v))
 
 
@@ -97,8 +100,8 @@ def lines_of(table):
         if any(g.kw for g in variants):
             variants = [g for g in variants if g.kw]
         for g in variants:
-            out.append("%08x %s" % (lr, " ".join(fmt(v) for v in (g.x, g.y, g.w, g.h, g.dx, g.dy, g.z, g.kw, g.kh, g.ox, g.oy,
-                                                                   g.cdx, g.cdy))))
+            out.append("%08x %s %d" % (lr, " ".join(fmt(v) for v in (g.x, g.y, g.w, g.h, g.dx, g.dy, g.z, g.kw, g.kh, g.ox, g.oy,
+                                                                      g.cdx, g.cdy)), g.cols))
             for row in sorted(g.off):
                 if row:
                     out.append("%08x off %d %s" % (lr, row, " ".join(fmt(v) for v in (*g.off[row], g.z, g.kw, g.kh))))

@@ -581,6 +581,66 @@ the cell's (the frame sits 4 pixels outside it), the cells are one step each way
 a grid gets the bits its own paging masks return (`0x85f8c4` previous, `0x85f914` next: L / R in the item box), a list
 Left / Right (as the pause menu's arrows).
 
+The front end can't be learned: on the title's Main Menu (`0x87d824`) and its Options (`0x880798`) no HUD piece moves
+(the bars stay where they are and the selected one is recoloured), and Character Select's frame (`0x5e29a0`) is drawn
+at scale 1, so its size is not known. All three are built in, measured at 1280x720 (Main Menu bars 170..1110 from y 153,
+64 tall, every 84; Options the same from y 195; save cards 55..620 from y 146, 98 tall, every 116), which also keeps the
+learner off them. A learned scale-1 list (no column step) has rows from its frame's corner to the screen's middle (or
+its edge, starting right of the middle). The host forgets the cell the pointer was over when another menu comes into
+focus (else the first hover over the same place on the new screen did nothing).
+
+New Game (2026-11-11): Create New Character / Reuse Data (`0x87f8a0`, bars as the Main Menu's) and Gender (`0x8874cc`,
+two cards side by side, the chosen one drawn bigger: nothing moves) are built in. The creation menu (`0x883804`, a grid
+of 3 x 4: Name ... Clothing, Done its last row) and its sub-screens' grids (4 columns: `0x773e58` Face / Voice / Hairstyle,
+`0x773c44` Features / Eye Color / Clothing, the same layout) are learned: their frames are small-scale pieces (2 x 2;
+three 1 x 1 pieces moving together), which the learner now takes when every small piece that moved moved alike. These
+grids run their cursor only when a button is pressed, which broke three things, each fixed: (1) learning dropped them
+between presses - it now watches a cursor for 3 s after it ran and keeps the last frame of a menu while none is in focus
+(30 s), so its next move is compared with it (a fresh screen's first move is still not seen: three presses each way);
+(2) a hover's jump waited for the next press - when a jump or page waits for a cursor that has not run lately the host
+presses Down for 3 frames, and the hook replaces the pad's steps with its own; (3) nothing knew the screen was open
+before its first press - the renderer looks for the frame of every known small-frame menu exactly (to a pixel) on one of
+its cells (`scan_small`), which opens it there, with the cell, and so a geometry keeps its cursor's column count (a 15th
+field). The two grid calls look alike, so both are found on either's screen; the update that runs takes a jump meant for
+its look-alike. Name is the port's typed text entry.
+Skin Tone is a slider, no cursor: found by a heap diff around Left, Left, Right (a u32 at its object +0x84 went 184,
+183, 182, 183) and an `fntrace` on its object: its update `0x8babe4(slider, ..., pad bits)` runs every frame (from
+`0x8ba920`); Left / Right step the tone (1..184; 10 at a time with L / R held), which it reads from its GUI object's
+parameter 0x10 (+0x24 the GUI; `0x745a78` gets it, `0x745a40` sets it, the value a float in s0). The marker is at x 143
++ 2 x tone. The hook sets that parameter one tone off the one asked for and gives the update one step, so the game moves
+the marker and colours the hunter. A press on the gradient sets the tone, dragging follows it, the wheel steps it; on
+this screen A keeps the tone (it stays open) and B leaves, dropping a tone not kept, so a double click on the gradient
+also confirms it and a click elsewhere on its panel confirms the current one; a right click is B as everywhere. The
+slider counts as an open pointer screen while its update runs. Checked: a click at tone 50 (marker and hunter moved), a
+double click kept it, tone 120 then the swatch kept that, a right click left with tone 120 kept.
+A first try by hand found Eye Color dead past its first cells after Skin Tone (until backing out and in): one call
+runs three screens of 15, 10 and 7 items and its look-alike one of 2, and a quiet cursor kept the last run's count, so
+a bigger screen's other cells were not offered. A quiet cursor's count now counts as unknown (any cell is offered; the
+update gives up one beyond the page's last), and a waiting jump's nudge is kept from the game also when the jump is
+given up (it had moved the selection down a row). Checked: Clothing, Skin Tone, ZR to Eye Color, its 7th cell by hover
+with no key pressed, an empty cell past its 10th left alone. Nudges are at most every 60 ms (were 150).
+
+Prompts (2026-11-11): "Create a character with these settings?" (and, it seems, the game's Yes / No prompts) use a third,
+tiny choice class: `0x74fbb0(choice, pad bits, back mask, on mask)`, the choice a byte (0 the first), A picks it (returns
+1 / 2), B moves to the second and then cancels, the masks (Left / Right from the prompt's call `0x84bd18`) move it. It
+is hooked as a two-cell cursor whose step bits are its caller's masks; learned like the rest (its brackets, 1 x 1 pieces,
+move 140 across: a small frame in a list laid out across has a cell a step wide centred on it). Found with a heap diff
+around Right, Left, Right (a byte 0, 1, 0, 1) and an `fntrace` on its object. Before it was hooked the prompt showed what
+an unknown screen in front of a known one does: the pointer stayed on the menu behind, a left click hit nothing and the
+right one (Cancel) was the only button - while Confirm is the right button on the default keyboard and mouse. So an
+unknown running cursor of several cells that appeared well (100 ms) after the known one now gives the mouse back to what
+it was (captured, its buttons the game's). Then the Style screen (`0x8838e0`, 3 x 2, learned) after it.
+Fixes on the way: (1) a jump or page not done in 400 ms is given up (a jump for the creation menu waited under a message
+box, and the nudge held Down there for good, which kept the message's Confirm out); (2) a nudge's Down is taken out of
+every update for a moment, so it never moves anything itself; (3) a grid's jump moves the row first and then the column,
+each one ordinary step (the Style grid took back a column written with the row); (4) look-alikes - the Style grid has the
+creation menu's frame, place and column step - are told apart by which cursor ran last (the frame scan skips the others),
+a jump for one that isn't running is moved to the look-alike that runs, its cell found again from the pointer's place by
+that one's geometry; (5) a menu known only from the frame scan comes last for the pointer, and a sighting is never its
+appearing anew (a stray piece where the Face grid's corner would be, on the Style screen, had taken the pointer); (6) the
+frame scan correcting a quiet cursor's cell is not a move (the creation menu behind the prompt had taken the pointer that
+way). Checked: the whole New Game flow by mouse in a hidden run, from Create New Character to the Style screen.
+
 What ships: `runtime/hle/menuptr_table.h`, made by `tools/menus_table.py` from menus_learned.txt files of playthroughs
 (`python tools/menus_table.py <menus_learned.txt>...`; it reads the table's own lines first, so a new playthrough adds to
 it). It merges them as the game does, leaves out a call's fixed-place lines once it has a geometry with a signature, and
@@ -593,8 +653,16 @@ Multiplayer menu, the item box).
 `host_input.c` lets the mouse go while a known menu is open (and, in a hunt, while a screen it opened is: the pause
 handler `f_86eeec` is still stopped), puts the pointer on the selected row when the mouse was captured, and makes a left
 click pick a row (Confirm once it is selected; the pause menu's arrows turn its page), a right click Cancel, the wheel
-move the selection. Wider than 16:9 a menu is mapped to the canvas side its rows are on (exec.c `ui_group_hside`'s rule,
-by the whole list: untested). Tested in hidden runs with `menuat`: hover, the pause menu's arrows, Quest Info opened and
+move the selection. On a picture not 16:9 the renderer places the HUD itself (narrowed toward a side wider than 16:9,
+flattened toward the top or bottom at 16:10, a window at a time; its matrices are final only once the window's group
+is complete), so the pointer is mapped by what it did: `menulearn.c` keeps each piece's final matrix (the copy
+`cbuf_info` hands the GPU, read at the frame's end) beside its layout, and for the menu in focus takes a piece inside its
+cells' area: its layout and final places give the offset, the renderer's scale the rest (`menuptr_screen_map`); until
+there is one, the menu counts as centred. Checked with `mouseat` (the pointer at a window point, so the mapping isn't
+what checks itself) on the pause menu's rows as screenshots showed them: at 16:10 (the first try at y 301, "Pause",
+had picked "Hunter's Notes": the flattening was not mapped), at 21:9 with the HUD centred (x had spread the 16:9 HUD
+over the whole picture: the left of the rows missed) and with Edges. The front end at 21:9 and 16:10 is not checked.
+Tested in hidden runs with `menuat`: hover, the pause menu's arrows, Quest Info opened and
 closed by right clicks, the pause menu learned from scratch, Gestures learned and a gesture performed by a click. Not
 done: menus whose highlight doesn't move (lists that scroll under a fixed bar), grids and other cursor types (the item
 pouch, item box, smithy), page arrows other than the pause menu's, a list laid out across (the step would be Left /
