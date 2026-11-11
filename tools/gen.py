@@ -36,6 +36,11 @@ MOV_LR_PC = 0xE1A0E00F
 PATCHES = {
     ('main', 0xdbcd34): (0xE3A00D1E, '{ extern uint32_t g_render_size[2]; c->r[0] = g_render_size[0]; }'),
     ('main', 0xdbcd38): (0xE3007438, '{ extern uint32_t g_render_size[2]; c->r[7] = g_render_size[1]; }'),
+    # The GPU memory pool render targets and textures share (game heap 6): `movt #0x3520` = 848 MB, sized for the
+    # Switch's resolutions; larger with a larger render size (runtime/config.c g_gpu_pool_size). 0x351e40: the heap
+    # table's entry, 0x351fa4: the pool's creation.
+    ('main', 0x351e40): (0xE3432520, '{ extern uint32_t g_gpu_pool_size; c->r[2] = g_gpu_pool_size; }'),
+    ('main', 0x351fa4): (0xE3433520, '{ extern uint32_t g_gpu_pool_size; c->r[3] = g_gpu_pool_size; }'),
     # 2D UI canvas size: mov r7, #1280 (0xdbcd48) / mov r7, #720 (0xdbcd54)
     ('main', 0xdbcd48): (0xE3A07C05, '{ extern uint32_t g_ui_size[2]; c->r[7] = g_ui_size[0]; }'),
     ('main', 0xdbcd54): (0xE3A07E2D, '{ extern uint32_t g_ui_size[2]; c->r[7] = g_ui_size[1]; }'),
