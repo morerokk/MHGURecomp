@@ -386,7 +386,6 @@ static const char DEFAULT_INI[] =
     "; Default: Click\n"
     "MouseCapture = Click\n"
     "\n"
-    "\n"
     "[Keybinds]\n"
     "; The keys or mouse buttons for each Switch button, for moving (the left stick) and for turning the item bar\n"
     "; (ItemLeft / ItemRight: one item per press, in a hunt, without holding L).\n"

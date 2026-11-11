@@ -11,6 +11,12 @@
 #include <strings.h>
 
 #include <SDL3/SDL.h>
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 #include "config.h"
 #include "keymap.h"
@@ -499,17 +505,27 @@ bool act_save(const char *path, const ActProfile *p) {
     snprintf(tmp, sizeof tmp, "%s.actions.tmp", path);
     FILE *f = fopen(tmp, "wb");
     if (!f) return free(out), false;
-    bool ok = fwrite(out, 1, n, f) == n;
+    bool ok = fwrite(out, 1, n, f) == n && fflush(f) == 0;
+#ifdef _WIN32
+    ok = _commit(_fileno(f)) == 0 && ok;
+#else
+    ok = fsync(fileno(f)) == 0 && ok;
+#endif
     ok = fclose(f) == 0 && ok;
     free(out);
-    if (!ok) return remove(tmp), false;
-    remove(path);
-    if (rename(tmp, path) != 0) return false;
-    return true;
+    // (replaced in one step, as config_save does: the old file stays until the new one is complete)
+#ifdef _WIN32
+    if (ok) ok = MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    if (ok) ok = rename(tmp, path) == 0;
+#endif
+    if (!ok) remove(tmp);
+    return ok;
 }
 
 // ---- the profile in use. The sampler (window thread) reads it at every update and a controls screen may replace it:
-// a short spin lock around both (the game thread only reads one flag of it).
+// a short spin lock around both. The game thread reads a few flags of it without the lock (enable, menus, pointer, log,
+// sheathed_attack): bools, so a frame with the old value is all a race can give.
 static ActProfile prof;
 static bool prof_on;
 static atomic_int prof_confirm = -1;  // the settings menu's confirm position from the Confirm binding (MENU_CONFIRM_*), -1 none

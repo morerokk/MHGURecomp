@@ -161,7 +161,9 @@ static void mb_update(Cpu *c) {
     uint32_t mb = c->r[0], sp = spad();
     bool first = sp && mb == sp + MB1_OFF;
     if (first) {
-        const ActProfile *p = act_profile();  // (replaced only on this thread: the settings menu's Save)
+        // (the settings menu's Save replaces the profile from the UI thread, unlocked to this one: only these flags are
+        // read, and a frame with the old ones is harmless)
+        const ActProfile *p = act_profile();
         g_on = act_enabled(), g_menus = p->menus, g_log = p->log, g_pointer = p->pointer;
         g_split = act_split();
     }

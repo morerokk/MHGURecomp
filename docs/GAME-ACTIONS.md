@@ -1,9 +1,10 @@
 # Game-action rebinding: implementation notes (M1, the non-hover part of M2, and the Game actions screen)
 
-Branch `input-impl` (on upstream 0.15.5+2). Written against `docs/input-rework/ACTIONS.md` of the research branch (section 4,
-"prototype spec"). Everything here is **off** unless `[Actions] Enable=1` is in the ini (or it is turned on in the settings
-menu, Controls > Game actions): with it off nothing is hooked, no guest code is touched and the only changes on the input
-path are two mutex-guarded copies in `hle/input.c`.
+From the `input-impl` branch (PR 338), written against the author's own research notes ("prototype spec"; not in this
+repository). Everything here is **off** unless `[Actions] Enable=1` is in the ini (or it is turned on in the settings
+menu, Controls > Game actions): with it off the translators are not hooked and the only changes on the input path are two
+mutex-guarded copies in `hle/input.c`. The one hook in place either way is the hunt's pause menu handler, which is only
+timed, for the new `[Mouse] MouseCapture = Hunt` (see "Mouse camera" below).
 
 ## What it is
 
@@ -481,29 +482,28 @@ camera's yaw / pitch before and after, control command `camstat` prints where th
 * **Aiming:** the HBG aims with the mouse (`aim turn` lines: the hunter's yaw and the eye pitch move). With the Bow's R the
   camera's own stick handler keeps running, so the camera path turns it (the hunter follows the camera): works, but it
   is not the aim-turn path.
-* **Village / Hub and menus: the mouse is the right stick (as at first).** Outside a hunt's camera the pointer's movement
-  feeds the right stick (a smoothed velocity, `[Mouse] MouseSensitivity`) and nothing is captured. It is a speed, not an
+* **Village / Hub and menus: a captured mouse is the right stick (as before this work).** Outside a hunt's camera the
+  captured mouse's movement feeds the right stick (a smoothed velocity, `[Mouse] MouseSensitivity`). It is a speed, not an
   angle per count, with the stick's dead zone. Whether a village camera turns with it was not shown (screenshots at the
   noise level, the controller's own right stick did no better; the village camera class was not located), so no village
   camera feature is promised: a "hold a button to look" setting (`VillageLook`) existed for a day and was removed.
-  The menus see that stick, as they see a controller's: the menu translator folds the right stick onto the D-pad, so moving
-  the mouse moves a list's selector and turns the Plus menu's page (a "no mouse in menus" version, 815543e, was undone at
-  the user's request). The gameplay view is untouched either way.
-* **The cursor in menus.** No global "menu open" signal exists (a heap-snapshot search found one candidate field, the hot
-  button HUD panel's state, that does not flip in NPC dialogs and sits at a run-dependent address). What is done instead:
-  * **A free pointer outside a hunt's camera** (villages, the Hub, the title, every menu): nothing is captured, the cursor
-    shows (full screen too, for 3 s after it moved), a click is the game's button (`mouse:left` etc. of `[Actions.Kbm]` or
-    `[Keybinds]`, no capture click), the wheel scrolls menus, and the movement is the right stick (above).
-  * **A hunt's pause menu releases the mouse.** In a hunt the Plus menu does not pause and the camera handler keeps
+  The menus see that stick, as they see a controller's: the menu translator folds the right stick onto the D-pad.
+* **Capture.** As before: a click in the window captures the mouse (that click is not a button), Esc or losing focus lets it
+  go, and an uncaptured mouse does nothing in the game (no stick, no wheel, the cursor hidden in full screen). A version
+  with a free pointer outside a hunt's camera (the cursor shown after every movement, the movement as the right stick, a
+  click as the game's button) was merged with the action layer and taken out again right after (2026-11-11): the menus
+  can't be pointed at, so a visible pointer only got in the way. No global "menu open" signal exists (a heap-snapshot
+  search found one candidate field, the hot button HUD panel's state, that does not flip in NPC dialogs and sits at a
+  run-dependent address); what is used instead, for `MouseCapture = Hunt` only:
+  * **A hunt's pause menu ends the automatic capture.** In a hunt the Plus menu does not pause and the camera handler keeps
     running (the mouse still turned the camera with the menu open), so the camera handler is no signal there. The hunt's
     pause menu handler `f_86eeec` runs every update of a hunt except while the pause menu (and the pouch it opens) is open
     (quest 101, `fntrace`: 3 of 3 idle, 0 of 3 in the Plus menu, 0 of 3 in the pouch, 3 of 3 closed, 3 of 3 in the map,
     which is not modal). It is hooked (`hle/input_view.c`, always, only when nothing else hooks it); not seen for 300 ms
-    after it ran in this hunt = the menu is open (`input_view_hunt_menu_open`, reset when no hunt runs). Then the mouse is
-    released and the cursor shown, a click is a button; when the menu closes it is captured again (`MouseCapture` Click
-    keeps your click, Hunt captures by itself). Measured with `camstat` (also prints the mouse state: hunt camera, hunt menu,
-    captured, grab, cursor shown): Plus menu `hunt menu 1 captured 0 cursor shown 1`, closed `hunt menu 0 captured 1`, in
-    both capture modes. Other hunt modals (an NPC dialog at a camp, the quest result) were not checked: they keep the mouse
+    after it ran in this hunt = the menu is open (`input_view_hunt_menu_open`, reset when no hunt runs). With
+    `MouseCapture = Hunt` the mouse is then let go (unless a click captured it), and captured again when the menu closes.
+    With `Click` it stays captured, as before. `camstat` also prints the mouse state (hunt camera, hunt menu, captured,
+    grab, released). Other hunt modals (an NPC dialog at a camp, the quest result) were not checked: they keep the mouse
     captured if that handler keeps running there.
   * Control commands for tests: `mousebtn <1-5> <0|1>` (an SDL button event), `camstat`.
 New `[Mouse]` settings (settings menu: Controls tab, Spanish strings; live, no restart):
@@ -526,8 +526,8 @@ block is not read by the list controllers (P1 above), the NSO imports no touch A
 copy (writing it did not move the highlight), and there is no HUD quad registry. Two substitutes were built and rejected by
 the user, both removed (`91ac87d`, `ea2efba`, reverted): the pointer's *movement* as Up / Down presses (a pointer resting at
 the bottom of the screen selected nothing) and a scan of the finished frame for the gold highlight bar walked to the
-pointer (slow scrolling, a bug in the Save menu). In menus the mouse is therefore the right stick, the wheel and its
-buttons, as above.
+pointer (slow scrolling, a bug in the Save menu). In menus a captured mouse is therefore the right stick, the wheel and
+its buttons, as above.
 
 ### The settings panel's drawing tabs and mouse clicks (2026-11-11)
 

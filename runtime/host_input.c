@@ -120,8 +120,6 @@ static bool mouse_grab;       // the player's choice: clicked in (true) or Esc /
 static bool mouse_captured;   // relative mode on now (grabbed, and no Forge menu open)
 static bool mouse_no_capture; // relative mode refused (WSLg, some Wayland compositors): clicks are buttons, no mouse look
 void host_input_mouse_status(void);
-static volatile bool g_hunt_ctx;  // the hunt camera is the mouse's (its handler ran in the last 400 ms): mouse look is captured
-static uint64_t last_motion_ns;  // the pointer moved last (the cursor shows for a while after, even full screen)
 static bool mouse_released;   // Esc / focus lost: no automatic capture (MouseCapture = Hunt) until a click or the hunt is over
 static float mouse_dx, mouse_dy;  // counts moved since the last update
 // (tests: the control file's "mousemove <x> <y> <ms>", a mouse moving at that many counts a second, captured or not)
@@ -780,14 +778,13 @@ void host_input_event(const SDL_Event *e) {
         }
         break;
     case SDL_EVENT_MOUSE_MOTION:
-        // (captured: the hunt camera's counts; a free pointer outside a hunt's camera also moves the right stick, below)
-        if (mouse_captured || (!g_hunt_ctx && !overlay_menu_open() && !chat_active() && !host_input_mouse_free()))
-            mouse_dx += e->motion.xrel, mouse_dy += e->motion.yrel;
-        if (!mouse_captured) last_motion_ns = plat_now_ns();
+        // (only a captured mouse: the hunt camera's counts, elsewhere the right stick. A free pointer moves nothing: the
+        // game's menus can't be pointed at, so a pointer passing over the window must not turn the stick)
+        if (mouse_captured) mouse_dx += e->motion.xrel, mouse_dy += e->motion.yrel;
         break;
     case SDL_EVENT_MOUSE_WHEEL: {  // (what [Keybinds] says: by default the item bar)
         int n = wheel_notches(e);
-        if ((mouse_captured || !g_hunt_ctx) && n) wheel_turn(n);  // (a free pointer's wheel scrolls menus, too)
+        if (mouse_captured && n) wheel_turn(n);
         break;
     }
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: {
@@ -797,8 +794,7 @@ void host_input_event(const SDL_Event *e) {
             mouse_held &= ~(1u << btn);
         } else if (host_input_mouse_free()) {
             break;  // (a mod's free pointer: the click is the mod's only)
-        } else if (!mouse_captured && !mouse_no_capture && g_hunt_ctx) {
-            // (the click that captures the mouse is not a button press; elsewhere a click is a button: free pointer)
+        } else if (!mouse_captured && !mouse_no_capture) {  // (the click that captures the mouse is not a button press)
             if (!mouse_grab) LOG("[input] capturing the mouse\n");
             mouse_grab = true, mouse_released = false;
         } else {
@@ -829,27 +825,25 @@ static int32_t clamp_axis(int v) { return v < -32767 ? -32767 : v > 32767 ? 3276
 
 // Capture or release the mouse as wanted, and give its movement to the hunt camera or the right stick.
 void host_input_mouse_status(void) {
-    LOG("[mouse] hunt camera %d, hunt menu %d, captured %d, grab %d, cursor shown %d\n", g_hunt_ctx,
-        input_view_hunt_menu_open(), mouse_captured, mouse_grab, !mouse_captured);
+    LOG("[mouse] hunt camera %d, hunt menu %d, captured %d, grab %d, released %d\n", mousecam_active(),
+        input_view_hunt_menu_open(), mouse_captured, mouse_grab, mouse_released);
 }
 
 static void mouse_update(int *rx, int *ry) {
     // (Forge's menu, the chat box, a mod's free pointer: the pointer is theirs)
-    // In a hunt the camera handler running means the mouse is the camera's: captured after a click (MouseCapture = Click)
-    // or by itself (Hunt); a menu, a cutscene or a carve stops the handler and the mouse is free again (cursor shown, a
-    // click is a button) until it runs again. Elsewhere (villages, the Hub, the title, menus) the mouse is a free pointer
-    // too and is never captured.
+    // A click captures the mouse anywhere and Esc lets it go (MouseCapture = Click, the default). With MouseCapture = Hunt
+    // it is also captured by itself while the hunt camera is the mouse's, and let go again when that camera stops (the
+    // hunt's pause menu, a cutscene, the hunt over) unless a click captured it.
     static uint64_t cam_seen_ns;
     uint64_t now0 = plat_now_ns();
     if (mousecam_active()) cam_seen_ns = now0;
-    else if (mouse_released && now0 - cam_seen_ns > 500000000ull) mouse_released = false;
+    else if (mouse_released && now0 - cam_seen_ns > 500000000ull) mouse_released = false;  // (the hunt is over)
     bool hunt = mousecam_active() || now0 - cam_seen_ns < 400000000ull;
     if (!hunt) input_view_hunt_menu_reset();  // (a new hunt starts with no menu)
-    bool hunt_menu = hunt && input_view_hunt_menu_open();  // the hunt's pause menu: the camera is not the mouse's meanwhile
-    g_hunt_ctx = hunt && !hunt_menu;
+    bool hunt_menu = hunt && input_view_hunt_menu_open();  // the hunt's pause menu: no automatic capture meanwhile
     bool auto_cap = config_live_mouse_capture() == MOUSE_CAPTURE_HUNT && mousecam_active() && !hunt_menu && !mouse_released && !mouse_no_capture;
-    if (auto_cap && !mouse_captured) LOG("[input] capturing the mouse (a hunt)\n");
-    bool want = (g_hunt_ctx && (mouse_grab || auto_cap)) && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
+    if (auto_cap && !mouse_captured && !mouse_grab) LOG("[input] capturing the mouse (a hunt)\n");
+    bool want = (mouse_grab || auto_cap) && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
     SDL_Window *w = ui_window();
     if (want != mouse_captured && w) {
         if (SDL_SetWindowRelativeMouseMode(w, want) || !want) {
@@ -862,7 +856,7 @@ static void mouse_update(int *rx, int *ry) {
     }
     // (full screen hides the pointer: shown while the chat box can be dragged or a mod has the mouse free)
     static bool pointer_shown;
-    bool show = chat_active() || host_input_mouse_free() || (!mouse_captured && plat_now_ns() - last_motion_ns < 3000000000ull);
+    bool show = chat_active() || host_input_mouse_free();
     if (show != pointer_shown && w) {
         pointer_shown = show;
         if (show) SDL_ShowCursor();
@@ -890,6 +884,7 @@ static void mouse_update(int *rx, int *ry) {
         vx += (mouse_dx / dt - vx) * a, vy += (mouse_dy / dt - vy) * a;
     }
     mouse_dx = mouse_dy = 0;
+    if (!mouse_captured && now >= test_until) vx = vy = 0;  // (let go while moving: the stick stops at once)
     float s = config_live_mouse_sensitivity() / MOUSE_FULL_SPEED;
     float x = vx * s, y = -vy * s;  // (the mouse's y is down, the stick's up)
     float m = sqrtf(x * x + y * y);

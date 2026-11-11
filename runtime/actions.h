@@ -1,4 +1,4 @@
-// Game-action rebinding (docs/IMPLEMENTATION-NOTES.md, docs/input-rework/ACTIONS.md of the research branch).
+// Game-action rebinding (docs/GAME-ACTIONS.md).
 //
 // The host samples the bindings of [Actions.Pad] / [Actions.Kbm] into a set of active actions (act_sample, on the
 // window thread, once per host_input_update, together with the Switch pad word it sets). The game thread latches the
