@@ -266,6 +266,28 @@ controller's choice also after 8 s; the button chosen is not also a press in the
 the `[Actions*]` sections (every other line of the ini is kept) and they are in use from the next frame; turning Enable on
 hooks the game then, with no restart, and turning it off makes the hooks pass the pad through.
 
+**The drawing and the context tabs (phase 2, `runtime/binding_view.*`, `draw_bind_*` in settings_panel.cpp).** A controller
+outline (Controller scheme) or a keyboard with the mouse (Keyboard scheme) is drawn from the same bindings as the rows. The
+focused row (controller / keyboard focus) or the one just chosen glows its input(s) with a leader arrow to a chip naming the
+action; hovering a row rings its input; hovering an input (the key, or its chip) says what is on it; clicking an input while a
+row is capturing binds it (the same path as a pressed input: reserved keys such as Esc and the stick's directions are refused
+with a message), and clicking an input with a row focused and nothing capturing gives it to that row. The drawing follows the
+chosen weapon class (Advanced) and the tab. **Tabs** Hunt / Town / Menus (the Show row, or L1 / R1 on the controller) show
+one context at a time, so conflicts are per context; **Keys** shows the keyboard-only inputs (movement, Walk, item bar left /
+right on keys and the wheel, chat key). These are not new settings: they edit the existing `[Keybinds]` (`s.draft.binds`) and
+the old Keybinds submenu still works on the same values. The Plus + Minus menu chord is a toggle (`menu.chord`) on the
+Controller Menus tab.
+Layout of the window: **beside** the list when the screen has the room (the list is narrowed to give the drawing about 72
+font-heights), **inline** above the rows otherwise; windows at least 50 font-heights tall that are too narrow for beside use
+a drawing over the list. Below that (about 800x450) the drawing is inline and scrolls with the rows: still usable, not ideal.
+`bv_fit_width` picks the widest drawing that fits the height (chips as side columns or as tiers above and below).
+**Held inputs** light up live: pad buttons from the SDL state, keys / mouse buttons / wheel from `ui_keys` / `ui_mouse` in
+host_input.c (kept apart from the game's `keys[]` because the overlay swallows the events while the menu is open;
+`host_input_held`). In the menu the pad's bottom button is Back, so use the sticks' clicks to test the glow.
+Limits: the sticks' four directions are drawn but cannot be bound (BV_STICK_*; stick clicks can); the pad's own wedge areas
+of the drawing are hit-tested as polygons, small keys of the keyboard are targets of their own. Hidden-run screenshots:
+`build\shots\` (p2*).
+
 ## Control commands (control file, `MHGU_CONTROL`)
 
 `act <Name> [frames]` holds the action for that many presented frames (default 8; needs Enable=1), `ptr <x> <y> [0|1]` / `ptr off`
