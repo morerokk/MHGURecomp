@@ -57,6 +57,10 @@ typedef struct {
     HpScale hp;               // large monster HP in Hub-type quests (runtime/hle/hpscale.c)
     float mouse_sensitivity;  // mouse look: times the hunt camera's angle per count (runtime/hle/mousecam.c), and
                               // the speed for full right stick tilt elsewhere is divided by it (runtime/host_input.c)
+    float mouse_sensitivity_y;  // [Mouse] MouseSensitivityY: times the vertical angle per count, on top of the above
+    int mouse_invert_y;       // [Mouse] MouseInvertY: up / down turned round, on top of the game's own invert option
+    float mouse_smoothing;    // [Mouse] MouseSmoothing: 0 none, towards 1 the turn trails the mouse (hunt camera only)
+    int mouse_capture;        // [Mouse] MouseCapture: MOUSE_CAPTURE_*
     float aspect_ratio;       // the picture's shape (width / height), 0: the window's; never below 16:10 (config.c)
     float fov;                // 3D camera field of view factor (1: the game's)
     int ui_anchor;            // where the HUD goes on a picture wider than 16:9: UI_*
@@ -206,6 +210,11 @@ float config_live_fps(void);
 void config_set_live_fps(float fps);
 float config_live_fov(void);
 float config_live_mouse_sensitivity(void);
+float config_live_mouse_sensitivity_y(void);
+int config_live_mouse_invert_y(void);
+float config_live_mouse_smoothing(void);
+int config_live_mouse_capture(void);
+enum { MOUSE_CAPTURE_CLICK, MOUSE_CAPTURE_HUNT };  // a click in the window captures the mouse; or a hunt does as well
 float config_live_draw_distance(void);
 int config_live_fxaa(void);
 int config_live_msaa(void);

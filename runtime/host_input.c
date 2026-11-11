@@ -119,6 +119,7 @@ static void act_wheel_step(void) {
 static bool mouse_grab;       // the player's choice: clicked in (true) or Esc / focus lost (false)
 static bool mouse_captured;   // relative mode on now (grabbed, and no Forge menu open)
 static bool mouse_no_capture; // relative mode refused (WSLg, some Wayland compositors): clicks are buttons, no mouse look
+static bool mouse_released;   // Esc / focus lost: no automatic capture (MouseCapture = Hunt) until a click or the hunt is over
 static float mouse_dx, mouse_dy;  // counts moved since the last update
 // (tests: the control file's "mousemove <x> <y> <ms>", a mouse moving at that many counts a second, captured or not)
 static float test_vx, test_vy;
@@ -547,6 +548,7 @@ static void control_poll(void) {
                 continue;
             }
             if (!strcmp(cmd, "actstat")) { input_view_status(); continue; }
+            if (!strcmp(cmd, "camstat")) { mousecam_status(); continue; }
             if (!strcmp(cmd, "weapon")) {  // weapon <type 0-14> [id]: (debug) the local hunter holds that weapon type (before "depart")
                 uint32_t T = (uint32_t)atoi(arg), id = (uint32_t)strtoul(arg2, NULL, 0);
                 uint32_t sp = LD32(0x1a85b58u), gc = LD32(0x1a8ca48u), slot = LD32(gc + 0x30);
@@ -733,8 +735,8 @@ void host_input_event(const SDL_Event *e) {
                 keys[e->key.scancode] = false;
                 chat_open();  // (a line to type, sent as chat: runtime/hle/chat.c)
             } else if (e->key.scancode == SDL_SCANCODE_ESCAPE) {
-                if (mouse_grab) LOG("[input] mouse released\n");
-                mouse_grab = false;
+                if (mouse_grab || mouse_captured) LOG("[input] mouse released\n");
+                mouse_grab = false, mouse_released = true;
             } else if (e->key.scancode == SDL_SCANCODE_F12 && !(e->key.mod & SDL_KMOD_SHIFT))
                 snprintf(g_shot_request, sizeof g_shot_request, "shots/shot_%llu_%d.png", (unsigned long long)t, nshot++);
             else if (e->key.scancode == SDL_SCANCODE_F11) {
@@ -776,7 +778,7 @@ void host_input_event(const SDL_Event *e) {
             break;  // (a mod's free pointer: the click is the mod's only)
         } else if (!mouse_captured && !mouse_no_capture) {  // (the click that captures the mouse is not a button press)
             if (!mouse_grab) LOG("[input] capturing the mouse\n");
-            mouse_grab = true;
+            mouse_grab = true, mouse_released = false;
         } else {
             mouse_held |= 1u << btn;
         }
@@ -784,7 +786,7 @@ void host_input_event(const SDL_Event *e) {
     }
     case SDL_EVENT_WINDOW_FOCUS_LOST:
         memset(keys, 0, sizeof keys);
-        mouse_held = 0, mouse_grab = false;
+        mouse_held = 0, mouse_grab = false, mouse_released = true;
         config_window_focus(false);  // ([Audio] MuteInBackground)
         if (config_editable().mute_in_background) LOG("[input] window in the background: sound muted\n");
         break;
@@ -806,7 +808,14 @@ static int32_t clamp_axis(int v) { return v < -32767 ? -32767 : v > 32767 ? 3276
 // Capture or release the mouse as wanted, and give its movement to the hunt camera or the right stick.
 static void mouse_update(int *rx, int *ry) {
     // (Forge's menu, the chat box, a mod's free pointer: the pointer is theirs)
-    bool want = mouse_grab && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
+    // (MouseCapture = Hunt: the hunt camera being the mouse's also captures it, until Esc or the window losing focus
+    // let it go; free again when the camera stops asking: menus, cutscenes, villages)
+    static uint64_t cam_seen_ns;
+    if (mousecam_active()) cam_seen_ns = plat_now_ns();
+    else if (mouse_released && plat_now_ns() - cam_seen_ns > 500000000ull) mouse_released = false;
+    bool auto_cap = config_live_mouse_capture() == MOUSE_CAPTURE_HUNT && mousecam_active() && !mouse_released && !mouse_no_capture;
+    if (auto_cap && !mouse_captured) LOG("[input] capturing the mouse (a hunt)\n");
+    bool want = (mouse_grab || auto_cap) && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
     SDL_Window *w = ui_window();
     if (want != mouse_captured && w) {
         if (SDL_SetWindowRelativeMouseMode(w, want) || !want) {

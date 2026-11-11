@@ -467,3 +467,38 @@ smithy, equipment box, item box, shop, map, options: hover there is unknown (the
    `f<n> <ctx> w<weapon> mb1 in <engine word> out <word given to the game> cur <mb1 translation> | mb2 ... | act <set> v<context>`
    (v0 weapon out, v3 weapon away, v2 town, v4 no hunter).
 4. Host tests: `make test-actions test-settings test-settings-panel test-settings-locale`.
+
+## Mouse camera (2026-11-11)
+
+`runtime/hle/mousecam.c` turns the hunt camera's own angles (the quest camera's stick handler `f_2255cc`, and the aiming
+hunter by `f_4a1738`), not the right stick; only where neither runs (villages and the Hub) the mouse is still the right
+stick (`host_input.c`, a smoothed velocity). Audited in hidden runs (`MHGU_MOUSECAM_LOG=1` logs every turn with the
+camera's yaw / pitch before and after, control command `camstat` prints where the camera looks and whether the mouse has it):
+
+* **Hunt camera:** `mousemove 1000 0 200` (about 200 counts) turned the yaw by 3021 units (expected 2913 = 200 x 0.08 deg x
+  65536 / 360 within the test's timing); the same going back; up / down turn the pitch by about 125 units per update per
+  500 counts a second. Right turns the yaw down, up raises the pitch, as the stick does.
+* **Aiming:** the HBG aims with the mouse (`aim turn` lines: the hunter's yaw and the eye pitch move). With the Bow's R the
+  camera's own stick handler keeps running, so the camera path turns it (the hunter follows the camera): works, but it
+  is not the aim-turn path.
+* **Village / Hub:** the camera turns with the mouse through the right stick fallback (screenshots before / after a
+  1.2 s mouse move: the view is rotated). It is a speed, not an angle per count, with the stick's dead zone: slow precise
+  turns are not possible there. The village camera class (`uVillageCamera` exists) was not located: a function-first-call
+  diff (`fnnew`) while the stick turns it found nothing, because its update runs all the time and only its data changes.
+* **Gap, not fixed:** while the mouse is captured and a menu is open in a village, the stick fallback reaches the menu
+  (the menu view folds the right stick onto the D-pad): moving the mouse right turned the Plus menu's page. There is no
+  signal for "a menu has the pad" outside the action layer (`f_6eeb78` is a registration function, not a getter). Capture
+  = Hunt (below) frees the mouse in menus of a hunt; in a village click-to-capture stays, so Esc frees it.
+
+New `[Mouse]` settings (settings menu: Controls tab, Spanish strings; live, no restart):
+
+| key | default | what |
+|---|---|---|
+| `MouseSensitivityY` | 1.0 | times the vertical angle per count, on top of `MouseSensitivity` (0.1 - 10) |
+| `MouseInvertY` | Off | up / down turned round, on top of the game's own invert options |
+| `MouseSmoothing` | 0.0 | 0 .. 0.9: each update takes (1 - s) of the counts waiting, the rest trails (hunt camera only; the same total turn: measured 101 + 164 + 196 ... decaying 5, 3, 1 against 240 a step unsmoothed) |
+| `MouseCapture` | Click | Click: a click in the window captures the mouse. Hunt: also captured by itself while the hunt camera is the mouse's (its handler ran in the last 200 ms), free again in menus, cutscenes and villages; Esc or losing focus stops it until a click or the hunt is over |
+
+Measured with `MouseSensitivityY=2 MouseInvertY=On MouseSmoothing=0.6`: the pitch per update went from +125 to -240 (twice,
+reversed), the yaw ramped up and trailed off. The mouse buttons bound to actions (`[Actions.Kbm]`) work while captured
+(the capture is the same, `mouse_held`), also with the automatic capture.

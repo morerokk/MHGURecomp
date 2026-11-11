@@ -523,6 +523,12 @@ static inline const char *settings_text(int language, const char *english) {
         {"Walk slows the left stick's movement while it is held. The keys move the stick, so the game's own Control Type options apply.", "Caminar frena el movimiento del stick izquierdo mientras se mantiene. Las teclas mueven el stick, así que se aplican las opciones de tipo de control del juego."},
         {"What a key presses on the Switch controller. An action left on Default reads these; an action with a key of its own does not.", "Lo que una tecla pulsa en el mando de Switch. Una acción en Predeterminado lee estas; una acción con tecla propia no."},
         {"What the list and the drawing show: one part of the game at a time. L1 / R1 on a controller go through them. Keys: the keys that are not actions (movement, the item bar, chat).", "Lo que muestran la lista y el dibujo: una parte del juego cada vez. L1 / R1 en un mando las recorren. Teclas: las teclas que no son acciones (movimiento, barra de objetos, chat)."},
+        {"Vertical sensitivity", "Sensibilidad vertical"},
+        {"Invert mouse Y", "Invertir el ratón en vertical"},
+        {"Mouse smoothing", "Suavizado del ratón"},
+        {"Mouse capture", "Captura del ratón"},
+        {"Click", "Clic"},
+        {"Mouse sensitivity must be 0.1-10 and smoothing 0-0.9.", "La sensibilidad del ratón debe estar entre 0,1 y 10 y el suavizado entre 0 y 0,9."},
     };
     for (unsigned i = 0; i < sizeof messages / sizeof *messages; ++i)
         if (!strcmp(english, messages[i].en)) return messages[i].es;
