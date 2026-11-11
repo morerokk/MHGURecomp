@@ -31,6 +31,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +39,7 @@
 #include "../config.h"
 #include "../hle.h"
 #include "menuptr.h"
+#include "menuptr_table.h"
 
 #define FN_CURSOR_UPDATE 0x74ee98u  // (cursor, pad bits) -> nonzero when it moved
 #define FN_GRID_UPDATE   0x7530d4u
@@ -152,39 +154,53 @@ void menuptr_learned(const MenuGeom *g) {
     }
 }
 
+// One line of menus_learned.txt (or of the shipped table); false: not a geometry or a row's place
+static bool geoms_line(const char *line) {
+    MenuGeom g = {0};
+    int row;
+    if (sscanf(line, "%x off %d %f %f %f %f %f", &g.lr, &row, &g.ox, &g.oy, &g.z, &g.kw, &g.kh) == 7) {
+        MenuGeom *o = geom_kind_sig(&g);  // (a row of a geometry above: its bar's signature tells which)
+        if (o && row >= 0 && row < MENUPTR_ROWS) {
+            if (!(o->offmask & 1)) o->offmask |= 1, o->offx[0] = o->offy[0] = 0;
+            o->offmask |= 1u << row, o->offx[row] = g.ox, o->offy[row] = g.oy;
+        }
+        return o != NULL;
+    }
+    // lr x y w h dx dy [z kw kh ox oy [cdx cdy]]: older lines have no bar signature (a fixed place) or no columns
+    int k = sscanf(line, "%x %f %f %f %f %f %f %f %f %f %f %f %f %f", &g.lr, &g.x, &g.y, &g.w, &g.h, &g.dx, &g.dy, &g.z,
+                   &g.kw, &g.kh, &g.ox, &g.oy, &g.cdx, &g.cdy);
+    if (k != 7 && k != 12 && k != 14) return false;
+    if (k == 7) g.z = g.kw = g.kh = g.ox = g.oy = 0;
+    if (k < 14) g.cdx = g.cdy = 0;
+    if (is_builtin(g.lr)) return false;
+    geom_put(&g);
+    return true;
+}
+
 static void geoms_load(void) {
     g_no_builtin = getenv("MHGU_MENUPTR_NO_BUILTIN") != NULL;
     for (unsigned i = 0; i < sizeof builtin / sizeof *builtin && !g_no_builtin; i++) geom_put(&builtin[i]);
+    // the menus the recomp ships (learned in playthroughs: menuptr_table.h), then the player's own, which add to them
+    int shipped = 0;
+    if (!g_no_builtin && !getenv("MHGU_MENUPTR_NO_SHIPPED"))
+        for (const char *s = menuptr_shipped; *s;) {
+            const char *nl = strchr(s, '\n');
+            char line[256];
+            snprintf(line, sizeof line, "%.*s", (int)(nl ? nl - s : (ptrdiff_t)strlen(s)), s);
+            shipped += geoms_line(line);
+            s = nl ? nl + 1 : s + strlen(s);
+        }
     char ini[1100];
     config_path(ini, sizeof ini);
     char *slash = strrchr(ini, '/'), *bslash = strrchr(ini, '\\');
     if (bslash > slash) slash = bslash;
     snprintf(g_learned_path, sizeof g_learned_path, "%.*smenus_learned.txt", slash ? (int)(slash - ini + 1) : 0, ini);
     FILE *f = fopen(g_learned_path, "r");
-    if (!f) return;
     char line[256];
     int n = 0;
-    while (fgets(line, sizeof line, f)) {  // (later lines win: a menu learned again)
-        MenuGeom g = {0};
-        int row;
-        if (sscanf(line, "%x off %d %f %f %f %f %f", &g.lr, &row, &g.ox, &g.oy, &g.z, &g.kw, &g.kh) == 7) {
-            MenuGeom *o = geom_kind_sig(&g);  // (a row of a geometry above: its bar's signature tells which)
-            if (o && row >= 0 && row < MENUPTR_ROWS) {
-                if (!(o->offmask & 1)) o->offmask |= 1, o->offx[0] = o->offy[0] = 0;
-                o->offmask |= 1u << row, o->offx[row] = g.ox, o->offy[row] = g.oy;
-            }
-            continue;
-        }
-        // lr x y w h dx dy [z kw kh ox oy [cdx cdy]]: older lines have no bar signature (a fixed place) or no columns
-        int k = sscanf(line, "%x %f %f %f %f %f %f %f %f %f %f %f %f %f", &g.lr, &g.x, &g.y, &g.w, &g.h, &g.dx, &g.dy, &g.z,
-                       &g.kw, &g.kh, &g.ox, &g.oy, &g.cdx, &g.cdy);
-        if (k != 7 && k != 12 && k != 14) continue;
-        if (k == 7) g.z = g.kw = g.kh = g.ox = g.oy = 0;
-        if (k < 14) g.cdx = g.cdy = 0;
-        if (!is_builtin(g.lr)) geom_put(&g), n++;
-    }
-    fclose(f);
-    LOG("[menuptr] %d learned menu line(s) from %s\n", n, g_learned_path);
+    while (f && fgets(line, sizeof line, f)) n += geoms_line(line);  // (later lines win: a menu learned again)
+    if (f) fclose(f);
+    LOG("[menuptr] %d shipped menu line(s), %d learned from %s\n", shipped, n, f ? g_learned_path : "(none yet)");
 }
 
 static void write_offset(const MenuGeom *g, int row) {

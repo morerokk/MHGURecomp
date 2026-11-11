@@ -581,6 +581,15 @@ the cell's (the frame sits 4 pixels outside it), the cells are one step each way
 a grid gets the bits its own paging masks return (`0x85f8c4` previous, `0x85f914` next: L / R in the item box), a list
 Left / Right (as the pause menu's arrows).
 
+What ships: `runtime/hle/menuptr_table.h`, made by `tools/menus_table.py` from menus_learned.txt files of playthroughs
+(`python tools/menus_table.py <menus_learned.txt>...`; it reads the table's own lines first, so a new playthrough adds to
+it). It merges them as the game does, leaves out a call's fixed-place lines once it has a geometry with a signature, and
+writes one line per geometry and per row place. The game parses it at start-up before the player's own
+menus_learned.txt, which can still add menus and correct places; learning stays on for menus the table lacks.
+`MHGU_MENUPTR_NO_SHIPPED=1` leaves it out (with `MHGU_MENUPTR_NO_BUILTIN=1`, both are). First table (2026-11-11): 44
+menus from one playthrough with the test save (title, village and hunt menus, item and equipment sets, the
+Multiplayer menu, the item box).
+
 `host_input.c` lets the mouse go while a known menu is open (and, in a hunt, while a screen it opened is: the pause
 handler `f_86eeec` is still stopped), puts the pointer on the selected row when the mouse was captured, and makes a left
 click pick a row (Confirm once it is selected; the pause menu's arrows turn its page), a right click Cancel, the wheel
