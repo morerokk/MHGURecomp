@@ -119,6 +119,11 @@ static void act_wheel_step(void) {
 static bool mouse_grab;       // the player's choice: clicked in (true) or Esc / focus lost (false)
 static bool mouse_captured;   // relative mode on now (grabbed, and no Forge menu open)
 static bool mouse_no_capture; // relative mode refused (WSLg, some Wayland compositors): clicks are buttons, no mouse look
+static int mouse_look_button(void);
+void host_input_mouse_status(void);
+static volatile bool g_hunt_ctx;  // the hunt camera is the mouse's (its handler ran in the last 400 ms): mouse look is captured
+static bool look_down;        // the village look button is held (mouse_update: captured while it is)
+static uint64_t last_motion_ns;  // the pointer moved last (the cursor shows for a while after, even full screen)
 static bool mouse_released;   // Esc / focus lost: no automatic capture (MouseCapture = Hunt) until a click or the hunt is over
 static float mouse_dx, mouse_dy;  // counts moved since the last update
 // (tests: the control file's "mousemove <x> <y> <ms>", a mouse moving at that many counts a second, captured or not)
@@ -548,7 +553,15 @@ static void control_poll(void) {
                 continue;
             }
             if (!strcmp(cmd, "actstat")) { input_view_status(); continue; }
-            if (!strcmp(cmd, "camstat")) { mousecam_status(); continue; }
+            if (!strcmp(cmd, "camstat")) { mousecam_status(); host_input_mouse_status(); continue; }
+            if (!strcmp(cmd, "mousebtn")) {  // mousebtn <1-5> <0|1>: that mouse button pressed / released (tests: SDL's own event)
+                SDL_Event b = {0};
+                int down = atoi(arg2);
+                b.button.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP, b.button.button = (Uint8)atoi(arg);
+                b.button.down = down != 0, b.button.clicks = 1;
+                SDL_PushEvent(&b);
+                continue;
+            }
             if (!strcmp(cmd, "weapon")) {  // weapon <type 0-14> [id]: (debug) the local hunter holds that weapon type (before "depart")
                 uint32_t T = (uint32_t)atoi(arg), id = (uint32_t)strtoul(arg2, NULL, 0);
                 uint32_t sp = LD32(0x1a85b58u), gc = LD32(0x1a8ca48u), slot = LD32(gc + 0x30);
@@ -763,10 +776,11 @@ void host_input_event(const SDL_Event *e) {
         break;
     case SDL_EVENT_MOUSE_MOTION:
         if (mouse_captured) mouse_dx += e->motion.xrel, mouse_dy += e->motion.yrel;
+        else last_motion_ns = plat_now_ns();
         break;
     case SDL_EVENT_MOUSE_WHEEL: {  // (what [Keybinds] says: by default the item bar)
         int n = wheel_notches(e);
-        if (mouse_captured && n) wheel_turn(n);
+        if ((mouse_captured || !g_hunt_ctx) && n) wheel_turn(n);  // (a free pointer's wheel scrolls menus, too)
         break;
     }
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: {
@@ -774,9 +788,13 @@ void host_input_event(const SDL_Event *e) {
         if (btn < 1 || btn > SDL_BUTTON_X2) break;
         if (!e->button.down) {
             mouse_held &= ~(1u << btn);
+            if (btn == mouse_look_button()) look_down = false;
         } else if (host_input_mouse_free()) {
             break;  // (a mod's free pointer: the click is the mod's only)
-        } else if (!mouse_captured && !mouse_no_capture) {  // (the click that captures the mouse is not a button press)
+        } else if (btn == mouse_look_button() && !g_hunt_ctx) {
+            look_down = true;  // (the village look button: held to turn the camera, not a game button)
+        } else if (!mouse_captured && !mouse_no_capture && (g_hunt_ctx || config_live_mouse_village_look() == MVL_ALWAYS)) {
+            // (the click that captures the mouse is not a button press; elsewhere a click is a button: free pointer)
             if (!mouse_grab) LOG("[input] capturing the mouse\n");
             mouse_grab = true, mouse_released = false;
         } else {
@@ -786,7 +804,7 @@ void host_input_event(const SDL_Event *e) {
     }
     case SDL_EVENT_WINDOW_FOCUS_LOST:
         memset(keys, 0, sizeof keys);
-        mouse_held = 0, mouse_grab = false, mouse_released = true;
+        mouse_held = 0, mouse_grab = false, mouse_released = true, look_down = false;
         config_window_focus(false);  // ([Audio] MuteInBackground)
         if (config_editable().mute_in_background) LOG("[input] window in the background: sound muted\n");
         break;
@@ -806,16 +824,54 @@ void host_input_event(const SDL_Event *e) {
 static int32_t clamp_axis(int v) { return v < -32767 ? -32767 : v > 32767 ? 32767 : v; }
 
 // Capture or release the mouse as wanted, and give its movement to the hunt camera or the right stick.
+// The mouse button that turns the camera in a village (0: none). Auto: the first of right, middle, 5th, 4th that no
+// action or keybind uses, so that holding it never also presses a game button.
+static bool mouse_button_in_use(int b) {
+    int code = KEY_MOUSE + b;
+    if (act_uses_input(code)) return true;
+    for (int i = 0; i < BINDS; i++)
+        for (int k = 0; k < BIND_KEYS; k++)
+            if (config_live_bind(i, k) == code) return true;
+    return false;
+}
+static int mouse_look_button(void) {
+    switch (config_live_mouse_village_look()) {
+    case MVL_RIGHT: return SDL_BUTTON_RIGHT;
+    case MVL_MIDDLE: return SDL_BUTTON_MIDDLE;
+    case MVL_X1: return SDL_BUTTON_X1;
+    case MVL_X2: return SDL_BUTTON_X2;
+    case MVL_AUTO: {
+        static const int order[] = {SDL_BUTTON_RIGHT, SDL_BUTTON_MIDDLE, SDL_BUTTON_X2, SDL_BUTTON_X1};
+        for (unsigned i = 0; i < sizeof order / sizeof *order; i++)
+            if (!mouse_button_in_use(order[i])) return order[i];
+        return 0;
+    }
+    }
+    return 0;  // (Always, Off)
+}
+void host_input_mouse_status(void) {
+    LOG("[mouse] hunt camera %d, hunt menu %d, captured %d, grab %d, look button %d (%s), cursor shown %d\n", g_hunt_ctx,
+        input_view_hunt_menu_open(), mouse_captured, mouse_grab, mouse_look_button(), look_down ? "held" : "up", !mouse_captured);
+}
+
 static void mouse_update(int *rx, int *ry) {
     // (Forge's menu, the chat box, a mod's free pointer: the pointer is theirs)
-    // (MouseCapture = Hunt: the hunt camera being the mouse's also captures it, until Esc or the window losing focus
-    // let it go; free again when the camera stops asking: menus, cutscenes, villages)
+    // In a hunt the camera handler running means the mouse is the camera's: captured after a click (MouseCapture = Click)
+    // or by itself (Hunt); a menu, a cutscene or a carve stops the handler and the mouse is free again (cursor shown, a
+    // click is a button) until it runs again. Elsewhere (villages, the Hub, the title, menus) the mouse is a free pointer
+    // too, and it is captured only while the village look button is held (VillageLook; Always: a click captures it).
     static uint64_t cam_seen_ns;
-    if (mousecam_active()) cam_seen_ns = plat_now_ns();
-    else if (mouse_released && plat_now_ns() - cam_seen_ns > 500000000ull) mouse_released = false;
-    bool auto_cap = config_live_mouse_capture() == MOUSE_CAPTURE_HUNT && mousecam_active() && !mouse_released && !mouse_no_capture;
+    uint64_t now0 = plat_now_ns();
+    if (mousecam_active()) cam_seen_ns = now0;
+    else if (mouse_released && now0 - cam_seen_ns > 500000000ull) mouse_released = false;
+    bool hunt = mousecam_active() || now0 - cam_seen_ns < 400000000ull;
+    if (!hunt) input_view_hunt_menu_reset();  // (a new hunt starts with no menu)
+    bool hunt_menu = hunt && input_view_hunt_menu_open();  // the hunt's pause menu: the camera is not the mouse's meanwhile
+    g_hunt_ctx = hunt && !hunt_menu;
+    bool auto_cap = config_live_mouse_capture() == MOUSE_CAPTURE_HUNT && mousecam_active() && !hunt_menu && !mouse_released && !mouse_no_capture;
     if (auto_cap && !mouse_captured) LOG("[input] capturing the mouse (a hunt)\n");
-    bool want = (mouse_grab || auto_cap) && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
+    bool look = !hunt && !mouse_no_capture && ((look_down && mouse_look_button()) || (config_live_mouse_village_look() == MVL_ALWAYS && mouse_grab));
+    bool want = ((g_hunt_ctx && (mouse_grab || auto_cap)) || look) && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
     SDL_Window *w = ui_window();
     if (want != mouse_captured && w) {
         if (SDL_SetWindowRelativeMouseMode(w, want) || !want) {
@@ -828,7 +884,7 @@ static void mouse_update(int *rx, int *ry) {
     }
     // (full screen hides the pointer: shown while the chat box can be dragged or a mod has the mouse free)
     static bool pointer_shown;
-    bool show = chat_active() || host_input_mouse_free();
+    bool show = chat_active() || host_input_mouse_free() || (!mouse_captured && plat_now_ns() - last_motion_ns < 3000000000ull);
     if (show != pointer_shown && w) {
         pointer_shown = show;
         if (show) SDL_ShowCursor();

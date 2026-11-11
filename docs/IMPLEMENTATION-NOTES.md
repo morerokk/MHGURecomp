@@ -496,13 +496,41 @@ camera's yaw / pitch before and after, control command `camstat` prints where th
   No "a menu has the input" signal is needed for this. Measured in the Plus menu of a village (hidden run, mouse moved
   right, left, up and down at 1000 counts/s for 0.5 s each): mb2 `cur` stays 0, the page stays 1/2 and Item Pouch stays
   selected; with the menu closed the same mouse movement turns the village camera.
-* **Not done: releasing the mouse while a menu is open.** A signal for "a menu has the input" was looked for (the 373
-  mb2 readers of the research's consumers.csv, hooked in a probe, one hidden run: walking idle, Plus menu, pouch, item
-  box, smithy). Many readers (`f_3cee88`, `f_86eeec`, `f_7b3d1c`, `f_992728`, `f_993424`, `f_937120`) run every update
-  in a village with no menu open (they are the always-on prompts: Multiplayer Menu / World Map / Hunter Search), so
-  "a reader ran" is not a signal, and the run's scenarios were too coarse to find one that is. The mouse therefore stays
-  captured (cursor hidden) in the village menus for `MouseCapture=Click`; it now does nothing there. `MouseCapture=Hunt`
-  frees it in the menus of a hunt as before; Esc frees it anywhere.
+* **The cursor in menus (done, not by a global "menu open" signal).** A global flag was searched for again: snapshots of the
+  guest heap (1 MB chunks, 0x0c000000+, about 70 mapped) in a village idle, Plus menu, pouch, map and item box, diffed for
+  words that flip in all of them and stay put otherwise, gave one candidate (`0x0c019eec`, 1 idle / 2 in the Plus menu, the
+  map and the item box; it is a field of a pooled UI block, the hot-button HUD panel's state) that did not flip in NPC
+  dialogs (shop, quest board) and sits at an address that depends on the heap layout of the run, so it is not used. What
+  is used instead:
+  * **A free pointer by default.** Outside a hunt's camera (villages, the Hub, the title, every menu) the mouse is not
+    captured: the cursor shows (full screen too, for 3 s after it moved), a click is the game's button (`mouse:left` etc.
+    of `[Actions.Kbm]` or `[Keybinds]`, no capture click) and the wheel scrolls menus. The right stick is not fed by the
+    mouse there, so nothing moves by itself.
+  * **Village look: hold a button.** `[Mouse] VillageLook` (Controls tab, "Village camera look"): Auto (default; the first
+    of right, middle, 5th, 4th mouse button that no action and no keybind uses, so holding it never also presses a game
+    button), Right, Middle, X1, X2, Always (the old behaviour: a click captures the mouse everywhere, the cursor is
+    hidden), Off. While it is held the mouse is captured and turns the camera through the right stick (those cameras have
+    no direct angle path); the menus still never see that stick (815543e). NOTE: in the harness's village spot neither the
+    mouse nor the controller's own right stick turned the camera in a screenshot comparison (noise 4.7, stick held 6.1), so
+    whether a village camera turns at all was not shown; the earlier "free look turns the village camera" check compared
+    screenshots at about the noise level.
+  * **A hunt's pause menu releases the mouse.** In a hunt the Plus menu does not pause and the camera handler keeps
+    running (the mouse still turned the camera with the menu open), so the camera handler is no signal there. The hunt's
+    pause menu handler `f_86eeec` runs every update of a hunt except while the pause menu (and the pouch it opens) is open
+    (quest 101, `fntrace`: 3 of 3 idle, 0 of 3 in the Plus menu, 0 of 3 in the pouch, 3 of 3 closed, 3 of 3 in the map,
+    which is not modal). It is hooked (`hle/input_view.c`, always, only when nothing else hooks it); not seen for 300 ms
+    after it ran in this hunt = the menu is open (`input_view_hunt_menu_open`, reset when no hunt runs). Then the mouse is
+    released and the cursor shown, a click is a button; when the menu closes it is captured again (`MouseCapture` Click
+    keeps your click, Hunt captures by itself). Measured with `camstat` (now also prints the mouse state: hunt camera,
+    hunt menu, captured, grab, look button, cursor shown): Plus menu `hunt menu 1 captured 0 cursor shown 1`, closed `hunt
+    menu 0 captured 1`, in both capture modes. Other hunt modals (a dialog from an NPC at a camp, the quest result)
+    were not checked: they keep the mouse captured if that handler keeps running there.
+  * Control commands for tests: `mousebtn <1-5> <0|1>` (an SDL button event; the "look" button is `5` with the default
+    bindings), `camstat`.
+  * Verified (hidden runs): village idle `captured 0 cursor shown 1`; look button held `captured 1 cursor shown 0`; released
+    `captured 0`; in the Plus menu a click on a row (`MenuConfirm = mouse:left`) opened the Item Pouch with the cursor
+    visible; look held with the Plus menu open and the mouse moved: page and row unchanged. Hunt (quest 101) in both
+    capture modes as above, the camera yaw turned by the same amount per count as before (`071d` -> `ea99` -> `eac4`).
 New `[Mouse]` settings (settings menu: Controls tab, Spanish strings; live, no restart):
 
 | key | default | what |
@@ -511,6 +539,7 @@ New `[Mouse]` settings (settings menu: Controls tab, Spanish strings; live, no r
 | `MouseInvertY` | Off | up / down turned round, on top of the game's own invert options |
 | `MouseSmoothing` | 0.0 | 0 .. 0.9: each update takes (1 - s) of the counts waiting, the rest trails (hunt camera only; the same total turn: measured 101 + 164 + 196 ... decaying 5, 3, 1 against 240 a step unsmoothed) |
 | `MouseCapture` | Click | Click: a click in the window captures the mouse. Hunt: also captured by itself while the hunt camera is the mouse's (its handler ran in the last 200 ms), free again in menus, cutscenes and villages; Esc or losing focus stops it until a click or the hunt is over |
+| `VillageLook` | Auto | what turns the camera in villages, the Hub and menus while held (Auto, Right, Middle, X1, X2, Always, Off); the mouse is a free pointer otherwise |
 
 Measured with `MouseSensitivityY=2 MouseInvertY=On MouseSmoothing=0.6`: the pitch per update went from +125 to -240 (twice,
 reversed), the yaw ramped up and trailed off. The mouse buttons bound to actions (`[Actions.Kbm]`) work while captured

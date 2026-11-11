@@ -374,6 +374,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(mouse_invert_y);
     SAME(mouse_smoothing);
     SAME(mouse_capture);
+    SAME(mouse_village_look);
     SAME(aspect_ratio);
     SAME(fov);
     SAME(ui_anchor);
@@ -1661,6 +1662,7 @@ void reset_section() {
         c.mouse_invert_y = f.mouse_invert_y;
         c.mouse_smoothing = f.mouse_smoothing;
         c.mouse_capture = f.mouse_capture;
+        c.mouse_village_look = f.mouse_village_look;
         SDL_strlcpy(c.chat_key, f.chat_key, sizeof c.chat_key);
         memcpy(c.binds, f.binds, sizeof c.binds);
         break;
@@ -2086,6 +2088,10 @@ std::vector<Row> main_rows() {
         number(r, "mouse.smooth", tr("Mouse smoothing"), &c.mouse_smoothing, lo("MouseSmoothing"), hi("MouseSmoothing"), .05f, ini("MouseSmoothing"));
         add_choice(r, "mouse.capture", "Mouse capture", c.mouse_capture, {tr("Click"), tr("Hunt")},
                    [](int v) { c.mouse_capture = v; }, ini("MouseCapture"));
+        add_choice(r, "mouse.look", "Village camera look", c.mouse_village_look,
+                   {tr("Auto"), tr("Right"), tr("Middle"), tr("Mouse 4"), tr("Mouse 5"), tr("Always"), tr("Off")},
+                   [](int v) { c.mouse_village_look = v; }, ini("VillageLook"));
+        r.back().help = tr("Villages, the Hub and the menus: the mouse is a free pointer. This is what turns the camera there while held: Auto picks a mouse button no action or keybind uses; Always captures the mouse everywhere with a click, as in a hunt (the cursor is hidden).");
         action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
         r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons, for moving and for the item bar, and the chat key.");
         action(r, "actions", tr("Game actions"), []() { push(View::Actions, "act.enable"); });

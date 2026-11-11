@@ -98,6 +98,7 @@
     .mouse_invert_y = 0,                                                                            \
     .mouse_smoothing = 0.0f,                                                                        \
     .mouse_capture = MOUSE_CAPTURE_CLICK,                                                           \
+    .mouse_village_look = MVL_AUTO,                                                                 \
     /* [Keybinds] */                                                                                \
     .binds = DEFAULT_BINDS,                                                                         \
     /* [Multiplayer] */                                                                             \
@@ -383,6 +384,12 @@ static const char DEFAULT_INI[] =
     "; hunt camera is yours, and free in menus and cutscenes\n"
     "; Default: Click\n"
     "MouseCapture = Click\n"
+    "\n"
+    "; Villages, the Hub and the menus: the mouse is a free pointer (the cursor shows, a click is a button, the wheel scrolls).\n"
+    "; What turns the camera there while held: Auto (the first mouse button no action or keybind uses: right, middle, 5th,\n"
+    "; 4th), Right, Middle, X1, X2, Always (a click captures the mouse everywhere, as in a hunt: the cursor is hidden) or Off\n"
+    "; Default: Auto\n"
+    "VillageLook = Auto\n"
     "\n"
     "[Keybinds]\n"
     "; The keys or mouse buttons for each Switch button, for moving (the left stick) and for turning the item bar\n"
@@ -765,6 +772,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Mouse", "MouseInvertY", mouse_invert_y, false),
     {"Mouse", "MouseSmoothing", SET_FLOAT, F(mouse_smoothing), 0, 0.0f, 0.9f, NULL, NULL, false, ERR_MOUSE},
     {"Mouse", "MouseCapture", SET_CHOICE, F(mouse_capture), 0, 0, 0, "Click,Hunt", NULL, false, ERR_MISC},
+    {"Mouse", "VillageLook", SET_CHOICE, F(mouse_village_look), 0, 0, 0, "Auto,Right,Middle,X1,X2,Always,Off", NULL, false, ERR_MISC},
     KEYS("MoveUp", BIND_MOVE_UP), KEYS("MoveDown", BIND_MOVE_DOWN), KEYS("MoveLeft", BIND_MOVE_LEFT),
     KEYS("MoveRight", BIND_MOVE_RIGHT), KEYS("Walk", BIND_WALK), KEYS("A", BIND_A), KEYS("B", BIND_B), KEYS("X", BIND_X),
     KEYS("Y", BIND_Y), KEYS("L", BIND_L), KEYS("R", BIND_R), KEYS("ZL", BIND_ZL), KEYS("ZR", BIND_ZR),

@@ -527,6 +527,13 @@ static inline const char *settings_text(int language, const char *english) {
         {"Invert mouse Y", "Invertir el ratón en vertical"},
         {"Mouse smoothing", "Suavizado del ratón"},
         {"Mouse capture", "Captura del ratón"},
+        {"Village camera look", "Mirar en aldeas"},
+        {"Mouse 4", "Ratón 4"},
+        {"Mouse 5", "Ratón 5"},
+        {"Always", "Siempre"},
+        {"Middle", "Central"},
+        {"Villages, the Hub and the menus: the mouse is a free pointer. This is what turns the camera there while held: Auto picks a mouse button no action or keybind uses; Always captures the mouse everywhere with a click, as in a hunt (the cursor is hidden).",
+         "Aldeas, la Sala de reunión y los menús: el ratón es un puntero libre. Esto es lo que gira allí la cámara mientras se mantiene: Automático elige un botón del ratón que ninguna acción ni tecla use; Siempre captura el ratón en todas partes con un clic, como en una caza (el cursor se oculta)."},
         {"Click", "Clic"},
         {"Mouse sensitivity must be 0.1-10 and smoothing 0-0.9.", "La sensibilidad del ratón debe estar entre 0,1 y 10 y el suavizado entre 0 y 0,9."},
     };

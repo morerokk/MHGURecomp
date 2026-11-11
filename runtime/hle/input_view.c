@@ -29,6 +29,10 @@
 #define FN_MB_UPDATE   0x5de064u  // (button object) cur / prev / trig / rel and the pointer block from the pad's word
 #define FN_TR_MB1      0x5de4b0u  // (button object, r1 = engine word) -> the gameplay word
 #define FN_TR_MB2      0x5de4f8u  // (button object, r1 = engine word) -> the menu word
+#define FN_HUNT_MENU   0x86eeecu  // the hunt's pause menu handler: runs every update of a hunt except while the pause menu
+                                  // (and what it opens: the item pouch...) is open. Measured in quest 101: 3 of 3 samples
+                                  // idle, 0 of 3 in the Plus menu and in the pouch, 3 of 3 again once closed
+#define HUNT_MENU_STALE_NS 300000000ull
 #define FN_PLAYER      0x4a79ccu  // the hunter's update (r0 = the player)
 #define FN_TOWN        0x48d1f0u  // the town avatar's update
 #define FN_PL_IS_LOCAL 0x47bcd0u  // (player) 1: ours
@@ -81,6 +85,7 @@ static bool g_kclog;           // MHGU_ACTION_KCLOG=1: log each return address t
 static uint32_t g_kc_seen[256];
 static int g_kc_n;
 static bool g_on;      // the layer is on this frame ([Actions] Enable; the settings menu can turn it on and off)
+static volatile uint64_t g_hunt_menu_ns;  // when that handler last ran (0: not in this hunt yet)
 static bool g_mb2_own;  // the menu translator's hook is in (always: input_view_init)
 static bool g_hooked;  // the hooks are in (from the first time it was on)
 
@@ -251,6 +256,17 @@ static uint32_t menu_word_without_mouse(uint32_t w) {
     if (rx < -RS_THRESHOLD) keep |= 0x10800000u;
     return (w & ~RS_DIR_BITS) | (w & keep);
 }
+static void hunt_menu_seen(Cpu *c) {
+    g_hunt_menu_ns = plat_now_ns();
+    fnhook_call_original(c, FN_HUNT_MENU);
+}
+// A hunt's pause menu is open: the handler has not run for a moment although it ran before in this hunt (any thread; only
+// meaningful while a hunt's camera is the mouse's: host_input.c). Villages run the same function always.
+bool input_view_hunt_menu_open(void) {
+    uint64_t seen = g_hunt_menu_ns;
+    return seen && plat_now_ns() - seen > HUNT_MENU_STALE_NS;
+}
+void input_view_hunt_menu_reset(void) { g_hunt_menu_ns = 0; }
 static void tr_mb2(Cpu *c) {
     c->r[1] = menu_word_without_mouse(c->r[1]);
     if (g_on && g_menus) tr_view(c, ACT_VIEW_MB2, 1, FN_TR_MB2);
@@ -288,6 +304,8 @@ void input_view_init(void) {
     act_init(path);
     // the menu translator is always ours (the mouse's stick feed, tr_mb2); the rest only with the layer on
     if (!fnhook_get(FN_TR_MB2)) fnhook_set(FN_TR_MB2, hle_register("inputview:tr_mb2", tr_mb2)), g_mb2_own = true;
+    // (and the hunt's pause menu handler: the mouse is free while that menu is open, host_input.c mouse_update)
+    if (!fnhook_get(FN_HUNT_MENU)) fnhook_set(FN_HUNT_MENU, hle_register("inputview:hunt_menu", hunt_menu_seen));
     input_view_apply();
 }
 

@@ -53,12 +53,12 @@ int main(int argc, char **argv) {
     assert(fabsf(config_live_fov()-1.6f)<0.001f && fabsf(config_live_fps()-144.5f)<0.001f);
     float camera_before=camera_fovy(0.5f,g_render_aspect);
     c.menu_confirm = MENU_CONFIRM_SOUTH; c.menu_scale = 170; c.fps = 120; c.fov = 1.2f; c.volume = 25; c.confirm_exit = 0; c.language = 1; c.button_icons = 2;
-    c.fxaa=0; c.msaa=4; c.vsync=0; c.face_buttons=FACE_LABEL; c.background_input=0; c.mouse_sensitivity=2.5f; c.mouse_sensitivity_y=1.5f; c.mouse_invert_y=1; c.mouse_smoothing=0.5f; c.mouse_capture=MOUSE_CAPTURE_HUNT;
+    c.fxaa=0; c.msaa=4; c.vsync=0; c.face_buttons=FACE_LABEL; c.background_input=0; c.mouse_sensitivity=2.5f; c.mouse_sensitivity_y=1.5f; c.mouse_invert_y=1; c.mouse_smoothing=0.5f; c.mouse_capture=MOUSE_CAPTURE_HUNT; c.mouse_village_look=MVL_ALWAYS;
     assert(config_save(&c,error,sizeof error) && !config_restart_required(&c));
     assert(config_live_fps()==120 && fabsf(config_live_fov()-1.2f)<0.001f);
     assert(config_live_msaa()==4 && !config_live_vsync() && !config_live_fxaa());
     assert(config_live_face_buttons()==FACE_LABEL && !config_live_background_input());
-    assert(config_live_mouse_sensitivity_y()==1.5f && config_live_mouse_invert_y()==1 && config_live_mouse_smoothing()==0.5f && config_live_mouse_capture()==MOUSE_CAPTURE_HUNT);
+    assert(config_live_mouse_sensitivity_y()==1.5f && config_live_mouse_invert_y()==1 && config_live_mouse_smoothing()==0.5f && config_live_mouse_capture()==MOUSE_CAPTURE_HUNT && config_live_mouse_village_look()==MVL_ALWAYS);
     assert(config_live_mouse_sensitivity()==2.5f && camera_fovy(0.5f,g_render_aspect)<camera_before);
     assert(camera_fovy(0.5f,g_render_aspect*1.002f)<camera_before && camera_fovy(0.5f,g_render_aspect*1.1f)==0.5f); // (pixel rounding)
     float aspect_was=g_render_aspect; uint32_t size_was[2]={g_render_size[0],g_render_size[1]};

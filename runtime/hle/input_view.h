@@ -8,4 +8,6 @@ void input_view_init(void);          // loads [Actions*] and, with Enable=1, hoo
 bool input_view_dash_zr(void);       // the game's Control Type makes ZR the dash role (any thread; a frame late)
 int input_view_weapon(void);         // the weapon class the local hunter holds, 0..14 (-1: none seen)
 const char *input_view_context(void);  // "FIELD", "TOWN" or "MENU" (the last frames)
+bool input_view_hunt_menu_open(void);  // a hunt's pause menu (or the pouch...) is open: its handler stopped running (any thread)
+void input_view_hunt_menu_reset(void); // (the host, when no hunt is running: a new hunt starts with no menu)
 void input_view_status(void);        // log the layer's state (control command "actstat")
