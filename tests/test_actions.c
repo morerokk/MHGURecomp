@@ -863,6 +863,13 @@ static void test_crouch_not_moving(void) {
     p = parse("[Actions]\nEnable=1\n");
     act_use_profile(&p);
     CHECK(act_view(ACT_VIEW_MB1, stick, crouch, false) & 0x4000, "not split: Crouch is Dodge's B as before");
+    // split only because Dodge and Interact share an input: Crouch follows Dodge's input and is not stopped while moving
+    // (that input is the roll), weapon out or away
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nDodge = pad:south\nInteract = pad:south\n");
+    act_use_profile(&p);
+    for (int i = 0; i < 3; i++)
+        CHECK(act_view(views[i], stick, crouch | dodge, false) & 0x4000, "view %d: auto split, Dodge's input still rolls while moving", views[i]);
+    CHECK(act_view(ACT_VIEW_MB1, stick, crouch, false) & 0x4000, "auto split, weapon out: Crouch following Dodge is not stopped while moving");
 }
 
 int main(void) {

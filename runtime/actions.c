@@ -514,6 +514,8 @@ static ActProfile prof;
 static bool prof_on;
 static atomic_int prof_confirm = -1;  // the settings menu's confirm position from the Confirm binding (MENU_CONFIRM_*), -1 none
 static atomic_bool prof_split;  // act_split_in(prof), for the game thread
+static bool act_crouch_own_in(const ActProfile *p);
+static atomic_bool crouch_own_on;    // Crouch has a binding of its own (not only the one it follows from Dodge)
 static atomic_bool crouch_split_on;  // act_crouch_split_in(prof)
 static atomic_bool crouch_clash;     // Interact and Crouch end up on one input for some device or weapon class
 static atomic_ullong share_tab[ACT_VARS];  // act_interact_share, per weapon variant
@@ -622,6 +624,7 @@ void act_use_profile(const ActProfile *p) {
     atomic_store(&prof_split, act_split_in(p));
     atomic_store(&prof_confirm, p->enable ? confirm_policy_in(p) : -1);
     atomic_store(&crouch_split_on, act_crouch_split_in(p));
+    atomic_store(&crouch_own_on, act_crouch_own_in(p));
     atomic_store(&crouch_clash, act_crouch_clash_in(p, NULL));
     for (int v = 0; v < ACT_VARS; v++) atomic_store(&share_tab[v], share_in(p, v));
     atomic_store(&shared_frames_now, p->shared_frames > 0 ? p->shared_frames : 1);
@@ -652,6 +655,14 @@ static bool dodge_interact_overlap(const ActProfile *p) {
                 for (int e = 0; e < bd->n; e++)
                     if (chords_overlap(&bi->alt[a], &bd->alt[e])) return true;
         }
+    return false;
+}
+static bool act_crouch_own_in(const ActProfile *p) {
+    for (int d = 0; d < 2; d++) {
+        if (p->dev[d].base[ACT_CROUCH].set && p->dev[d].base[ACT_CROUCH].n > 0) return true;
+        for (int w = 0; w < ACT_WEAPONS; w++)
+            if (p->dev[d].weapon[w][ACT_CROUCH].set && p->dev[d].weapon[w][ACT_CROUCH].n > 0) return true;
+    }
     return false;
 }
 bool act_crouch_split_in(const ActProfile *p) {
@@ -1099,7 +1110,10 @@ static uint32_t scoped_bits(int i, uint32_t bits, uint32_t st, uint64_t active) 
     if (act_crouch_split()) {
         if (i == ACT_DODGE) forbid |= ST_AWAY_STILL;
         if (i == ACT_CROUCH) {
-            forbid |= ST_MOVING;  // (the stick pushed: Crouch never fires, with the weapon out or away; Dodge is the roll)
+            forbid |= ST_AWAY_MOVING;
+            // (only when Crouch has a binding of its own: then with the stick pushed it never fires, weapon out or
+            // away, and Dodge is the roll. Crouch following Dodge's input is not touched: that would stop the roll)
+            if (atomic_load(&crouch_own_on)) forbid |= ST_MOVING;
             if ((st & ST_AWAY_STILL) && (active >> ACT_INTERACT & 1) && atomic_load(&crouch_clash)) forbid |= ST_AWAY_STILL;
         }
     }
