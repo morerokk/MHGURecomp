@@ -560,6 +560,27 @@ four geometries (the one whose bar is on screen is used), and the menu the point
 known rows that last moved or appeared, while learning watches only cursors of more than one row (a section cursor
 never takes the focus). menus_learned.txt lines: `lr x y w h dx dy` (a fixed place, older) or with `z kw kh ox oy` after.
 
+Two more kinds of list came up in the playthrough. Item Sets and Equipment Sets (and the Multiplayer menu) don't use the
+list cursor: a heap diff around Down, Down, Up (`memsave` of 0x0c000000, 16 MB: one byte went 0, 1, 2, 1) and an
+`fntrace` filtered on its object found a grid cursor (vtable 0x196cb9c; +0x14 column, +0x15 row, +0x16 / +0x17 columns /
+rows a page, +0x18 / +0x1a page / pages, +0x1c items), updated through its vtable by `0x7530b8`, which runs `0x7530d4` or,
+when +0x1e is not 1, `0x7536e8`; both move the row by Up / Down. Both are hooked like the list cursor (grids of more than
+one column are seen but not done). The Multiplayer menu's rows sit under two group headers, so they are not one step
+apart: a geometry also keeps, for its first 16 rows, a row's own place from the first row's bar, written when the bar is
+seen on that row away from where the geometry put it (`lr off row x y z kw kh` lines; others are counted in steps from the
+nearest known row), and a bar seen again with another step (a jump across a gap) is the same list, only placed anew.
+
+Grids (the item box: call `0x9169dc`, 10 x 10 a page, 23 pages, 2300 items; the equipment box): a geometry has a column
+step (cdx, cdy) beside the row step, each learned from its own moves (Up / Down in one column, Left / Right in one row)
+and written as `lr x y w h dx dy z kw kh ox oy cdx cdy`. A cell is row * columns + column; the jump writes the target's
+column and puts the row one off (or, in the target's row, the column one off) and gives one step bit. The item box's
+cursor frame is drawn at matrix scale 1 (its size is in its vertices), so the learner, which skips pieces under 100
+square units, never saw it: a scale-1 piece is taken when it is the only piece that moved by whole cells, its corner is
+the cell's (the frame sits 4 pixels outside it), the cells are one step each way, and it is not followed every frame
+(many icons and letters on its layer have the same signature). The wheel turns the page of any menu of more than one:
+a grid gets the bits its own paging masks return (`0x85f8c4` previous, `0x85f914` next: L / R in the item box), a list
+Left / Right (as the pause menu's arrows).
+
 `host_input.c` lets the mouse go while a known menu is open (and, in a hunt, while a screen it opened is: the pause
 handler `f_86eeec` is still stopped), puts the pointer on the selected row when the mouse was captured, and makes a left
 click pick a row (Confirm once it is selected; the pause menu's arrows turn its page), a right click Cancel, the wheel

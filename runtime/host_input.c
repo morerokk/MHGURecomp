@@ -773,14 +773,15 @@ static bool menu_ptr_geometry(SDL_Window *w, float *left, float *top, float *sx,
         *left = ((float)ww - pw) / 2, *sx = pw / 1280.0f;
         return true;
     }
-    float x0 = 0, x1 = 1280;  // (the list's sideways extent: its first and last row)
+    float x0 = 0, x1 = 1280;  // (the menu's sideways extent: its first row's first and last cells, and its last cell)
     MenuGeom g;
     if (menuptr_geometry(&g)) {
-        float a0, b0, a1, b1, y;
-        int rows = menuptr_rows();
-        menuptr_row_rect(&g, 0, &a0, &y, &a1, &y);
-        menuptr_row_rect(&g, rows > 1 ? rows - 1 : 0, &b0, &y, &b1, &y);
-        x0 = fminf(a0, b0), x1 = fmaxf(a1, b1);
+        float a0, b0, c0, a1, b1, c1, y;
+        int cells = menuptr_rows(), cols = menuptr_cols();
+        menuptr_row_rect(&g, 0, cols, &a0, &y, &a1, &y);
+        menuptr_row_rect(&g, (cells < cols ? cells : cols) - 1 > 0 ? (cells < cols ? cells : cols) - 1 : 0, cols, &b0, &y, &b1, &y);
+        menuptr_row_rect(&g, cells > 1 ? cells - 1 : 0, cols, &c0, &y, &c1, &y);
+        x0 = fminf(a0, fminf(b0, c0)), x1 = fmaxf(a1, fmaxf(b1, c1));
     }
     bool centred = x0 <= 640.0f && x1 >= 640.0f && fabsf(x0 + x1 - 1280.0f) < 8.0f;
     float shift = centred ? (canvas - 1280.0f) / 2 : x0 + x1 < 1280.0f ? 0.0f : canvas - 1280.0f;
@@ -811,11 +812,13 @@ static void menu_ptr_click(int btn, float mx, float my) {
     else if (hit == MENUPTR_PAGE_LEFT) host_input_press("LEFT", 12);
     else if (hit == MENUPTR_PAGE_RIGHT) host_input_press("RIGHT", 12);
 }
-static void menu_ptr_wheel(int n) {  // (n > 0 up: the row above)
-    int row = menuptr_row(), rows = menuptr_rows();
-    if (row < 0 || rows <= 0) return;
-    int to = row - n;
-    menuptr_select(to < 0 ? 0 : to >= rows ? rows - 1 : to, false);
+static void menu_ptr_wheel(int n) {  // (n > 0 up: a menu of pages turns to the previous one; else the row above)
+    if (menuptr_pages() > 1) return menuptr_page_turn(n > 0 ? -1 : 1);
+    int cell = menuptr_row(), cells = menuptr_rows(), cols = menuptr_cols();
+    if (cell < 0 || cells <= 0) return;
+    int to = cell - n * cols;
+    if (to < 0 || to >= cells) to = to < 0 ? cell % cols : cells - 1;
+    menuptr_select(to, false);
 }
 
 static volatile int g_last_dev = -1;  // the device a button was last pressed on: 0 controller, 1 keyboard and mouse

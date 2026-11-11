@@ -66,7 +66,27 @@ static bool find_bar(int dr, float *sx, float *sy, float box[4], Piece *key) {
             break;
         }
     }
-    if (best == 0) return false;
+    if (best == 0) {
+        // A frame drawn at scale 1 (its size in its vertices, not its matrix: the item box's cursor) has no size here: it
+        // counts only when it is the one piece that moved that way. Its box is its corner; the cells take the steps.
+        int found = 0;
+        for (int i = 0; i < g_ncur; i++) {
+            const Piece *b = &g_cur[i];
+            if (fabsf(b->w) != 1.0f || fabsf(b->h) != 1.0f || in(g_prev, g_nprev, b)) continue;
+            for (int j = 0; j < g_nprev; j++) {
+                const Piece *a = &g_prev[j];
+                if (!near(a->z, b->z) || !near(a->w, b->w) || !near(a->h, b->h) || in(g_cur, g_ncur, a)) continue;
+                float dx = (b->x - a->x) / (float)dr, dy = (b->y - a->y) / (float)dr;
+                bool along_y = fabsf(b->x - a->x) < 0.5f && fabsf(dy) >= 4.0f, along_x = fabsf(b->y - a->y) < 0.5f && fabsf(dx) >= 4.0f;
+                if (!along_x && !along_y) continue;
+                if (found++) return false;  // (two of them: which one is the cursor isn't known)
+                *sx = along_x ? dx : 0, *sy = along_y ? dy : 0, *key = *b;
+                box[0] = box[2] = b->x, box[1] = box[3] = b->y;
+                break;
+            }
+        }
+        return found == 1;
+    }
     // the bar: every piece that moved by that much (a bar drawn in pieces: ends and middle), as one box
     box[0] = box[1] = 1e9f, box[2] = box[3] = -1e9f;
     for (int i = 0; i < g_ncur; i++) {
@@ -85,71 +105,102 @@ static bool find_bar(int dr, float *sx, float *sy, float box[4], Piece *key) {
     return box[2] > box[0] && box[3] > box[1];
 }
 
-// Two changes of a menu that agree (the same bar and steps: the place may differ, a popup) make its geometry
+// Two changes of a menu that agree (the same bar and step: the place may differ, a popup) make a step of its geometry: a
+// row's (Up / Down) or a column's (Left / Right), each kept apart until it is seen twice
 static bool same_bar(const MenuGeom *a, const MenuGeom *b) {
     return fabsf(a->z - b->z) < 0.5f && fabsf(a->kw - b->kw) < 0.01f && fabsf(a->kh - b->kh) < 0.01f && fabsf(a->w - b->w) < 0.5f &&
-           fabsf(a->h - b->h) < 0.5f && fabsf(a->dx - b->dx) < 0.5f && fabsf(a->dy - b->dy) < 0.5f;
+           fabsf(a->h - b->h) < 0.5f && fabsf(a->dx - b->dx) < 0.5f && fabsf(a->dy - b->dy) < 0.5f && fabsf(a->cdx - b->cdx) < 0.5f &&
+           fabsf(a->cdy - b->cdy) < 0.5f;
 }
-static struct { MenuGeom g; int seen; } g_pending[16];
-static void observe(const MenuGeom *g) {
+static struct { MenuGeom g; int axis, seen; } g_pending[16];
+static void observe(const MenuGeom *g, int axis) {
     int k = -1, free_k = 0;
     for (int i = 0; i < 16; i++) {
-        if (g_pending[i].g.lr == g->lr) { k = i; break; }
+        if (g_pending[i].g.lr == g->lr && g_pending[i].axis == axis) { k = i; break; }
         if (!g_pending[i].g.lr) free_k = i;
     }
-    if (k < 0) k = free_k, g_pending[k].seen = 0;
+    if (k < 0) k = free_k, g_pending[k].seen = 0, g_pending[k].axis = axis;
     bool agree = g_pending[k].seen && same_bar(&g_pending[k].g, g);
     g_pending[k].g = *g;
     g_pending[k].seen = agree ? g_pending[k].seen + 1 : 1;
     if (g_pending[k].seen >= 2) menuptr_learned(g);  // (again later: a new place of a known bar is not written)
 }
 
+// The geometry of lr with the bar of key (its steps and rows' places so far), else one with none
+static MenuGeom known_like(uint32_t lr, const Piece *key) {
+    MenuGeom v[4], none = {0};
+    int n = menuptr_variants(lr, v, 4);
+    for (int k = 0; k < n; k++)
+        if (v[k].kw && near(v[k].z, key->z) && near(v[k].kw, key->w) && near(v[k].kh, key->h)) return v[k];
+    return none;
+}
+
 // Where the bar of the menu the pointer works on is this frame: a piece of its signature (of any of the call's
-// geometries; the one nearest where that geometry was, when there are several), the rows placed from it
+// geometries; the one nearest where that geometry was, when there are several), the cells placed from it
 static void follow(void) {
     uint32_t lr;
-    int row;
+    int row, col;
     uint64_t since;
-    if (!menuptr_pointer_focus(&lr, &row, &since)) return;
-    if (g_present_count - since < 3) return;  // (the row just changed: the frame may still show the old one)
+    if (!menuptr_pointer_focus(&lr, &row, &col, &since)) return;
+    if (g_present_count - since < 3) return;  // (the cell just changed: the frame may still show the old one)
     MenuGeom v[4], best;
     int n = menuptr_variants(lr, v, 4);
-    float best_d = 1e18f;
+    float best_d = 1e18f, bx = 0, by = 0;
     for (int k = 0; k < n; k++) {
-        if (!v[k].kw) continue;
+        // (no signature; or a frame of scale 1, which many other pieces share - icons, letters: not looked for, its
+        // menu stays where it was learned)
+        if (!v[k].kw || (fabsf(v[k].kw) == 1.0f && fabsf(v[k].kh) == 1.0f)) continue;
+        float ox, oy;  // (where this cell is from the first: its row's own place when known, else by steps)
+        menuptr_row_offset(&v[k], row, &ox, &oy);
+        ox += v[k].cdx * (float)col, oy += v[k].cdy * (float)col;
         for (int i = 0; i < g_ncur; i++) {
             const Piece *p = &g_cur[i];
             if (!near(p->z, v[k].z) || !near(p->w, v[k].kw) || !near(p->h, v[k].kh)) continue;
             MenuGeom g = v[k];
-            g.x = p->x + g.ox - g.dx * (float)row, g.y = p->y + g.oy - g.dy * (float)row;
+            g.x = p->x + g.ox - ox, g.y = p->y + g.oy - oy;
             float d = (g.x - v[k].x) * (g.x - v[k].x) + (g.y - v[k].y) * (g.y - v[k].y);
-            if (d < best_d) best_d = d, best = g;
+            if (d < best_d) best_d = d, best = g, bx = p->x + g.ox - g.cdx * (float)col, by = p->y + g.oy - g.cdy * (float)col;
         }
     }
     menuptr_live(best_d < 1e18f ? &best : NULL);
+    if (best_d < 1e18f) menuptr_row_seen(&best, row, bx, by);  // (rows not one step apart: their own places)
 }
 
+static int g_prev_col;
 void menulearn_frame(void) {
     if (g_logging) LOG("[pieces] frame done: %d pieces\n", g_ncur), g_logging = 0;
     if (g_log_request) g_log_request = 0, g_logging = 1;
     follow();
     uint32_t lr;
-    int row, page;
+    int row, col, page;
     uint64_t since;
-    if (!menuptr_focus(&lr, &row, &page, &since)) {
+    if (!menuptr_focus(&lr, &row, &col, &page, &since)) {
         g_prev_row = -1;
     } else if (g_present_count - since >= STABLE_FRAMES) {
-        if (g_prev_row >= 0 && lr == g_prev_lr && page == g_prev_page && row != g_prev_row) {
+        // a row changed in the same column (Up / Down), or a column in the same row (Left / Right)
+        bool by_row = row != g_prev_row && col == g_prev_col, by_col = col != g_prev_col && row == g_prev_row;
+        if (g_prev_row >= 0 && lr == g_prev_lr && page == g_prev_page && (by_row || by_col)) {
             float sx, sy, box[4];
             Piece key;
-            if (find_bar(row - g_prev_row, &sx, &sy, box, &key)) {
-                MenuGeom g = {lr, box[0] - sx * (float)row, box[1] - sy * (float)row, box[2] - box[0], box[3] - box[1], sx, sy,
-                              key.z, key.w, key.h, box[0] - key.x, box[1] - key.y, false};
-                observe(&g);
+            if (find_bar(by_row ? row - g_prev_row : col - g_prev_col, &sx, &sy, box, &key)) {
+                MenuGeom k = known_like(lr, &key), g = {0};
+                g.lr = lr, g.w = box[2] - box[0], g.h = box[3] - box[1];
+                g.z = key.z, g.kw = key.w, g.kh = key.h, g.ox = box[0] - key.x, g.oy = box[1] - key.y;
+                if (by_row) g.dx = sx, g.dy = sy, g.cdx = k.cdx, g.cdy = k.cdy;
+                else g.cdx = sx, g.cdy = sy, g.dx = k.dx, g.dy = k.dy;
+                g.offmask = k.offmask, memcpy(g.offx, k.offx, sizeof g.offx), memcpy(g.offy, k.offy, sizeof g.offy);
+                float ox, oy;  // (the first cell: back from this one by its row's place and its column's steps)
+                menuptr_row_offset(&g, row, &ox, &oy);
+                g.x = box[0] - ox - g.cdx * (float)col, g.y = box[1] - oy - g.cdy * (float)col;
+                MenuGeom step = g;  // (what is learned: only the step this change shows)
+                if (by_row) step.cdx = step.cdy = 0;
+                else step.dx = step.dy = 0;
+                step.offmask = 0;
+                observe(&step, by_row ? 0 : 1);
             }
         }
-        memcpy(g_prev, g_cur, sizeof *g_cur * (size_t)g_ncur);  // (the latest frame of a kept row)
-        g_nprev = g_ncur, g_prev_lr = lr, g_prev_row = row, g_prev_page = page;
+        memcpy(g_prev, g_cur, sizeof *g_cur * (size_t)g_ncur);  // (the latest frame of a kept cell)
+        g_nprev = g_ncur, g_prev_lr = lr, g_prev_row = row, g_prev_col = col, g_prev_page = page;
     }
     g_ncur = 0;
 }
