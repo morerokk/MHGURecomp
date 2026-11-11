@@ -1265,6 +1265,22 @@ static void app_run(Cpu *c) {
             continue;
         }
         (void)patch;
+        // The emulators' Lag Compensation plugin (the port's net/hitsync.c as a Forge plugin): the port has it built in
+        // and speaks its messages in crossplay, and with both on every hit would be reported twice.
+        if (!strcmp(gstr(p->param + 6), "Lag Compensation")) {
+            LOG("[forge] plugin %s (Lag Compensation) not started: built into the port ([Multiplayer] LagCompensation)\n", p->name);
+            p->active = false;
+            continue;
+        }
+        // The emulators' High Frame Rate Fixes plugin (the port's hle/emjump.c, emstall.c, hatestep.c, combowin.c,
+        // mashrate.c and buffcycle.c as a Forge plugin): built in here, and both would scale the same things twice.
+        // MHGU_FORGE_HFR=1 starts it anyway (tests, with MHGU_NO_EMJUMP=1 MHGU_NO_EMSTALL=1 MHGU_NO_HATESTEP=1
+        // MHGU_NO_MASHRATE=1; its hooks then take the patched sites over)
+        if (!strcmp(gstr(p->param + 6), "High Frame Rate Fixes") && !(getenv("MHGU_FORGE_HFR") && *getenv("MHGU_FORGE_HFR") == '1')) {
+            LOG("[forge] plugin %s (High Frame Rate Fixes) not started: built into the port\n", p->name);
+            p->active = false;
+            continue;
+        }
         if (p->on_init) {
             flog(0, "Initializing plugin app:/nativeNX/plugins/%s", p->name);
             gcall(c, p->on_init, 0, 0, 0, 0);

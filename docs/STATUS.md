@@ -409,6 +409,30 @@ HR72 hosting a Wycademy Hub, client a new HR1 save with only Village 1 star): De
 Fungal Hunt (105, a 1-star quest the client hadn't unlocked) refused; Find the Ferns (101) joined. A Forge plugin
 could do the same (same hooks), but the HP part is the port's own.
 
+Chinese text (2026-11-09): Village quest names and descriptions came up in English in the Hub and Pub when the save's
+language is Simplified or Traditional Chinese. A quest's rQuestData holds its text in 7 languages (mMessage_eng ...
+_chS); the list job loads it from the loose files, but chS and chT were added by a title update and have no loose
+files. Their text is only in the bundles an area keeps loaded (loc\arc\quest\vq for area types 1-4 and 6, gq and gq2
+for 0 and 7: the picker 0x35339c), and the Hub never loads vq. villagehub.c now holds vq (rArchive DTI 0x2324df0,
+getResource, then wait for bit 0 of +0x50: the call only starts the load) from the list job's start 0x5b7fd8 while a
+Hub / Pub counter is in Village mode, and for an on-demand load of a posted Village quest; released with 0xa87660.
+Only for language 7 (chT) and 8 (chS): for the other five, vq's text and rQuestData are byte-identical to the loose
+files (checked for all of vq, gq, gq2). Not in vq, so still English in Chinese: quests 712, 819, 827, 1008, 1014-1016,
+1043 (their text is only in their own q arc; a village has the same limit). The language is sGameControl +0xa5 (table
+0xd359a8: 1 eng, 7 chT, 8 chS), saved with the game and taken from the system language only when 0; no menu changes it.
+To test: control "poke" the byte to 8 (keep the word's other bytes), Quit Game and save, restart. Tested (HR72 test
+save, Pub): before, English names at the Village list; after, Chinese names, objectives and locale, also after Village
+-> Hub -> Village; departing on a Village quest and abandoning it works with the bundle held; English run unchanged.
+
+Empty Village list after an area load (2026-11-09): coming back from a quest with the Village list still selected, the
+counter's star rows were empty until L / R was pressed twice (in every language). The list job an area load starts
+(0x20fdc4) listed 8 quests instead of 402 (selector +0x28; the job had finished its scan, so the filter refused them;
+the filter's locked-quest test is the likely reason, not proven). Building the categories as a village at the stage's
+start (0x5ba8fc, hooked as a test) changed nothing. villagehub.c now marks a list made by an area load in Village mode
+as stale, and ui_update makes it again, as a switch does, the first time the counter's rank or star menu is up: 69 ms
+once. The reload log prints the number listed. Tested (same save, Pub): Village list, departure on quest 702, abandon,
+back to the counter: 402 listed, star rows there, names in Chinese.
+
 Maps (2026-11-05): a Village quest's supply box has one Map (0x6b3), a Hub quest's four. Started from the Hub or
 Pub (hpscale's test, `hpscale_village_from_hub`), it gets 3 more in the box's last empty slots. Supply data: the
 quest arc's quest\supp\supp_<n> (rSupplyList, DTI 0x1a8acf0): f32 1.0, u32 count, then entries of 40 slots
@@ -479,6 +503,30 @@ Forcing 329 (selector +0xd68 on both, depart bit +0xd65) crashed the host at the
 it (and has the Hub counter: run3\st hasn't met the Guild Manager). Possibly the same
 kind of problem: 713 / 906 end with a type 1 Valstrax demo after the clear (see the 713 section); in a session it won't
 play, and whether the quest still ends is untested.
+
+## GPU pool at large render sizes: the Great Maccao demo crash (2026-11-11)
+
+Report (0.16.1, RenderResolution 4320x2430): Vaulting Outlaw (206) crashed as the hunter entered Jurassic Frontier area 5,
+four threads at once on wild jumps. That is the quest's monster demo (event table entry 54: event054, stage 1, area 5),
+played only until the save has seen it: the demo's end sets bit n (entry n) of the event manager's seen flags (0x34e4d8,
+manager at *0x1a570d0, flags at +0x64; entry 54 = +0x68 bit 22), and the lookup 0x34cad8 skips a set bit. To replay one
+on a save that has seen it: `poke` that bit clear once in the quest (testsave/maccao/clearseen.sh).
+Cause: the game keeps render targets and textures in one GPU heap (game heap 6, *0x1aa62e8 [6] = 0x08026010, on the
+first NVN pool, 0x36400000) of a fixed 848 MB (`movt #0x3520` at 0x351e40 / 0x351fa4). The port has the game render at
+RenderResolution itself (0xdbcd34), and its screen-sized targets take ~59 bytes a pixel of that heap: used / largest free
+block in the town 209 / 41 MB at 1280x720, 280 / 35 at 1920x1080, 633 / 13 at 3840x2160, 791 / 5.59 MB at 4320x2430
+(heap object +0x4 used, +0x7c largest free). The demo's name card texture (boss_demo, 0x555a00 bytes, loaded by
+0xd084a4 on the loading thread through 0xa6a4c4) needs 2.5 KB more than that block: the allocation answers 0 and the
+game copies the 5.6 MB to address 0, over its own code from 0x200000 (a Switch would fault; here code is writable and
+the threads crash on what's left). Found with `protect 200000 172f000`: the memcpy faulted, called from 0xd08b40.
+Fix: gen.py PATCHES at 0x351e40 / 0x351fa4 take the size from g_gpu_pool_size (runtime/config.c): 848 MB + 64 bytes a
+pixel above 1920x1080, so the free part stays as on the Switch (4320x2430: 1365 MB, 37 MB largest free; the other two
+pools move up, the last ending at 0x9e600000). The heap fits ~665 MB more (4800x2700 played quest 1005; 5120x2880, +774:
+"out of command memory" before the town, 5760x3240: crash), and those sizes never worked before either (their targets
+alone are more than 848 MB): a 3D resolution above 1920x1080 + 640 MB / 64 is lowered to it in its shape and logged
+("is more than the game's memory holds": 7680x4320 -> 4724x2656, 1490 MB). Tested (2026-11-11, the user walking): 206's
+demo at 4320x2430 crashed at 30 and 120 fps and played at 1280x720 at 30 and 120 fps; with the fix it plays at
+4320x2430. Not tested: multiplayer at a large render size (four hunters, more of the heap in use), FSR with a large output.
 
 ## Save data safety (2026-10-22)
 
@@ -602,6 +650,8 @@ Training dummy (2026-11-02, debug, runtime/hle/dummy.c): MHGU_DUMMY=1 holds the 
 
 Buff icons and the frame rate (2026-10-28): fixed. Reported: with two or more buffs the icon beside a name on the HUD's status plates (yours, the other hunters', the Palicoes') takes turns far too fast at 240 fps. The plates (cUIOStatusPlate / cUIOStatusPlateGuests, update 0x834314) call 0x834d00 once per update for each of their two icon slots ({index, countdown, shown} at plate +0xf0 / +0xfc; tables of 54 and 36 icons at image 0x1839250 / 0x18395b0, tested against the player's buff flags +0x2840..+0x2864, rebuilt from the buff timers each update at 0x49f0xx): the countdown drops by 1 per update and is reloaded with 20, 0.67 s at 30 fps, 0.08 s at 240. Fix (runtime/hle/buffcycle.c, tools/gen.py PATCHES): the decrement (0x834d20) takes step / 2 updates (at most 1) in 1/65536 units and the reload (0x834ef4) is 20 of those. Checked at 240 fps (test save, quest 101, two buffs from their timers: player +0x287c and +0x2880 poked to 3000): the two icons change every 0.667 s, 12 times in 8 s.
 
+Oversized decorations crash the equipment view (2026-11-10): fixed, not tested in game. Reported from emulators: a hunter whose armor is modded for more slots slots a decoration bigger than the unmodded piece allows (a 3-slot decoration in a 2-slot piece); other hunters crash when they view that hunter's equipment in the UI (confirmed by the user on emulators; the console runs the same code). Cause, in the game's code: 0x2db66c gives a piece's free slots, its slot count (from your own unmodded data) minus each decoration's size (`subne r8, r1, r0` at 0x2db770), returned as a u8, so 2 - 3 = 255. The slot icons (0x750570) keep the piece's three slot widgets in an array on the stack (sp+0x10) and draw `free` empty slots after the decorations (loop 0x750680): 255 reads past the array, each word handed to the UI calls (0x76e6a8 / 0x76e6fc) as a widget. Nothing checks another hunter's decorations on arrival. Fix (tools/gen.py PATCHES): the free count is clamped at 0 at 0x2db778 (`ldrh r1, [r4, #0xa]`, which every subtraction reaches), so all of 0x2db66c's callers (0x750570, 0x780a60's slot widget, 0x5c1be0...) see 0. Such a piece then shows its decorations' icons without an empty slot; skills are unaffected (0x2ddd48 reads all three decoration ids without the slot count). Also covers your own save after a slot mod is removed. To test: two instances, one save with a 3-slot decoration in a 2-slot piece (decoration ids at the piece's entry +6/+8/+0xa), view that hunter's equipment from the other.
+
 KO (stun) and the frame rate (2026-10-29): not found yet. Reported: KO from head hits with blunt weapons much harder at
 high frame rates (a 240 fps player: Alatreon hammer solo, horns broken early, 0-1 KOs). Suspected status decay counted
 per update: it isn't. Status data (dt_tune, rEnemyDtTune; monster +0x75ec -> the resource, entry pointers at +0x98:
@@ -647,6 +697,12 @@ real fps, UDP datagrams / bytes and RPC sends per send site every 5 s; RPC send 
 message type). Caveat: the dummy (motion speed 0) also stops the KO's countdown, so a KO on it lasts minutes. Two-instance
 route (both from the airship save, Hub Low 1 star quest 7): session da3c4186 scratchpad mp_go.ps1, mp_attack.ps1,
 rate_phase.ps1.
+
+Lag compensation (2026-11-08, branch feat/lag-compensation, prototype, tested with two instances on one PC): a hunter's melee hits count as that hunter saw them. runtime/net/hitsync.c, ini [Multiplayer] LagCompensation (default On), env MHGU_LAGCOMP; the file's header has the design. Only the owner applies a hit, for HP and parts as well as KO: 0x370968 -> 0x376ad0 (every game, one attack against one target) only adds to per-update fields of the status block, and 0x297ddc (consumes them into HP +0x370, parts, KO via 0x29a34c) returns at once when +0x7420 is 0; netEmAction overwrites the others' HP (0x2cc7dc). The fields: +0x484..+0x4ff, +0x3a0, +0x444, monster +0x142c.. (list in hitsync.c). Order: the collision update's start (0x36b15c -> 0x37260c) clears them if bit 30 of monster +0x1408 is set, hits add to them, the monster's update (0x2adb3c -> 0x2a5900 -> 0x2a59d0 -> 0x297ddc) consumes them and sets that bit. So a report added at 0x297ddc's entry is consumed once and cleared, without setting anything else (measured below). The design: the hunter's game snapshots the fields around 0x370968 and sends the change (F_AUX, reliable link, magic 0xE7); the owner restores the fields after its copy of a reporting hunter hits (sparks still show) and adds received reports at 0x297ddc's entry. Aggro doesn't go through the fields: 0x29dd40 is recorded and called on the owner (+0x254 + 4 x slot: 50 + damage x 20 before multipliers, measured 730 for damage 34). The per-swing list (+0x448, one hit per attack number) is left alone. Direct weapon hits on large monsters only (attack +0x6d = 1, +0x10 = 0; bow and bowgun shells were added later, see the next paragraph): kinsects, phials, thrown items and Palicoes (+0x6d = 4) stay as they are. Mixed versions without touching PROTO_VERSION: each game with it on sends a Hello every second, an owner ignores a copy and applies its reports only while it hears that hunter's Hello (3.5 s) and has it on itself; emsync.c's and hpscale.c's handlers check their magic and ignore the rest, and the host relays every F_AUX frame. Off in crossplay. Reports are range-checked (MAX_ADD); a hostile client can still report fake hits within range. Checked: it builds; one game with an earlier build (only the tracer, MHGU_HITSYNC_DIFF=1), quest 404, MHGU_DUMMY=1, Great Sword: 14 hits (7 hunter, 7 Palico), every byte each one changed logged, all in the list above except the aggro score +0x254 / +0x268 and +0x2c9 (a byte the aggro code sets), plus monster +0x1432 on Palico hits only. No status or KO weapon in that run, so those fields come from the code. Two instances (host owns the monster, Hub 3 star Flames of Glavenus Passion, two copies of testsave/save_0, Great Sword, MHGU_DUMMY=1 + MHGU_DUMMY_SLOT=1 + MHGU_DUMMY_FACE=1, 1 damage per hit, the client swinging): on / on, 10 reports sent, 10 applied, 10 of the owner's copy's hits ignored; then a counted stretch: host HP -27 = 16 hits it applied itself (Palicoes) + 11 reports, its 11 copy hits adding nothing, so no double hits and no repeated damage. Owner on / client off: no reports, nothing filtered, HP -12 for 12 hits. Owner off / client on: 10 reports sent, none applied, HP -13 for 13 hits. With the released 0.15.5 (dist zip, no hitsync, MHGU_DATA_DIR at build/data): 0.15.5 owner, this branch's client: 10 reports sent and ignored, HP -19 for 19 hits; this branch's owner, 0.15.5 client: nothing filtered, HP -19 for 20 hits counted a moment apart (a Palico hit between the two readings is the likely reason). Both stayed connected. Free monster (MHGU_SUMMON=300, no dummy, real damage, hunters pinned, 70 scripted swings): 100 ms added each way: the client saw 7 hits (damage 302), the owner's copy of it 9 (422); no added lag: 6 (319) against 8 (402). Too few hits to say how often swings are lost, and these are totals, not matched hit by hit; both runs had the copy landing more than the hunter saw, the case where this feature lowers damage against the original. A real session with MHGU_LOG_HITSYNC=1 ("slot N so far: reports sent ..., its copy hit ...") would give the figure. Who owns a large monster: the quest's poster, not the hub's host. Measured with the second player posting and departing the quest: on the hub host's game +0x7420 was 0 and +0x7424 slot 1, on the poster's 1 and slot 1. The owner is set at start-up (0x2b167c) and claimed once (0x2b16e0, the only sender of an owner change found); nothing moves it by zone. With the hub host then swinging and each game holding the monster in front of its own hunter (MHGU_DUMMY without MHGU_DUMMY_SLOT, so its copy missed every time on the owner): 9 reports sent, 9 applied, 0 copy hits, owner's HP -9, where the original game would have done nothing. Hub host in camp, client alone in zone 1 with the held dummy (host also the owner): 10 reports sent and applied, HP exact. netEmMasterSelect / Inquire have only vtable senders: when they run is not known (a disconnect is a guess). Not tested: a KO or status weapon (those fields are from the code), the aggro replay's effect on targets (the call runs, the scores were not read), 3-4 players, two PCs, an owner handover mid-hit. Open: species overrides of the on-hit vtable slots +0x2f8 / +0x98 run for the copy's hit, not for a report; a hit arriving during an owner handover can be lost. Scripts: testsave/lagcomp_test (outside the repo): full.sh <tag> <host on> <client on> runs the whole route and prints the counts; full_old.sh with OH=1 / OJ=1 runs 0.15.5 as that side; full_free.sh is the free monster run. A save for the joiner must be high enough rank for the hub (testsave/urgent_joiner isn't). MHGU_SUMMON now waits for a quest (it fired in the hub, zone 255).
+
+Lag compensation for bows and bowguns (2026-11-09, two instances on one PC, 30 fps, 640x360): the same design as melee, because shells go through the same 0x370968 on every game. An earlier note here said they are hit-checked on the owner only; the trace shows otherwise: 6 shots, 13 arrow hits on the shooter's game (+0x7420 0) and 13 on the owner's copy (+0x7420 1), each with attack +0x10 = 2, +0x6e = 0, +0x70 = the player, +0xc = the shell, and the same fields changed as a melee hit (status block +0x444, +0x484.., +0x4e4, +0x4f0, the per-swing list; +0x2cc changes too and is not reported, like a melee hit's). Reported per hit, so a Rapid shot's arrows or a Pierce shot's hits are counted one by one. Which shells: by vtable (SHOT_VT in hitsync.c), uShellPlw10_000 / _001 (bow) and uShellPlw04_000 / _100 / _101 (w04 for both bowguns); every other player shell stays as it was. A copy's arrows still fly and spark on the owner, with no damage. Mixed versions: shots are their own message kind (M_SHOT, which a melee-only build drops) and the Hello gets a fifth byte, caps bit 0 = this hunter reports shots (older builds send and read only four bytes); the owner ignores a copy's shots only from a hunter with that flag. Checked (host owns the monster, MHGU_DUMMY=300 + MHGU_DUMMY_SLOT=1 + MHGU_DUMMY_FACE=1, control "dummy 800 180" on both, the client shooting, 1 damage per hit): on / on, 8 shots: 24 reports sent, 24 applied, the owner's copy landed 16 hits, all ignored; owner HP -33 between the first and the last report = 23 reports + 10 Palico hits. Client off: no reports, nothing filtered. Owner off / client on: 19 sent, none applied. Melee-only owner (the build before this change) / this client: 21 sent, none applied, nothing filtered. This owner / melee-only client: no shot reports, nothing filtered. Not tested: a bowgun (the vtables come from the class list and the bow's was confirmed live; the only save had a bow), uShellPlw10_001, Pierce and other shot types, bow / bowgun Hunter Arts, real damage on a free monster or with added lag, 3-4 players, two PCs. Explosions that bowgun ammo may spawn through other shell classes (uShellPlEffect*) stay as they were. The user's bow save (run3/bowsave, Rapid bow) fires with X held about 1 s, then R; X alone only charges.
+
+Lag compensation in crossplay, with the emulators' Forge plugin (2026-11-10, branch feat/lagcomp-plugin-interop): hitsync.c ported to a Forge plugin for emulator players (lagcomp.nro, "Lag Compensation", kept outside this repo in C:\MHGURecompile\lagcomp-forge with its notes). The plugin can't use F_AUX, so it sends the same messages (magic 0xE7, Hello / Report / Shot, same layout) as UDP broadcasts on port 47318 of the local play network, through the game's own nn::socket; Ryujinx's LDN proxy carries any port. Now the port does the same in crossplay (ldn_crossplay(): a Ryujinx LDN lobby or a room): hitsync sends there with ldn_send (UDP broadcast, port HITSYNC_UDP_PORT) instead of ldn_send_aux, and vsock_deliver hands datagrams to that port to hitsync_aux_received; outside crossplay it stays F_AUX, so older builds keep working with this one. LagCompensation is no longer off in crossplay. A Hello or report carrying our own slot is dropped (a broadcast can come back). forge.c doesn't start a plugin named "Lag Compensation" (logged): the port has it built in, and with both on every hit would be reported twice. Checked: recomp-only hub, two instances, testsave/lagcomp_test/full.sh: 10 reports sent, 10 applied, 10 copy hits ignored, as before. Crossplay, one PC, this build with RyuServe = On as the LDN server and a Ryujinx 1.2.82 copy (C:\Ryujinx\lc1, Forge 1.5.1 + the plugin's test build that holds the monster like MHGU_DUMMY_SLOT=1), Great Sword, 1 HP per hit: the port's log "slot N reports its hits (crossplay, UDP)" and the plugin's Hello both ways. Port host owns the monster, Ryujinx swings: 6 reports sent by the plugin, 6 applied by the port, 6 copy hits ignored, HP -10 for 10 damage calls. Ryujinx posts the quest and owns it, the port's hunter swings: 9 sent by the port over UDP, 9 applied by the plugin, 9 copy hits ignored, each report consumed as one hunter damage call (3 more kind-1 calls of 10-13 damage on another part came with no swing, on both games: not weapon hits, left as they were). The plugin with the port's built-in one on the same machine: "plugin lagcomp.nro (Lag Compensation) not started". Not tested: suyu-style rooms, 3-4 players, two PCs.
 
 Two-button inputs and the frame rate (2026-10-28): fixed. Reported: the Hunting Horn's X+A (and the Lance's R+X+A)
 need both buttons almost together at high frame rates. The player's input update (0x47ca28, every weapon; called
@@ -706,6 +762,17 @@ MHGU_LOG_MOVES also logs every act change ("is", with the time) and the stun's r
 "plact <act_st hex> <act_no> [param]" / "plsweep" start player actions; MHGU_PLSNAP=<file> + "plsnap [updates]"
 (also from a knockback) save the player's memory every update; "interpread" now also sees register-offset loads and
 VLDR (interp.c). Not tested yet: by the user at a high frame rate; the other holds.
+
+The frame-rate fixes for emulators, as a Forge plugin (2026-11-11, branch feat/highfps-plugin-skip): emjump.c, emstall.c,
+hatestep.c, combowin.c (Lenient), mashrate.c and buffcycle.c ported to "High Frame Rate Fixes" (highfps.nro, kept outside this
+repo in C:\MHGURecompile\highfps-forge with its NOTES.md), for emulator players on a 60 / 240 fps mod or cheat. The PATCHES sites
+become Forge hooks inside their functions: each site's two words jump to a stub that saves every register, runs the C, runs the
+second word (or emulates it when it reads pc or branches) and goes on. forge.c doesn't start a plugin of that name (both would
+scale the same counters twice); MHGU_FORGE_HFR=1 starts it anyway, for tests with MHGU_NO_EMJUMP=1 MHGU_NO_EMSTALL=1
+MHGU_NO_HATESTEP=1 MHGU_NO_MASHRATE=1 (its hooks then take the patched sites over, their functions interpreted). Checked here,
+quest 404 with MHGU_SUMMON, Volvidon's 7:92 / 7:98 forced, MHGU_EMTRACE=2: at 240 fps with the plugin the body press is in the air
+1.06-2.18 s, apex ~900 at 1.67 s, the drop hop 0.03-0.90 s, apex 532 at 0.50 s; at 30 fps 1.03-2.10 s / 1.63 s and 0.03-0.87 s /
+0.50 s; at 240 fps with nothing 1.14 s to the apex and the hop 0.03-0.11 s. Ryujinx 1.2.82 at 240 fps: see the plugin's notes.
 
 ## Fidelity audit (2026-10-20)
 
@@ -1112,6 +1179,15 @@ default ini text now has `Y = R, Mouse Middle` (the first commit changed only th
 101: defaults, and ItemLeft = Wheel Down / ItemRight = Wheel Up from the ini, through the control file's `wheel`.
 The menu shows the Item bar rows. Not tested: choosing the wheel in the menu (needs a real wheel event), a keyboard
 key on ItemLeft / ItemRight, the wheel on a button keybind.
+
+Prowler (2026-11-10): uOtomo has its own bar handler, 0x1417d68 (vtable +0x5c4, called from the player update right
+after the hunters' 0x4f7f38, which also runs for a Palico and passes its checks: without a test there the notch only moved
+the unused pouch slot +0x3298). Selected slot u16 +0x3336 (0-8, wraps, skips the empty ones: f_1417efc(palico, slot, 0
+right / 1 left)), turn bits +0x3338 (2 right, 4 left), select check vfunc +0x230(palico, 0x10), actions 0x47 / 0x48
+without L. itembar.c hooks it too; a Palico is told apart by that vtable slot. Tested with the user's Prowler save in
+quest 101 (uOtomo found with control `find ec159501`, vtable 0x19515ec; `peek` +0x3334): `wheel` -1 / 1 move the slot one each
+way, HUD name and count following, 0 <-> 7 wraps (slot 8 empty in that save), 9 notches at once = 4 (MAX_WAITING). Hunter save (bow)
+retested the same way: the bar still turns. Not tested: a Prowler in multiplayer.
 
 ## BC textures without GPU support (2026-10-31, branch feat/android-build)
 
@@ -1595,11 +1671,14 @@ controller, frames = presented frames; e.g. `300:A:10`), `MHGU_NAME` (answers ev
 `MHGU_CONTROL=ctl.txt` (drive a running game: append lines `A`, `DOWN 8`, `STICK_UP 60`, `shot name` -> shots/name.png;
 `X 6 25` = X for 6 frames from 25 frames on, lines written together form a timed sequence; `fntrace lo hi n`;
 `fnnew lo hi [learn ms]` = log only the first call of each function in [lo, hi) not seen while learning, to find what an
-event runs; `peek` / `poke` / `memsave` / `find` for guest memory), `MHGU_QUICKHUNT=<quest number>` (from start-up
+event runs; `peek` / `poke` / `memsave` / `find` for guest memory; `protect <addr> <size>` = that guest memory read-only,
+so a wild write crashes at once with the writer named), `MHGU_POOL_LOG=1` (each NVN memory pool the game makes, with its
+callers), `MHGU_QUICKHUNT=<quest number>` (from start-up
 straight into that quest: A through the menus to the save's town, then the quest is ordered and departed on;
 runtime/hle/quickhunt.c has how the game departs; `MHGU_QUICKHUNT=town` stops in the town), `MHGU_KILL_AFTER=<s>`
-(the quest's large monster dies by one real hit that long into the quest), `MHGU_FORCE_EVENT=<n>` (the next quest-demo
-lookup plays event table entry n; both in quickhunt.c), `vpad` (control file:
+(the quest's large monster dies by one real hit that long into the quest), `MHGU_FORCE_EVENT=<n>` (the first quest-demo
+lookup in entry n's own area plays it; both in quickhunt.c; a forced demo doesn't give the hunter back at its end: to
+see a quest's demo as a player would, clear its seen bit instead, see "GPU pool at large render sizes"), `vpad` (control file:
 attach an SDL virtual controller; `vpad <n> <button> <0|1>` presses its button), `MHGU_LOG_MOVES=1` (the player's actions and command table
 changes, runtime/hle/movelog.c), `MHGU_EMTRACE=1/2/3` (large monster actions with their real-time length, height and
 distance; 2: the position every update; 3: the monster object saved on 4 updates once a forced action is 200 up;

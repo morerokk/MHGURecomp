@@ -107,6 +107,7 @@
     .ldn_key = "",                                                                                  \
     .ldn_direct = 1,                                                                                \
     .sync_small_monsters = 1,                                                                       \
+    .lag_compensation = 1,                                                                          \
     .share_urgent = 1,                                                                              \
     /* [Monster HP, Village Quests] */                                                              \
     .hp = {{1, 1, 1, 1}, 2},                                                                        \
@@ -131,6 +132,7 @@
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
+uint32_t g_gpu_pool_size = 0x35200000u;  // the game's GPU pool for render targets and textures (gen.py PATCHES)
 float g_render_aspect = 16.0f / 9.0f;
 float g_fov_scale = 1.0f;
 uint32_t g_ui_size[2] = {1280, 720};
@@ -447,6 +449,12 @@ static const char DEFAULT_INI[] =
     "; Sync small monsters between players in multiplayer. Everyone in the hunt should use the same setting.\n"
     "; Default: On\n"
     "SyncSmallMonsters = On\n"
+    "\n"
+    "; Experimental. Your hits on large monsters (melee, bows and bowguns) count as you saw them land, even if your hunter\n"
+    "; missed on the screen of the player running the monster. Works when that player has it on too, and has no effect\n"
+    "; otherwise. Emulator players in a crossplay hub need the Lag Compensation Forge plugin for it.\n"
+    "; Default: On\n"
+    "LagCompensation = On\n"
     "\n"
     "; Clearing an Urgent quest posted by someone else also counts for you, if you have unlocked it yourself. The\n"
     "; original game only counts it for the hunter who posted it. This only changes your own save, the others in the\n"
@@ -780,6 +788,7 @@ const ConfigSetting g_settings[] = {
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},
     ON_OFF("Multiplayer", "Direct", ldn_direct, false),
     ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, false),
+    ON_OFF("Multiplayer", "LagCompensation", lag_compensation, false),
     ON_OFF("Multiplayer", "ShareUrgentCredit", share_urgent, false),
     {"Monster HP", "1Player|1Players", SET_FACTOR, F(hp.scale[0]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
     {"Monster HP", "2Players|2Player", SET_FACTOR, F(hp.scale[1]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
@@ -1244,6 +1253,7 @@ void config_load(void) {
     if ((e = getenv("MHGU_PAD_POSITIONAL"))) g_config.face_buttons = atoi(e) ? FACE_POSITION : FACE_LABEL;
     if ((e = getenv("MHGU_LDN_PORT")) && atoi(e) > 0) g_config.ldn_port = atoi(e);
     if ((e = getenv("MHGU_SYNC_ZAKO"))) g_config.sync_small_monsters = atoi(e) != 0;
+    if ((e = getenv("MHGU_LAGCOMP"))) g_config.lag_compensation = atoi(e) != 0;
     if ((e = getenv("MHGU_LDN_JOIN"))) snprintf(g_config.ldn_join, sizeof g_config.ldn_join, "%s", e);
     if ((e = getenv("MHGU_LDN_SERVER"))) snprintf(g_config.ldn_server, sizeof g_config.ldn_server, "%s", e);
     if ((e = getenv("MHGU_LDN_KEY"))) snprintf(g_config.ldn_key, sizeof g_config.ldn_key, "%s", e);
@@ -1310,9 +1320,33 @@ void config_load(void) {
             "%.2f\n", names[g_config.fsr_quality], r, w, h, g_fsr_output[0], g_fsr_output[1], g_config.fsr_sharpness,
             g_fsr_lod_bias);
     }
+    {   // The game's 2.5 GB heap fits its GPU pool (below) grown by ~665 MB at most (4800x2700 played; 5120x2880, +774:
+        // "out of command memory" before the town). Larger render sizes never worked: their targets alone are more than
+        // the pool. Keep the shape, lower the size to what fits with 640 MB.
+        const uint64_t max_px = 1920ull * 1080ull + (640ull << 20) / 64;
+        uint64_t px = (uint64_t)w * (uint64_t)h;
+        if (px > max_px) {
+            double s = sqrt((double)max_px / (double)px);
+            int ow = w, oh = h;
+            fit_aspect((int)(w * s), (int)(h * s), aspect, &w, &h);
+            while ((uint64_t)w * (uint64_t)h > max_px) fit_aspect(w - 8, h - 8, aspect, &w, &h);
+            LOG("[config] 3D resolution %dx%d is more than the game's memory holds: using %dx%d\n", ow, oh, w, h);
+            if (g_config.fsr && !getenv("MHGU_FSR_LODBIAS")) g_fsr_lod_bias = log2f((float)w / (float)g_fsr_output[0]);
+        }
+    }
     g_config.render_w = w, g_config.render_h = h;
     g_render_size[0] = (uint32_t)w;
     g_render_size[1] = (uint32_t)h;
+    {   // The game's screen-sized targets come out of its 848 MB GPU pool: ~59 bytes a pixel (measured at 720p to
+        // 4320x2430). Above the Switch's 1920x1080 the pool grows by that much (64 a pixel), so what's left for
+        // textures stays as on the Switch; at 4320x2430 the pool was otherwise too full for a boss demo's 5.6 MB
+        // texture, and the game copied it to address 0 over its own code.
+        uint64_t px = (uint64_t)w * (uint64_t)h, base = 1920ull * 1080ull;
+        uint64_t size = 0x35200000ull + (px > base ? ((px - base) * 64 + 0xfffff) & ~0xfffffull : 0);
+        g_gpu_pool_size = (uint32_t)size;
+        if (px > base) LOG("[config] GPU memory pool %u MB (848 + %u for the render size)\n", (unsigned)(size >> 20),
+                           (unsigned)((size - 0x35200000ull) >> 20));
+    }
     g_render_aspect = aspect;
     g_fov_scale = g_config.fov;
 

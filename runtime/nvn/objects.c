@@ -172,6 +172,12 @@ NVN(nvnMemoryPoolInitialize) {
     p->size = G(uint64_t, A(1), 0x18);
     p->flags = G(uint32_t, A(1), 8);
     plat_commit(GUEST_BASE + p->storage, p->size);
+    if (getenv("MHGU_POOL_LOG")) {  // (debug: which game code makes which pool)
+        char tag[96];
+        snprintf(tag, sizeof tag, "[nvn] pool %08llx at %08llx +%llx flags %x", (unsigned long long)A(0),
+                 (unsigned long long)p->storage, (unsigned long long)p->size, p->flags);
+        kernel_log_guest_stack(tag, c);
+    }
     SET_HOST(A(0), p);
     RET(1);
 }

@@ -325,7 +325,7 @@ int main() {
     tab();
     tab();
     selected("sync");  // (the Hub heading first)
-    down(3);
+    down(4);  // (lag compensation, village quests, urgent quests, then the HP heading is passed)
     selected("hp.0");
     tab();
     selected("mod.Aaa");
@@ -614,7 +614,7 @@ int main() {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);  // (Cheats, Mods, Misc)
     selected("sync");  // (the Hub heading first)
-    down(3);
+    down(4);  // (lag compensation, village quests, urgent quests, then the HP heading is passed)
     selected("hp.0");
     down(5);
     confirm();

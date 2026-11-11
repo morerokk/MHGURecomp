@@ -4,7 +4,8 @@ Minus + Plus (Back/Select + Start) or F1 opens a single panel inside the game.
 Insert still opens Forge; with a controller alone, Mods > Open the Forge menu opens it over the panel, which waits
 under it (Cancel in the Forge window, or Minus + Plus, closes it and returns to the panel). Options, Save and Reset share one scrolling flow, in that order.
 Back appears only as a guide beneath the options. Discard is available only
-in the unsaved-changes confirmation when leaving the menu. Menu Options also contains Restart and Exit. The panel is attached on
+in the unsaved-changes confirmation when leaving the menu. Menu Options also contains Restart and Exit; pressing B
+on the title screen's Main Menu opens that Exit question, as closing the window does. The panel is attached on
 every opening; detach allows dragging, and Move menu works with the controller.
 
 Shoulder glyphs bracket the tab labels at the top. The tab header stays pinned
@@ -125,7 +126,9 @@ This is the testable host portion of contextual confirmation. In-game sPad field
 not establish a working title-screen B-confirm path. No guest-memory probe or
 unverified in-game remap is shipped. Original menu consumers and their prompts
 still require separate identification and validation before this option can
-cover the game itself.
+cover the game itself. Back-to-exit on the title screen is separate and does not
+use this policy: B on the Main Menu opens the Exit question through
+`runtime/hle/title_exit.c`, leaving the pad and gameplay menus untouched.
 
 ## FSR settings
 

@@ -401,6 +401,13 @@ static void control_poll(void) {
                 ST32(a, v);
                 continue;
             }
+            if (!strcmp(cmd, "protect")) {  // protect <guest hex address> <hex size>: make guest memory read-only, so the
+                                            // first write there crashes with the writer named (wild writes; debugging)
+                uint32_t a = (uint32_t)strtoul(arg, NULL, 16) & ~0xfffu, n = (uint32_t)strtoul(arg2, NULL, 16);
+                int r = plat_protect((uint64_t)(uintptr_t)G2H(a), (n + 0xfffu) & ~0xfffu, PLAT_PROT_READ);
+                LOG("[protect] %08x +%x read-only: %s\n", a, n, r ? "failed" : "ok");
+                continue;
+            }
             if (!strcmp(cmd, "fntrace")) {  // fntrace <lo hex> <hi hex> [n] [r0 lo hex] [r0 hi hex]: log the next n calls of
                                             // guest functions there (only those with r0 in [r0 lo, r0 hi) when given)
                 void fntrace_set(uint32_t, uint32_t, int, uint32_t, uint32_t);

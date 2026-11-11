@@ -145,6 +145,7 @@ static void send_tcp(VSock *s, int kind, const void *data, uint32_t len) {  // (
 
 // ---- from the network
 void vsock_deliver(const VPacket *p, const void *data, uint32_t len) {
+    if (p->proto == VPROTO_UDP && p->dst_port == HITSYNC_UDP_PORT) hitsync_aux_received(data, len);  // (crossplay: hitsync.c)
     VPacket reply = {0};
     bool send_reply = false;
     pthread_mutex_lock(&mu);
