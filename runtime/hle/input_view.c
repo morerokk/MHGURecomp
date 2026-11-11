@@ -81,6 +81,7 @@ static bool g_kclog;           // MHGU_ACTION_KCLOG=1: log each return address t
 static uint32_t g_kc_seen[256];
 static int g_kc_n;
 static bool g_on;      // the layer is on this frame ([Actions] Enable; the settings menu can turn it on and off)
+static bool g_mb2_own;  // the menu translator's hook is in (always: input_view_init)
 static bool g_hooked;  // the hooks are in (from the first time it was on)
 
 static bool sane(uint32_t a) { return a >= 0x08000000u && a < 0xF0000000u && !(a & 3); }
@@ -232,7 +233,26 @@ static void tr_mb1(Cpu *c) {
     if (g_on) tr_view(c, g_view = gameplay_view(), 0, FN_TR_MB1);
     else fnhook_call_original(c, FN_TR_MB1);
 }
+// The menus fold the right stick onto the D-pad (the translator ORs its direction bits, INPUTS-MASTER B.1), and where
+// the mouse is the camera's right stick (villages, the Hub: host_input.c) any slight movement of it turned the Plus
+// menu's page and moved a list's selector. So the menu view does not see what the mouse adds: its right stick
+// direction bits (0xf0f00000: up 0x20100000, right 0x40200000, down 0x80400000, left 0x10800000, measured) stay only
+// in the directions the controller's own right stick is pushed to (past the engine's 0x3fff). The gameplay view,
+// which turns the camera, is untouched.
+#define RS_DIR_BITS 0xf0f00000u
+#define RS_THRESHOLD 0x3fff
+static uint32_t menu_word_without_mouse(uint32_t w) {
+    int32_t rx, ry;
+    if (!input_mouse_stick_get(&rx, &ry)) return w;
+    uint32_t keep = 0;
+    if (ry > RS_THRESHOLD) keep |= 0x20100000u;
+    if (rx > RS_THRESHOLD) keep |= 0x40200000u;
+    if (ry < -RS_THRESHOLD) keep |= 0x80400000u;
+    if (rx < -RS_THRESHOLD) keep |= 0x10800000u;
+    return (w & ~RS_DIR_BITS) | (w & keep);
+}
 static void tr_mb2(Cpu *c) {
+    c->r[1] = menu_word_without_mouse(c->r[1]);
     if (g_on && g_menus) tr_view(c, ACT_VIEW_MB2, 1, FN_TR_MB2);
     else fnhook_call_original(c, FN_TR_MB2);
 }
@@ -266,6 +286,8 @@ void input_view_init(void) {
     config_path(path, sizeof path);
     act_set_log(log_line);
     act_init(path);
+    // the menu translator is always ours (the mouse's stick feed, tr_mb2); the rest only with the layer on
+    if (!fnhook_get(FN_TR_MB2)) fnhook_set(FN_TR_MB2, hle_register("inputview:tr_mb2", tr_mb2)), g_mb2_own = true;
     input_view_apply();
 }
 
@@ -280,13 +302,13 @@ void input_view_apply(void) {
     // these functions later chain behind ours, as Forge does for any hook already there)
     static const uint32_t needed[] = {FN_MB_UPDATE, FN_TR_MB1, FN_TR_MB2, FN_PLAYER, FN_TOWN};
     for (unsigned i = 0; i < sizeof needed / sizeof *needed; i++)
-        if (fnhook_get(needed[i])) {
+        if (fnhook_get(needed[i]) && !(needed[i] == FN_TR_MB2 && g_mb2_own)) {
             LOG("[actions] %08x is hooked already: the action layer stays off\n", needed[i]);
             return;
         }
     fnhook_set(FN_MB_UPDATE, hle_register("inputview:mb_update", mb_update));
     fnhook_set(FN_TR_MB1, hle_register("inputview:tr_mb1", tr_mb1));
-    fnhook_set(FN_TR_MB2, hle_register("inputview:tr_mb2", tr_mb2));
+    if (!g_mb2_own) fnhook_set(FN_TR_MB2, hle_register("inputview:tr_mb2", tr_mb2));
     fnhook_set(FN_PLAYER, hle_register("inputview:player", player_update));
     fnhook_set(FN_TOWN, hle_register("inputview:town", town_update));
     for (int i = 0; i < ACT_WEAPONS; i++) {

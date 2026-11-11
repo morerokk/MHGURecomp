@@ -10,6 +10,10 @@
 enum { BTN_A, BTN_B, BTN_X, BTN_Y, BTN_LSTICK, BTN_RSTICK, BTN_L, BTN_R, BTN_ZL, BTN_ZR, BTN_PLUS, BTN_MINUS,
        BTN_LEFT, BTN_UP, BTN_RIGHT, BTN_DOWN };
 void input_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry);
+// The mouse is feeding the right stick (villages and the Hub, where the camera turns by the stick): the controller's
+// own right stick without it, so the menus can be told what is the mouse's (input_mouse_stick_get). Host thread.
+void input_mouse_stick_set(bool feeding, int32_t rx, int32_t ry);
+bool input_mouse_stick_get(int32_t *rx, int32_t *ry);  // false: the mouse is not feeding the right stick now
 void input_get(uint64_t *buttons, int32_t sticks[4]);  // the controller state the game sees
 uint64_t input_npad_state(int32_t sticks[4]);  // what GetNpadState gives player 1: buttons (stick directions too), sticks
 extern volatile uint64_t g_a_pressed_ns;  // when A was last pressed (plat_now_ns; 0: never)

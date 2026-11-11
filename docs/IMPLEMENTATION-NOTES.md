@@ -485,11 +485,24 @@ camera's yaw / pitch before and after, control command `camstat` prints where th
   1.2 s mouse move: the view is rotated). It is a speed, not an angle per count, with the stick's dead zone: slow precise
   turns are not possible there. The village camera class (`uVillageCamera` exists) was not located: a function-first-call
   diff (`fnnew`) while the stick turns it found nothing, because its update runs all the time and only its data changes.
-* **Gap, not fixed:** while the mouse is captured and a menu is open in a village, the stick fallback reaches the menu
-  (the menu view folds the right stick onto the D-pad): moving the mouse right turned the Plus menu's page. There is no
-  signal for "a menu has the pad" outside the action layer (`f_6eeb78` is a registration function, not a getter). Capture
-  = Hunt (below) frees the mouse in menus of a hunt; in a village click-to-capture stays, so Esc frees it.
-
+* **Menus in villages (fixed 2026-11-11):** where the mouse is the right stick (villages, the Hub) the menu view folds
+  the right stick onto the D-pad, so any slight movement turned the Plus menu's page and moved a list's selector (mb2
+  `cur` 0x00800080 / 0x40200020 for left / right: the stick's direction bit and its copy `<<8`, then the D-pad bit). The fix
+  is at the menu translator (`f_5de4f8`, hooked always since this change, `hle/input_view.c tr_mb2`): the host tells the
+  game thread when the mouse is feeding the stick and what the controller's own right stick is (`input_mouse_stick_set /
+  _get`), and the menu word keeps its right-stick direction bits (0xf0f00000: up 0x20100000, right 0x40200000, down
+  0x80400000, left 0x10800000, measured with the mouse in each direction) only in directions the controller's own stick
+  is pushed to. The gameplay view (mb1, which turns the camera) is untouched, so free look in villages still turns it.
+  No "a menu has the input" signal is needed for this. Measured in the Plus menu of a village (hidden run, mouse moved
+  right, left, up and down at 1000 counts/s for 0.5 s each): mb2 `cur` stays 0, the page stays 1/2 and Item Pouch stays
+  selected; with the menu closed the same mouse movement turns the village camera.
+* **Not done: releasing the mouse while a menu is open.** A signal for "a menu has the input" was looked for (the 373
+  mb2 readers of the research's consumers.csv, hooked in a probe, one hidden run: walking idle, Plus menu, pouch, item
+  box, smithy). Many readers (`f_3cee88`, `f_86eeec`, `f_7b3d1c`, `f_992728`, `f_993424`, `f_937120`) run every update
+  in a village with no menu open (they are the always-on prompts: Multiplayer Menu / World Map / Hunter Search), so
+  "a reader ran" is not a signal, and the run's scenarios were too coarse to find one that is. The mouse therefore stays
+  captured (cursor hidden) in the village menus for `MouseCapture=Click`; it now does nothing there. `MouseCapture=Hunt`
+  frees it in the menus of a hunt as before; Esc frees it anywhere.
 New `[Mouse]` settings (settings menu: Controls tab, Spanish strings; live, no restart):
 
 | key | default | what |

@@ -849,6 +849,7 @@ static void mouse_update(int *rx, int *ry) {
     if (mousecam_active()) {  // (the hunt camera turns by the counts themselves)
         if (mouse_dx != 0 || mouse_dy != 0) mousecam_add(mouse_dx, mouse_dy);
         mouse_dx = mouse_dy = vx = vy = 0;
+        input_mouse_stick_set(false, 0, 0);
         return;
     }
     if (dt > 0.0f) {
@@ -856,12 +857,14 @@ static void mouse_update(int *rx, int *ry) {
         vx += (mouse_dx / dt - vx) * a, vy += (mouse_dy / dt - vy) * a;
     }
     mouse_dx = mouse_dy = 0;
+    input_mouse_stick_set(false, 0, 0);  // (set again below while the mouse really moves the stick)
     if (!mouse_captured && now >= test_until) vx = vy = 0;
     float s = config_live_mouse_sensitivity() / MOUSE_FULL_SPEED;
     float x = vx * s, y = -vy * s;  // (the mouse's y is down, the stick's up)
     float m = sqrtf(x * x + y * y);
-    if (m < 0.02f) return;
+    if (m < 0.02f) return input_mouse_stick_set(false, 0, 0);
     float t = (MOUSE_DEADZONE + (1.0f - MOUSE_DEADZONE) * (m > 1.0f ? 1.0f : m)) / m;
+    input_mouse_stick_set(true, *rx, *ry);  // (the menus are not told about what the mouse adds: hle/input_view.c)
     *rx += (int)(x * t * 32767.0f), *ry += (int)(y * t * 32767.0f);
 }
 
