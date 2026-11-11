@@ -4,7 +4,8 @@
 // runs the monster (its owner) applies them: a client's swing, or the arrow its copy fires on the owner's game, counts only
 // if that copy also connects. Here the hunter's own game reports each weapon hit it saw, and the owner applies the report
 // and ignores what its copy of that hunter does (a copy's arrows still fly and show their sparks there). Each hit is counted
-// once: the owner drops its copy's hit in full, and a report travels the reliable link (ldn_send_aux), once. A shot that
+// once: the owner drops its copy's hit in full, and a report travels the reliable link (ldn_send_aux, or in crossplay
+// a UDP broadcast: below), once. A shot that
 // hits several times (Rapid's arrows, Pierce) reports each hit. Only direct weapon hits and bow / bowgun shells on large
 // monsters: kinsects, phials, gunlance shells, thrown items, cannons and Palicoes stay as they are.
 //
@@ -24,10 +25,15 @@
 // Mixed versions: no change to the link protocol. A game that has this on says so (Hello, to all, every second and when
 // it changes); an owner ignores its copy of a hunter, and applies that hunter's reports, only while it hears that
 // hunter's Hello and has this on itself. A game without this drops the unknown messages (the F_AUX handlers check their
-// magic number), and its hits work as they always did, in either role. Not in a Ryujinx crossplay hub: F_AUX doesn't
-// travel there. Shots are reported as their own message (M_SHOT) and announced by a flag at the end of the Hello, so a
-// build that only knows melee reports drops them and goes on counting its copy's shots; and an owner counts its copy's
-// shots from a hunter whose Hello doesn't have the flag.
+// magic number), and its hits work as they always did, in either role. Shots are reported as their own message
+// (M_SHOT) and announced by a flag at the end of the Hello, so a build that only knows melee reports drops them and
+// goes on counting its copy's shots; and an owner counts its copy's shots from a hunter whose Hello doesn't have the flag.
+//
+// Crossplay (a Ryujinx LDN lobby or a suyu-style room): F_AUX doesn't travel there, so the same messages go as UDP
+// broadcasts on port 47318 of the local play network, which is what the emulators' Lag Compensation Forge plugin
+// (this file ported to Forge) sends and listens to: players on the port and players on an emulator with the plugin
+// report to each other. Games without either never open that port. The plugin itself isn't started in the port
+// (forge.c), so hits are never reported twice.
 //
 // Debug: MHGU_LOG_HITSYNC=1 logs each report and copy's hit and adds up per hunter what a report said against what the
 // hunter's copy did on the owner (how much the original game would have lost or added). MHGU_HITSYNC_DIFF=1 instead
@@ -93,6 +99,7 @@ enum { M_HELLO, M_REPORT, M_SHOT };
 #define QUEUE         128
 #define QUEUE_STALE   3000000000ull
 #define MAX_ADD       16000       // a part's damage or the like from one hit: more is a damaged or hostile message
+#define UDP_PORT      HITSYNC_UDP_PORT  // crossplay: the Forge plugin's port (lagcomp.nro)
 
 typedef struct { uint8_t magic, kind, slot, on, caps; } Hello;  // (older builds send the first 4 bytes, and read only those)
 
@@ -124,7 +131,14 @@ static struct { uint32_t sent, sent_dmg, applied, applied_dmg, copy, copy_dmg; }
 static bool g_log;
 
 static bool sane(uint32_t a) { return a >= 0x08000000u && a < 0xF0000000u && !(a & 3); }
-static bool active(void) { return config_live_lag_compensation() && ldn_net_up() && !ldn_crossplay(); }
+static bool active(void) { return config_live_lag_compensation() && ldn_net_up(); }
+
+// A message to every other game: the link's F_AUX, or in crossplay a UDP broadcast on UDP_PORT (as the plugin sends).
+static void hs_send(const void *m, uint32_t len) {
+    if (!ldn_crossplay()) { ldn_send_aux(m, len); return; }
+    VPacket p = {ldn_own_ip(), ldn_broadcast_ip(), UDP_PORT, UDP_PORT, VPROTO_UDP, 0, 0};
+    ldn_send(&p, m, len);
+}
 
 static bool reports(int slot, uint64_t now) { return g_hello[slot] && now - g_hello[slot] < HELLO_STALE; }
 static bool reports_shots(int slot, uint64_t now) { return reports(slot, now) && (g_caps[slot] & HELLO_SHOTS); }
@@ -225,7 +239,7 @@ static void report_send(const Snap *s, uint32_t en, uint32_t info, int slot, boo
     }
     r.aggro = t_aggro_sum, r.aggro_flag = t_aggro_flag;
     if (!any) return;
-    ldn_send_aux(&r, sizeof r);
+    hs_send(&r, sizeof r);
     int d = damage_of(r.parts);
     __atomic_add_fetch(&g_st[slot].sent, 1, __ATOMIC_RELAXED);
     __atomic_add_fetch(&g_st[slot].sent_dmg, (uint32_t)d, __ATOMIC_RELAXED);
@@ -367,7 +381,7 @@ static void en_apply(Cpu *c) {
 
 static void hello_send(int me, bool on) {
     Hello m = {MAGIC, M_HELLO, (uint8_t)me, on, HELLO_SHOTS};
-    ldn_send_aux(&m, sizeof m);
+    hs_send(&m, sizeof m);
 }
 
 // From the game's input polling (each frame).
@@ -399,13 +413,16 @@ void hitsync_aux_received(const void *data, uint32_t len) {
     if (m[1] == M_HELLO && len >= 4) {
         Hello h = {0};
         memcpy(&h, data, len < sizeof h ? len : sizeof h);
-        if (h.slot < 4) g_caps[h.slot] = h.caps, g_hello[h.slot] = h.on ? plat_now_ns() : 0;
+        if (h.slot < 4 && (int)h.slot != local_slot()) {  // (in crossplay a broadcast can come back to its sender)
+            if (g_log && h.on && !g_hello[h.slot]) LOG("[hitsync] slot %u reports its hits (%s)\n", h.slot, ldn_crossplay() ? "crossplay, UDP" : "link");
+            g_caps[h.slot] = h.caps, g_hello[h.slot] = h.on ? plat_now_ns() : 0;
+        }
         return;
     }
     if ((m[1] != M_REPORT && m[1] != M_SHOT) || len < sizeof(Report)) return;
     Report r;
     memcpy(&r, data, sizeof r);
-    if (r.slot > 3 || r.id >= ZAKO_FIRST) return;
+    if (r.slot > 3 || r.id >= ZAKO_FIRST || (int)r.slot == local_slot()) return;
     for (int i = 0; i < N_PARTS; i++) if (r.parts[i] > MAX_ADD || r.parts[i] < -MAX_ADD) return;
     for (int i = 0; i < N_MORE; i++) if (r.more[i] > MAX_ADD || r.more[i] < -MAX_ADD) return;
     if (r.aggro < 0 || r.aggro > MAX_ADD) return;
