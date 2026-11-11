@@ -47,6 +47,7 @@ static SDL_AtomicInt live_fps;
 static SDL_AtomicInt live_vsync = {1};
 // [Controls]
 static SDL_AtomicInt live_face;
+static SDL_AtomicInt live_kbm_prompts;
 static SDL_AtomicInt live_menu_confirm;
 static SDL_AtomicInt live_background = {1};
 static SDL_AtomicInt live_combo;
@@ -101,6 +102,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->msaa != saved.msaa) SDL_SetAtomicInt(&live_msaa, c->msaa);
     if (all || c->vsync != saved.vsync) SDL_SetAtomicInt(&live_vsync, c->vsync);
     if (all || c->face_buttons != saved.face_buttons) SDL_SetAtomicInt(&live_face, c->face_buttons);
+    if (all || c->kbm_prompts != saved.kbm_prompts) SDL_SetAtomicInt(&live_kbm_prompts, c->kbm_prompts);
     if (all || c->menu_confirm != saved.menu_confirm) SDL_SetAtomicInt(&live_menu_confirm, c->menu_confirm);
     if (all || c->background_input != saved.background_input) SDL_SetAtomicInt(&live_background, c->background_input);
     if (all || c->combo_window != saved.combo_window) SDL_SetAtomicInt(&live_combo, c->combo_window);
@@ -191,6 +193,7 @@ int config_live_msaa(void) { return runtime_fsr ? 1 : SDL_GetAtomicInt(&live_msa
 int config_live_vsync(void) { return SDL_GetAtomicInt(&live_vsync); }
 int config_live_menu_confirm(void) { return SDL_GetAtomicInt(&live_menu_confirm); }
 int config_live_face_buttons(void) { return SDL_GetAtomicInt(&live_face); }
+int config_live_kbm_prompts(void) { return SDL_GetAtomicInt(&live_kbm_prompts); }
 int config_live_background_input(void) { return SDL_GetAtomicInt(&live_background); }
 int config_live_combo_window(void) { return SDL_GetAtomicInt(&live_combo); }
 int config_live_chat_key(void) { return SDL_GetAtomicInt(&live_chat_key); }

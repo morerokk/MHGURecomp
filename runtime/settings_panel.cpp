@@ -363,6 +363,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(fxaa);
     SAME(fxaa_mode);
     SAME(face_buttons);
+    SAME(kbm_prompts);
     SAME(ldn_port);
     SAME(sync_small_monsters);
     SAME(lag_compensation);
@@ -913,6 +914,10 @@ bool action_take(int code) {
         b.alt[b.n].code[0] = code;
         b.n++;
     }
+    if (!a.draft.enable) {  // (a binding chosen with the layer off would do nothing: the player means it on)
+        a.draft.enable = true;
+        s.error = tr("Rebind game actions was off: turned on, so this binding is used.");
+    }
     if (a.capture_row >= 0) {  // Simple: the row's actions, then the other rows lose the input
         int row = a.capture_row;
         act_row_set(&a.draft, a.dev, row, &row_binding);
@@ -979,7 +984,15 @@ std::string row_value(int row, bool &warn) {
     ActionTab &a = acts();
     ActBinding shown;
     switch (act_row_state(&a.draft, a.dev, row, &shown)) {
-    case ACT_ROW_DEFAULT: return tr("Default");
+    case ACT_ROW_DEFAULT: {
+        std::string text = tr("Default");
+        if (const ActBinding *own = act_default_binding(act_row(row)->head, a.dev))  // (a default of the device's own)
+            return text + " (" + binding_text(*own) + ")";
+        for (int k = 0; k < 3 && act_row(row)->members[k] >= 0; k++)
+            if (const ActBinding *own = act_default_binding(act_row(row)->members[k], a.dev))
+                text += std::string(" (") + tr("in town:") + " " + binding_text(*own) + ")";
+        return text;
+    }
     case ACT_ROW_UNSET: warn = true; return tr("Not set: choose a button");
     case ACT_ROW_CUSTOM: warn = true; return tr("Custom (differs by context: see Advanced)");
     default: break;
@@ -1141,9 +1154,11 @@ void advanced_rows(std::vector<Row> &r) {
             row.title = tr(act_label(id));
             const ActBinding *b = act_effective(&p, a.dev, id, var, &from);
             const ActBinding &own = action_slot(id);
-            if (!b)
+            if (!b) {
                 row.value = tr("Default");
-            else {
+                if (const ActBinding *own = act_default_binding(id, a.dev))
+                    row.value += " (" + binding_text(*own) + ")";
+            } else {
                 row.value = binding_text(*b);
                 if (from != id)
                     row.value += std::string(" (") + tr("same as") + " " + act_name(from) + ")";
@@ -1294,6 +1309,8 @@ void binding_inputs(const ActBinding &b, int dev, std::vector<int> &out) {
         }
 }
 void default_inputs(int id, int dev, std::vector<int> &out) {
+    if (const ActBinding *own = act_default_binding(id, dev))  // (a default of the device's own: keyboard and mouse in town)
+        return binding_inputs(*own, dev, out);
     int btn = act_default_button(id, input_view_dash_zr());
     if (btn < 0)
         return;
@@ -1655,6 +1672,7 @@ void reset_section() {
     case 2:
         c.face_buttons = f.face_buttons;
         c.background_input = f.background_input;
+        c.kbm_prompts = f.kbm_prompts;
         c.menu_chord = f.menu_chord;
         c.combo_window = f.combo_window;
         c.mouse_sensitivity = f.mouse_sensitivity;
@@ -2080,6 +2098,7 @@ std::vector<Row> main_rows() {
         add_choice(r, "face", "Face buttons", c.face_buttons, {tr("Position"), tr("Label")},
                    [](int v) { c.face_buttons = v; }, ini("FaceButtons"));
         add_bool(r, "background", "Background input", &c.background_input, ini("BackgroundInput"));
+        add_bool(r, "kbm.prompts", "Keyboard button prompts", &c.kbm_prompts, ini("KeyboardPrompts"));
         add_choice(r, "combo", "Combo input window", c.combo_window, {tr("Lenient"), tr("Strict")},
                    [](int v) { c.combo_window = v; }, ini("ComboInputWindow"));
         number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, ini("MouseSensitivity"));

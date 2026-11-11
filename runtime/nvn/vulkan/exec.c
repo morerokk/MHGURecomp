@@ -3331,6 +3331,10 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
     if (size < 16) size = 16;
     if (!guest_range_ok(r.addr, size)) return zero_buffer(size);
     if (stage == 0 && k == 3) ui_relax_scissor = false, ui_scissor_v = -1;
+    if (stage == 0 && k == 3 && !st.ds[0] && (pass_h == g_render_size[1] || pass_sy != 1.0f) && size >= 64) {
+        void menulearn_piece(const float *m);  // (the HUD pieces of the frame, at any shape: where menus' rows are)
+        menulearn_piece((const float *)G2H((uint32_t)r.addr));
+    }
     if (stage == 0 && k == 3 && !st.ds[0] && (pass_h == g_render_size[1] || pass_sy != 1.0f) &&  // (FSR: stand-ins)
         fabsf(g_render_aspect - 16.0f / 9.0f) > 0.01f) {
         if (size >= 64) {
@@ -3559,6 +3563,10 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 VkSpan sp = vk_transient_copy(G2H((uint32_t)r.addr), size, 256);  // (all of it, the matrix changed)
                 memcpy(sp.ptr, m, 64);
                 if (grouped) ui_group_add((float *)sp.ptr, pos_z, pos_x, pos_y, vgroup);
+                {   // (where the piece ends up: read at the frame's end, once its group has its anchor - runtime/menulearn.c)
+                    void menulearn_piece_final(const float *m);
+                    menulearn_piece_final((const float *)sp.ptr);
+                }
                 // The game clips some windows (a list, the help windows' body) with a scissor laid out for the 16:9 window:
                 // it moves with the piece, as its group was anchored last frame (the group is not complete yet), or for a
                 // group not seen before as the pieces so far are.

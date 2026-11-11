@@ -542,6 +542,9 @@ static void upload_texture(NvnTexture *t, TexBackend *b) {
     b->full_frame = frame;
     b->sample_hash = fnv_sample(mem, total);
     if (b->uploaded && h == b->data_hash) return;
+    // (hle/prompts.c: the button glyphs' textures, by their data - a backend is reused for a quest's textures, so not
+    // only its first upload)
+    { void prompts_texture_seen(uint32_t, const uint8_t *, uint64_t); prompts_texture_seen((uint32_t)t->addr, mem, total); }
     if (b->uploaded && h != b->data_hash) b->dynamic = true;
     b->data_hash = h;
     b->uploaded = true;

@@ -118,6 +118,7 @@ typedef struct {
     int discord_hunter;       // [Discord] ShowHunter: your hunter's name and HR there too (runtime/hle/presence.c)
     int show_fps;             // [Performance] ShowFPS: the frame rate in a box on the screen (runtime/overlay.cpp)
     int menu_chord;           // [Controls] MenuChord: Plus + Minus together open the settings menu (runtime/host_input.c)
+    int kbm_prompts;          // [Controls] KeyboardPrompts: the game's button glyphs show keys and mouse buttons (hle/prompts.c)
     int show_battery;         // [Performance] ShowBattery: BATTERY_*, the battery's charge beside the frame rate or alone
     char save_location[256];  // [Application] SaveLocation (PC): the folder holding the save (save_0/), "" the default
                               // (%APPDATA%\MHGURecomp\save, ~/.local/share/MHGURecomp/save: main.c)
@@ -221,6 +222,7 @@ int config_live_fxaa(void);
 int config_live_msaa(void);
 int config_live_vsync(void);
 int config_live_face_buttons(void);
+int config_live_kbm_prompts(void);  // [Controls] KeyboardPrompts (any thread)
 int config_live_menu_confirm(void);
 int config_live_background_input(void);
 int config_live_combo_window(void);

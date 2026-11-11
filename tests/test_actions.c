@@ -90,9 +90,10 @@ static void test_ini(void) {
     CHECK(!strcmp(text, text2), "format is stable:\n%s\n---\n%s", text, text2);
     CHECK(q.enable && q.menus && q.dev[1].base[ACT_MENU_DOWN].alt[0].code[0] == KEY_WHEEL_DOWN && q.dev[0].weapon[2][ACT_ATTACK_A].set, "round trip");
 
-    // back-compat: no section at all, or Enable=0, hooks nothing; the legacy [Keybinds] and friends are not ours
+    // no section at all: on, the menus too (the game's buttons, but for act_default_binding's); Enable=0 hooks nothing;
+    // the legacy [Keybinds] and friends are not ours
     ActProfile none = parse("[Display]\nResolution=1280x720\n[Keybinds]\nA = Mouse Left\n");
-    CHECK(!none.enable && !none.menus, "no [Actions]: off");
+    CHECK(none.enable && none.menus, "no [Actions]: on, menus on");
     ActProfile off = parse("[Actions]\nEnable=0\n[Actions.Pad]\nDodge=pad:north\n");
     CHECK(!off.enable, "Enable=0");
     act_set_log(quiet);
@@ -133,8 +134,12 @@ static void test_golden(void) {
                 uint32_t in = ew | noise[k];
                 uint64_t act = s.hold[0] | s.pulse[0];
                 CHECK(act_view(ACT_VIEW_MB1, in, act, zr) == in, "T0 mb1 b=%04x zr=%d noise=%x", b, zr, noise[k]);
-                CHECK(act_view(ACT_VIEW_MB2, in, act, zr) == in, "T0 mb2 b=%04x zr=%d noise=%x", b, zr, noise[k]);
-                CHECK(act_view(ACT_VIEW_TOWN, in, act, zr) == in, "T0 town b=%04x zr=%d noise=%x", b, zr, noise[k]);
+                // (A, X and L are pressed by key here: keyboard and mouse have defaults of their own in the menus and the
+                // town, act_default_binding, test_kbm_town)
+                if (!(b & 0x15)) {
+                    CHECK(act_view(ACT_VIEW_MB2, in, act, zr) == in, "T0 mb2 b=%04x zr=%d noise=%x", b, zr, noise[k]);
+                    CHECK(act_view(ACT_VIEW_TOWN, in, act, zr) == in, "T0 town b=%04x zr=%d noise=%x", b, zr, noise[k]);
+                }
                 CHECK(act_view(ACT_VIEW_SHEATHED, in, act, zr) == in && act_view(ACT_VIEW_HUNT_ANY, in, act, zr) == in, "T0 hunt states b=%04x zr=%d noise=%x", b, zr, noise[k]);
                 CHECK(act_view(ACT_VIEW_MB1 | ACT_VIEW_BAR, in, act, zr) == in && act_view(ACT_VIEW_SHEATHED | ACT_VIEW_BAR, in, act, zr) == in, "T0 item bar b=%04x zr=%d noise=%x", b, zr, noise[k]);
                 if (failures > 20) return;
@@ -275,6 +280,56 @@ static void test_chord_alt(void) {
 
 // The town and the menus are independent: rebinding one never moves the other, or the hunt (the Simple layout's merged
 // rows write both, see test_rows); with nothing of its own an action reads the button the game has
+// Keyboard and mouse in the menus and the town by default: left click confirms / talks (A), right click backs out (B),
+// Space is X; Tier 0's keys for those buttons do nothing there, the controller is the game's, and the hunt keeps Tier 0's
+static void test_kbm_town(void) {
+    ActProfile p = parse("");
+    act_use_profile(&p);
+    const int LEFT = KEY_MOUSE + SDL_BUTTON_LEFT, RIGHT = KEY_MOUSE + SDL_BUTTON_RIGHT;
+    CHECK(act_default_binding(ACT_TOWN_INTERACT, 1) && act_default_binding(ACT_TOWN_INTERACT, 1)->alt[0].code[0] == LEFT, "TownInteract: left click");
+    CHECK(act_default_binding(ACT_TOWN_CANCEL, 1)->alt[0].code[0] == RIGHT && act_default_binding(ACT_TOWN_X, 1)->alt[0].code[0] == SDL_SCANCODE_SPACE, "TownCancel, TownX");
+    CHECK(act_default_binding(ACT_MENU_CONFIRM, 1)->alt[0].code[0] == LEFT && act_default_binding(ACT_MENU_CANCEL, 1)->alt[0].code[0] == RIGHT && act_default_binding(ACT_MENU_X, 1)->alt[0].code[0] == SDL_SCANCODE_SPACE, "MenuConfirm, MenuCancel, MenuX");
+    CHECK(!act_default_binding(ACT_TOWN_INTERACT, 0) && !act_default_binding(ACT_ATTACK_X, 1) && !act_default_binding(ACT_TOWN_Y, 1) && !act_default_binding(ACT_MENU_Y, 1), "only those six, only keyboard and mouse");
+    struct { int code; uint32_t town; const char *what; } cases[] = {
+        {LEFT, 0x2000, "left click talks"}, {RIGHT, 0x4000, "right click is B"}, {SDL_SCANCODE_SPACE, 0x1000, "Space is X"},
+        {40 + 0, 0, "Tier 0's A key: nothing"}, {40 + 1, 0, "Tier 0's B key: nothing"}, {40 + 2, 0, "Tier 0's X key: nothing"},
+        {ACT_PAD + 20 + 0, 0x2000, "the controller's A is A"}, {40 + 3, 0x8000, "Tier 0's Y key is Y"},
+    };
+    for (unsigned i = 0; i < sizeof cases / sizeof *cases; i++) {
+        release_all();
+        press(cases[i].code);
+        ActHost h = host_for(tier0_word(), false, 2000 + i);
+        ActSnap s;
+        act_sample(&h, &s);
+        uint32_t in = ew_of_word(tier0_word());
+        CHECK(act_view(ACT_VIEW_TOWN, in, s.hold[0], false) == cases[i].town, "town: %s: %x", cases[i].what, act_view(ACT_VIEW_TOWN, in, s.hold[0], false));
+        CHECK(act_view(ACT_VIEW_MB2, in, s.hold[0], false) == cases[i].town, "menus: %s: %x", cases[i].what, act_view(ACT_VIEW_MB2, in, s.hold[0], false));
+        CHECK(act_view(ACT_VIEW_MB1, in, s.hold[0], false) == in, "the hunt as the game: %s", cases[i].what);
+    }
+    // a binding of its own wins; Enable=0 leaves it all to the game
+    p = parse("[Actions.Kbm]\nTownInteract = key:f\n");
+    act_use_profile(&p);
+    release_all();
+    press(LEFT);
+    ActHost h = host_for(tier0_word(), false, 2100);
+    ActSnap s;
+    act_sample(&h, &s);
+    CHECK(act_view(ACT_VIEW_TOWN, 0, s.hold[0], false) == 0, "TownInteract bound to F: left click no longer talks");
+    p = parse("[Actions]\nEnable=0\n");
+    act_use_profile(&p);
+    CHECK(!act_enabled(), "Enable=0: off");
+    p = parse("");
+    act_use_profile(&p);
+    CHECK(act_row_state(&p, 1, act_row_of(ACT_TOWN_INTERACT), NULL) == ACT_ROW_DEFAULT, "Simple: Confirm is still Default");
+    // Simple: left click given to Menu Y takes it from Confirm's default (Confirm is left not set)
+    int my = act_row_of(ACT_MENU_Y), confirm = act_row_of(ACT_MENU_CONFIRM);
+    ActBinding b;
+    memset(&b, 0, sizeof b);
+    b.set = true, b.n = 1, b.alt[0].n = 1, b.alt[0].code[0] = LEFT;
+    act_row_set(&p, 1, my, &b);
+    uint64_t took = act_row_claim(&p, 1, my, LEFT, NULL, NULL, false);
+    CHECK((took >> confirm & 1) && act_row_state(&p, 1, confirm, NULL) == ACT_ROW_UNSET, "left click taken from Confirm's default: %llx", (unsigned long long)took);
+}
 static void test_town(void) {
     CHECK(act_find("Confirm") == ACT_MENU_CONFIRM && act_find("cancel") == ACT_MENU_CANCEL, "Confirm / Cancel names");
     ActProfile p = parse("[Actions]\nEnable=1\nManageMenus=1\n[Actions.Pad]\nConfirm = pad:south\nCancel = pad:east\n");
@@ -882,6 +937,7 @@ int main(void) {
     test_weapon();
     test_chord_alt();
     test_town();
+    test_kbm_town();
     test_scopes();
     test_crouch_rows();
     test_interact();
