@@ -535,7 +535,11 @@ game's own glyphs back at its next button press.
 * **Which input.** The context on screen: a hunt (gameplay, and no menu: the pause menu's handler running, no known
   menu in the pointer's focus, no menu cursor run in the last 150 ms - the focus alone once missed the pause menu with
   the Hunting Horn out, so Signal showed the hunt's left click, not the menu's Space), a town (no known menu open),
-  else the menus. The button's first action in that context (`act_order`, by its default Switch button), its
+  else the menus. The Hunting Horn's Melody Effect panel (R in a hunt's pause menu) is the hunt's though a menu is up:
+  its notes are played in the hunt. Its toggle `0x8786d0` (opening and closing it, from the pause menu at 0x86f3f0 /
+  0x86f630) is hooked for the pause menu's object, whose byte `+0xdc` is 1 while the panel shows (0 with the menu;
+  `+0x48` is 3 / 0 too: found by saving the object in both states). Forgotten out of the hunt. Hidden run (`weapon 12`,
+  quest 101): the panel's notes are left click, right click, left + right click; the menu again: Signal Space. The button's first action in that context (`act_order`, by its default Switch button), its
   keyboard and mouse binding: its own or the one it follows (`act_effective`), else the device's default
   (`act_default_binding`), else the keybinds' first key for that button (Tier 0; also with the layer or its menus off).
 * **The pictures.** `extras/prompts/mouse_icons.png` (a 4 x 2 grid; used: left, right, middle, wheel up, wheel down)

@@ -376,8 +376,27 @@ static void write_copies(Sheet *s, const uint8_t *data) {
 
 // ------------------------------------------------------------------ which input a button is now
 enum { SRC_NONE, SRC_LMB, SRC_RMB, SRC_MMB, SRC_WHEEL_UP, SRC_WHEEL_DOWN, SRC_KEY };
+// The Hunting Horn's Melody Effect panel (R in a hunt's pause menu): the pause menu's object, as the panel's toggle
+// (0x8786d0, opening and closing it) is called on it; +0xdc is 1 while the panel shows (0 with the menu; measured in
+// quest 101). Its notes are played in the hunt, so its prompts are the hunt's, not the menu's.
+#define FN_MELODY_TOGGLE 0x8786d0u
+#define PM_MELODY_SHOWN  0xdcu
+static volatile uint32_t g_pause_menu;  // (0: not seen in this hunt)
+static void melody_toggle(Cpu *c) {
+    g_pause_menu = c->r[0];
+    fnhook_call_original(c, FN_MELODY_TOGGLE);
+}
+void prompts_init(void) {
+    if (!fnhook_get(FN_MELODY_TOGGLE)) fnhook_set(FN_MELODY_TOGGLE, hle_register("prompts:melody_toggle", melody_toggle));
+}
+static bool melody_shown(void) {
+    uint32_t pm = g_pause_menu;
+    return pm && LD8(pm + PM_MELODY_SHOWN) == 1;
+}
 static int view_now(void) {
     const char *ctx = input_view_context();
+    if (strcmp(ctx, "FIELD")) g_pause_menu = 0;  // (out of the hunt: the next one's pause menu is another object)
+    else if (melody_shown()) return ACT_VIEW_MB1;
     // (a hunt's menu: its pause menu handler stopped, a known menu in the pointer's focus, or any menu cursor running -
     // the pointer's focus alone missed one with the Hunting Horn out)
     if (!strcmp(ctx, "FIELD") && !input_view_hunt_menu_open() && !menuptr_open() && !menuptr_cursor_ran(150000000ull))

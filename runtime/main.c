@@ -86,6 +86,7 @@ static void boot(const char *root) {
     mousecam_init();  // (mouse look on the hunt camera's angles: runtime/hle/mousecam.c)
     itembar_init();  // (the mouse wheel on the item bar: runtime/hle/itembar.c)
     { void menuptr_init(void); menuptr_init(); }  // (the mouse in the pause menu: runtime/hle/menuptr.c)
+    { void prompts_init(void); prompts_init(); }  // (keyboard and mouse button prompts: runtime/hle/prompts.c)
     { void input_view_init(void); input_view_init(); }  // (game-action rebinding, with [Actions] Enable=1: runtime/hle/input_view.c)
     { void title_exit_init(void); title_exit_init(); }  // (B on the title screen's Main Menu asks to quit: runtime/hle/title_exit.c)
     { void textlayout_init(void); textlayout_init(); }  // (UI text spacing and kerning: runtime/hle/textlayout.c)
