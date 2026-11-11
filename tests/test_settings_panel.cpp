@@ -227,7 +227,7 @@ int main() {
     selected("face");
     // The Keybinds submenu: a key chosen for B, then a mouse button as its second; the recomp's own keys refused
     press(ImGuiKey_Home);
-    down(9);  // (background, combo, mouse, vertical, invert, smoothing, capture, menus, keybinds)
+    down(8);  // (background, combo, mouse, vertical, invert, smoothing, capture, keybinds)
     selected("keybinds");
     confirm();
     selected("bind.0");  // (past the section's title)
@@ -280,13 +280,40 @@ int main() {
     assert(config_live_bind(BIND_B, 0) == SDL_SCANCODE_G && config_live_bind(BIND_B, 1) == KEY_MOUSE + SDL_BUTTON_MIDDLE);
     assert(config_live_bind(BIND_X, 0) == KEY_MOUSE + SDL_BUTTON_X1);
     press(ImGuiKey_Home);
-    down(9);
+    down(8);
     confirm();
     press(ImGuiKey_End);
     press(ImGuiKey_GamepadDpadUp);
     selected("bind.reset");
     confirm();
     back();
+    selected("keybinds");
+    // The Game actions screen: the tabs over the drawing (Hunt | Town and Hub | Menus | Keys) answer the mouse
+    down();
+    selected("actions");
+    confirm();
+    selected("act.enable");
+    {
+        auto *bw = ImGui::FindWindowByName("Settings##bind");
+        assert(bw);
+        float y = bw->Pos.y + ImGui::GetStyle().WindowPadding.y + bw->FontWindowScale * ImGui::GetFontSize();
+        bool found = false;
+        for (float x = bw->Pos.x + 60; x < bw->Pos.x + bw->Size.x - 60 && !found; x += 8) {
+            io.AddMousePosEvent(x, y);
+            idle();
+            io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+            frame();
+            io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+            idle(4);
+            found = ImGui::GetCurrentContext()->NavId == id("act.tab");  // (a tab click puts the focus on the list's Show row)
+        }
+        assert(found);  // (a tab of the drawing took a click)
+        io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+        idle();
+    }
+    back();
+    selected("actions");
+    press(ImGuiKey_GamepadDpadUp);
     press(ImGuiKey_End);
     press(ImGuiKey_GamepadDpadUp);
     confirm();

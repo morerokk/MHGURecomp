@@ -27,7 +27,6 @@
 
 #include "actions.h"
 #include "config.h"
-#include "cursor_nav.h"
 #include "menu_confirm.h"
 #include "forge.h"
 #include "hle/chat.h"
@@ -141,89 +140,6 @@ static struct { int x, y; bool down, valid; } test_ptr;
 static SDL_SpinLock mods_lock;
 static struct { float x, y, dx, dy; bool inside; uint32_t held, pressed; } mods_mouse;
 static SDL_AtomicInt mods_free;
-
-// ---- the mouse as a menu cursor (runtime/cursor_nav.h), by position: while the pointer has moved lately over a list, the
-// renderer scans the finished frame for the menu's highlight bar (nvn/vulkan/device.c) and the game thread presses
-// MenuUp / MenuDown (the menu view only) until the highlighted row is the one under the pointer. Clicks are the buttons
-// bound to the mouse; an unbound left click is MenuConfirm and an unbound right click MenuCancel.
-static CursorNav cnav;
-static int cnav_click[2];  // confirm, cancel
-static volatile float cur_x, cur_y;       // the pointer, window pixels
-static volatile uint64_t cur_move_ns;     // when it last moved over the window
-static volatile int cur_new_episode;      // it moved to a new place: the walk starts again
-extern volatile int g_scan_request;       // (nvn/vulkan/device.c: scan the next frame for highlight bars)
-extern MenuScan g_menu_scan;
-static bool cursor_nav_on(void) {
-    return config_live_mouse_menu_cursor() && act_enabled() && act_menus_on() && !g_hunt_ctx && !mouse_captured && !overlay_menu_open() && !chat_active() &&
-           !host_input_mouse_free();
-}
-static bool click_bound(int btn) {
-    int code = KEY_MOUSE + btn;
-    if (act_uses_input(code)) return true;
-    for (int i = 0; i < BINDS; i++)
-        for (int k = 0; k < BIND_KEYS; k++)
-            if (config_live_bind(i, k) == code) return true;
-    return false;
-}
-static void cursor_motion(float x, float y) {
-    static float ref_x, ref_y;
-    static bool have;
-    cur_x = x, cur_y = y;
-    if (!have || fabsf(x - ref_x) > 12.0f || fabsf(y - ref_y) > 12.0f) {  // (a new place, not a tremor)
-        ref_x = x, ref_y = y, have = true;
-        __atomic_store_n(&cur_new_episode, 1, __ATOMIC_RELAXED);
-    }
-    if (cursor_nav_on()) cur_move_ns = plat_now_ns();
-}
-static void cursor_click(int btn) {
-    if (!cursor_nav_on() || click_bound(btn)) return;
-    if (btn == SDL_BUTTON_LEFT) __atomic_store_n(&cnav_click[0], 1, __ATOMIC_RELAXED);
-    else if (btn == SDL_BUTTON_RIGHT) __atomic_store_n(&cnav_click[1], 1, __ATOMIC_RELAXED);
-}
-static void cursor_step(void) {  // (game thread, once per update)
-    static uint64_t f_ns, f_cnt, scan_next, press_ns, used_ns, q_next;
-    static int q_left, q_dir;
-    static float fps = 60.0f;
-    static bool init;
-    static int last_count;
-    uint64_t now = plat_now_ns();
-    if (now - f_ns >= 300000000ull) {  // (a press lasts 70 ms of presented frames, however fast they come)
-        if (f_ns && g_present_count > f_cnt) fps = (float)(g_present_count - f_cnt) * 1e9f / (float)(now - f_ns);
-        f_ns = now, f_cnt = g_present_count;
-    }
-    unsigned frames = (unsigned)(fps * 0.07f) + 1;
-    if (frames < 3) frames = 3;
-    for (int c = 0; c < 2; c++)
-        if (__atomic_exchange_n(&cnav_click[c], 0, __ATOMIC_RELAXED)) act_inject(c ? ACT_MENU_CANCEL : ACT_MENU_CONFIRM, frames, g_present_count);
-    if (!init) cursor_nav_reset(&cnav), init = true;
-    if (!cursor_nav_on()) {
-        q_left = 0;
-        return;
-    }
-    if (__atomic_exchange_n(&cur_new_episode, 0, __ATOMIC_RELAXED)) cursor_nav_reset(&cnav);
-    if (q_left > 0) {  // (presses of one decision, a gap apart)
-        if (now >= q_next) {
-            act_inject(q_dir == CNAV_UP ? ACT_MENU_UP : ACT_MENU_DOWN, frames, g_present_count);
-            press_ns = now, q_next = now + 110000000ull, q_left--;
-        }
-        return;
-    }
-    if (now - cur_move_ns > 1500000000ull) return;  // (the pointer rests: the keyboard and the pad have the menu)
-    if (now >= scan_next) g_scan_request = 1, scan_next = now + (last_count ? 90000000ull : 400000000ull);
-    MenuScan s;
-    uint32_t q0 = __atomic_load_n(&g_menu_scan.seq, __ATOMIC_ACQUIRE);
-    if (q0 & 1) return;
-    s = g_menu_scan;
-    if (__atomic_load_n(&g_menu_scan.seq, __ATOMIC_ACQUIRE) != q0) return;
-    if (s.ns == used_ns || s.ns < press_ns + 150000000ull) return;  // (a frame after the last press has shown its effect)
-    used_ns = s.ns, last_count = s.count;
-    SDL_Window *w = ui_window();
-    int ww = 0, wh = 0;
-    if (!s.count || !w || !SDL_GetWindowSize(w, &ww, &wh) || ww < 1 || wh < 1) return;
-    int k = 0;
-    int d = cursor_nav_decide(&cnav, s.band, s.count, cur_x * (float)s.w / (float)ww, cur_y * (float)s.h / (float)wh, &k);
-    if (d >= 0 && k > 0) q_dir = d, q_left = k, q_next = now, press_ns = now;
-}
 
 static int wheel_notches(const SDL_Event *e) {  // (> 0: up)
     return e->wheel.integer_y * (e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1);
@@ -857,8 +773,10 @@ void host_input_event(const SDL_Event *e) {
         }
         break;
     case SDL_EVENT_MOUSE_MOTION:
-        if (mouse_captured) mouse_dx += e->motion.xrel, mouse_dy += e->motion.yrel;
-        else last_motion_ns = plat_now_ns(), cursor_motion(e->motion.x, e->motion.y);
+        // (captured: the hunt camera's counts; a free pointer outside a hunt's camera also moves the right stick, below)
+        if (mouse_captured || (!g_hunt_ctx && !overlay_menu_open() && !chat_active() && !host_input_mouse_free()))
+            mouse_dx += e->motion.xrel, mouse_dy += e->motion.yrel;
+        if (!mouse_captured) last_motion_ns = plat_now_ns();
         break;
     case SDL_EVENT_MOUSE_WHEEL: {  // (what [Keybinds] says: by default the item bar)
         int n = wheel_notches(e);
@@ -878,7 +796,6 @@ void host_input_event(const SDL_Event *e) {
             mouse_grab = true, mouse_released = false;
         } else {
             mouse_held |= 1u << btn;
-            if (!g_hunt_ctx) cursor_click(btn);
         }
         break;
     }
@@ -968,13 +885,12 @@ static void mouse_update(int *rx, int *ry) {
     }
     mouse_dx = mouse_dy = 0;
     input_mouse_stick_set(false, 0, 0);  // (set again below while the mouse really moves the stick)
-    if (!mouse_captured && now >= test_until) vx = vy = 0;
     float s = config_live_mouse_sensitivity() / MOUSE_FULL_SPEED;
     float x = vx * s, y = -vy * s;  // (the mouse's y is down, the stick's up)
     float m = sqrtf(x * x + y * y);
     if (m < 0.02f) return input_mouse_stick_set(false, 0, 0);
     float t = (MOUSE_DEADZONE + (1.0f - MOUSE_DEADZONE) * (m > 1.0f ? 1.0f : m)) / m;
-    input_mouse_stick_set(true, *rx, *ry);  // (the menus are not told about what the mouse adds: hle/input_view.c)
+    input_mouse_stick_set(true, *rx, *ry);
     *rx += (int)(x * t * 32767.0f), *ry += (int)(y * t * 32767.0f);
 }
 
@@ -1134,7 +1050,6 @@ int host_input_held(int *out, int max) {
 static void act_update(uint64_t b, uint64_t script_b, bool suppress) {
     if (!act_enabled()) return;
     act_wheel_step();
-    cursor_step();
     ActHost h = {NULL, act_phys_held, act_sw_sources, b, script_b, suppress, input_view_dash_zr(), g_present_count};
     ActSnap s;
     memset(&s, 0, sizeof s);

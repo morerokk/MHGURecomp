@@ -95,7 +95,6 @@
     /* [Mouse] */                                                                                   \
     .mouse_sensitivity = 1.0f,                                                                      \
     .mouse_sensitivity_y = 1.0f,                                                                    \
-    .mouse_menu_cursor = 1,                                                                          \
     .mouse_invert_y = 0,                                                                            \
     .mouse_smoothing = 0.0f,                                                                        \
     .mouse_capture = MOUSE_CAPTURE_CLICK,                                                           \
@@ -375,12 +374,6 @@ static const char DEFAULT_INI[] =
     "; Invert the mouse's up and down (on top of the game's own invert option)\n"
     "; Default: Off\n"
     "MouseInvertY = Off\n"
-    "\n"
-    "; The mouse in the menus (and the hunt's pause menu): the row of a list under the pointer is selected (while the\n"
-    "; pointer moves over it), and the buttons bound to the mouse (MenuConfirm / MenuCancel in Game actions) click. Needs\n"
-    "; Game actions on with ManageMenus; not with HDR output\n"
-    "; Default: On\n"
-    "MenuCursor = On\n"
     "\n"
     "; Mouse smoothing for the camera in a hunt: 0 turns exactly with the mouse, higher values let the turn trail it\n"
     "; Default: 0.0\n"
@@ -771,7 +764,6 @@ const ConfigSetting g_settings[] = {
     {"Mouse", "MouseSensitivity", SET_FLOAT, F(mouse_sensitivity), 0, 0.1f, 10.0f, NULL, NULL, false, ERR_VIEW},
     {"Mouse", "MouseSensitivityY", SET_FLOAT, F(mouse_sensitivity_y), 0, 0.1f, 10.0f, NULL, NULL, false, ERR_MOUSE},
     ON_OFF("Mouse", "MouseInvertY", mouse_invert_y, false),
-    ON_OFF("Mouse", "MenuCursor", mouse_menu_cursor, false),
     {"Mouse", "MouseSmoothing", SET_FLOAT, F(mouse_smoothing), 0, 0.0f, 0.9f, NULL, NULL, false, ERR_MOUSE},
     {"Mouse", "MouseCapture", SET_CHOICE, F(mouse_capture), 0, 0, 0, "Click,Hunt", NULL, false, ERR_MISC},
     KEYS("MoveUp", BIND_MOVE_UP), KEYS("MoveDown", BIND_MOVE_DOWN), KEYS("MoveLeft", BIND_MOVE_LEFT),

@@ -374,7 +374,6 @@ bool equal(const Config &a, const Config &b) {
     SAME(mouse_invert_y);
     SAME(mouse_smoothing);
     SAME(mouse_capture);
-    SAME(mouse_menu_cursor);
     SAME(aspect_ratio);
     SAME(fov);
     SAME(ui_anchor);
@@ -1662,7 +1661,6 @@ void reset_section() {
         c.mouse_invert_y = f.mouse_invert_y;
         c.mouse_smoothing = f.mouse_smoothing;
         c.mouse_capture = f.mouse_capture;
-        c.mouse_menu_cursor = f.mouse_menu_cursor;
         SDL_strlcpy(c.chat_key, f.chat_key, sizeof c.chat_key);
         memcpy(c.binds, f.binds, sizeof c.binds);
         break;
@@ -2088,8 +2086,6 @@ std::vector<Row> main_rows() {
         number(r, "mouse.smooth", tr("Mouse smoothing"), &c.mouse_smoothing, lo("MouseSmoothing"), hi("MouseSmoothing"), .05f, ini("MouseSmoothing"));
         add_choice(r, "mouse.capture", "Mouse capture", c.mouse_capture, {tr("Click"), tr("Hunt")},
                    [](int v) { c.mouse_capture = v; }, ini("MouseCapture"));
-        add_bool(r, "mouse.menu", "Mouse in menus", &c.mouse_menu_cursor, ini("MenuCursor"));
-        r.back().help = tr("The row of the game's menus under the pointer is selected (the menu's highlight is found in the picture and walked to the pointer while it moves). Clicks are the buttons bound to the mouse (MenuConfirm and MenuCancel in Game actions). Not with HDR output.");
         action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
         r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons, for moving and for the item bar, and the chat key.");
         action(r, "actions", tr("Game actions"), []() { push(View::Actions, "act.enable"); });
@@ -2577,6 +2573,9 @@ void navigate(std::vector<Row> &rows, bool list = false) {
 // Keep ImGui internals at this boundary: rows retain native activation and rendering.
 void own_focus(ImGuiWindow *w, ImGuiID id, const ImRect &rect) {
     ImGuiContext &g = *ImGui::GetCurrentContext();
+    // (an item of another window being pressed, a tab or an input of the drawing: focusing the list now would end that press)
+    if (g.ActiveId != 0 && g.ActiveIdWindow && g.ActiveIdWindow->RootWindow != w->RootWindow)
+        return;
     // Focus first: a click outside the menu leaves no focused window, and SetNavID asserts one
     ImGui::FocusWindow(w);
     ImGui::SetNavID(id, ImGuiNavLayer_Main, 0,
@@ -3325,8 +3324,10 @@ void settings_panel(bool *open) {
         draw_bind_window(ImVec2(main_pos.x, vp->WorkPos.y + margin), width, 0, bv_stack, scale, margin, look);
     if (bv_mode == 2)
         draw_bind_window(ImVec2(main_pos.x + main_size.x + bv_gap, main_pos.y), bv_width, main_size.y, 0, scale, margin, look);
-    if (bv_mode >= 2 && g_bv_pointing && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-        ImGui::SetWindowFocus("Settings##main");  // (a click on the drawing does not take the list's keyboard and controller)
+    // (a click on the drawing does not take the list's keyboard and controller: when the button is let go, not when it goes
+    // down: focusing the list's window at the press would end the press of the tab or input under the pointer)
+    if (bv_mode >= 2 && g_bv_pointing && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+        ImGui::SetWindowFocus("Settings##main");
     if (s.dropdown.open && s.dropdown.anchored && !options.empty())
         draw_dropdown(options, scale, base);
     else

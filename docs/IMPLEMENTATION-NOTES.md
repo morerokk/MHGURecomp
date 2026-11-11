@@ -471,7 +471,8 @@ smithy, equipment box, item box, shop, map, options: hover there is unknown (the
 ## Mouse camera (2026-11-11)
 
 `runtime/hle/mousecam.c` turns the hunt camera's own angles (the quest camera's stick handler `f_2255cc`, and the aiming
-hunter by `f_4a1738`), not the right stick. Villages and the Hub have no mouse camera (below). Audited in hidden runs (`MHGU_MOUSECAM_LOG=1` logs every turn with the
+hunter by `f_4a1738`), not the right stick; only where neither runs (villages and the Hub) the mouse is still the right
+stick (`host_input.c`, a smoothed velocity). Audited in hidden runs (`MHGU_MOUSECAM_LOG=1` logs every turn with the
 camera's yaw / pitch before and after, control command `camstat` prints where the camera looks and whether the mouse has it):
 
 * **Hunt camera:** `mousemove 1000 0 200` (about 200 counts) turned the yaw by 3021 units (expected 2913 = 200 x 0.08 deg x
@@ -480,32 +481,19 @@ camera's yaw / pitch before and after, control command `camstat` prints where th
 * **Aiming:** the HBG aims with the mouse (`aim turn` lines: the hunter's yaw and the eye pitch move). With the Bow's R the
   camera's own stick handler keeps running, so the camera path turns it (the hunter follows the camera): works, but it
   is not the aim-turn path.
-* **Village / Hub: no mouse camera (decided 2026-11-11).** A village camera could not be shown to turn with the mouse (or
-  with the controller's own right stick in the harness spot: screenshots at the noise level), the village camera class
-  was not located, and the aim of this work was the menus, so the "hold a button to look" setting (`VillageLook`) and the
-  mouse-as-right-stick feed there were removed. Outside a hunt the mouse is a free pointer.
-* **Menus in villages (fixed 2026-11-11):** where the mouse is the right stick (villages, the Hub) the menu view folds
-  the right stick onto the D-pad, so any slight movement turned the Plus menu's page and moved a list's selector (mb2
-  `cur` 0x00800080 / 0x40200020 for left / right: the stick's direction bit and its copy `<<8`, then the D-pad bit). The fix
-  is at the menu translator (`f_5de4f8`, hooked always since this change, `hle/input_view.c tr_mb2`): the host tells the
-  game thread when the mouse is feeding the stick and what the controller's own right stick is (`input_mouse_stick_set /
-  _get`), and the menu word keeps its right-stick direction bits (0xf0f00000: up 0x20100000, right 0x40200000, down
-  0x80400000, left 0x10800000, measured with the mouse in each direction) only in directions the controller's own stick
-  is pushed to. The gameplay view (mb1, which turns the camera) is untouched, so free look in villages still turns it.
-  No "a menu has the input" signal is needed for this. Measured in the Plus menu of a village (hidden run, mouse moved
-  right, left, up and down at 1000 counts/s for 0.5 s each): mb2 `cur` stays 0, the page stays 1/2 and Item Pouch stays
-  selected; with the menu closed the same mouse movement turns the village camera.
-* **The cursor in menus (done, not by a global "menu open" signal).** A global flag was searched for again: snapshots of the
-  guest heap (1 MB chunks, 0x0c000000+, about 70 mapped) in a village idle, Plus menu, pouch, map and item box, diffed for
-  words that flip in all of them and stay put otherwise, gave one candidate (`0x0c019eec`, 1 idle / 2 in the Plus menu, the
-  map and the item box; it is a field of a pooled UI block, the hot-button HUD panel's state) that did not flip in NPC
-  dialogs (shop, quest board) and sits at an address that depends on the heap layout of the run, so it is not used. What
-  is used instead:
-  * **A free pointer by default.** Outside a hunt's camera (villages, the Hub, the title, every menu) the mouse is not
-    captured: the cursor shows (full screen too, for 3 s after it moved), a click is the game's button (`mouse:left` etc.
-    of `[Actions.Kbm]` or `[Keybinds]`, no capture click) and the wheel scrolls menus. The right stick is not fed by the
-    mouse there, so nothing moves by itself. (A village look button, `VillageLook`, existed for a day and was removed:
-    see "Village / Hub" above.)
+* **Village / Hub and menus: the mouse is the right stick (as at first).** Outside a hunt's camera the pointer's movement
+  feeds the right stick (a smoothed velocity, `[Mouse] MouseSensitivity`) and nothing is captured. It is a speed, not an
+  angle per count, with the stick's dead zone. Whether a village camera turns with it was not shown (screenshots at the
+  noise level, the controller's own right stick did no better; the village camera class was not located), so no village
+  camera feature is promised: a "hold a button to look" setting (`VillageLook`) existed for a day and was removed.
+  The menus see that stick, as they see a controller's: the menu translator folds the right stick onto the D-pad, so moving
+  the mouse moves a list's selector and turns the Plus menu's page (a "no mouse in menus" version, 815543e, was undone at
+  the user's request). The gameplay view is untouched either way.
+* **The cursor in menus.** No global "menu open" signal exists (a heap-snapshot search found one candidate field, the hot
+  button HUD panel's state, that does not flip in NPC dialogs and sits at a run-dependent address). What is done instead:
+  * **A free pointer outside a hunt's camera** (villages, the Hub, the title, every menu): nothing is captured, the cursor
+    shows (full screen too, for 3 s after it moved), a click is the game's button (`mouse:left` etc. of `[Actions.Kbm]` or
+    `[Keybinds]`, no capture click), the wheel scrolls menus, and the movement is the right stick (above).
   * **A hunt's pause menu releases the mouse.** In a hunt the Plus menu does not pause and the camera handler keeps
     running (the mouse still turned the camera with the menu open), so the camera handler is no signal there. The hunt's
     pause menu handler `f_86eeec` runs every update of a hunt except while the pause menu (and the pouch it opens) is open
@@ -513,13 +501,11 @@ camera's yaw / pitch before and after, control command `camstat` prints where th
     which is not modal). It is hooked (`hle/input_view.c`, always, only when nothing else hooks it); not seen for 300 ms
     after it ran in this hunt = the menu is open (`input_view_hunt_menu_open`, reset when no hunt runs). Then the mouse is
     released and the cursor shown, a click is a button; when the menu closes it is captured again (`MouseCapture` Click
-    keeps your click, Hunt captures by itself). Measured with `camstat` (now also prints the mouse state: hunt camera,
-    hunt menu, captured, grab, cursor shown): Plus menu `hunt menu 1 captured 0 cursor shown 1`, closed `hunt
-    menu 0 captured 1`, in both capture modes. Other hunt modals (a dialog from an NPC at a camp, the quest result)
-    were not checked: they keep the mouse captured if that handler keeps running there.
+    keeps your click, Hunt captures by itself). Measured with `camstat` (also prints the mouse state: hunt camera, hunt menu,
+    captured, grab, cursor shown): Plus menu `hunt menu 1 captured 0 cursor shown 1`, closed `hunt menu 0 captured 1`, in
+    both capture modes. Other hunt modals (an NPC dialog at a camp, the quest result) were not checked: they keep the mouse
+    captured if that handler keeps running there.
   * Control commands for tests: `mousebtn <1-5> <0|1>` (an SDL button event), `camstat`.
-  * Verified (hidden runs): village idle `captured 0 cursor shown 1`; hunt (quest 101) in both capture modes as above, the
-    camera yaw turned by the same amount per count as before (`071d` -> `ea99` -> `eac4`).
 New `[Mouse]` settings (settings menu: Controls tab, Spanish strings; live, no restart):
 
 | key | default | what |
@@ -528,51 +514,26 @@ New `[Mouse]` settings (settings menu: Controls tab, Spanish strings; live, no r
 | `MouseInvertY` | Off | up / down turned round, on top of the game's own invert options |
 | `MouseSmoothing` | 0.0 | 0 .. 0.9: each update takes (1 - s) of the counts waiting, the rest trails (hunt camera only; the same total turn: measured 101 + 164 + 196 ... decaying 5, 3, 1 against 240 a step unsmoothed) |
 | `MouseCapture` | Click | Click: a click in the window captures the mouse. Hunt: also captured by itself while the hunt camera is the mouse's (its handler ran in the last 200 ms), free again in menus, cutscenes and villages; Esc or losing focus stops it until a click or the hunt is over |
-| `MenuCursor` | On | the row under the pointer is selected in the menus (see "Cursor menus"); off, the mouse only clicks and scrolls |
 
 Measured with `MouseSensitivityY=2 MouseInvertY=On MouseSmoothing=0.6`: the pitch per update went from +125 to -240 (twice,
 reversed), the yaw ramped up and trailed off. The mouse buttons bound to actions (`[Actions.Kbm]`) work while captured
 (the capture is the same, `mouse_held`), also with the automatic capture.
 
-### Cursor menus (2026-11-11): the row under the pointer is selected (position based, by looking at the picture)
+### Cursor menus (2026-11-11): tried twice, removed
 
-The game gives the host no row data: the engine's pointer block is not read by the list controllers (P1 above: its 21
-readers never ran), the NSO imports no touch API (so there is no touch feed to give the game), the Plus menu's
-`+0xe4` row byte is a copy (writing it did not move the highlight), and the host has no registry of the HUD quads. A first
-version that turned the pointer's *movement* into presses was rejected (a pointer resting at the bottom of the screen must
-select what is under it). What is built reads the highlight from the finished picture instead:
+A pointer that selects the menu row under it needs the rows' positions, which the host does not have: the engine's pointer
+block is not read by the list controllers (P1 above), the NSO imports no touch API, the Plus menu's `+0xe4` row byte is a
+copy (writing it did not move the highlight), and there is no HUD quad registry. Two substitutes were built and rejected by
+the user, both removed (`91ac87d`, `ea2efba`, reverted): the pointer's *movement* as Up / Down presses (a pointer resting at
+the bottom of the screen selected nothing) and a scan of the finished frame for the gold highlight bar walked to the
+pointer (slow scrolling, a bug in the Save menu). In menus the mouse is therefore the right stick, the wheel and its
+buttons, as above.
 
-* **The eyes** (`runtime/cursor_nav.h` `menu_scan_bands`, pure, host-tested on synthetic frames; called from
-  `nvn/vulkan/device.c` `frame_end`): while the host asks (`g_scan_request`, about 11 times a second, 2.5 a second while
-  nothing is found), the window image is copied back (as a screenshot is) and scanned for the list highlight, a saturated
-  gold bar (about 202,156,19, also the dimmed one of a list without the focus): runs of 12 to 90 scanlines that are gold
-  over at least 80 pixels, at least 120 pixels wide, thin gold lines and small patches are ignored. The result
-  (`MenuScan`: frame size and up to 6 bars, in window-image pixels) is published with a seqlock. HDR output has no scan
-  (the pointer then selects nothing; clicks and the wheel still work).
-* **The loop** (`cursor_nav_decide`, pure, host-tested; `host_input.c` `cursor_step`, game thread each update): with the
-  pointer moved in the last 1.5 s (so the keyboard and the pad have the menu when the mouse rests) and the menu view ours,
-  the bar under the pointer's x and nearest its y is compared with the pointer's y (scaled from the window to the image):
-  within 0.6 of a row = arrived; else `MenuUp` / `MenuDown` is pressed (`act_inject`: the menu view only, the gameplay
-  view, the right stick and the camera never see it), one to three presses when far (always leaving one for the next look),
-  110 ms apart, and the next look waits for a frame 150 ms after the last press. The row pitch is learned from the bar's
-  movement (starts at the bar's height x 1.05 = 36 px at 720p). Never turns back inside an episode (a new episode starts when
-  the pointer moves more than 12 px to a new place): a disabled row is skipped by the bar, which then stays where it landed;
-  two presses that move nothing, or 40 presses, give up.
-* **Clicks** are the buttons bound to the mouse. With the default `[Keybinds]` (A = Mouse Right, X = Mouse Left) a right click
-  confirms and a left click is X; for left = confirm and right = cancel bind them in Controls > Game actions
-  (`MenuConfirm = mouse:left`, `MenuCancel = mouse:right` in `[Actions.Kbm]`): those are claimed from the Tier 0 binds in
-  the menus. An unbound left / right click is `MenuConfirm` / `MenuCancel`.
-* **Setting:** `[Mouse] MenuCursor = On` (Controls tab, "Mouse in menus"); needs `[Actions] Enable=1 ManageMenus=1`.
-* **Verified (hidden runs, `mouse x y` / `mousebtn`, shots):** village Plus menu, the pointer parked at the rows' heights
-  (x 1100; y = 261 / 367 / 119 / 225 / 296 / 190): Palicoes, Chat, Item Pouch (7 rows up in under 2.5 s), Quest Info (greyed,
-  reached from above: the game lets it be highlighted), Hunter's Notes, Combo List, each within the 2.5 s; with the mouse
-  resting 2.5 s a pad Down (control command `DOWN`) moved the selection one row and the mouse did not pull it back; a left
-  click (`MenuConfirm = mouse:left`) on Combo List opened it, a right click closed it. Quest 101's pause menu: Pause (y 334),
-  Combo List (190) and Palicoes (262) selected; a click there. Village with no menu open: movement changed nothing on
-  screen. All as the game reads it (the highlight was moved by the game's own Up / Down handling).
-* **Not done / not verified:** sideways (tabs and pages: the `< >` arrows of a title bar) are not selected by position; the
-  pointer picks rows of vertical lists only (horizontal button rows such as Yes / No: not tried). A real mouse in a visible
-  window, the shop, smithy, item box, quest board, NPC dialogs at a camp, the quest result screen and the title's
-  Character Select were not run with the final code. Gold scenery behind a menu is the possible false bar (the loop only
-  presses MenuUp / MenuDown into the menu view; nothing is hurt, but it gives up after 40 presses). A scan stalls the
-  frame for the copy (about a frame), only while the pointer has moved in the last 1.5 s.
+### The settings panel's drawing tabs and mouse clicks (2026-11-11)
+
+The tabs over the controller / keyboard drawing (Hunt | Town and Hub | Menus | Keys) and the drawing's inputs lit up under the
+pointer but a click did nothing: the list's selected row called `ImGui::FocusWindow` on every frame (`own_focus`), which ends
+the press of an item in another window, and the panel also focused the list at the press itself. `own_focus` now does nothing
+while an item of another window is pressed and the focus goes back to the list when the button is let go. A host panel test
+(`tests/test_settings_panel.cpp`) clicks a tab of the Game actions screen. The other tab strip (Display | Graphics ... ) and
+the rows were not affected.

@@ -7,7 +7,6 @@
 
 #include <SDL3/SDL.h>
 
-#include "../runtime/cursor_nav.h"
 #include "../runtime/actions.h"
 #include "../runtime/config.h"
 
@@ -873,77 +872,6 @@ static void test_crouch_not_moving(void) {
     CHECK(act_view(ACT_VIEW_MB1, stick, crouch, false) & 0x4000, "auto split, weapon out: Crouch following Dodge is not stopped while moving");
 }
 
-// The mouse as a menu cursor: the highlight bar found in a frame and the walk to the row under the pointer
-static void put_gold(uint8_t *px, int w, int x0, int x1, int y0, int y1, bool bgr, int gap_every) {
-    for (int y = y0; y <= y1; y++)
-        for (int x = x0; x <= x1; x++) {
-            uint8_t *p = px + ((size_t)y * w + x) * 4;
-            bool text = gap_every && (x - x0) % gap_every < 3 && y > y0 + 8 && y < y1 - 8;  // (letters: not gold)
-            uint8_t r = text ? 240 : 202, g = text ? 240 : 156, b = text ? 240 : 19;
-            p[0] = bgr ? b : r, p[1] = g, p[2] = bgr ? r : b, p[3] = 255;
-        }
-}
-static void test_cursor_nav(void) {
-    enum { W = 1280, H = 720 };
-    static uint8_t px[W * H * 4];
-    for (int bgr = 0; bgr < 2; bgr++) {
-        memset(px, 40, sizeof px);
-        put_gold(px, W, 900, 1240, 173, 206, bgr, 9);   // the bar: letters cut it up
-        put_gold(px, W, 440, 935, 459, 459, bgr, 0);    // a thin gold line: not a bar
-        MenuBand b[MENU_BANDS_MAX];
-        int n = menu_scan_bands(px, W, H, bgr, b, MENU_BANDS_MAX);
-        CHECK(n == 1, "bgr %d: one bar found (%d)", bgr, n);
-        CHECK(n == 1 && b[0].y0 == 173 && b[0].y1 == 206 && b[0].x0 >= 895 && b[0].x1 <= 1245 && b[0].x1 - b[0].x0 > 300,
-              "bar place %d..%d x %d..%d", b[0].y0, b[0].y1, b[0].x0, b[0].x1);
-        memset(px, 40, sizeof px);
-        n = menu_scan_bands(px, W, H, bgr, b, MENU_BANDS_MAX);
-        CHECK(n == 0, "no bar in a dark frame");
-        put_gold(px, W, 100, 160, 300, 340, bgr, 0);  // a small gold thing: not wide enough
-        n = menu_scan_bands(px, W, H, bgr, b, MENU_BANDS_MAX);
-        CHECK(n == 0, "a small gold patch is not a bar");
-    }
-    // the walk: rows of 36 px, the bar 34 tall at 173..206
-    CursorNav n = {0};
-    cursor_nav_reset(&n);
-    MenuBand bar = {173, 206, 900, 1240};
-    CHECK(cursor_nav_decide(&n, &bar, 1, 1000, 190, NULL) == -1, "pointer on the bar's row: nothing");
-    CHECK(cursor_nav_decide(&n, &bar, 1, 1000, 205, NULL) == -1, "within 0.6 of a row: nothing");
-    CHECK(cursor_nav_decide(&n, &bar, 1, 100, 400, NULL) == -1, "pointer outside the list's x: nothing");
-    cursor_nav_reset(&n);
-    CHECK(cursor_nav_decide(&n, &bar, 1, 1000, 262, NULL) == CNAV_DOWN, "pointer two rows below: Down");
-    bar = (MenuBand){209, 242, 900, 1240};
-    CHECK(cursor_nav_decide(&n, &bar, 1, 1000, 262, NULL) == CNAV_DOWN, "one row down, one to go: Down");
-    CHECK(n.pitch > 35.0f && n.pitch < 37.0f, "the row pitch is learned (%.1f)", n.pitch);
-    bar = (MenuBand){245, 278, 900, 1240};
-    CHECK(cursor_nav_decide(&n, &bar, 1, 1000, 262, NULL) == -1, "arrived: nothing");
-    // up, from a new episode
-    cursor_nav_reset(&n);
-    CHECK(cursor_nav_decide(&n, &bar, 1, 1000, 190, NULL) == CNAV_UP, "pointer above: Up");
-    // a disabled row under the pointer: the bar lands past it and stays (no turning back)
-    cursor_nav_reset(&n);
-    bar = (MenuBand){173, 206, 900, 1240};
-    CHECK(cursor_nav_decide(&n, &bar, 1, 1000, 226, NULL) == CNAV_DOWN, "disabled row below: Down");
-    bar = (MenuBand){245, 278, 900, 1240};
-    CHECK(cursor_nav_decide(&n, &bar, 1, 1000, 226, NULL) == -1, "the bar skipped the disabled row: no turning back");
-    // a press that moves nothing twice gives up
-    cursor_nav_reset(&n);
-    bar = (MenuBand){173, 206, 900, 1240};
-    CHECK(cursor_nav_decide(&n, &bar, 1, 1000, 400, NULL) == CNAV_DOWN, "stuck 0");
-    CHECK(cursor_nav_decide(&n, &bar, 1, 1000, 400, NULL) == CNAV_DOWN, "stuck 1");
-    CHECK(cursor_nav_decide(&n, &bar, 1, 1000, 400, NULL) == -1, "stuck twice: gives up");
-    // far away: several presses at once, one row left for the next look
-    cursor_nav_reset(&n);
-    bar = (MenuBand){173, 206, 900, 1240};
-    int k = 0;
-    CHECK(cursor_nav_decide(&n, &bar, 1, 1000, 190 + 36 * 6, &k) == CNAV_DOWN && k == 3, "six rows below: three presses (%d)", k);
-    cursor_nav_reset(&n);
-    CHECK(cursor_nav_decide(&n, &bar, 1, 1000, 190 + 36 * 2.1f, &k) == CNAV_DOWN && k == 1, "two rows below: one press (%d)", k);
-    // two bars (two lists): the one under the pointer's x and nearest y
-    cursor_nav_reset(&n);
-    MenuBand two[2] = {{173, 206, 100, 400}, {300, 333, 900, 1240}};
-    CHECK(cursor_nav_decide(&n, two, 2, 1000, 400, NULL) == CNAV_DOWN, "right list: its bar is above the pointer: Down");
-}
-
 int main(void) {
     act_set_log(quiet);
     test_registry();
@@ -962,7 +890,6 @@ int main(void) {
     test_save();
     test_menu_confirm_policy();
     test_crouch_not_moving();
-    test_cursor_nav();
     test_rows();
     test_claim();
     test_scheme_layout();

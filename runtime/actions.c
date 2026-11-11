@@ -513,7 +513,6 @@ bool act_save(const char *path, const ActProfile *p) {
 static ActProfile prof;
 static bool prof_on;
 static atomic_int prof_confirm = -1;  // the settings menu's confirm position from the Confirm binding (MENU_CONFIRM_*), -1 none
-static atomic_bool prof_menus;       // ManageMenus is on (and the layer): the menu view is ours
 static atomic_bool prof_split;  // act_split_in(prof), for the game thread
 static bool act_crouch_own_in(const ActProfile *p);
 static atomic_bool crouch_own_on;    // Crouch has a binding of its own (not only the one it follows from Dodge)
@@ -617,14 +616,12 @@ static int confirm_policy_in(const ActProfile *p) {
     int c = b->alt[0].code[0];
     return c == ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH ? MENU_CONFIRM_SOUTH : c == ACT_PAD + SDL_GAMEPAD_BUTTON_EAST ? MENU_CONFIRM_EAST : -1;
 }
-bool act_menus_on(void) { return atomic_load(&prof_menus); }
 int act_menu_confirm_policy(void) { return atomic_load(&prof_confirm); }
 void act_use_profile(const ActProfile *p) {
     lock();
     prof = *p;
     prof_on = p->enable;
     atomic_store(&prof_split, act_split_in(p));
-    atomic_store(&prof_menus, p->enable && p->menus);
     atomic_store(&prof_confirm, p->enable ? confirm_policy_in(p) : -1);
     atomic_store(&crouch_split_on, act_crouch_split_in(p));
     atomic_store(&crouch_own_on, act_crouch_own_in(p));
