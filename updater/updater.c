@@ -8,8 +8,12 @@
 // - Never written: data/, mods/, engine_modules/, cheats/, bonus/, cache/, shots/, save/, mhgurecomp.ini and log.txt (the player's), only
 //   the files the release carries besides those. Each file replaced is kept in update/backup/ until the next start, and
 //   put back if the install stops halfway.
+// - The game's files can't be replaced under a running game: the check looks for the game's own process (not for a
+//   write lock on mhgurecomp.exe, which an antivirus scan or a sync tool holds for a moment too). The checked download
+//   is then kept, and Try again installs it without asking GitHub or the network again.
 // - No connection, GitHub's rate limit (60 checks an hour per address; an unchanged release is answered "304" from its
-//   ETag, without the JSON again), a cancelled or failed update: the game starts as it is.
+//   ETag, without the JSON again), a cancelled or failed update: the game starts as it is, when the player asks for it.
+//   (A failure leaves the window open, with Try again and Start game: it never counts down and starts the game by itself.)
 // - [Application] Updates in mhgurecomp.ini: Ask (the default), Auto (no question), Off (start the game at once).
 //
 //   --update-force       update a development build too        --update-no-launch   don't start the game afterwards
@@ -27,6 +31,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <tlhelp32.h>
 #define GAME_EXE "mhgurecomp.exe"
 #define GAME_LIB "mhgugame.dll"
 #define ASSET_PREFIXES "Windows-"
@@ -143,24 +148,84 @@ static int read_mode(void) {
 
 // Is the game running from this folder? (Its files can't be replaced under it: Windows refuses, and on Linux it would
 // go on with the old ones.)
+#ifdef _WIN32
+// A file as Windows identifies it, whatever path a program opened it by (a link, a shortcut's relative start)
+typedef struct { DWORD volume, high, low; } FileId;
+static bool file_id(const wchar_t *p, FileId *id) {
+    HANDLE h = CreateFileW(p, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                           FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    BY_HANDLE_FILE_INFORMATION info;
+    bool ok = GetFileInformationByHandle(h, &info);
+    CloseHandle(h);
+    if (ok) id->volume = info.dwVolumeSerialNumber, id->high = info.nFileIndexHigh, id->low = info.nFileIndexLow;
+    return ok;
+}
+static bool same_file(const FileId *a, const FileId *b) {
+    return a->volume == b->volume && a->high == b->high && a->low == b->low;
+}
+
+// (A write lock on the .exe used to answer this, and it answered wrong: an antivirus scan, a cloud sync or Explorer's
+// handler opens a just-started program without write sharing for a moment, so every attempt said "MHGU Recomp is
+// running" and left the update undone. Only a process whose image is this file is the game now.)
 static bool game_running(void) {
     char exe[1100];
+    wchar_t wexe[1100], img[1100];
     path(exe, sizeof exe, GAME_EXE);
-#ifdef _WIN32
+    if (!MultiByteToWideChar(CP_UTF8, 0, exe, -1, wexe, 1100)) return false;
+    FileId want;
+    if (!file_id(wexe, &want)) return false;  // (no such file: nothing can be running it)
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return false;
+    bool found = false;
+    DWORD pid = 0;
+    PROCESSENTRY32W pe;
+    memset(&pe, 0, sizeof pe);
+    pe.dwSize = sizeof pe;
+    for (BOOL more = Process32FirstW(snap, &pe); more && !found; more = Process32NextW(snap, &pe)) {
+        DWORD len = 1100;
+        HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
+        if (!p) continue;
+        bool got = QueryFullProcessImageNameW(p, 0, img, &len);
+        CloseHandle(p);
+        if (!got) continue;
+        if (!_wcsicmp(img, wexe)) found = true;  // (the same path the updater would start)
+        else {
+            FileId id;  // (or the same file under another name, or through a link)
+            found = file_id(img, &id) && same_file(&id, &want);
+        }
+        if (found) pid = pe.th32ProcessID;
+    }
+    CloseHandle(snap);
+    if (found) ulog("[update] the game is running (pid %lu)\n", (unsigned long)pid);
+    return found;
+}
+
+// Are the game's files free to be replaced? (Windows also refuses a file another program has open, and an antivirus
+// scan or a sync tool holds one for a moment after a download: given a little while, they let go.)
+static bool game_files_free(int tries) {
     const char *names[] = {GAME_EXE, GAME_LIB};
-    for (int i = 0; i < 2; i++) {
-        wchar_t w[1100];
-        char p[1100];
-        path(p, sizeof p, names[i]);
-        if (!MultiByteToWideChar(CP_UTF8, 0, p, -1, w, 1100)) continue;
-        HANDLE h = CreateFileW(w, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-                               OPEN_EXISTING, 0, NULL);  // (a running image can't be opened for writing)
-        if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
-        else if (GetLastError() == ERROR_SHARING_VIOLATION) return true;
+    for (int t = 0; t < tries; t++) {
+        bool free_now = true;
+        for (int i = 0; i < 2 && free_now; i++) {
+            char p[1100];
+            wchar_t w[1100];
+            path(p, sizeof p, names[i]);
+            if (!MultiByteToWideChar(CP_UTF8, 0, p, -1, w, 1100)) continue;
+            HANDLE h = CreateFileW(w, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                                   OPEN_EXISTING, 0, NULL);
+            if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+            else if (GetLastError() == ERROR_SHARING_VIOLATION) free_now = false;
+        }
+        if (free_now) return true;
+        SDL_Delay(250);
     }
     return false;
+}
 #else
-    char want[4096], got[4096];
+static bool game_running(void) {
+    char exe[4096], want[4096], got[4096];
+    path(exe, sizeof exe, GAME_EXE);
     if (!realpath(exe, want)) return false;
     DIR *d = opendir("/proc");
     bool found = false;
@@ -173,14 +238,16 @@ static bool game_running(void) {
     }
     if (d) closedir(d);
     return found;
-#endif
 }
+#endif
 
 // ---- what the window shows, set by the worker
 enum { ST_CHECKING, ST_ASK, ST_DOWNLOADING, ST_INSTALLING, ST_DONE, ST_FAILED, ST_LAUNCH };
 static SDL_AtomicInt state, answer, cancel, kb_done, kb_total;  // answer: 1 update, 2 not now
 static char latest[64], failure[300];
 static bool no_launch;  // (the game is running: don't start another)
+static char part[1100], part_tag[64];  // the checked download, kept when the game stopped the install
+static bool part_ready;
 static int mode;
 static bool force;
 
@@ -228,6 +295,23 @@ static bool to_file(void *ctx, const void *data, size_t n) {
     d->got += (int64_t)n;
     SDL_SetAtomicInt(&kb_done, (int)(d->got >> 10));
     return true;
+}
+
+// Is the download kept from an earlier attempt still the release's, whole and unchecked nothing? (Try again then
+// installs it without asking GitHub or the network again.)
+static bool part_intact(const Asset *a) {
+    SDL_IOStream *in = SDL_IOFromFile(part, "rb");
+    if (!in) return false;
+    Sha256 s;
+    sha256_init(&s);
+    char buf[1 << 16];
+    size_t n;
+    int64_t size = 0;
+    while ((n = SDL_ReadIO(in, buf, sizeof buf)) > 0) sha256_update(&s, buf, n), size += (int64_t)n;
+    bool closed = SDL_CloseIO(in);
+    char hex[65];
+    sha256_hex(&s, hex);
+    return closed && size == a->size && !strcmp(hex, a->digest + 7);
 }
 
 // ---- extracting into update/new/: the files to install, their paths relative to the game folder
@@ -373,6 +457,7 @@ static const Asset *pick_asset(const Release *r) {
 
 static int SDLCALL worker(void *arg) {
     (void)arg;
+    no_launch = false;
     char p[1100], etag_path[1100];
     path(p, sizeof p, "update/latest.json");
     path(etag_path, sizeof etag_path, "update/latest.etag");
@@ -428,38 +513,48 @@ static int SDLCALL worker(void *arg) {
     }
 
     // download (update/<asset>.part), checked
-    set_state(ST_DOWNLOADING);
-    SDL_SetAtomicInt(&kb_total, (int)(a->size >> 10));
-    char part[1100];
     snprintf(part, sizeof part, "%supdate/%s.part", root, a->name);
-    Download d = {SDL_IOFromFile(part, "wb")};
-    if (!d.out) return failed("can't write %s: %s", part, SDL_GetError());
-    sha256_init(&d.sha);
-    ulog("[update] downloading %s (%lld bytes)\n", a->url, (long long)a->size);
-    ok = http_get(a->url, "application/octet-stream", NULL, 15, to_file, &d, &r);
-    if (!SDL_CloseIO(d.out)) ok = false;
-    if (SDL_GetAtomicInt(&cancel)) { SDL_RemovePath(part); return quietly("download cancelled"); }
-    if (!ok || r.status != 200) {
-        SDL_RemovePath(part);
-        return r.status && r.status != 200 ? failed("download: GitHub answered %d", r.status)
-                                           : failed("download: %s", r.error[0] ? r.error : "no answer");
+    if (part_ready && !strcmp(part_tag, latest) && part_intact(a)) {
+        ulog("[update] the download from the last attempt is still the one: not downloaded again\n");
+    } else {
+        part_ready = false;
+        set_state(ST_DOWNLOADING);
+        SDL_SetAtomicInt(&kb_total, (int)(a->size >> 10));
+        Download d = {SDL_IOFromFile(part, "wb")};
+        if (!d.out) return failed("can't write %s: %s", part, SDL_GetError());
+        sha256_init(&d.sha);
+        ulog("[update] downloading %s (%lld bytes)\n", a->url, (long long)a->size);
+        ok = http_get(a->url, "application/octet-stream", NULL, 15, to_file, &d, &r);
+        if (!SDL_CloseIO(d.out)) ok = false;
+        if (SDL_GetAtomicInt(&cancel)) { SDL_RemovePath(part); return quietly("download cancelled"); }
+        if (!ok || r.status != 200) {
+            SDL_RemovePath(part);
+            return r.status && r.status != 200 ? failed("download: GitHub answered %d", r.status)
+                                               : failed("download: %s", r.error[0] ? r.error : "no answer");
+        }
+        char hex[65];
+        sha256_hex(&d.sha, hex);
+        if (d.got != a->size || strcmp(hex, a->digest + 7)) {
+            SDL_RemovePath(part);
+            return failed("the download is damaged (%lld of %lld bytes, SHA-256 %.12s..., expected %.12s...)",
+                          (long long)d.got, (long long)a->size, hex, a->digest + 7);
+        }
+        ulog("[update] download checked: %lld bytes, sha256 %s\n", (long long)d.got, hex);
     }
-    char hex[65];
-    sha256_hex(&d.sha, hex);
-    if (d.got != a->size || strcmp(hex, a->digest + 7)) {
-        SDL_RemovePath(part);
-        return failed("the download is damaged (%lld of %lld bytes, SHA-256 %.12s..., expected %.12s...)",
-                      (long long)d.got, (long long)a->size, hex, a->digest + 7);
-    }
-    ulog("[update] download checked: %lld bytes, sha256 %s\n", (long long)d.got, hex);
+    part_ready = true;
+    snprintf(part_tag, sizeof part_tag, "%s", latest);
 
     // install
     set_state(ST_INSTALLING);
     if (game_running()) {
         no_launch = true;
-        SDL_RemovePath(part);
-        return failed("MHGU Recomp is running: close it, then start the updater again.");
+        return failed("MHGU Recomp is running: close it, then press Try again.");  // (the download is kept)
     }
+#ifdef _WIN32
+    // (an antivirus scan or a sync tool may hold one of the files for a moment: wait for it, then go on: the install
+    // says what is wrong, and puts the old files back, if it still can't)
+    if (!game_files_free(8)) ulog("[update] note: %s or %s is open elsewhere: installing anyway\n", GAME_EXE, GAME_LIB);
+#endif
     char newdir[1100];
     path(newdir, sizeof newdir, "update/new");
     rm_tree(newdir);
@@ -490,7 +585,8 @@ static int SDLCALL worker(void *arg) {
 // ---- the window: 8x8 text (SDL's own), keyboard, mouse and controller
 #define W 800
 #define H 300
-typedef struct { const char *label; int action; } Button;  // action: 1 update, 2 not now / cancel / skip, 3 continue
+typedef struct { const char *label; int action; } Button;  // action: 1 update, 2 not now / cancel / skip, 3 continue,
+                                                           // 4 check and install again
 static int sel;
 
 static void text(SDL_Renderer *rd, float x, float y, const char *s, int scale) {
@@ -521,7 +617,7 @@ static SDL_FRect button_rect(int i, int n) {
     return (SDL_FRect){x0 + i * (w + gap), H - 70, w, 44};
 }
 
-static int draw(SDL_Renderer *rd, int st, const Button *b, int nb, Uint64 shown_at) {
+static int draw(SDL_Renderer *rd, int st, const Button *b, int nb) {
     SDL_SetRenderDrawColor(rd, 24, 26, 32, 255);
     SDL_RenderClear(rd);
     SDL_SetRenderDrawColor(rd, 240, 180, 60, 255);
@@ -541,11 +637,7 @@ static int draw(SDL_Renderer *rd, int st, const Button *b, int nb, Uint64 shown_
         break;
     case ST_INSTALLING: snprintf(msg, sizeof msg, "Installing %s...", latest); break;
     case ST_DONE: snprintf(msg, sizeof msg, "Updated to %s. Starting the game...", latest); break;
-    case ST_FAILED:
-        if (no_launch) snprintf(msg, sizeof msg, "The update was not installed. %s", failure);
-        else snprintf(msg, sizeof msg, "The update was not installed: %s   The game starts as it is in %d s.", failure,
-                      (int)(10 - (SDL_GetTicks() - shown_at) / 1000));
-        break;
+    case ST_FAILED: snprintf(msg, sizeof msg, "The update was not installed: %s", failure); break;
     default: msg[0] = 0;
     }
     SDL_UnlockMutex(lock);
@@ -577,7 +669,10 @@ static int buttons(int st, Button *b) {
     case ST_CHECKING: b[0] = (Button){"Skip", 2}; return 1;
     case ST_ASK: b[0] = (Button){"Update", 1}, b[1] = (Button){"Not now", 2}; return 2;
     case ST_DOWNLOADING: b[0] = (Button){"Cancel", 2}; return 1;
-    case ST_FAILED: b[0] = no_launch ? (Button){"Close", 3} : (Button){"Start game", 3}; return 1;
+    case ST_FAILED:
+        b[0] = (Button){"Try again", 4};
+        b[1] = no_launch ? (Button){"Close", 3} : (Button){"Start game", 3};  // (the game runs: not another one)
+        return 2;
     default: return 0;
     }
 }
@@ -587,6 +682,7 @@ static int act(int st, int action) {
     if (st == ST_ASK) { SDL_SetAtomicInt(&answer, action); return 0; }
     if (st == ST_CHECKING && action == 2) return 1;  // (the check goes on unheard: its answer no longer matters)
     if (st == ST_DOWNLOADING && action == 2) { SDL_SetAtomicInt(&cancel, 1); return 0; }
+    if (st == ST_FAILED && action == 4) return 0;  // (run_window runs the worker again)
     return st == ST_FAILED;
 }
 
@@ -612,6 +708,7 @@ static void set_window_icon(SDL_Window *win) { (void)win; }
 static bool run_window(SDL_Thread *th) {
     SDL_Window *win = NULL;
     SDL_Renderer *rd = NULL;
+    SDL_Thread *thread = th;
 #ifndef _WIN32
     // (the game's app id, so the window goes with the game's app menu launcher: runtime/ui.c, install_launcher)
     SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_IDENTIFIER_STRING, "mhgurecomp");
@@ -632,7 +729,6 @@ static bool run_window(SDL_Thread *th) {
         if (st != last) last = st, state_at = SDL_GetTicks(), sel = 0;
         if (st == ST_LAUNCH) break;
         if (st == ST_DONE && SDL_GetTicks() - state_at > 1500) break;
-        if (st == ST_FAILED && !no_launch && SDL_GetTicks() - state_at > 10000) break;
         if (!rd) {
             if (st == ST_FAILED || st == ST_DONE) break;
             SDL_Delay(50);
@@ -669,11 +765,20 @@ static bool run_window(SDL_Thread *th) {
                 }
             }
         }
+        if (action == 4 && st == ST_FAILED && thread) {  // try again: another check and install, from here
+            SDL_WaitThread(thread, NULL);
+            no_launch = false;
+            SDL_SetAtomicInt(&answer, 0), SDL_SetAtomicInt(&cancel, 0);
+            set_state(ST_CHECKING);
+            thread = SDL_CreateThread(worker, "update", NULL);
+            if (!thread) break;
+            continue;
+        }
         if (action && act(st, action)) {
             left = st == ST_CHECKING;
             break;
         }
-        if (shown) draw(rd, st, b, nb, state_at);
+        if (shown) draw(rd, st, b, nb);
         else SDL_Delay(16);
     }
     if (rd) SDL_DestroyRenderer(rd);
@@ -681,11 +786,11 @@ static bool run_window(SDL_Thread *th) {
     SDL_Quit();
     if (left) {  // (it stops before downloading anything)
         SDL_SetAtomicInt(&cancel, 1), SDL_SetAtomicInt(&answer, 2);
-        SDL_DetachThread(th);
+        if (thread) SDL_DetachThread(thread);
         return false;
     }
     if (SDL_GetAtomicInt(&state) == ST_ASK) SDL_SetAtomicInt(&answer, 2);
-    SDL_WaitThread(th, NULL);
+    if (thread) SDL_WaitThread(thread, NULL);
     return true;
 }
 
