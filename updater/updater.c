@@ -197,7 +197,11 @@ static bool game_running(void) {
         if (found) pid = pe.th32ProcessID;
     }
     CloseHandle(snap);
-    if (found) ulog("[update] the game is running (pid %lu)\n", (unsigned long)pid);
+    if (found) {
+        char img8[3300];  // (the matched process's image path, as UTF-8 for the log)
+        if (!WideCharToMultiByte(CP_UTF8, 0, img, -1, img8, sizeof img8, NULL, NULL)) img8[0] = 0;
+        ulog("[update] the game is running (pid %lu, %s)\n", (unsigned long)pid, img8);
+    }
     return found;
 }
 
@@ -246,6 +250,7 @@ enum { ST_CHECKING, ST_ASK, ST_DOWNLOADING, ST_INSTALLING, ST_DONE, ST_FAILED, S
 static SDL_AtomicInt state, answer, cancel, kb_done, kb_total;  // answer: 1 update, 2 not now
 static char latest[64], failure[300];
 static bool no_launch;  // (the game is running: don't start another)
+static bool closed; 
 static char part[1100], part_tag[64];  // the checked download, kept when the game stopped the install
 static bool part_ready;
 static int mode;
@@ -747,6 +752,7 @@ static bool run_window(SDL_Thread *th) {
             if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED || key == SDLK_ESCAPE ||
                 pad == SDL_GAMEPAD_BUTTON_EAST || pad == SDL_GAMEPAD_BUTTON_BACK) {
                 action = nb ? b[nb - 1].action : 0;
+                if (st == ST_FAILED) closed = true;  // closing is not "Start game": leave without starting it
             } else if (key == SDLK_LEFT || key == SDLK_RIGHT || key == SDLK_TAB || pad == SDL_GAMEPAD_BUTTON_DPAD_LEFT ||
                        pad == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) {
                 if (nb) sel = (sel + 1) % nb;
@@ -767,7 +773,7 @@ static bool run_window(SDL_Thread *th) {
         }
         if (action == 4 && st == ST_FAILED && thread) {  // try again: another check and install, from here
             SDL_WaitThread(thread, NULL);
-            no_launch = false;
+            no_launch = false, closed = false;
             SDL_SetAtomicInt(&answer, 0), SDL_SetAtomicInt(&cancel, 0);
             set_state(ST_CHECKING);
             thread = SDL_CreateThread(worker, "update", NULL);
@@ -901,5 +907,5 @@ int main(int argc, char **argv) {
         SDL_Thread *th = SDL_CreateThread(worker, "update", NULL);
         if (th) run_window(th);
     }
-    return launch_game && !no_launch ? launch(npass, pass) : 0;
+    return launch_game && !no_launch && !closed ? launch(npass, pass) : 0;
 }
