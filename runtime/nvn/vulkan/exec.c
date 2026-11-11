@@ -1256,6 +1256,10 @@ void vk_gpuprof_frame(void) {  // (device.c, after each presented frame's submis
 static bool pass_msaa;  // (MSAA, below) the pass renders through multisampled images (resolved when next read)
 static TexBackend *pass_att[9];
 static uint32_t pass_natt;
+// (MSAA) the pass has cleared or may have written its depth / stencil target (a draw writing depth or testing stencil):
+// one that only tests depth leaves its multisampled image as it was, and a resolve of it (a copy of every sample, ~2.5 ms
+// at 1080p 4x on a Radeon iGPU) isn't needed again
+static bool pass_ds_written;
 // (MSAA) colour target 0 is a picture 3D models are drawn into (ms_expand). Its picture is copied into the samples
 // only for what tests depth (the models, and the depth clears before them): the menu's 2D draws around them stay
 // without MSAA. draw / clear set ms_want_depth before a pass begins; pass_want_depth: what the pass began for
@@ -1288,7 +1292,10 @@ void vk_end_pass(void) {
                  (unsigned long long)(stat_draws - pass_draws_at), gp_pass_note);
         gp_mark(l);
     }
-    if (pass_msaa) for (uint32_t k = 0; k < pass_natt; k++) pass_att[k]->ms_dirty = true;
+    if (pass_msaa)
+        for (uint32_t k = 0; k < pass_natt; k++)
+            if (pass_ds_written || !(pass_att[k]->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)))
+                pass_att[k]->ms_dirty = true;
     pass_msaa = false;
     if (g_dump_active) dump_pass();
 }
@@ -1398,10 +1405,12 @@ static VkPipeline resolve_pipeline(VkRenderPass rp, int kind, uint32_t samples) 
 
 void vk_ms_resolve(TexBackend *b) {
     if (!b || !b->ms_dirty) return;
+    // (the pass ends first: ending it marks its targets for resolving again, and this resolve covers what it drew - it
+    // was marked after clearing the mark, and the scene's depth was resolved twice in a row, ~2.5 ms each on an iGPU)
+    if (b->ms && in_pass) { vk_end_pass(); st.rt_dirty = true; }
     b->ms_dirty = false;
     TexBackend *m = b->ms;
     if (!m) return;
-    if (in_pass) { vk_end_pass(); st.rt_dirty = true; }
     VkCommandBuffer cb = vk_cmd();
     vk_full_barrier(cb);
     bool depth = b->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
@@ -1420,6 +1429,7 @@ void vk_ms_resolve(TexBackend *b) {
         VkImageCopy c = {.srcSubresource = {m->aspect, 0, 0, 1}, .dstSubresource = {m->aspect, 0, 0, 1},
                          .extent = {b->width, b->height, 1}};
         vkCmdCopyImage(cb, m->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, r->image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
+        gp_mark("  depth copy");
     }
     ib.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, ib.newLayout = att;
     ib.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
@@ -1459,7 +1469,11 @@ void vk_ms_resolve(TexBackend *b) {
         vkCmdEndRenderPass(cb);
         ss_forget();
     }
-    gp_mark("  resolve");
+    if (gp_active) {
+        char l[64];
+        snprintf(l, sizeof l, "  resolve %s %ux%u @%p", depth ? "depth" : "colour", b->width, b->height, (void *)b);
+        gp_mark(l);
+    }
 }
 
 // A pass that draws 3D models over a picture it did not clear: menus draw the hunter and Palicoes (Character Select,
@@ -1793,6 +1807,7 @@ static void begin_pass(void) {
     ss_forget();
     in_pass = true;
     pass_draws_at = stat_draws;
+    pass_ds_written = false;
     if (g_dump_active) {  // (debug) the pass's targets: texture object, size, NVN format
         char tg[400];
         int n = 0;
@@ -2200,6 +2215,7 @@ static void clear(int index, int kind, const void *color, uint32_t mask, bool de
     depth = depth && has_depth;
     stencil = stencil && has_stencil;
     if (index < 0 && !depth && !stencil) return;
+    if (depth || stencil) pass_ds_written = true;  // (MSAA: vk_end_pass)
     if (g_clear_draw < 0) { const char *e = getenv("MHGU_CLEAR_DRAW"); g_clear_draw = e && atoi(e); }
     bool simple = (index < 0 || ((mask & 0xF) == 0xF && !g_clear_draw)) && (!stencil || (smask & 0xFF) == 0xFF);
     if (simple) {
@@ -4044,6 +4060,7 @@ static void draw(CmdRec *r, bool indexed) {
     k.depth_write = k.depth_test && st.ds[1];
     k.depth_op = (uint8_t)(k.depth_test ? compare_fn(st.ds[2]) : VK_COMPARE_OP_ALWAYS);
     k.stencil_test = st.ds[3] && has_stencil;
+    if (k.depth_write || k.stencil_test) pass_ds_written = true;  // (MSAA: vk_end_pass)
     // (3D models drawn over the finished picture, without MSAA: from the next frame on, for as long as they are drawn,
     // the player's anti-aliasing for them: ms_expand, models_fxaa_end)
     if (k.depth_write) {
