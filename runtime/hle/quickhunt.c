@@ -57,7 +57,8 @@ void quickhunt_poll(void) {
     host_input_press("A", 8);
 }
 
-// (debug) MHGU_FORCE_EVENT=<index>: the next call of the quest-event lookup (0x34cad8) answers with that entry of the
+// (debug) MHGU_FORCE_EVENT=<index>: the first call of the quest-event lookup (0x34cad8) in the entry's own area answers
+// with that entry of the
 // event manager's table (0x17a06fc: 0x6b entries of 12 bytes: u8 type (1 quest demo, 2 stage, 5 movie), u8 event or
 // stage-event number, u8 stage, u8 town/area, u32, u32 quest). The lookup runs where a quest's demo can start (e.g.
 // quest 713's post-clear Valstrax demo, entry 105 = event082), and only then: not on arrival in a town.
@@ -65,8 +66,9 @@ void quickhunt_poll(void) {
 static int g_force_event = -1;
 static void quest_event(Cpu *c) {
     uint32_t mgr = c->r[0];
-    if (g_force_event >= 0) {
-        uint32_t e = 0x17a06fcu + 12u * (uint32_t)g_force_event;
+    // (only in the entry's own area, as the game's lookup: the area at +0x49 of *0x1a8ca48, +0x4a when r1 is 1)
+    uint32_t e = 0x17a06fcu + 12u * (uint32_t)(g_force_event < 0 ? 0 : g_force_event), sa = LD32(0x1a8ca48u);
+    if (g_force_event >= 0 && sa && LD8(sa + (c->r[1] == 1 ? 0x4au : 0x49u)) == LD8(e + 3)) {
         ST32(mgr + 0x28, (uint32_t)g_force_event);
         ST8(mgr + 0x24, LD8(e));
         LOG("[quickhunt] forced event table entry %d (type %u, event %03u)\n", g_force_event, LD8(e), LD8(e + 1));

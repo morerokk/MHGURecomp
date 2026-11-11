@@ -504,6 +504,30 @@ it (and has the Hub counter: run3\st hasn't met the Guild Manager). Possibly the
 kind of problem: 713 / 906 end with a type 1 Valstrax demo after the clear (see the 713 section); in a session it won't
 play, and whether the quest still ends is untested.
 
+## GPU pool at large render sizes: the Great Maccao demo crash (2026-11-11)
+
+Report (0.16.1, RenderResolution 4320x2430): Vaulting Outlaw (206) crashed as the hunter entered Jurassic Frontier area 5,
+four threads at once on wild jumps. That is the quest's monster demo (event table entry 54: event054, stage 1, area 5),
+played only until the save has seen it: the demo's end sets bit n (entry n) of the event manager's seen flags (0x34e4d8,
+manager at *0x1a570d0, flags at +0x64; entry 54 = +0x68 bit 22), and the lookup 0x34cad8 skips a set bit. To replay one
+on a save that has seen it: `poke` that bit clear once in the quest (testsave/maccao/clearseen.sh).
+Cause: the game keeps render targets and textures in one GPU heap (game heap 6, *0x1aa62e8 [6] = 0x08026010, on the
+first NVN pool, 0x36400000) of a fixed 848 MB (`movt #0x3520` at 0x351e40 / 0x351fa4). The port has the game render at
+RenderResolution itself (0xdbcd34), and its screen-sized targets take ~59 bytes a pixel of that heap: used / largest free
+block in the town 209 / 41 MB at 1280x720, 280 / 35 at 1920x1080, 633 / 13 at 3840x2160, 791 / 5.59 MB at 4320x2430
+(heap object +0x4 used, +0x7c largest free). The demo's name card texture (boss_demo, 0x555a00 bytes, loaded by
+0xd084a4 on the loading thread through 0xa6a4c4) needs 2.5 KB more than that block: the allocation answers 0 and the
+game copies the 5.6 MB to address 0, over its own code from 0x200000 (a Switch would fault; here code is writable and
+the threads crash on what's left). Found with `protect 200000 172f000`: the memcpy faulted, called from 0xd08b40.
+Fix: gen.py PATCHES at 0x351e40 / 0x351fa4 take the size from g_gpu_pool_size (runtime/config.c): 848 MB + 64 bytes a
+pixel above 1920x1080, so the free part stays as on the Switch (4320x2430: 1365 MB, 37 MB largest free; the other two
+pools move up, the last ending at 0x9e600000). The heap fits ~665 MB more (4800x2700 played quest 1005; 5120x2880, +774:
+"out of command memory" before the town, 5760x3240: crash), and those sizes never worked before either (their targets
+alone are more than 848 MB): a 3D resolution above 1920x1080 + 640 MB / 64 is lowered to it in its shape and logged
+("is more than the game's memory holds": 7680x4320 -> 4724x2656, 1490 MB). Tested (2026-11-11, the user walking): 206's
+demo at 4320x2430 crashed at 30 and 120 fps and played at 1280x720 at 30 and 120 fps; with the fix it plays at
+4320x2430. Not tested: multiplayer at a large render size (four hunters, more of the heap in use), FSR with a large output.
+
 ## Save data safety (2026-10-22)
 
 Reported: saves in a folder symlinked to a NAS (Linux, Proton) were lost. The game saves by DeleteFile(system),
@@ -738,6 +762,17 @@ MHGU_LOG_MOVES also logs every act change ("is", with the time) and the stun's r
 "plact <act_st hex> <act_no> [param]" / "plsweep" start player actions; MHGU_PLSNAP=<file> + "plsnap [updates]"
 (also from a knockback) save the player's memory every update; "interpread" now also sees register-offset loads and
 VLDR (interp.c). Not tested yet: by the user at a high frame rate; the other holds.
+
+The frame-rate fixes for emulators, as a Forge plugin (2026-11-11, branch feat/highfps-plugin-skip): emjump.c, emstall.c,
+hatestep.c, combowin.c (Lenient), mashrate.c and buffcycle.c ported to "High Frame Rate Fixes" (highfps.nro, kept outside this
+repo in C:\MHGURecompile\highfps-forge with its NOTES.md), for emulator players on a 60 / 240 fps mod or cheat. The PATCHES sites
+become Forge hooks inside their functions: each site's two words jump to a stub that saves every register, runs the C, runs the
+second word (or emulates it when it reads pc or branches) and goes on. forge.c doesn't start a plugin of that name (both would
+scale the same counters twice); MHGU_FORGE_HFR=1 starts it anyway, for tests with MHGU_NO_EMJUMP=1 MHGU_NO_EMSTALL=1
+MHGU_NO_HATESTEP=1 MHGU_NO_MASHRATE=1 (its hooks then take the patched sites over, their functions interpreted). Checked here,
+quest 404 with MHGU_SUMMON, Volvidon's 7:92 / 7:98 forced, MHGU_EMTRACE=2: at 240 fps with the plugin the body press is in the air
+1.06-2.18 s, apex ~900 at 1.67 s, the drop hop 0.03-0.90 s, apex 532 at 0.50 s; at 30 fps 1.03-2.10 s / 1.63 s and 0.03-0.87 s /
+0.50 s; at 240 fps with nothing 1.14 s to the apex and the hop 0.03-0.11 s. Ryujinx 1.2.82 at 240 fps: see the plugin's notes.
 
 ## Fidelity audit (2026-10-20)
 
@@ -1636,11 +1671,14 @@ controller, frames = presented frames; e.g. `300:A:10`), `MHGU_NAME` (answers ev
 `MHGU_CONTROL=ctl.txt` (drive a running game: append lines `A`, `DOWN 8`, `STICK_UP 60`, `shot name` -> shots/name.png;
 `X 6 25` = X for 6 frames from 25 frames on, lines written together form a timed sequence; `fntrace lo hi n`;
 `fnnew lo hi [learn ms]` = log only the first call of each function in [lo, hi) not seen while learning, to find what an
-event runs; `peek` / `poke` / `memsave` / `find` for guest memory), `MHGU_QUICKHUNT=<quest number>` (from start-up
+event runs; `peek` / `poke` / `memsave` / `find` for guest memory; `protect <addr> <size>` = that guest memory read-only,
+so a wild write crashes at once with the writer named), `MHGU_POOL_LOG=1` (each NVN memory pool the game makes, with its
+callers), `MHGU_QUICKHUNT=<quest number>` (from start-up
 straight into that quest: A through the menus to the save's town, then the quest is ordered and departed on;
 runtime/hle/quickhunt.c has how the game departs; `MHGU_QUICKHUNT=town` stops in the town), `MHGU_KILL_AFTER=<s>`
-(the quest's large monster dies by one real hit that long into the quest), `MHGU_FORCE_EVENT=<n>` (the next quest-demo
-lookup plays event table entry n; both in quickhunt.c), `vpad` (control file:
+(the quest's large monster dies by one real hit that long into the quest), `MHGU_FORCE_EVENT=<n>` (the first quest-demo
+lookup in entry n's own area plays it; both in quickhunt.c; a forced demo doesn't give the hunter back at its end: to
+see a quest's demo as a player would, clear its seen bit instead, see "GPU pool at large render sizes"), `vpad` (control file:
 attach an SDL virtual controller; `vpad <n> <button> <0|1>` presses its button), `MHGU_LOG_MOVES=1` (the player's actions and command table
 changes, runtime/hle/movelog.c), `MHGU_EMTRACE=1/2/3` (large monster actions with their real-time length, height and
 distance; 2: the position every update; 3: the monster object saved on 4 updates once a forced action is 200 up;
