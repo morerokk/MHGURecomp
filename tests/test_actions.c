@@ -822,6 +822,49 @@ static void test_crouch_rows(void) {
     CHECK(act_rows_clash(&p, 0, left, right), "the bar's two clash with each other");
 }
 
+// The host settings menu follows the controller's MenuConfirm (south / east), else keeps its own setting
+static void test_menu_confirm_policy(void) {
+    ActProfile p = parse("[Actions]\nEnable=1\n");
+    act_use_profile(&p);
+    CHECK(act_menu_confirm_policy() == -1, "default: the menu's own setting");
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nMenuConfirm = pad:south\n");
+    act_use_profile(&p);
+    CHECK(act_menu_confirm_policy() == MENU_CONFIRM_SOUTH, "south");
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nConfirm = pad:east\n");
+    act_use_profile(&p);
+    CHECK(act_menu_confirm_policy() == MENU_CONFIRM_EAST, "east");
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nMenuConfirm = pad:west\n");
+    act_use_profile(&p);
+    CHECK(act_menu_confirm_policy() == -1, "west: no such position, own setting");
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nMenuConfirm = None\n");
+    act_use_profile(&p);
+    CHECK(act_menu_confirm_policy() == -1, "None: own setting");
+    p = parse("[Actions]\nEnable=1\n[Actions.Kbm]\nMenuConfirm = key:return\n");
+    act_use_profile(&p);
+    CHECK(act_menu_confirm_policy() == -1, "keyboard only: own setting");
+    p = parse("[Actions]\nEnable=0\n[Actions.Pad]\nMenuConfirm = pad:south\n");
+    act_use_profile(&p);
+    CHECK(act_menu_confirm_policy() == -1, "layer off: own setting");
+}
+
+// Crouch never fires while the left stick is pushed (split from Dodge), with the weapon out or away
+static void test_crouch_not_moving(void) {
+    ActProfile p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nCrouch = pad:west\nDodge = pad:south\n");
+    act_use_profile(&p);
+    uint64_t crouch = 1ull << ACT_CROUCH, dodge = 1ull << ACT_DODGE;
+    const uint32_t stick = 0x10000;  // the left stick pushed up (engine word)
+    int views[] = {ACT_VIEW_MB1, ACT_VIEW_SHEATHED, ACT_VIEW_HUNT_ANY};
+    for (int i = 0; i < 3; i++) {
+        uint32_t standing = act_view(views[i], 0, crouch, false), moving = act_view(views[i], stick, crouch, false);
+        CHECK(standing & 0x4000, "view %d: Crouch standing gives B: %x", views[i], standing);
+        CHECK(!(moving & 0x4000), "view %d: Crouch with the stick pushed gives no B: %x", views[i], moving);
+        CHECK(act_view(views[i], stick, dodge, false) & 0x4000, "view %d: Dodge with the stick pushed gives B (the roll)", views[i]);
+    }
+    p = parse("[Actions]\nEnable=1\n");
+    act_use_profile(&p);
+    CHECK(act_view(ACT_VIEW_MB1, stick, crouch, false) & 0x4000, "not split: Crouch is Dodge's B as before");
+}
+
 int main(void) {
     act_set_log(quiet);
     test_registry();
@@ -838,6 +881,8 @@ int main(void) {
     test_all_buttons();
     test_script();
     test_save();
+    test_menu_confirm_policy();
+    test_crouch_not_moving();
     test_rows();
     test_claim();
     test_scheme_layout();

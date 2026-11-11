@@ -310,7 +310,7 @@ void draw_guides(ImGuiWindow *window, const GuideLayout &layout, float top) {
         // (Save: the top face button, Y / X / triangle - Ctrl+S on the keyboard - greyed while there is nothing to save)
         SettingsIcons::draw(draw, pos, f, s.draft.button_icons, icons[i],
                             i == 3 ? 3
-                                   : menu_confirm_position(config_live_menu_confirm(), overlay_face_position(0),
+                                   : menu_confirm_position(menu_confirm_policy_now(), overlay_face_position(0),
                                                            overlay_face_position(1), i == 2));
         draw->AddText(ImVec2(pos.x + f * 1.4f, pos.y),
                       i == 3 && !dirty() ? theme().text_off : ImGui::GetColorU32(ImGuiCol_Text), tr(labels[i]));

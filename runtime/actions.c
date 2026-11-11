@@ -512,6 +512,7 @@ bool act_save(const char *path, const ActProfile *p) {
 // a short spin lock around both (the game thread only reads one flag of it).
 static ActProfile prof;
 static bool prof_on;
+static atomic_int prof_confirm = -1;  // the settings menu's confirm position from the Confirm binding (MENU_CONFIRM_*), -1 none
 static atomic_bool prof_split;  // act_split_in(prof), for the game thread
 static atomic_bool crouch_split_on;  // act_crouch_split_in(prof)
 static atomic_bool crouch_clash;     // Interact and Crouch end up on one input for some device or weapon class
@@ -605,11 +606,21 @@ static bool act_crouch_clash_in(const ActProfile *p, char *which) {
         }
     return false;
 }
+// What the controller's MenuConfirm is bound to, as the settings menu's confirm position: the bottom button (pad:south)
+// or the right one (pad:east); any other input, None and the default are -1 (the menu keeps its own setting)
+static int confirm_policy_in(const ActProfile *p) {
+    const ActBinding *b = binding_in(p, 0, ACT_MENU_CONFIRM, 0, NULL);
+    if (!b || b->n < 1 || b->alt[0].n != 1) return -1;
+    int c = b->alt[0].code[0];
+    return c == ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH ? MENU_CONFIRM_SOUTH : c == ACT_PAD + SDL_GAMEPAD_BUTTON_EAST ? MENU_CONFIRM_EAST : -1;
+}
+int act_menu_confirm_policy(void) { return atomic_load(&prof_confirm); }
 void act_use_profile(const ActProfile *p) {
     lock();
     prof = *p;
     prof_on = p->enable;
     atomic_store(&prof_split, act_split_in(p));
+    atomic_store(&prof_confirm, p->enable ? confirm_policy_in(p) : -1);
     atomic_store(&crouch_split_on, act_crouch_split_in(p));
     atomic_store(&crouch_clash, act_crouch_clash_in(p, NULL));
     for (int v = 0; v < ACT_VARS; v++) atomic_store(&share_tab[v], share_in(p, v));
@@ -1069,7 +1080,8 @@ uint32_t act_view_managed(int view, bool dash_zr) {
 
 // With the weapon away and Crouch split from Dodge (act_crouch_split): B comes from Crouch while the left stick is
 // not pushed (the crouch) and from Dodge while it is (the roll). Where Interact and Crouch are on one input, Interact
-// wins: that press is only A. With the weapon out both deliver B as before: weapon B-actions need it standing.
+// wins: that press is only A. With the weapon out Dodge still delivers B standing (weapon B-actions need it), and Crouch
+// delivers it standing but never while the stick is pushed.
 static uint32_t state_of(int view, uint32_t ew, bool bar) {
     uint32_t st = 0;
     if (view == ACT_VIEW_MB1 || view == ACT_VIEW_HUNT_ANY) st |= ST_OUT;
@@ -1087,7 +1099,7 @@ static uint32_t scoped_bits(int i, uint32_t bits, uint32_t st, uint64_t active) 
     if (act_crouch_split()) {
         if (i == ACT_DODGE) forbid |= ST_AWAY_STILL;
         if (i == ACT_CROUCH) {
-            forbid |= ST_AWAY_MOVING;
+            forbid |= ST_MOVING;  // (the stick pushed: Crouch never fires, with the weapon out or away; Dodge is the roll)
             if ((st & ST_AWAY_STILL) && (active >> ACT_INTERACT & 1) && atomic_load(&crouch_clash)) forbid |= ST_AWAY_STILL;
         }
     }

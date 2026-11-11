@@ -65,6 +65,9 @@ uint32_t act_ew_bits(int id, bool dash_zr);  // the engine-word bits (INPUTS-MAS
 // is, which the game's R-role getter (f_85f93c) returns to the callers that are weapon moves (hle/input_view.c)
 #define ACT_VBIT_WEAPON_R 0x8000u
 bool act_split(void);                     // Dash and the weapon R-action are two inputs (SplitDashWeaponR=1, or WeaponR is bound)
+// The settings menu's confirm position (config.h MENU_CONFIRM_SOUTH / EAST) that follows the controller's MenuConfirm
+// binding while the layer is on; -1: not bound to the bottom or right button, use the menu's own setting
+int act_menu_confirm_policy(void);
 bool act_split_in(const struct ActProfile *p);
 // The hunter's B button is the roll while the left stick is pushed and the crouch while it is not. With Crouch bound
 // to an input of its own (any device or weapon class), or with Dodge and Interact on one input, the two are told apart: with the weapon away Crouch delivers B
