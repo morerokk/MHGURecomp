@@ -967,6 +967,7 @@ void backend_present(NvnTexture *t) {
     }
     { void vk_gpuprof_frame(void); vk_gpuprof_frame(); }  // (debug) MHGU_CONTROL "gpuprof"
     { void menulearn_frame(void); menulearn_frame(); }  // (the frame's HUD pieces: runtime/menulearn.c)
+    { void prompts_frame(void); prompts_frame(); }  // (keyboard and mouse button glyphs: runtime/hle/prompts.c)
     vk_unlock();
     static int fps = -1;
     if (fps < 0) fps = getenv("MHGU_FPS") != NULL;

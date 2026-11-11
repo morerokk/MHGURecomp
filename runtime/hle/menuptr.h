@@ -31,6 +31,7 @@ void menuptr_row_offset(const MenuGeom *g, int row, float *x, float *y);  // a r
 // A cell is row * columns + column, on the menu's page; a list has one column.
 void menuptr_init(void);
 bool menuptr_open(void);                 // a menu whose cells are known is open
+bool menuptr_cursor_ran(uint64_t within_ns);  // a menu's cursor (any, known or not) ran in the last within_ns
 int menuptr_row(void);                   // its selected cell, -1 when none is open
 int menuptr_rows(void);                  // the cells on its page now (0: none open)
 int menuptr_cols(void);                  // its columns (1: a list)

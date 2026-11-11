@@ -363,6 +363,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(fxaa);
     SAME(fxaa_mode);
     SAME(face_buttons);
+    SAME(kbm_prompts);
     SAME(ldn_port);
     SAME(sync_small_monsters);
     SAME(lag_compensation);
@@ -1671,6 +1672,7 @@ void reset_section() {
     case 2:
         c.face_buttons = f.face_buttons;
         c.background_input = f.background_input;
+        c.kbm_prompts = f.kbm_prompts;
         c.menu_chord = f.menu_chord;
         c.combo_window = f.combo_window;
         c.mouse_sensitivity = f.mouse_sensitivity;
@@ -2096,6 +2098,7 @@ std::vector<Row> main_rows() {
         add_choice(r, "face", "Face buttons", c.face_buttons, {tr("Position"), tr("Label")},
                    [](int v) { c.face_buttons = v; }, ini("FaceButtons"));
         add_bool(r, "background", "Background input", &c.background_input, ini("BackgroundInput"));
+        add_bool(r, "kbm.prompts", "Keyboard button prompts", &c.kbm_prompts, ini("KeyboardPrompts"));
         add_choice(r, "combo", "Combo input window", c.combo_window, {tr("Lenient"), tr("Strict")},
                    [](int v) { c.combo_window = v; }, ini("ComboInputWindow"));
         number(r, "mouse", tr("Mouse sensitivity"), &c.mouse_sensitivity, lo("MouseSensitivity"), hi("MouseSensitivity"), .05f, ini("MouseSensitivity"));

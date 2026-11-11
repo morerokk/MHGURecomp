@@ -594,8 +594,14 @@ static int linked_by(uint32_t lr, bool col) {
     return -1;
 }
 
+static _Atomic uint64_t g_any_cursor_ns;  // when any cursor of the four classes last ran (a menu is up)
+bool menuptr_cursor_ran(uint64_t within_ns) {
+    uint64_t t = atomic_load(&g_any_cursor_ns);
+    return t && plat_now_ns() - t < within_ns;
+}
 static void cursor_update_as(Cpu *c, const Layout *L) {
     uint32_t cur = c->r[0], lr = c->r[14] & ~1u;
+    atomic_store(&g_any_cursor_ns, plat_now_ns());
     if ((lr == CALL_WIDGET_A || lr == CALL_WIDGET_B) && g_widget_lr) lr = g_widget_lr | (lr == CALL_WIDGET_B ? WIDGET_SECOND : 0);
     // (the host's nudge - a short Down that makes a quiet cursor run - never moves anything itself: a jump puts its own
     // step in, and with none, or for another menu than the one that runs, it would walk the selection down)

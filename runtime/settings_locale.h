@@ -421,6 +421,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"same as", "igual que"},
         {"also:", "también:"},
         {"in town:", "en la aldea:"},
+        {"Keyboard button prompts", "Botones de teclado y ratón en pantalla"},
         {"Rebind game actions was off: turned on, so this binding is used.", "Reasignar acciones del juego estaba desactivado: se ha activado para usar esta asignación."},
         {"Set", "Asignar"},
         {"Add another", "Añadir otra"},

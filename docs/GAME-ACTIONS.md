@@ -503,6 +503,56 @@ smithy, equipment box, item box, shop, map, options: hover there is unknown (the
   left click advances the dialog to its end; Space opens the World Map and right click closes it. `make test-actions`:
   2,982,980 checks, 0 failures (the golden test now skips the menu word too for A / X / L pressed by key).
 
+## Keyboard and mouse button prompts (2026-11-11, `runtime/hle/prompts.c`)
+
+While the keyboard and mouse are what was last pressed (`host_input_last_device`) and `[Controls] KeyboardPrompts` is
+On (the default; the settings' Controls tab, live), the game's button glyphs show the input that gives that button:
+the mouse's left / right / middle button or wheel as a picture, a key as a cap with its name. The controller gets the
+game's own glyphs back at its next button press.
+
+* **The glyphs.** The button font, `resident.arc` `GUI\02_common\font\button_festa` (a GFD: 70 cells of 24 x 24; its
+  glyph table starts right after the texture name, 20 bytes an entry, code / packed cell as in font_festa), draws from
+  `button_festa_00_ID` (256 x 256 BC3, block-linear, block height 8 GOBs). `fontIcon` (GII) names its codes: PAD_Y X
+  B A L at y 0 (x 0..96), PAD_R 0,24, KEY (the D-pad) 24,24, KEY_U 72,24, KEY_R 96,24, PAD_ZL 120,24, PAD_ZR 144,24,
+  ANALOG_LB / RB (L3 / R3) 168,24 / 192,24, KEY_D 0,48, KEY_L 24,48, KEY_UD 48,48, KEY_RL 72,48, PAD_START /
+  SELECT (Plus / Minus) 0,72 / 24,72; the sticks, arrows, weapons, elements and Palico icons are left alone.
+* **More sheets** (the 3DS had no ZL / ZR: the HUD's buttons are pictures of their own, found from the quest arc's
+  GUI files' texture names): `HD_custom_pnl2_BM_NOMIP` (512 x 512 BC3: the hunt HUD's L Y X B A R ZL ZR, D-pad up /
+  down / right, R3 at y ~247 on a 32 pitch, L3 at 360,184; the Hunter Arts' "ZL + X", the map's R3), `HD_hud00_BM_NOMIP`
+  (the item bar's L Y X B A R at y ~411) and `HD_window_BM_MQ_NOMIP` (the quest details' L / R pages at y 85, ZL / ZR at
+  y 193; it has words, so one file per language). Boxes measured from each picture's ink (`panel_cells`...), the
+  24 x 24 drawing fitted into each. The button font's file is also in each quest arc (the hunt's, the Hunting Horn's
+  notes): textures of their own, the same data.
+* **Swapping them.** The game copies a texture's data as it is into its GPU memory, and the renderer uploads a texture
+  again when its memory changes (page tracking / hashes). The renderer reports every upload (`prompts_texture_seen`,
+  textures.c: a backend is reused for a quest's textures, so not only first uploads); one whose data is a sheet's file
+  (any language's, `nativeNX/<lang>/GUI/...`) is a copy of it, up to 8 a sheet. Each frame (`prompts_frame`, device.c
+  at present) the inputs wanted are worked out; on a change each sheet's cells are drawn on its texels (decoded once)
+  and only the 4 x 4 blocks they touch encoded back to BC3 (alpha extremes in 8 steps, the two furthest-apart colours
+  in 4), the rest of the data the file's to the bit, and written over each copy - one that holds neither the file's
+  data nor what was last written is dropped (its memory is something else's now), never written. The controller gets
+  the file's data back.
+* **Which input.** The context on screen: a hunt (gameplay, and no menu: the pause menu's handler running, no known
+  menu in the pointer's focus, no menu cursor run in the last 150 ms - the focus alone once missed the pause menu with
+  the Hunting Horn out, so Signal showed the hunt's left click, not the menu's Space), a town (no known menu open),
+  else the menus. The button's first action in that context (`act_order`, by its default Switch button), its
+  keyboard and mouse binding: its own or the one it follows (`act_effective`), else the device's default
+  (`act_default_binding`), else the keybinds' first key for that button (Tier 0; also with the layer or its menus off).
+* **The pictures.** `extras/prompts/mouse_icons.png` (a 4 x 2 grid; used: left, right, middle, wheel up, wheel down)
+  and `keycap.png`, made into 24 x 24 cells by `tools/prompt_icons.py` (cut to their ink, area-averaged; the mouse to
+  22 px) as `runtime/hle/prompt_icons.h`. A key's name is drawn on the cap in the game's festa font (its first glyph
+  page, RGBA8, from `resident.arc`), near black, scaled into the cap's face: one letter or digit, F1..F12, N0..N9 for
+  the keypad, arrows as arrows, SPC ENT TAB BS ESC SHF CTL ALT CAP DEL INS HOM END PGU PGD, else the SDL name's first 3
+  letters; M4 / M5 for the side buttons. Two D-pad directions on one glyph (KEY_UD, KEY_RL) take both keys' symbols,
+  stacked when that draws them bigger (the left / right arrows).
+* **Tested** (hidden runs, a copy of the save, the Soaratorium): the town's HUD shows TAB Multiplayer Menu, SPC World Map,
+  R Hunter Search, T Chat (ZR), BS Help; a virtual controller's press brings back ZL / X / Y / ZR / Minus, a key press
+  the keys again. The atlas (`MHGU_PROMPTS_DUMP=<file>`: the RGBA drawn and its BC3 round trip) has A as the left
+  click and B as the right click in the menus. In a hunt (quest 101): the item bar Q / R, the Hunter Art TAB + left
+  click, R3 ALT; the pause menu's Signal SPC, Zoom In Map R; the context hunt / menus / hunt as the menu opens and closes.
+  Not checked by eye: the quest details' L / R (HD_window), the Hunting Horn's notes, other languages (the files are
+  compared, so a mod's own pictures are left alone).
+
 ## Mouse camera (2026-11-11)
 
 `runtime/hle/mousecam.c` turns the hunt camera's own angles (the quest camera's stick handler `f_2255cc`, and the aiming
