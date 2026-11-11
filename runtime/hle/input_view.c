@@ -86,7 +86,6 @@ static uint32_t g_kc_seen[256];
 static int g_kc_n;
 static bool g_on;      // the layer is on this frame ([Actions] Enable; the settings menu can turn it on and off)
 static volatile uint64_t g_hunt_menu_ns;  // when that handler last ran (0: not in this hunt yet)
-static bool g_mb2_own;  // the menu translator's hook is in (always: input_view_init)
 static bool g_hooked;  // the hooks are in (from the first time it was on)
 
 static bool sane(uint32_t a) { return a >= 0x08000000u && a < 0xF0000000u && !(a & 3); }
@@ -283,8 +282,6 @@ void input_view_init(void) {
     config_path(path, sizeof path);
     act_set_log(log_line);
     act_init(path);
-    // the menu translator is hooked at once (it passes through while the layer is off)
-    if (!fnhook_get(FN_TR_MB2)) fnhook_set(FN_TR_MB2, hle_register("inputview:tr_mb2", tr_mb2)), g_mb2_own = true;
     // (and the hunt's pause menu handler: the mouse is free while that menu is open, host_input.c mouse_update)
     if (!fnhook_get(FN_HUNT_MENU)) fnhook_set(FN_HUNT_MENU, hle_register("inputview:hunt_menu", hunt_menu_seen));
     input_view_apply();
@@ -301,13 +298,13 @@ void input_view_apply(void) {
     // these functions later chain behind ours, as Forge does for any hook already there)
     static const uint32_t needed[] = {FN_MB_UPDATE, FN_TR_MB1, FN_TR_MB2, FN_PLAYER, FN_TOWN};
     for (unsigned i = 0; i < sizeof needed / sizeof *needed; i++)
-        if (fnhook_get(needed[i]) && !(needed[i] == FN_TR_MB2 && g_mb2_own)) {
+        if (fnhook_get(needed[i])) {
             LOG("[actions] %08x is hooked already: the action layer stays off\n", needed[i]);
             return;
         }
     fnhook_set(FN_MB_UPDATE, hle_register("inputview:mb_update", mb_update));
     fnhook_set(FN_TR_MB1, hle_register("inputview:tr_mb1", tr_mb1));
-    if (!g_mb2_own) fnhook_set(FN_TR_MB2, hle_register("inputview:tr_mb2", tr_mb2));
+    fnhook_set(FN_TR_MB2, hle_register("inputview:tr_mb2", tr_mb2));
     fnhook_set(FN_PLAYER, hle_register("inputview:player", player_update));
     fnhook_set(FN_TOWN, hle_register("inputview:town", town_update));
     for (int i = 0; i < ACT_WEAPONS; i++) {

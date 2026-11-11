@@ -527,10 +527,6 @@ static inline const char *settings_text(int language, const char *english) {
         {"Invert mouse Y", "Invertir el ratón en vertical"},
         {"Mouse smoothing", "Suavizado del ratón"},
         {"Mouse capture", "Captura del ratón"},
-        {"Mouse 4", "Ratón 4"},
-        {"Mouse 5", "Ratón 5"},
-        {"Always", "Siempre"},
-        {"Middle", "Central"},
         {"Click", "Clic"},
         {"Mouse sensitivity must be 0.1-10 and smoothing 0-0.9.", "La sensibilidad del ratón debe estar entre 0,1 y 10 y el suavizado entre 0 y 0,9."},
     };

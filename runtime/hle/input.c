@@ -22,18 +22,6 @@ volatile uint64_t g_a_pressed_ns;
 
 void input_act_stage(const ActSnap *s) { act_staged = *s; }
 
-static volatile uint32_t g_mouse_stick;  // bit 31: the mouse feeds the right stick; the controller's own rx / ry, 16 bits each
-void input_mouse_stick_set(bool feeding, int32_t rx, int32_t ry) {
-    uint32_t v = 0;
-    if (feeding) v = 0x80000000u | (uint32_t)((rx >> 2) + 8192) << 14 | (uint32_t)((ry >> 2) + 8192);  // two 14-bit halves
-    __atomic_store_n(&g_mouse_stick, v, __ATOMIC_RELAXED);
-}
-bool input_mouse_stick_get(int32_t *rx, int32_t *ry) {
-    uint32_t v = __atomic_load_n(&g_mouse_stick, __ATOMIC_RELAXED);
-    if (!(v & 0x80000000u)) return false;
-    *rx = (int32_t)((v >> 14 & 0x3fffu) - 8192) * 4, *ry = (int32_t)((v & 0x3fffu) - 8192) * 4;
-    return true;
-}
 void input_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
     if ((buttons & ~g_buttons) & (1ull << BTN_A)) g_a_pressed_ns = plat_now_ns();
     pthread_mutex_lock(&act_lock);
