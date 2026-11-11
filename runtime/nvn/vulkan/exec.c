@@ -857,6 +857,7 @@ static uint64_t ui_pv_present;
 static uint32_t ui_nrecent, ui_pass_recent;  // (quads recorded so far, the slot is the count modulo UI_RECENT; and when
                                              // this pass began)
 static bool ui_loading_pass;  // this pass draws the loading screen (its backdrop, layer 110, came first)
+static unsigned ui_loading_rows;  // the loading backdrop's rows seen in this pass (1: y 168, 2: 433, 4: 570)
 static bool ui_title_pass;  // this pass draws the title screen (its layout, layer 108 at the canvas centre, came first)
 static bool ui_frontend_pass;  // this pass draws a front-end screen (Main Menu, Character Select: its 16:9 backdrop, layer
                                // 250 at the canvas centre, came first)
@@ -1729,6 +1730,7 @@ static void begin_pass(void) {
     if (minw == UINT32_MAX) minw = minh = 16;
     pass_w = minw; pass_h = minh;
     ui_loading_pass = false;
+    ui_loading_rows = 0;
     ui_title_pass = false;
     ui_frontend_pass = ui_frontend_frame == g_present_count;
     ui_stamp_pass = false;
@@ -3358,9 +3360,15 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 if (fabsf(pos_z - 110.0f) < 0.5f) {
                     // (only the strips: the lock-on markers and other effects use layer 110 too, mid-hunt, and made
                     // everything after them center-anchored, so the HUD jumped down)
-                    loading_strip = fabsf(pos_y - 168.0f) < 0.3f || fabsf(pos_y - 433.0f) < 0.3f || fabsf(pos_y - 570.0f) < 0.3f;
-                    if (loading_strip) ui_loading_pass = true;
-                    if (ui_loading_pass) sy = 1.0f;
+                    unsigned row = fabsf(pos_y - 168.0f) < 0.3f ? 1u : fabsf(pos_y - 433.0f) < 0.3f ? 2u
+                                 : fabsf(pos_y - 570.0f) < 0.3f ? 4u : 0u;
+                    loading_strip = row != 0;
+                    // The loading screen once the backdrop has shown two of its rows: a reticle or lock-on marker passing
+                    // through one of those heights mid-hunt made the pass a loading screen, and the HUD drawn after it for
+                    // that frame sat centred (its top pieces ~94 px lower at 16:10, the item bar higher): a flash.
+                    ui_loading_rows |= row;
+                    if (ui_loading_rows & (ui_loading_rows - 1)) ui_loading_pass = true;
+                    if (loading_strip || ui_loading_pass) sy = 1.0f;
                 }
                 // Front-end screens keep their backdrop 16:9: the HUD stays on it as with the 16:9 anchor. Edges / 21:9 / 32:9
                 // took their centred menus (layer 100, x 640, anchored Right) and the help box (96) off it, to the sides.
