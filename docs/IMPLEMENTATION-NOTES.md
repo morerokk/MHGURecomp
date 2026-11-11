@@ -502,3 +502,27 @@ New `[Mouse]` settings (settings menu: Controls tab, Spanish strings; live, no r
 Measured with `MouseSensitivityY=2 MouseInvertY=On MouseSmoothing=0.6`: the pitch per update went from +125 to -240 (twice,
 reversed), the yaw ramped up and trailed off. The mouse buttons bound to actions (`[Actions.Kbm]`) work while captured
 (the capture is the same, `mouse_held`), also with the automatic capture.
+
+### Cursor menus (phase 2, 2026-11-11): not implemented; what was tried and what is missing
+
+The aim: hover a row with the mouse = select it, click = confirm. What the evidence says:
+
+* **(c) The engine's pointer block** (P1 above): none of its 21 readers runs for the vanilla list controllers in the
+  screens tried. Not re-probed.
+* **(a) HUD quads:** the host has no registry of the quads a menu is drawn with. `hudtrace` logs only quads it moves for
+  non-16:9 pictures (at 16:9 it prints `frame done` and nothing else), and a row of a list is a text quad with no link to
+  the list's selection. A hover that works needs a new registry in `nvn/vulkan/exec.c` (every textured quad with its
+  screen rectangle and its draw order) and a way to tell a row from decoration: not built.
+* **(b) The list's own selection index:** the Plus menu is an object at runtime (found with `fntrace 86e000 870000` while
+  pressing Down: its `r0`, e.g. `0c02a490`); a `peek` diff of its first 0x320 bytes across Down / Down / Up shows exactly one
+  word that follows the cursor, `+0xe4`: bytes `01 <row> 08 00` (state, row, row count). Writing `+0xe4` with `poke`
+  (`80501`, row 5) did **not** move the highlight, and the next Down went from the old row (Item Pouch to Combine), so
+  that byte is a copy the list recomputes, not its state. The real cursor state (and each class's own: pouch, item box,
+  shop, smithy...) has to be found per list class: the recipe above finds the object and the changing words, a store
+  watch (`itwatch`, research tree) would find the writer.
+
+So a cursor menu needs both (a) the rows' rectangles and (b) a write-safe way to move the selection (or Up / Down presses
+toward the hovered row, which needs (a) plus knowing the current row, which (b)'s copy gives for the Plus menu). With
+click = Confirm, right click = Cancel and the wheel = Up / Down already done through the actions layer (`[Actions.Kbm]`
+`MenuConfirm = mouse:left`, `MenuCancel = mouse:right`, `MenuUp = mouse:wheelup`...), the mouse is usable in menus now,
+without a cursor. No `CursorMenus` setting was added (nothing to switch).
