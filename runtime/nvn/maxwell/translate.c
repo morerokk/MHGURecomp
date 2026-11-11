@@ -3,7 +3,8 @@
 // The binary is an NVN header (0x30), the shader program header (SPH, 0x50; graphics stages), then
 // instructions in groups of four 64-bit words (one scheduling word + three instructions).
 // Registers are emitted as `uint` variables; float ops use as_type<> conversions. Shaders with
-// branches become a `switch (pc)` state machine with explicit SSY/PBK/PCNT stacks.
+// branches become a `switch (pc)` state machine; its SSY/PBK/PCNT stacks are resolved at translation where every
+// path agrees (flow_resolve), else kept as explicit run-time stacks.
 //
 // GLSL: the instruction body is generated in the MSL spelling and converted by glsl_rewrite() (a token-aware
 // pass: as_type<T>() -> as_u/as_f overloads, float4 -> vec4, ulong -> uint64_t, char()/short() casts -> sx8/sx16,
@@ -84,6 +85,8 @@ typedef struct {
     uint8_t tex_alpha[256];  // register holds a texture sample's alpha here
     uint8_t inf_now[256];    // register may hold 1 / a texture's alpha here (fragment FMZ multiplies, emit_insn)
     uint8_t inf_ever[256];   // ... has held one so far: what a branch target may see
+    bool static_flow;        // SSY / PBK / PCNT stacks resolved at translation (flow_resolve): no run-time stacks
+    uint32_t *flow_tgt;      // (static_flow) per instruction index: where its SYNC / BRK / CONT goes (~0u: unreached)
 } Ctx;
 
 static uint64_t bits(uint64_t w, int lo, int n) { return (w >> lo) & ((n == 64) ? ~0ull : ((1ull << n) - 1)); }
@@ -912,13 +915,19 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         sp(&c->body, "    pc = %uu; continue;\n", target);
     } else if (OPM(0xe290000000000000ull, 0xfff0000000000020ull)) {  // SSY
         c->uses_branches = true;
-        sp(&c->body, "    ssy[ssy_n++] = %uu;\n", norm_target((int64_t)pc + 8 + sbits(w, 20, 24)));
+        if (!c->static_flow) sp(&c->body, "    ssy[ssy_n++] = %uu;\n", norm_target((int64_t)pc + 8 + sbits(w, 20, 24)));
     } else if (OPM(0xe2a0000000000000ull, 0xfff0000000000020ull)) {  // PBK
         c->uses_branches = true;
-        sp(&c->body, "    pbk[pbk_n++] = %uu;\n", norm_target((int64_t)pc + 8 + sbits(w, 20, 24)));
+        if (!c->static_flow) sp(&c->body, "    pbk[pbk_n++] = %uu;\n", norm_target((int64_t)pc + 8 + sbits(w, 20, 24)));
     } else if (OPM(0xe2b0000000000000ull, 0xfff0000000000020ull)) {  // PCNT
         c->uses_branches = true;
-        sp(&c->body, "    pcnt[pcnt_n++] = %uu;\n", norm_target((int64_t)pc + 8 + sbits(w, 20, 24)));
+        if (!c->static_flow) sp(&c->body, "    pcnt[pcnt_n++] = %uu;\n", norm_target((int64_t)pc + 8 + sbits(w, 20, 24)));
+    } else if (c->static_flow && (OPM(0xf0f8000000000000ull, 0xfff8000000000000ull) ||
+                                  OPM(0xe340000000000000ull, 0xfff0000000000000ull) ||
+                                  OPM(0xe350000000000000ull, 0xfff0000000000000ull))) {  // SYNC / BRK / CONT, resolved
+        uint32_t t = c->flow_tgt[pc / 8];
+        if (t == ~0u) sp(&c->body, "    exit_now = true; break;\n");  // (never reached)
+        else sp(&c->body, "    pc = %uu; continue;\n", t);
     } else if (OPM(0xf0f8000000000000ull, 0xfff8000000000000ull)) {  // SYNC
         sp(&c->body, "    pc = ssy[--ssy_n]; continue;\n");
     } else if (OPM(0xe340000000000000ull, 0xfff0000000000000ull)) {  // BRK
@@ -1949,7 +1958,8 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
     if (c->uses_local) sp(&s, "  uint lmem[%d]; for (int li_ = 0; li_ < %d; li_++) lmem[li_] = 0u;\n", LMEM_WORDS, LMEM_WORDS);
     if (dbg) sp(&s, maxwell_dbg_pc == 0xffffffffu ? "  float dbgv = 1.0f;\n" : "  float dbgv = -1.0f;\n");
     if (any_branch) {
-        sp(&s, "  uint pc = 8u; uint ssy[16]; uint ssy_n = 0u; uint pbk[16]; uint pbk_n = 0u; uint pcnt[16]; uint pcnt_n = 0u;\n");
+        sp(&s, c->static_flow ? "  uint pc = 8u;\n"
+                              : "  uint pc = 8u; uint ssy[16]; uint ssy_n = 0u; uint pbk[16]; uint pbk_n = 0u; uint pcnt[16]; uint pcnt_n = 0u;\n");
         sp(&s, "  bool exit_now = false;\n");
         sp(&s, "  for (uint guard = 0u; guard < 100000u; guard++) {\n  switch (pc) {\n");
         sp(&s, "%s", body.buf ? body.buf : "");
@@ -1990,12 +2000,19 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
             static const char *const pass[8] = {"", "false", "c0.a < alpha_ref.x", "c0.a == alpha_ref.x", "c0.a <= alpha_ref.x",
                                                 "c0.a > alpha_ref.x", "c0.a != alpha_ref.x", "c0.a >= alpha_ref.x"};
             int cov = key->alpha_coverage;
+            // A fragment the plain test passes keeps all its samples; only those it fails get partial coverage (up
+            // to half). The game often lays the same cut-out's depth in an earlier pass with its own all-or-nothing
+            // test (Marshlands' tall grass: the shadow pass): samples left out there show neither the cut-out nor
+            // what is behind it (its depth hides that), only the pass's clear colour - black dots in distant grass.
+            // gl_SampleMask is written on every path (an invocation that doesn't write it has an undefined mask: blocky
+            // noise on everything alpha-tested), and fwidth taken outside the branch (derivatives are undefined where
+            // a neighbour in the quad skips it).
             if (cov > 1 && (alpha_func == 2 || alpha_func == 4 || alpha_func == 5 || alpha_func == 7))
                 sp(&s, "  { float d = %s, w = max(fwidth(c0.a), 1.0e-4f);\n"
-                       "    int n = int(clamp(d / w + 0.5f, 0.0f, 1.0f) * %d.0f + 0.5f);\n"
+                       "    int n = (%s) ? %d : int(clamp(d / w + 0.5f, 0.0f, 1.0f) * %d.0f + 0.5f);\n"
                        "    if (n <= 0) discard;\n"
                        "    gl_SampleMask[0] = (1 << n) - 1; }\n",
-                   alpha_func <= 4 ? "alpha_ref.x - c0.a" : "c0.a - alpha_ref.x", cov);
+                   alpha_func <= 4 ? "alpha_ref.x - c0.a" : "c0.a - alpha_ref.x", pass[alpha_func], cov, cov);
             else
                 sp(&s, "  if (!(%s)) discard;\n", pass[alpha_func]);
         } else if (alpha_spec) {
@@ -2021,6 +2038,83 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
     free(c->body.buf);
     free(c);
     return info;
+}
+
+// ------------------------------------------------------------------ control-flow stacks at translation
+// SSY / PBK / PCNT push constant targets, so following every path from the entry gives each SYNC / BRK / CONT one
+// target, the same the run-time stacks of the switch would hold (CONT keeps its entry, as there). The switch then needs
+// no stacks: uint arrays indexed at run time, which AMD and Intel drivers put in scratch memory (Marshlands' tall-grass
+// shadow shader, 1080p MSAA 4x on a Radeon iGPU: 8.0 ms with them, 5.9 written out without). false: paths meet with
+// different stacks, or a computed branch (BRX), or a stack would overflow - the run-time stacks stay.
+typedef struct { uint8_t n[3]; uint32_t v[3][16]; } FlowStacks;  // SSY, PBK, PCNT
+static bool flow_same(const FlowStacks *a, const FlowStacks *b) {
+    for (int k = 0; k < 3; k++)
+        if (a->n[k] != b->n[k] || memcmp(a->v[k], b->v[k], a->n[k] * sizeof a->v[k][0])) return false;
+    return true;
+}
+static bool flow_resolve(const uint64_t *code, size_t end, uint32_t *tgt) {
+    FlowStacks *at = calloc(end, sizeof *at);
+    uint8_t *seen = calloc(end, 1);
+    uint32_t *work = malloc(end * sizeof *work);
+    bool ok = at && seen && work && end > 1;
+    for (size_t i = 0; i < end; i++) tgt[i] = ~0u;
+    size_t nw = 0;
+    if (ok) seen[1] = 1, work[nw++] = 1;  // (pc 8: the first instruction)
+    while (ok && nw) {
+        size_t i = work[--nw];
+        FlowStacks s = at[i], ts = s;
+        uint64_t w = code[i], top12 = w & 0xfff0000000000000ull;
+        uint32_t pc = (uint32_t)(i * 8), target = 0;
+        int pr = (int)bits(w, 16, 3);
+        bool prn = bits(w, 19, 1);
+        if (top12 == 0xe290000000000000ull || top12 == 0xe2a0000000000000ull || top12 == 0xe2b0000000000000ull ||
+            top12 == 0xe270000000000000ull)
+            pr = PT, prn = false;  // (no predicate: as emit_insn)
+        bool never = pr == PT && prn, cond = !(pr == PT && !prn);
+        bool sync = (w & 0xfff8000000000000ull) == 0xf0f8000000000000ull;
+        if (top12 == 0xe240000000000000ull || top12 == 0xe300000000000000ull || top12 == 0xe330000000000000ull ||
+            top12 == 0xe340000000000000ull || top12 == 0xe350000000000000ull || sync) {
+            int t = (int)bits(w, 0, 5);  // condition-code test (cc_test): 15 always, 0 never
+            if (t == 0) never = true;
+            else if (t != 15) cond = true;
+        }
+        bool taken = false, falls = true;
+        int k = -1;
+        if ((w & 0xfff0000000000020ull) == 0xe290000000000000ull) k = 0;
+        else if ((w & 0xfff0000000000020ull) == 0xe2a0000000000000ull) k = 1;
+        else if ((w & 0xfff0000000000020ull) == 0xe2b0000000000000ull) k = 2;
+        if (k >= 0) {  // SSY / PBK / PCNT: push
+            if (s.n[k] >= 16) { ok = false; break; }
+            s.v[k][s.n[k]++] = norm_target((int64_t)pc + 8 + sbits(w, 20, 24));
+        } else if (never) {
+        } else if (top12 == 0xe250000000000000ull) {  // BRX
+            ok = false;
+            break;
+        } else if ((w & 0xfff0000000000020ull) == 0xe240000000000000ull) {  // BRA
+            target = norm_target((int64_t)pc + 8 + sbits(w, 20, 24)), ts = s, taken = true, falls = cond;
+        } else if (top12 == 0xe300000000000000ull) {  // EXIT
+            falls = cond;
+        } else if (sync || top12 == 0xe340000000000000ull || top12 == 0xe350000000000000ull) {  // SYNC / BRK / CONT
+            k = sync ? 0 : top12 == 0xe340000000000000ull ? 1 : 2;
+            if (!s.n[k]) { ok = false; break; }
+            ts = s;
+            target = tgt[i] = s.v[k][s.n[k] - 1];
+            if (k != 2) ts.n[k]--;
+            taken = true, falls = cond;
+        }
+        for (int e = 0; e < 2 && ok; e++) {
+            size_t j = e ? i + 1 + ((i + 1) % 4 == 0) : target / 8;
+            if (e ? !falls : !taken) continue;
+            if (j >= end) continue;  // (off the end: the switch's default, an exit)
+            const FlowStacks *ns = e ? &s : &ts;
+            if (!seen[j]) seen[j] = 1, at[j] = *ns, work[nw++] = (uint32_t)j;
+            else if (!flow_same(&at[j], ns)) ok = false;
+        }
+    }
+    free(at);
+    free(seen);
+    free(work);
+    return ok;
 }
 
 ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, const ShaderKey *key) {
@@ -2083,6 +2177,10 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
     static int annotate = -1;
     if (annotate < 0) annotate = getenv("MHGU_SAVE_MSL") != NULL;
     c->branchy = any_branch;
+    if (any_branch) {
+        c->flow_tgt = malloc((end + 4) * sizeof *c->flow_tgt);
+        c->static_flow = c->flow_tgt && flow_resolve((const uint64_t *)code, end, c->flow_tgt);
+    }
     for (size_t i = 0; i < end && !c->fail; i++) {
         if (i % 4 == 0) continue;
         uint32_t pc = (uint32_t)(i * 8);
@@ -2101,6 +2199,8 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
         info->num_insts++;
     }
     free(label);
+    free(c->flow_tgt);
+    c->flow_tgt = NULL;
     if (c->fail) { free(c->body.buf); free(c); return info; }
     if (c->glsl) return glsl_finish(c, any_branch, dbg);
 
@@ -2204,7 +2304,8 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
     if (c->uses_local) sp(&s, "  uint lmem[%d] = {};\n", LMEM_WORDS);
     if (dbg) sp(&s, maxwell_dbg_pc == 0xffffffffu ? "  float dbgv = 1.0f;\n" : "  float dbgv = -1.0f;\n");
     if (any_branch) {
-        sp(&s, "  uint pc = 8u; uint ssy[16]; uint ssy_n = 0; uint pbk[16]; uint pbk_n = 0; uint pcnt[16]; uint pcnt_n = 0;\n");
+        sp(&s, c->static_flow ? "  uint pc = 8u;\n"
+                              : "  uint pc = 8u; uint ssy[16]; uint ssy_n = 0; uint pbk[16]; uint pbk_n = 0; uint pcnt[16]; uint pcnt_n = 0;\n");
         sp(&s, "  bool exit_now = false;\n");
         sp(&s, "  for (uint guard = 0; guard < 100000u; guard++) {\n  switch (pc) {\n");
         sp(&s, "%s", c->body.buf ? c->body.buf : "");

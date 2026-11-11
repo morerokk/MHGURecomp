@@ -1341,6 +1341,10 @@ void vk_gpuprof_frame(void) {  // (device.c, after each presented frame's submis
 static bool pass_msaa;  // (MSAA, below) the pass renders through multisampled images (resolved when next read)
 static TexBackend *pass_att[9];
 static uint32_t pass_natt;
+// (MSAA) the pass has cleared or may have written its depth / stencil target (a draw writing depth or testing stencil):
+// one that only tests depth leaves its multisampled image as it was, and a resolve of it (a copy of every sample, ~2.5 ms
+// at 1080p 4x on a Radeon iGPU) isn't needed again
+static bool pass_ds_written;
 // (MSAA) colour target 0 is a picture 3D models are drawn into (ms_expand). Its picture is copied into the samples
 // only for what tests depth (the models, and the depth clears before them): the menu's 2D draws around them stay
 // without MSAA. draw / clear set ms_want_depth before a pass begins; pass_want_depth: what the pass began for
@@ -1373,7 +1377,10 @@ void vk_end_pass(void) {
                  (unsigned long long)(stat_draws - pass_draws_at), gp_pass_note);
         gp_mark(l);
     }
-    if (pass_msaa) for (uint32_t k = 0; k < pass_natt; k++) pass_att[k]->ms_dirty = true;
+    if (pass_msaa)
+        for (uint32_t k = 0; k < pass_natt; k++)
+            if (pass_ds_written || !(pass_att[k]->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)))
+                pass_att[k]->ms_dirty = true;
     pass_msaa = false;
     if (g_dump_active) dump_pass();
 }
@@ -1483,10 +1490,12 @@ static VkPipeline resolve_pipeline(VkRenderPass rp, int kind, uint32_t samples) 
 
 void vk_ms_resolve(TexBackend *b) {
     if (!b || !b->ms_dirty) return;
+    // (the pass ends first: ending it marks its targets for resolving again, and this resolve covers what it drew - it
+    // was marked after clearing the mark, and the scene's depth was resolved twice in a row, ~2.5 ms each on an iGPU)
+    if (b->ms && in_pass) { vk_end_pass(); st.rt_dirty = true; }
     b->ms_dirty = false;
     TexBackend *m = b->ms;
     if (!m) return;
-    if (in_pass) { vk_end_pass(); st.rt_dirty = true; }
     VkCommandBuffer cb = vk_cmd();
     vk_full_barrier(cb);
     bool depth = b->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
@@ -1505,6 +1514,7 @@ void vk_ms_resolve(TexBackend *b) {
         VkImageCopy c = {.srcSubresource = {m->aspect, 0, 0, 1}, .dstSubresource = {m->aspect, 0, 0, 1},
                          .extent = {b->width, b->height, 1}};
         vkCmdCopyImage(cb, m->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, r->image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
+        gp_mark("  depth copy");
     }
     ib.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, ib.newLayout = att;
     ib.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
@@ -1544,7 +1554,11 @@ void vk_ms_resolve(TexBackend *b) {
         vkCmdEndRenderPass(cb);
         ss_forget();
     }
-    gp_mark("  resolve");
+    if (gp_active) {
+        char l[64];
+        snprintf(l, sizeof l, "  resolve %s %ux%u @%p", depth ? "depth" : "colour", b->width, b->height, (void *)b);
+        gp_mark(l);
+    }
 }
 
 // A pass that draws 3D models over a picture it did not clear: menus draw the hunter and Palicoes (Character Select,
@@ -1878,6 +1892,7 @@ static void begin_pass(void) {
     ss_forget();
     in_pass = true;
     pass_draws_at = stat_draws;
+    pass_ds_written = false;
     if (g_dump_active) {  // (debug) the pass's targets: texture object, size, NVN format
         char tg[400];
         int n = 0;
@@ -2285,6 +2300,7 @@ static void clear(int index, int kind, const void *color, uint32_t mask, bool de
     depth = depth && has_depth;
     stencil = stencil && has_stencil;
     if (index < 0 && !depth && !stencil) return;
+    if (depth || stencil) pass_ds_written = true;  // (MSAA: vk_end_pass)
     if (g_clear_draw < 0) { const char *e = getenv("MHGU_CLEAR_DRAW"); g_clear_draw = e && atoi(e); }
     bool simple = (index < 0 || ((mask & 0xF) == 0xF && !g_clear_draw)) && (!stencil || (smask & 0xFF) == 0xFF);
     if (simple) {
@@ -4090,6 +4106,44 @@ static bool topology(uint32_t mode, VkPrimitiveTopology *t) {
 }
 
 // The fragment code's content hash: the same in every run and area (its address is not).
+// Tall grass (Marshlands area 8): drawn twice a frame, into the shadow pass and then the main pass, both with depth
+// writes and a cut-out (discard, under MSAA a sample mask). Writing depth with a cut-out keeps the GPU from testing
+// depth before shading, so every blade behind the front one is shaded too. The shadow pass has already written the
+// same blades' depth, so the main pass's draw of geometry the shadow pass drew this frame, into the same depth target,
+// leaves its depth writes out: hidden blades are then dropped before shading (main pass 8.0 -> 5.95 ms, Radeon iGPU,
+// 1080p MSAA 4x; the picture the same). Matched per draw (the index / vertex data, count and depth target), so a draw
+// the shadow pass didn't make keeps its depth writes.
+#define GRASS_MAIN_FS 0x6451e52f4661b1b0ull    // the grass's main-pass fragment shader (prog_fs_hash)
+#define GRASS_SHADOW_FS 0x56d0c2e7b8b9e1f8ull  // ... its shadow-pass one
+static struct { uint64_t key; uint32_t n; } grass_laid[64];
+static int grass_nlaid;
+static uint64_t grass_frame;
+static uint64_t grass_key(const CmdRec *r, bool indexed) {
+    uint64_t k = indexed ? r->x[3] * 0x9E3779B97F4A7C15ull + r->x[4] : r->x[1];
+    k = (k ^ r->x[2]) * 0x9E3779B97F4A7C15ull;
+    k = (k ^ st.vbuf[0].addr) * 0x9E3779B97F4A7C15ull;
+    return k ^ (uint64_t)(uintptr_t)st.rt.depth;
+}
+static int grass_find(uint64_t key) {
+    if (grass_frame != g_present_count) grass_frame = g_present_count, grass_nlaid = 0;
+    int i = 0;
+    while (i < grass_nlaid && grass_laid[i].key != key) i++;
+    return i;
+}
+static void grass_shadow_drawn(const CmdRec *r, bool indexed, uint64_t fs_hash) {  // (draw: issued, writing depth)
+    if (fs_hash != GRASS_SHADOW_FS) return;
+    uint64_t key = grass_key(r, indexed);
+    int i = grass_find(key);
+    if (i == grass_nlaid && grass_nlaid < 64) grass_laid[grass_nlaid++] = (typeof(grass_laid[0])){key, 0};
+    if (i < grass_nlaid) grass_laid[i].n++;
+}
+static bool grass_depth_laid(const CmdRec *r, bool indexed, uint64_t fs_hash) {  // (draw: true, leave depth writes out)
+    if (fs_hash != GRASS_MAIN_FS) return false;
+    int i = grass_find(grass_key(r, indexed));
+    if (i == grass_nlaid || !grass_laid[i].n) return false;
+    grass_laid[i].n--;
+    return true;
+}
 static uint64_t prog_fs_hash(Prog *p) {
     if (!p->chash[1]) p->chash[1] = code_hash(p->code[1], p->cmax[1], 1);
     return p->chash[1];
@@ -4397,6 +4451,8 @@ static void draw(CmdRec *r, bool indexed) {
     k.depth_write = k.depth_test && st.ds[1];
     k.depth_op = (uint8_t)(k.depth_test ? compare_fn(st.ds[2]) : VK_COMPARE_OP_ALWAYS);
     k.stencil_test = st.ds[3] && has_stencil;
+    if (k.depth_write && grass_depth_laid(r, indexed, prog_fs_hash(pr))) k.depth_write = false;  // (tall grass, above)
+    if (k.depth_write || k.stencil_test) pass_ds_written = true;  // (MSAA: vk_end_pass)
     // (3D models drawn over the finished picture, without MSAA: from the next frame on, for as long as they are drawn,
     // the player's anti-aliasing for them: ms_expand, models_fxaa_end)
     if (k.depth_write) {
@@ -4651,6 +4707,7 @@ static void draw(CmdRec *r, bool indexed) {
     if (mf_tex) models_fxaa_note();
     if (!use_index) vkCmdDraw(cb, count, inst, first, base_inst);
     else vkCmdDrawIndexed(cb, icount, inst, 0, base_vertex, base_inst);
+    if (k.depth_write) grass_shadow_drawn(r, indexed, prog_fs_hash(pr));  // (tall grass: its main pass, grass_depth_laid)
     stat_draws++;
     if (g_fsr_objvel && pr->fsrcap && (k.depth_write || (k.depth_test && pr->vi->cbuf_dynamic)) && inst == 1 && pass_samples == 1) {
         // FSR object motion: the same draw again through the capture variant of its vertex shader (rasterizer

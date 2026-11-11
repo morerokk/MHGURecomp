@@ -60,7 +60,8 @@ void emsync_aux_received(const void *data, uint32_t len);  // an F_AUX message f
 
 // hitsync.c: melee hits reported by the hunter who made them
 void hitsync_tick(void);            // each frame, from the game's input polling
-void hitsync_aux_received(const void *data, uint32_t len);
+void hitsync_aux_received(const void *data, uint32_t len);  // an F_AUX message, or in crossplay a datagram to this port:
+#define HITSYNC_UDP_PORT 47318      // the emulators' Lag Compensation plugin's port (crossplay)
 
 // hle/hpscale.c: large monster HP by the number of hunters; the host's settings go to the others
 void hpscale_tick(void);            // each frame, from the game's input polling
