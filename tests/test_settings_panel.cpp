@@ -227,7 +227,7 @@ int main() {
     selected("face");
     // The Keybinds submenu: a key chosen for B, then a mouse button as its second; the recomp's own keys refused
     press(ImGuiKey_Home);
-    down(9);  // (background, combo, mouse, vertical, invert, smoothing, capture, village look, keybinds)
+    down(9);  // (background, combo, mouse, vertical, invert, smoothing, capture, menus, keybinds)
     selected("keybinds");
     confirm();
     selected("bind.0");  // (past the section's title)

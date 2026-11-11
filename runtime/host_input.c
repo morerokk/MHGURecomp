@@ -27,6 +27,7 @@
 
 #include "actions.h"
 #include "config.h"
+#include "cursor_nav.h"
 #include "menu_confirm.h"
 #include "forge.h"
 #include "hle/chat.h"
@@ -119,10 +120,8 @@ static void act_wheel_step(void) {
 static bool mouse_grab;       // the player's choice: clicked in (true) or Esc / focus lost (false)
 static bool mouse_captured;   // relative mode on now (grabbed, and no Forge menu open)
 static bool mouse_no_capture; // relative mode refused (WSLg, some Wayland compositors): clicks are buttons, no mouse look
-static int mouse_look_button(void);
 void host_input_mouse_status(void);
 static volatile bool g_hunt_ctx;  // the hunt camera is the mouse's (its handler ran in the last 400 ms): mouse look is captured
-static bool look_down;        // the village look button is held (mouse_update: captured while it is)
 static uint64_t last_motion_ns;  // the pointer moved last (the cursor shows for a while after, even full screen)
 static bool mouse_released;   // Esc / focus lost: no automatic capture (MouseCapture = Hunt) until a click or the hunt is over
 static float mouse_dx, mouse_dy;  // counts moved since the last update
@@ -142,6 +141,68 @@ static struct { int x, y; bool down, valid; } test_ptr;
 static SDL_SpinLock mods_lock;
 static struct { float x, y, dx, dy; bool inside; uint32_t held, pressed; } mods_mouse;
 static SDL_AtomicInt mods_free;
+
+// ---- the mouse as a menu cursor (runtime/cursor_nav.h): outside a hunt's camera, with the menu view ours, the pointer's
+// movement is presses of MenuUp / Down / Left / Right, a left click is MenuConfirm and a right click MenuCancel (unless
+// the click is bound to something). Queued here (window thread), pressed in turn by cursor_step (game thread).
+static CursorNav cnav;
+static int cnav_q[CNAV_DIRS];
+static int cnav_click[2];  // confirm, cancel
+static bool cursor_nav_on(void) {
+    return config_live_mouse_menu_cursor() && act_enabled() && act_menus_on() && !g_hunt_ctx && !mouse_captured && !overlay_menu_open() && !chat_active() &&
+           !host_input_mouse_free();
+}
+static bool click_bound(int btn) {
+    int code = KEY_MOUSE + btn;
+    if (act_uses_input(code)) return true;
+    for (int i = 0; i < BINDS; i++)
+        for (int k = 0; k < BIND_KEYS; k++)
+            if (config_live_bind(i, k) == code) return true;
+    return false;
+}
+static void cursor_motion(float x, float y) {
+    static float lx, ly;
+    static bool have;
+    uint64_t now = plat_now_ns();
+    int h = 720;
+    SDL_Window *w = ui_window();
+    if (w) SDL_GetWindowSize(w, NULL, &h);
+    float dx = x - lx, dy = y - ly;
+    bool jump = !have || fabsf(dx) > 0.4f * (float)h || fabsf(dy) > 0.4f * (float)h;  // (the pointer came back into the window)
+    lx = x, ly = y, have = true;
+    if (jump || !cursor_nav_on()) return;
+    int out[CNAV_DIRS] = {0};
+    cursor_nav_feed(&cnav, dx, dy, (float)h / 16.0f, now, out);
+    for (int d = 0; d < CNAV_DIRS; d++)
+        if (out[d] && __atomic_load_n(&cnav_q[d], __ATOMIC_RELAXED) < 6) __atomic_fetch_add(&cnav_q[d], out[d], __ATOMIC_RELAXED);
+}
+static void cursor_click(int btn) {
+    if (!cursor_nav_on() || click_bound(btn)) return;
+    if (btn == SDL_BUTTON_LEFT) __atomic_store_n(&cnav_click[0], 1, __ATOMIC_RELAXED);
+    else if (btn == SDL_BUTTON_RIGHT) __atomic_store_n(&cnav_click[1], 1, __ATOMIC_RELAXED);
+}
+static void cursor_step(void) {  // (game thread, once per update)
+    static const int ids[CNAV_DIRS] = {ACT_MENU_UP, ACT_MENU_DOWN, ACT_MENU_LEFT, ACT_MENU_RIGHT};
+    static uint64_t next, f_ns, f_cnt;
+    static float fps = 60.0f;
+    uint64_t now = plat_now_ns();
+    if (now - f_ns >= 300000000ull) {  // (a press lasts 70 ms of presented frames, however fast they come)
+        if (f_ns && g_present_count > f_cnt) fps = (float)(g_present_count - f_cnt) * 1e9f / (float)(now - f_ns);
+        f_ns = now, f_cnt = g_present_count;
+    }
+    unsigned frames = (unsigned)(fps * 0.07f) + 1;
+    if (frames < 3) frames = 3;
+    for (int c = 0; c < 2; c++)
+        if (__atomic_exchange_n(&cnav_click[c], 0, __ATOMIC_RELAXED)) act_inject(c ? ACT_MENU_CANCEL : ACT_MENU_CONFIRM, frames, g_present_count);
+    if (now < next) return;
+    for (int d = 0; d < CNAV_DIRS; d++)
+        if (__atomic_load_n(&cnav_q[d], __ATOMIC_RELAXED) > 0) {
+            __atomic_fetch_sub(&cnav_q[d], 1, __ATOMIC_RELAXED);
+            act_inject(ids[d], frames, g_present_count);
+            next = now + 140000000ull;  // (a gap between presses, as the wheel's)
+            break;
+        }
+}
 
 static int wheel_notches(const SDL_Event *e) {  // (> 0: up)
     return e->wheel.integer_y * (e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1);
@@ -776,7 +837,7 @@ void host_input_event(const SDL_Event *e) {
         break;
     case SDL_EVENT_MOUSE_MOTION:
         if (mouse_captured) mouse_dx += e->motion.xrel, mouse_dy += e->motion.yrel;
-        else last_motion_ns = plat_now_ns();
+        else last_motion_ns = plat_now_ns(), cursor_motion(e->motion.x, e->motion.y);
         break;
     case SDL_EVENT_MOUSE_WHEEL: {  // (what [Keybinds] says: by default the item bar)
         int n = wheel_notches(e);
@@ -788,23 +849,21 @@ void host_input_event(const SDL_Event *e) {
         if (btn < 1 || btn > SDL_BUTTON_X2) break;
         if (!e->button.down) {
             mouse_held &= ~(1u << btn);
-            if (btn == mouse_look_button()) look_down = false;
         } else if (host_input_mouse_free()) {
             break;  // (a mod's free pointer: the click is the mod's only)
-        } else if (btn == mouse_look_button() && !g_hunt_ctx) {
-            look_down = true;  // (the village look button: held to turn the camera, not a game button)
-        } else if (!mouse_captured && !mouse_no_capture && (g_hunt_ctx || config_live_mouse_village_look() == MVL_ALWAYS)) {
+        } else if (!mouse_captured && !mouse_no_capture && g_hunt_ctx) {
             // (the click that captures the mouse is not a button press; elsewhere a click is a button: free pointer)
             if (!mouse_grab) LOG("[input] capturing the mouse\n");
             mouse_grab = true, mouse_released = false;
         } else {
             mouse_held |= 1u << btn;
+            if (!g_hunt_ctx) cursor_click(btn);
         }
         break;
     }
     case SDL_EVENT_WINDOW_FOCUS_LOST:
         memset(keys, 0, sizeof keys);
-        mouse_held = 0, mouse_grab = false, mouse_released = true, look_down = false;
+        mouse_held = 0, mouse_grab = false, mouse_released = true;
         config_window_focus(false);  // ([Audio] MuteInBackground)
         if (config_editable().mute_in_background) LOG("[input] window in the background: sound muted\n");
         break;
@@ -824,34 +883,9 @@ void host_input_event(const SDL_Event *e) {
 static int32_t clamp_axis(int v) { return v < -32767 ? -32767 : v > 32767 ? 32767 : v; }
 
 // Capture or release the mouse as wanted, and give its movement to the hunt camera or the right stick.
-// The mouse button that turns the camera in a village (0: none). Auto: the first of right, middle, 5th, 4th that no
-// action or keybind uses, so that holding it never also presses a game button.
-static bool mouse_button_in_use(int b) {
-    int code = KEY_MOUSE + b;
-    if (act_uses_input(code)) return true;
-    for (int i = 0; i < BINDS; i++)
-        for (int k = 0; k < BIND_KEYS; k++)
-            if (config_live_bind(i, k) == code) return true;
-    return false;
-}
-static int mouse_look_button(void) {
-    switch (config_live_mouse_village_look()) {
-    case MVL_RIGHT: return SDL_BUTTON_RIGHT;
-    case MVL_MIDDLE: return SDL_BUTTON_MIDDLE;
-    case MVL_X1: return SDL_BUTTON_X1;
-    case MVL_X2: return SDL_BUTTON_X2;
-    case MVL_AUTO: {
-        static const int order[] = {SDL_BUTTON_RIGHT, SDL_BUTTON_MIDDLE, SDL_BUTTON_X2, SDL_BUTTON_X1};
-        for (unsigned i = 0; i < sizeof order / sizeof *order; i++)
-            if (!mouse_button_in_use(order[i])) return order[i];
-        return 0;
-    }
-    }
-    return 0;  // (Always, Off)
-}
 void host_input_mouse_status(void) {
-    LOG("[mouse] hunt camera %d, hunt menu %d, captured %d, grab %d, look button %d (%s), cursor shown %d\n", g_hunt_ctx,
-        input_view_hunt_menu_open(), mouse_captured, mouse_grab, mouse_look_button(), look_down ? "held" : "up", !mouse_captured);
+    LOG("[mouse] hunt camera %d, hunt menu %d, captured %d, grab %d, cursor shown %d\n", g_hunt_ctx,
+        input_view_hunt_menu_open(), mouse_captured, mouse_grab, !mouse_captured);
 }
 
 static void mouse_update(int *rx, int *ry) {
@@ -859,7 +893,7 @@ static void mouse_update(int *rx, int *ry) {
     // In a hunt the camera handler running means the mouse is the camera's: captured after a click (MouseCapture = Click)
     // or by itself (Hunt); a menu, a cutscene or a carve stops the handler and the mouse is free again (cursor shown, a
     // click is a button) until it runs again. Elsewhere (villages, the Hub, the title, menus) the mouse is a free pointer
-    // too, and it is captured only while the village look button is held (VillageLook; Always: a click captures it).
+    // too and is never captured.
     static uint64_t cam_seen_ns;
     uint64_t now0 = plat_now_ns();
     if (mousecam_active()) cam_seen_ns = now0;
@@ -870,8 +904,7 @@ static void mouse_update(int *rx, int *ry) {
     g_hunt_ctx = hunt && !hunt_menu;
     bool auto_cap = config_live_mouse_capture() == MOUSE_CAPTURE_HUNT && mousecam_active() && !hunt_menu && !mouse_released && !mouse_no_capture;
     if (auto_cap && !mouse_captured) LOG("[input] capturing the mouse (a hunt)\n");
-    bool look = !hunt && !mouse_no_capture && ((look_down && mouse_look_button()) || (config_live_mouse_village_look() == MVL_ALWAYS && mouse_grab));
-    bool want = ((g_hunt_ctx && (mouse_grab || auto_cap)) || look) && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
+    bool want = (g_hunt_ctx && (mouse_grab || auto_cap)) && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
     SDL_Window *w = ui_window();
     if (want != mouse_captured && w) {
         if (SDL_SetWindowRelativeMouseMode(w, want) || !want) {
@@ -1080,6 +1113,7 @@ int host_input_held(int *out, int max) {
 static void act_update(uint64_t b, uint64_t script_b, bool suppress) {
     if (!act_enabled()) return;
     act_wheel_step();
+    cursor_step();
     ActHost h = {NULL, act_phys_held, act_sw_sources, b, script_b, suppress, input_view_dash_zr(), g_present_count};
     ActSnap s;
     memset(&s, 0, sizeof s);

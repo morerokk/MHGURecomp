@@ -61,7 +61,7 @@ typedef struct {
     int mouse_invert_y;       // [Mouse] MouseInvertY: up / down turned round, on top of the game's own invert option
     float mouse_smoothing;    // [Mouse] MouseSmoothing: 0 none, towards 1 the turn trails the mouse (hunt camera only)
     int mouse_capture;        // [Mouse] MouseCapture: MOUSE_CAPTURE_*
-    int mouse_village_look;   // [Mouse] VillageLook: MVL_*: what turns the camera with the mouse where the hunt camera is not the mouse's
+    int mouse_menu_cursor;    // [Mouse] MenuCursor: moving the pointer moves the menus' selection (runtime/cursor_nav.h)
     float aspect_ratio;       // the picture's shape (width / height), 0: the window's; never below 16:10 (config.c)
     float fov;                // 3D camera field of view factor (1: the game's)
     int ui_anchor;            // where the HUD goes on a picture wider than 16:9: UI_*
@@ -215,12 +215,7 @@ float config_live_mouse_sensitivity_y(void);
 int config_live_mouse_invert_y(void);
 float config_live_mouse_smoothing(void);
 int config_live_mouse_capture(void);
-int config_live_mouse_village_look(void);
-// VillageLook: in a village, the Hub and the menus the mouse is a free pointer (cursor shown, clicks and the wheel are the
-// game's buttons). Holding the look button turns the camera (through the right stick: those cameras have no direct angle
-// path). Auto: the first of the right, middle, 5th, 4th mouse button no action or keybind uses. Always: as before, a click
-// captures the mouse (and hides the cursor) everywhere. Off: the mouse never turns a village camera.
-enum { MVL_AUTO, MVL_RIGHT, MVL_MIDDLE, MVL_X1, MVL_X2, MVL_ALWAYS, MVL_OFF };
+int config_live_mouse_menu_cursor(void);
 enum { MOUSE_CAPTURE_CLICK, MOUSE_CAPTURE_HUNT };  // a click in the window captures the mouse; or a hunt does as well
 float config_live_draw_distance(void);
 int config_live_fxaa(void);

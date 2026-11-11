@@ -7,6 +7,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "../runtime/cursor_nav.h"
 #include "../runtime/actions.h"
 #include "../runtime/config.h"
 
@@ -872,6 +873,51 @@ static void test_crouch_not_moving(void) {
     CHECK(act_view(ACT_VIEW_MB1, stick, crouch, false) & 0x4000, "auto split, weapon out: Crouch following Dodge is not stopped while moving");
 }
 
+// The mouse as a menu cursor: pointer movement becomes Up / Down / Left / Right presses (runtime/cursor_nav.h)
+static void test_cursor_nav(void) {
+    CursorNav n = {0};
+    int out[CNAV_DIRS] = {0};
+    uint64_t t = 1000000000ull;
+    // a row is 45 px: 20 px gives nothing, 50 px one Down, 100 px more two
+    cursor_nav_feed(&n, 0, 20, 45, t, out);
+    CHECK(!out[0] && !out[1] && !out[2] && !out[3], "20 px: no press");
+    cursor_nav_feed(&n, 0, 30, 45, t += 10000000, out);
+    CHECK(out[CNAV_DOWN] == 1 && !out[CNAV_UP], "50 px down: one Down (%d)", out[CNAV_DOWN]);
+    cursor_nav_feed(&n, 0, 95, 45, t += 10000000, out);
+    CHECK(out[CNAV_DOWN] == 3, "5 + 95 px more: two more Down (%d)", out[CNAV_DOWN]);
+    // up, with the remainder of a turn back dropped
+    memset(out, 0, sizeof out);
+    cursor_nav_feed(&n, 0, -10, 45, t += 10000000, out);
+    CHECK(!out[CNAV_UP], "a turn back starts again");
+    cursor_nav_feed(&n, 0, -40, 45, t += 10000000, out);
+    CHECK(out[CNAV_UP] == 1 && !out[CNAV_DOWN], "50 px up: one Up");
+    // a pause forgets what was not pressed
+    memset(out, 0, sizeof out);
+    cursor_nav_feed(&n, 0, 40, 45, t += 10000000, out);
+    cursor_nav_feed(&n, 0, 40, 45, t += 400000000, out);
+    CHECK(!out[CNAV_DOWN], "40 px, a pause, 40 px: nothing");
+    // horizontal needs two rows' distance
+    memset(out, 0, sizeof out);
+    n = (CursorNav){0};
+    cursor_nav_feed(&n, 60, 0, 45, t += 10000000, out);
+    CHECK(!out[CNAV_RIGHT], "60 px right: not yet");
+    cursor_nav_feed(&n, 40, 0, 45, t += 10000000, out);
+    CHECK(out[CNAV_RIGHT] == 1, "100 px right: one Right");
+    cursor_nav_feed(&n, -95, 0, 45, t += 10000000, out);
+    CHECK(out[CNAV_LEFT] == 1 && out[CNAV_RIGHT] == 1, "95 px left: one Left");
+    // the axis moved more wins
+    memset(out, 0, sizeof out);
+    n = (CursorNav){0};
+    cursor_nav_feed(&n, 70, 40, 45, t += 10000000, out);
+    CHECK(!out[CNAV_DOWN] && !out[CNAV_RIGHT], "diagonal, short of a row and of two: wait");
+    cursor_nav_feed(&n, 0, 50, 45, t += 10000000, out);
+    CHECK(out[CNAV_DOWN] == 2 && !out[CNAV_RIGHT], "then down: Down only (%d)", out[CNAV_DOWN]);
+    // a fast flick is capped
+    memset(out, 0, sizeof out);
+    cursor_nav_feed(&n, 0, 2000, 45, t += 10000000, out);
+    CHECK(out[CNAV_DOWN] == CNAV_MAX_PRESSES, "a long flick: capped (%d)", out[CNAV_DOWN]);
+}
+
 int main(void) {
     act_set_log(quiet);
     test_registry();
@@ -890,6 +936,7 @@ int main(void) {
     test_save();
     test_menu_confirm_policy();
     test_crouch_not_moving();
+    test_cursor_nav();
     test_rows();
     test_claim();
     test_scheme_layout();

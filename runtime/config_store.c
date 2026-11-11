@@ -53,7 +53,7 @@ static SDL_AtomicInt live_combo;
 static SDL_AtomicInt live_chat_key;
 static SDL_AtomicInt menu_chord = {1};
 // [Mouse]
-static SDL_AtomicInt live_mouse, live_mouse_y, live_mouse_invert, live_mouse_smooth, live_mouse_capture, live_mouse_look;
+static SDL_AtomicInt live_mouse, live_mouse_y, live_mouse_invert, live_mouse_smooth, live_mouse_capture, live_mouse_menu;
 // [Keybinds]
 static SDL_AtomicInt live_binds[BINDS][BIND_KEYS];
 // [Multiplayer]
@@ -95,7 +95,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->mouse_invert_y != saved.mouse_invert_y) SDL_SetAtomicInt(&live_mouse_invert, c->mouse_invert_y);
     if (all || c->mouse_smoothing != saved.mouse_smoothing) set_float(&live_mouse_smooth, c->mouse_smoothing);
     if (all || c->mouse_capture != saved.mouse_capture) SDL_SetAtomicInt(&live_mouse_capture, c->mouse_capture);
-    if (all || c->mouse_village_look != saved.mouse_village_look) SDL_SetAtomicInt(&live_mouse_look, c->mouse_village_look);
+    if (all || c->mouse_menu_cursor != saved.mouse_menu_cursor) SDL_SetAtomicInt(&live_mouse_menu, c->mouse_menu_cursor);
     if (all || c->draw_distance != saved.draw_distance) set_float(&live_draw, c->draw_distance);
     if (all || c->fxaa != saved.fxaa) SDL_SetAtomicInt(&live_fxaa, c->fxaa);
     if (all || c->msaa != saved.msaa) SDL_SetAtomicInt(&live_msaa, c->msaa);
@@ -181,10 +181,10 @@ void config_set_live_fps(float f) { set_float(&live_fps, f < 30 ? 30 : f > 240 ?
 float config_live_fov(void) { return get_float(&live_fov); }
 float config_live_mouse_sensitivity(void) { return get_float(&live_mouse); }
 float config_live_mouse_sensitivity_y(void) { return get_float(&live_mouse_y); }
+int config_live_mouse_menu_cursor(void) { return SDL_GetAtomicInt(&live_mouse_menu); }
 int config_live_mouse_invert_y(void) { return SDL_GetAtomicInt(&live_mouse_invert); }
 float config_live_mouse_smoothing(void) { return get_float(&live_mouse_smooth); }
 int config_live_mouse_capture(void) { return SDL_GetAtomicInt(&live_mouse_capture); }
-int config_live_mouse_village_look(void) { return SDL_GetAtomicInt(&live_mouse_look); }
 float config_live_draw_distance(void) { return get_float(&live_draw); }
 int config_live_fxaa(void) { return runtime_fsr ? 0 : SDL_GetAtomicInt(&live_fxaa); }
 int config_live_msaa(void) { return runtime_fsr ? 1 : SDL_GetAtomicInt(&live_msaa); }

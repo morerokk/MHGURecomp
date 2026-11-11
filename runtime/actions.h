@@ -68,6 +68,7 @@ bool act_split(void);                     // Dash and the weapon R-action are tw
 // The settings menu's confirm position (config.h MENU_CONFIRM_SOUTH / EAST) that follows the controller's MenuConfirm
 // binding while the layer is on; -1: not bound to the bottom or right button, use the menu's own setting
 int act_menu_confirm_policy(void);
+bool act_menus_on(void);   // the layer and ManageMenus are on: the menu view takes the actions (MenuUp ...)
 bool act_split_in(const struct ActProfile *p);
 // The hunter's B button is the roll while the left stick is pushed and the crouch while it is not. With Crouch bound
 // to an input of its own (any device or weapon class), or with Dodge and Interact on one input, the two are told apart: with the weapon away Crouch delivers B
