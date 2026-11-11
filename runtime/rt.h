@@ -33,6 +33,8 @@
 #define ALIAS_SIZE    0x28000000u
 #define STACK_BASE    0xD0000000u   // stack region (main thread stack, mapped thread stacks)
 #define STACK_SIZE    0x20000000u
+#define PLUGIN2_BASE  0xF0100000u   // Forge plugins that do not fit in PLUGIN_BASE..PLUGIN_END (unassigned above the stacks)
+#define PLUGIN2_END   0xF8100000u
 #define GUEST_SPACE   0x100000000ull
 
 // ---- loader.c
