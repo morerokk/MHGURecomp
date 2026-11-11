@@ -1265,6 +1265,13 @@ static void app_run(Cpu *c) {
             continue;
         }
         (void)patch;
+        // The emulators' Lag Compensation plugin (the port's net/hitsync.c as a Forge plugin): the port has it built in
+        // and speaks its messages in crossplay, and with both on every hit would be reported twice.
+        if (!strcmp(gstr(p->param + 6), "Lag Compensation")) {
+            LOG("[forge] plugin %s (Lag Compensation) not started: built into the port ([Multiplayer] LagCompensation)\n", p->name);
+            p->active = false;
+            continue;
+        }
         if (p->on_init) {
             flog(0, "Initializing plugin app:/nativeNX/plugins/%s", p->name);
             gcall(c, p->on_init, 0, 0, 0, 0);
