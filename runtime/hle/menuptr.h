@@ -12,6 +12,8 @@ enum { MENUPTR_NONE = -1, MENUPTR_PAGE_LEFT = -2, MENUPTR_PAGE_RIGHT = -3 };
 // Rows not one step apart (headers between groups: the Multiplayer menu): offmask's rows (of the first MENUPTR_ROWS) are
 // at offx / offy from the first row's bar instead; the others are a whole number of steps from the nearest such row.
 // cols: its cursor's columns (0: not known; kept for a frame of a small scale, whose menu the renderer finds by it).
+// count: the cells it was learned with, kept only for a menu that spaces its rows by their number (the World Map's
+// destinations: 76 apart for four, 94 for three): a geometry for each count, used while the menu has that many (0: any).
 #define MENUPTR_ROWS 16
 typedef struct {
     uint32_t lr;
@@ -22,6 +24,7 @@ typedef struct {
     float offx[MENUPTR_ROWS], offy[MENUPTR_ROWS];
     float cdx, cdy;
     int cols;
+    int count;
 } MenuGeom;
 void menuptr_row_offset(const MenuGeom *g, int row, float *x, float *y);  // a row's bar from the first row's
 

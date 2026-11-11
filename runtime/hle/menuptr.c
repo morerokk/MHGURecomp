@@ -70,7 +70,24 @@ static char g_learned_path[1200];
 #define CALL_CHAR_SELECT   0x5e29a0u  // Character Select: the three save cards
 #define CALL_NEW_CHAR      0x87f8a0u  // New Game: Create New Character, Reuse Data (bars as the Main Menu's)
 #define CALL_GENDER        0x8874ccu  // character creation's Gender: two cards side by side (the chosen one grows)
+// Banner lists whose chosen row is drawn 32 further left (no highlight of its own moves: nothing to learn), measured
+// from the HUD pieces and screenshots (2026-11-11, the Soaratorium)
+#define CALL_BISTRO        0x931d1cu  // the Bistro: Order a Meal, Use Voucher, Use Gourmet Voucher, Request Rife Roast
+#define CALL_QUEST_RANK    0x9839b8u  // the Quest Counter: Training, Low, High, Hunt of the Day
+#define CALL_QUEST_STARS   0x984314u  // ... a rank's star levels
+#define CALL_QUEST_LIST    0x981f1cu  // ... a level's quests (the list widget's caller: list_widget)
 static const MenuGeom builtin[] = {
+    {CALL_BISTRO, 868, 51, 364, 45, 0, 48, 0, 0, 0, 0, 0, true},
+    {CALL_QUEST_RANK, 740, 142, 540, 40, 0, 50, 0, 0, 0, 0, 0, true},
+    {CALL_QUEST_STARS, 740, 142, 540, 40, 0, 50, 0, 0, 0, 0, 0, true},
+    {CALL_QUEST_LIST, 740, 202, 540, 37, 0, 42, 0, 0, 0, 0, 0, true},
+    // the Palico Intense Training setup: # of times and Items (the learned bar, 36 apart), then Begin Training, a button
+    // well below whose highlight is recoloured in place - nothing moves onto it, so its row's place is measured (the
+    // button's piece 590,315 210 x 34)
+    {.lr = 0x967514u, .x = 428, .y = 170, .w = 372, .h = 36, .dy = 36, .z = 97, .kw = 186, .kh = 18, .builtin = true,
+     .offmask = 0x7, .offy = {0, 36, 145}, .cols = 1},
+    // the World Map: 2 rows of 4 destinations, picture and name (a linked pair of cursors: cursor_update_as, linked[])
+    {.lr = 0x993d04u, .x = 322, .y = 213, .w = 159, .h = 148, .dy = 148, .builtin = true, .cdx = 159, .cols = 4},
     {CALL_PAUSE_MENU, 970, 101, 282, 34, 0, 36, 97, 141, 17, 0, 0, true},
     {CALL_TITLE_MENU, 170, 153, 940, 64, 0, 84, 0, 0, 0, 0, 0, true},
     {CALL_TITLE_OPTIONS, 170, 195, 940, 64, 0, 84, 0, 0, 0, 0, 0, true},
@@ -114,8 +131,17 @@ static MenuGeom *geom_kind_sig(const MenuGeom *g) {
 // (the lock held) keep g: a known bar seen again gets only its new place and the steps it didn't have yet (its own
 // steps and rows' places stay); else added (a call's oldest goes when it has too many). Returns the geometry kept when
 // it is new or got a step, else NULL.
+static bool steps_differ(const MenuGeom *a, const MenuGeom *b) {
+    return (a->dx || a->dy) && (b->dx || b->dy) && (!nearf(a->dx, b->dx) || !nearf(a->dy, b->dy));
+}
 static MenuGeom *geom_put(const MenuGeom *g) {
-    MenuGeom *o = geom_kind(g);
+    MenuGeom *o = NULL;
+    for (int i = 0; i < g_ngeoms && !o; i++)  // (one learned with as many cells first: a menu spaced by its count)
+        if (g_geoms[i].lr == g->lr && g_geoms[i].count && g_geoms[i].count == g->count && same_kind(&g_geoms[i], g)) o = &g_geoms[i];
+    if (!o) o = geom_kind(g);
+    // (the same bar with another row step and another number of cells: a geometry of its own for that count, not a
+    // merge - a list with rows not one step apart shows other steps with the same count, and stays one)
+    if (o && o->kw && g->count && o->count != g->count && steps_differ(o, g)) o = NULL;
     if (o) {
         if (!o->kw) { *o = *g; return NULL; }
         bool more = false;
@@ -125,12 +151,14 @@ static MenuGeom *geom_put(const MenuGeom *g) {
         o->x = g->x, o->y = g->y;
         return more ? o : NULL;
     }
+    MenuGeom n_g = *g;
+    if (!geom_kind(g)) n_g.count = 0;  // (the count is kept only where it splits a menu)
     int n = 0, first = -1;
     for (int i = 0; i < g_ngeoms; i++)
         if (g_geoms[i].lr == g->lr) n++, first = first < 0 ? i : first;
-    if (n >= MAX_VARIANTS) { g_geoms[first] = *g; return &g_geoms[first]; }
+    if (n >= MAX_VARIANTS) { g_geoms[first] = n_g; return &g_geoms[first]; }
     if (g_ngeoms >= MAX_GEOMS) return NULL;
-    g_geoms[g_ngeoms] = *g;
+    g_geoms[g_ngeoms] = n_g;
     return &g_geoms[g_ngeoms++];
 }
 
@@ -148,9 +176,11 @@ static bool known(uint32_t lr) {
 }
 
 // (render thread, runtime/menulearn.c) a step seen twice: kept, and written to menus_learned.txt when it is new
-void menuptr_learned(const MenuGeom *g) {
-    if (is_builtin(g->lr)) return;
-    MenuGeom kept;
+static int cursor_cells(uint32_t lr);
+void menuptr_learned(const MenuGeom *g0) {
+    if (is_builtin(g0->lr)) return;
+    MenuGeom kept, gc = *g0, *g = &gc;
+    gc.count = cursor_cells(g0->lr);  // (geom_put keeps it only for a menu spaced by its count)
     pthread_mutex_lock(&g_geom_lock);
     MenuGeom *o = geom_put(g);
     if (o) kept = *o;
@@ -161,8 +191,9 @@ void menuptr_learned(const MenuGeom *g) {
         kept.kh);
     FILE *f = g_learned_path[0] ? fopen(g_learned_path, "a") : NULL;
     if (f) {
-        fprintf(f, "%08x %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.2f %.2f %.1f %.1f %.1f %.1f %d\n", kept.lr, kept.x, kept.y, kept.w,
-                kept.h, kept.dx, kept.dy, kept.z, kept.kw, kept.kh, kept.ox, kept.oy, kept.cdx, kept.cdy, kept.cols);
+        fprintf(f, "%08x %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.2f %.2f %.1f %.1f %.1f %.1f %d %d\n", kept.lr, kept.x, kept.y,
+                kept.w, kept.h, kept.dx, kept.dy, kept.z, kept.kw, kept.kh, kept.ox, kept.oy, kept.cdx, kept.cdy, kept.cols,
+                kept.count);
         fclose(f);
     }
 }
@@ -179,11 +210,12 @@ static bool geoms_line(const char *line) {
         }
         return o != NULL;
     }
-    // lr x y w h dx dy [z kw kh ox oy [cdx cdy [cols]]]: older lines have no bar signature (a fixed place), no column step
-    // or no column count
-    int k = sscanf(line, "%x %f %f %f %f %f %f %f %f %f %f %f %f %f %d", &g.lr, &g.x, &g.y, &g.w, &g.h, &g.dx, &g.dy, &g.z,
-                   &g.kw, &g.kh, &g.ox, &g.oy, &g.cdx, &g.cdy, &g.cols);
-    if (k != 7 && k != 12 && k != 14 && k != 15) return false;
+    // lr x y w h dx dy [z kw kh ox oy [cdx cdy [cols [count]]]]: older lines have no bar signature (a fixed place), no
+    // column step, no column count or no cell count
+    int k = sscanf(line, "%x %f %f %f %f %f %f %f %f %f %f %f %f %f %d %d", &g.lr, &g.x, &g.y, &g.w, &g.h, &g.dx, &g.dy, &g.z,
+                   &g.kw, &g.kh, &g.ox, &g.oy, &g.cdx, &g.cdy, &g.cols, &g.count);
+    if (k != 7 && k != 12 && k != 14 && k != 15 && k != 16) return false;
+    if (k < 16) g.count = 0;
     if (k < 15) g.cols = 0;
     if (k == 7) g.z = g.kw = g.kh = g.ox = g.oy = 0;
     if (k < 14) g.cdx = g.cdy = 0;
@@ -316,6 +348,14 @@ typedef struct {
 } Cursor;
 static Cursor g_cursors[MAX_CURSORS];
 static pthread_mutex_t g_cur_lock = PTHREAD_MUTEX_INITIALIZER;
+static int cursor_cells(uint32_t lr) {  // (its cells now; 0: not seen)
+    int n = 0;
+    pthread_mutex_lock(&g_cur_lock);
+    for (int i = 0; i < MAX_CURSORS; i++)
+        if (g_cursors[i].lr == lr && g_cursors[i].seen_ns) n = g_cursors[i].cells;
+    pthread_mutex_unlock(&g_cur_lock);
+    return n;
+}
 static atomic_uint g_target_lr;    // the menu a target is for
 static atomic_int g_target = -1;   // the cell asked for (-1 none)
 static atomic_bool g_click;        // ... and picked: Confirm once it is selected
@@ -523,12 +563,65 @@ static void probe(Cpu *c, uint32_t cur, uint32_t bits, uint32_t lr, int row0, in
     last[k].cur = cur, last[k].row = row, last[k].col = col, last[k].cnt = cnt, last[k].page = page;
 }
 
+// A list widget that runs the list cursor itself: the menus built on it - the Quest Counter's quest list, and 0x8e54b4's -
+// are told apart by the widget's caller, which stands for the call. It has two cursors: its list (widget+4, from
+// 0x74c4ec: the caller's address) and a second one (widget+0x28, from 0x74c514: the quest's details pages, L / R), which
+// gets the caller's address with the top bit set - one id for both made the pointer flip between them every frame
+#define FN_LIST_WIDGET 0x74c130u
+#define CALL_WIDGET_A  0x74c4ecu
+#define CALL_WIDGET_B  0x74c514u
+#define WIDGET_SECOND  0x80000000u
+static uint32_t g_widget_lr;  // (game thread: the caller of the widget running now)
+static void list_widget(Cpu *c) {
+    uint32_t saved = g_widget_lr;
+    g_widget_lr = c->r[14] & ~1u;
+    fnhook_call_original(c, FN_LIST_WIDGET);
+    g_widget_lr = saved;
+}
+
+// Two list cursors that make one grid: one picks the row (Up / Down), the other the column (Left / Right) - the World Map's
+// 2 x 4 destinations. The row cursor's call is the menu (its cells are rows x columns, its column the other cursor's);
+// the column cursor only reports its column and takes the column of a jump, and is never a menu of its own.
+#define CALL_WORLD_ROWS 0x993d04u
+#define CALL_WORLD_COLS 0x993d2cu
+typedef struct { uint32_t row_lr, col_lr; int cols; } Linked;
+static const Linked linked[] = {{CALL_WORLD_ROWS, CALL_WORLD_COLS, 4}};
+#define NLINKED (sizeof linked / sizeof *linked)
+static _Atomic int g_link_col[NLINKED];
+static int linked_by(uint32_t lr, bool col) {
+    for (unsigned i = 0; i < NLINKED; i++)
+        if ((col ? linked[i].col_lr : linked[i].row_lr) == lr) return (int)i;
+    return -1;
+}
+
 static void cursor_update_as(Cpu *c, const Layout *L) {
     uint32_t cur = c->r[0], lr = c->r[14] & ~1u;
+    if ((lr == CALL_WIDGET_A || lr == CALL_WIDGET_B) && g_widget_lr) lr = g_widget_lr | (lr == CALL_WIDGET_B ? WIDGET_SECOND : 0);
     // (the host's nudge - a short Down that makes a quiet cursor run - never moves anything itself: a jump puts its own
     // step in, and with none, or for another menu than the one that runs, it would walk the selection down)
     if (plat_now_ns() - atomic_load(&g_nudge_ns) < 150000000ull) c->r[1] &= ~BIT_DOWN;
+    int lc = L->col ? -1 : linked_by(lr, true);
+    if (lc >= 0) {  // (a linked pair's column cursor: the column of a jump for its row cursor's menu, as one step)
+        const Linked *k = &linked[lc];
+        int col0 = LD8(cur + L->row), target = atomic_load(&g_target);
+        if (atomic_load(&g_target_lr) == k->row_lr && target >= 0) {
+            int tc = target % k->cols;
+            c->r[1] &= ~(BIT_UP | BIT_DOWN | BIT_LEFT | BIT_RIGHT);
+            if (tc != col0) {
+                int from = tc > 0 ? tc - 1 : 1;
+                ST8(cur + L->row, (uint8_t)from);
+                c->r[1] |= tc > from ? BIT_RIGHT : BIT_LEFT;
+            }
+        }
+        uint32_t bits = c->r[1];
+        fnhook_call_original(c, L->fn);
+        if (g_probe > 0) probe(c, cur, bits, lr, col0, 0, L);
+        atomic_store(&g_link_col[lc], LD8(cur + L->row));
+        return;
+    }
+    int lk = L->col ? -1 : linked_by(lr, false);
     int row0 = LD8(cur + L->row), col0 = L->col ? LD8(cur + L->col) : 0, cols = cols_of(cur, L), cells = cells_now(cur, L);
+    if (lk >= 0) col0 = atomic_load(&g_link_col[lk]), cols = linked[lk].cols, cells *= cols;
     if (atomic_load(&g_page_lr) == lr && atomic_load(&g_page_dir)) {  // (the wheel: a page)
         int dir = atomic_exchange(&g_page_dir, 0);
         atomic_store(&g_target, -1), atomic_store(&g_click, false);
@@ -561,7 +654,7 @@ static void cursor_update_as(Cpu *c, const Layout *L) {
             int from = tr > 0 ? tr - 1 : 1;
             ST8(cur + L->row, (uint8_t)from);
             c->r[1] |= tr > from ? (across ? BIT_RIGHT : on) : (across ? BIT_LEFT : back);
-        } else if (target >= 0 && tc != col0 && cols > 1) {
+        } else if (target >= 0 && tc != col0 && cols > 1 && lk < 0) {  // (a linked pair: the column cursor's, above)
             int from = tc > 0 ? tc - 1 : 1;
             ST8(cur + L->col, (uint8_t)from);
             c->r[1] |= tc > from ? BIT_RIGHT : BIT_LEFT;
@@ -572,6 +665,7 @@ static void cursor_update_as(Cpu *c, const Layout *L) {
     if (g_probe > 0) probe(c, cur, bits, lr, row0, col0, L);
     uint64_t now = plat_now_ns();
     int row = LD8(cur + L->row), col = L->col ? LD8(cur + L->col) : 0, page = page_of(cur, L);
+    if (lk >= 0) col = atomic_load(&g_link_col[lk]);
     bool is_known = known(lr);
     pthread_mutex_lock(&g_cur_lock);
     Cursor *e = NULL, *oldest = &g_cursors[0];
@@ -585,6 +679,7 @@ static void cursor_update_as(Cpu *c, const Layout *L) {
     else if (e->row != row || e->col != col || e->page != page) e->moved_ns = now, e->since = g_present_count;
     e->seen_ns = now, e->row = row, e->col = col, e->page = page, e->pages = pages_of(cur, L), e->known = is_known;
     e->cols = cols_of(cur, L), e->cells = cells_now(cur, L);
+    if (lk >= 0) e->cols = linked[lk].cols, e->cells *= linked[lk].cols;
     pthread_mutex_unlock(&g_cur_lock);
     if (atomic_load(&g_target_lr) == lr && atomic_load(&g_target) == row * e->cols + col) {
         atomic_store(&g_target, -1);
@@ -659,13 +754,19 @@ bool menuptr_geometry(MenuGeom *out) {
     Cursor c;
     if (!pointer_menu(&c)) return false;
     pthread_mutex_lock(&g_live_lock);
-    bool live = g_live_ns && g_live.lr == c.lr && plat_now_ns() - g_live_ns < LIVE_NS;
+    bool live = g_live_ns && g_live.lr == c.lr && plat_now_ns() - g_live_ns < LIVE_NS && (!g_live.count || g_live.count == c.cells);
     if (live) *out = g_live;
     pthread_mutex_unlock(&g_live_lock);
     if (live) return true;
     MenuGeom v[MAX_VARIANTS];
-    int n = menuptr_variants(c.lr, v, MAX_VARIANTS);
-    if (n) *out = v[n - 1];  // (the last learned)
+    int n = menuptr_variants(c.lr, v, MAX_VARIANTS), pick = -1;
+    // (one learned with as many cells as it has now - a menu spaced by its count -, else the last learned for any count,
+    // else the last learned)
+    for (int i = 0; i < n; i++)
+        if (v[i].count && v[i].count == c.cells) pick = i;
+    for (int i = n - 1; i >= 0 && pick < 0; i--)
+        if (!v[i].count) pick = i;
+    if (n) *out = v[pick >= 0 ? pick : n - 1];
     return n > 0;
 }
 
@@ -691,9 +792,11 @@ void menuptr_row_rect(const MenuGeom *g, int cell, int cols, float *x0, float *y
         return;
     }
     if (w <= 0 && h <= 0) {  // (a frame of no known size, its corner: the cell is one step each way from it; a list's row
-                             // runs on to the middle of the screen, or to its edge when it starts right of the middle)
+                             // runs on to the middle of the screen from near the left edge, as far past the middle as it
+                             // starts before it from further in - a list in the middle: the World Map's destinations,
+                             // 384 to 896 -, or to the edge when it starts right of the middle)
         *x0 = x, *y0 = y, *y1 = y + (sh > 0 ? sh : sw);
-        *x1 = sw > 0 ? x + sw : sh > 0 ? (x < 640.0f ? 640.0f : 1280.0f) : x + sh;
+        *x1 = sw > 0 ? x + sw : sh > 0 ? (x >= 640.0f ? 1280.0f : x >= 200.0f ? 1280.0f - x : 640.0f) : x + sh;
         return;
     }
     if (sh > h) y -= (sh - h) / 2, h = sh;
@@ -705,10 +808,15 @@ int menuptr_hit(float x, float y) {
     Cursor c;
     MenuGeom g;
     if (!pointer_menu(&c) || !menuptr_geometry(&g)) return MENUPTR_NONE;
-    if (c.lr == CALL_PAUSE_MENU && y >= 64.0f && y < 97.0f && c.pages > 1) {  // (its page arrows)
-        if (x >= 1108.0f && x < 1146.0f) return MENUPTR_PAGE_LEFT;
-        if (x >= 1214.0f && x < 1252.0f) return MENUPTR_PAGE_RIGHT;
-    }
+    static const struct { uint32_t lr; float y0, y1, lx0, lx1, rx0, rx1; } arrows[] = {  // (page arrows, 1280x720)
+        {CALL_PAUSE_MENU, 64, 97, 1108, 1146, 1214, 1252},
+        {CALL_QUEST_LIST, 146, 184, 1144, 1182, 1236, 1274},
+    };
+    for (unsigned i = 0; i < sizeof arrows / sizeof *arrows; i++)
+        if (c.lr == arrows[i].lr && y >= arrows[i].y0 && y < arrows[i].y1 && c.pages > 1) {
+            if (x >= arrows[i].lx0 && x < arrows[i].lx1) return MENUPTR_PAGE_LEFT;
+            if (x >= arrows[i].rx0 && x < arrows[i].rx1) return MENUPTR_PAGE_RIGHT;
+        }
     int cols = c.cols > 1 && !g.cdx && !g.cdy ? 1 : c.cols;  // (columns whose step isn't known yet: only the first)
     for (int i = 0; i < c.cells; i++) {
         if (cols != c.cols && i % c.cols) continue;
@@ -850,4 +958,5 @@ void menuptr_init(void) {
     fnhook_set(FN_GRID_UPDATE2, hle_register("menuptr:grid_update2", grid_update2));
     fnhook_set(FN_SLIDER_UPDATE, hle_register("menuptr:slider_update", slider_update));
     fnhook_set(FN_CHOICE_UPDATE, hle_register("menuptr:choice_update", choice_update));
+    fnhook_set(FN_LIST_WIDGET, hle_register("menuptr:list_widget", list_widget));
 }

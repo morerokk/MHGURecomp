@@ -147,6 +147,39 @@ static bool find_bar(int dr, float *sx, float *sy, float box[4], Piece *key) {
     return box[2] > box[0] && box[3] > box[1];
 }
 
+// A banner list (the Smithy's and the Bistro's menus, the Quest Counter's lists) has no highlight that moves: the chosen
+// row's own pieces are drawn further left. A change of row then shows every piece that moved sliding sideways in its own
+// row by one distance, the new row's one way and the old row's back. Rows run down the screen, so the new row is the one
+// a step of dr further down; the step is their distance. Its box is the new row's top left corner (a frame of no known
+// size: the cell runs on to the screen's edge or middle), its key the piece there. False: not that.
+static bool find_slide(int dr, float *sx, float *sy, float box[4], Piece *key) {
+    float s = 0, ymin[2] = {1e9f, 1e9f}, xmin[2] = {1e9f, 1e9f};
+    Piece first[2];
+    int n[2] = {0, 0};
+    for (int i = 0; i < g_ncur; i++) {
+        const Piece *b = &g_cur[i];
+        if (in(g_prev, g_nprev, b)) continue;
+        float d = 0;
+        for (int j = 0; j < g_nprev && !d; j++) {
+            const Piece *a = &g_prev[j];
+            if (!near(a->z, b->z) || !near(a->w, b->w) || !near(a->h, b->h) || fabsf(a->y - b->y) > 0.5f || in(g_cur, g_ncur, a)) continue;
+            if (fabsf(b->x - a->x) >= 4.0f) d = b->x - a->x;
+        }
+        if (!d || (s && fabsf(fabsf(d) - s) > 0.5f)) return false;  // (it did not slide, or by another distance)
+        s = fabsf(d);
+        int g = d < 0;
+        if (b->y < ymin[g] - 0.5f || (fabsf(b->y - ymin[g]) <= 0.5f && b->x < xmin[g])) ymin[g] = b->y, xmin[g] = b->x, first[g] = *b;
+        n[g]++;
+    }
+    if (!n[0] || !n[1]) return false;
+    int nw = (ymin[1] - ymin[0]) * (float)dr > 0 ? 1 : 0;  // (the group a step of dr further down)
+    float step = (ymin[nw] - ymin[!nw]) / (float)dr;
+    if (step < 4.0f) return false;
+    *sx = 0, *sy = step, *key = first[nw];
+    box[0] = box[2] = xmin[nw], box[1] = box[3] = ymin[nw];
+    return true;
+}
+
 // Two changes of a menu that agree (the same bar and step: the place may differ, a popup) make a step of its geometry: a
 // row's (Up / Down) or a column's (Left / Right), each kept apart until it is seen twice
 static bool same_bar(const MenuGeom *a, const MenuGeom *b) {
@@ -207,6 +240,22 @@ static void follow(void) {
     }
     menuptr_live(best_d < 1e18f ? &best : NULL);
     if (best_d < 1e18f) menuptr_row_seen(&best, row, bx, by);  // (rows not one step apart: their own places)
+    // A list whose last row is a button below it (the Palico training setups' Begin Training / Select details): the
+    // list's bar is gone while the button is chosen, which is recoloured in place (nothing moves onto it). Settled on
+    // the last row with no bar of the menu's on screen, the one button there (layer 97, 210 x 34) is that row's place.
+    if (best_d < 1e18f || g_present_count - since < STABLE_FRAMES || col || row != menuptr_rows() - 1 || row <= 0) return;
+    const MenuGeom *list = NULL;
+    for (int k = 0; k < n && !list; k++)
+        if (v[k].kw && fabsf(4.0f * v[k].kw * v[k].kh) >= 100.0f) list = &v[k];
+    if (!list) return;
+    const Piece *button = NULL;
+    for (int i = 0; i < g_ncur; i++) {
+        const Piece *p = &g_cur[i];
+        if (!near(p->z, 97.0f) || fabsf(p->w - 105.0f) > 0.2f || fabsf(p->h - 17.0f) > 0.2f) continue;
+        if (button) return;  // (two: which is it isn't known)
+        button = p;
+    }
+    if (button) menuptr_row_seen(list, row, list->x, button->y);  // (the row keeps the list's left: the button within it)
 }
 
 // The menus of a small-scale frame: a piece of the frame's signature exactly on one of a menu's cells (its key piece's
@@ -272,6 +321,7 @@ void menulearn_frame(void) {
             float sx, sy, box[4];
             Piece key;
             bool found = find_bar(by_row ? row - g_prev_row : col - g_prev_col, &sx, &sy, box, &key);
+            if (!found && by_row) found = find_slide(row - g_prev_row, &sx, &sy, box, &key);  // (a banner list)
             if (dbg) LOG("[menulearn]   %s step: %s %+.1f,%+.1f at %.0f,%.0f\n", by_row ? "row" : "column", found ? "found" : "none", sx, sy,
                          box[0], box[1]);
             if (found) {

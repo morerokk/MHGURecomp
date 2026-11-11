@@ -23,7 +23,9 @@ volatile uint64_t g_a_pressed_ns;
 void input_act_stage(const ActSnap *s) { act_staged = *s; }
 
 void input_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
-    if ((buttons & ~g_buttons) & (1ull << BTN_A)) g_a_pressed_ns = plat_now_ns();
+    // (a cutscene's skip, hle/evskip.c: the Switch's A; while the menus are the game actions', Confirm's press instead,
+    // host_input.c act_update, so it is the same input that confirms in the menus: left click on keyboard and mouse)
+    if (!(act_enabled() && act_profile()->menus) && ((buttons & ~g_buttons) & (1ull << BTN_A))) g_a_pressed_ns = plat_now_ns();
     pthread_mutex_lock(&act_lock);
     for (int v = 0; v < ACT_VARS; v++) act_pub.hold[v] = act_staged.hold[v], act_pub.pulse[v] |= act_staged.pulse[v];
     act_pub.ptr_x = act_staged.ptr_x, act_pub.ptr_y = act_staged.ptr_y;

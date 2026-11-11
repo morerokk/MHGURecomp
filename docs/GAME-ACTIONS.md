@@ -184,7 +184,7 @@ low; (6) mash / struggle and the raw-word readers, not worth it.
 
 ```ini
 [Actions]
-Enable=1                  ; 0 (default, and no section at all): nothing hooked, bit-for-bit today's behaviour
+Enable=1                  ; 1 is the default (no section at all too); 0: nothing hooked, bit-for-bit the game's own input
 ManageMenus=1             ; the menu view too
 SheathedAttackA=0         ; 1: AttackA presses A with the weapon away too (only matters once Interact is bound)
 Pointer=0                 ; feed the engine's (dormant) pointer block: experiment, see P1 below
@@ -469,6 +469,40 @@ smithy, equipment box, item box, shop, map, options: hover there is unknown (the
    (v0 weapon out, v3 weapon away, v2 town, v4 no hunter).
 4. Host tests: `make test-actions test-settings test-settings-panel test-settings-locale`.
 
+## Keyboard and mouse in the menus and the town by default; the town's shortcuts (2026-11-11)
+
+* **On by default.** `[Actions] Enable` and `ManageMenus` default to 1 (no section at all too). With no bindings the game
+  plays as without the layer (the golden test), except for the defaults below; `Enable=0` still hooks nothing. A player
+  whose ini already says `Enable=0` / `ManageMenus=0` (anyone who saved the Game actions screen before) keeps that;
+  choosing a binding in the Game actions screen while Enable is off turns it on (with a note).
+* **Device defaults** (`act_default_binding`): keyboard and mouse have `MenuConfirm` / `TownInteract = mouse:left`
+  (confirm, advance a dialog, talk), `MenuCancel` / `TownCancel = mouse:right` (back) and `MenuX` / `TownX = key:Space`
+  (a menu's X action, the World Map), as the menu pointer works. Tier 0 alone gives right click (A), Space (B) and left
+  click (X) there; the hunt keeps those. They are read only where the action has no binding of its own (the sampler's
+  `binding_of`, and so the claims: Tier 0's sources for those buttons are not read there). Simple counts them as
+  Default (`Default (Mouse left)`; the AttackX row `Default (in town: Space)`), Advanced reads `Default (Mouse left)`,
+  the drawing lights them, and giving one of those inputs to another row of the same context takes it from the default
+  (`act_row_claim`). The controller has none.
+* **Pointer mode is unchanged**: a released mouse's clicks go to the pointer (`menu_ptr_click`), never to the bindings,
+  so a learned menu's click is one Confirm and a right click one Back (pause menu: Item Pouch opened, one right click
+  back to the menu). Captured clicks (dialogs, menus not learned) go through the bindings.
+* **Cutscene skip** (`hle/evskip.c`, the Switch's A) follows MenuConfirm's press while the menus are the actions'
+  (`act_update`), so left click skips, not right click.
+* **The town's shortcuts read the menu word.** The town avatar's controls (`f_992728`, run every frame from `0x86ee1c`)
+  read X (World Map) and Y (Hunter Search) and the Plus / Minus option from the *menu* button object's pressed bits
+  (`sPad+0x6bfc`), talking and moving from the gameplay word. So the town's actions alone (gameplay word) moved Space's X
+  only where nothing looked for it, and the menu word still had Tier 0's B. `tr_mb2` now keeps the menu word the town's
+  actions would give (`f_5de4f8` is pure: the engine word plus the left stick's directions as D-pad bits), and a hook on
+  `f_992728` puts its town-owned bits into the menu object's cur / prev / pressed / released for that call only, then
+  restores them; the menus never see them. (The gameplay object's words are in another layout: X is 0x20 there.)
+* **In the game** (hidden, fresh ini with no `[Actions]`, the Soaratorium): log `[actions] on`, `translators hooked`;
+  Space opens the World Map (before the hook: mb1 `in 4000 out 1000` but nothing opened); left click in town no longer
+  opens it; walked to the Wyventurer, "A Wyventurer" shown, left click starts the dialog. `make test-actions`: 3,785,786
+  checks, 0 failures (`test_kbm_town`; the golden test skips the town's A / X / L pressed by key, whose keys differ now).
+* **Menus too** (same day, fresh ini): `[actions] on (menus on)`; at the Wyventurer left click talks and every further
+  left click advances the dialog to its end; Space opens the World Map and right click closes it. `make test-actions`:
+  2,982,980 checks, 0 failures (the golden test now skips the menu word too for A / X / L pressed by key).
+
 ## Mouse camera (2026-11-11)
 
 `runtime/hle/mousecam.c` turns the hunt camera's own angles (the quest camera's stick handler `f_2255cc`, and the aiming
@@ -667,6 +701,41 @@ closed by right clicks, the pause menu learned from scratch, Gestures learned an
 done: menus whose highlight doesn't move (lists that scroll under a fixed bar), grids and other cursor types (the item
 pouch, item box, smithy), page arrows other than the pause menu's, a list laid out across (the step would be Left /
 Right: untested). `MHGU_MENUPTR_PROBE=1` logs every cursor of the class with its call ("(known)" once its rows are).
+
+**Menus the learner can't see (2026-11-11, the Soaratorium).** Found with `fnnew 700000 a00000 1` in a visible run while
+the user went through each menu (the first-call log, matched with the list cursor's call sites), measured with `pieces`
+before and after a Down and with screenshots:
+* *Banner lists* - the Bistro's Order a Meal (`0x931d1c`), the Quest Counter's ranks (`0x9839b8`), star levels
+  (`0x984314`) and quests: the chosen banner is drawn 32 further left (and recoloured), no piece of its own moves, so
+  nothing is learned. Built in (`builtin[]`, `tools/menus_table.py` BUILTIN) at their measured places.
+* *The list widget* `0x74c130` runs the list cursor itself (from `0x74c4ec` for its list at widget+4, `0x74c514` for a
+  second one at widget+0x28: the quest details' L / R pages); `list_widget` keeps its caller, and the cursor's call is
+  that caller (`0x981f1c`: the quest list), the second one with the top bit set. One id for both made the pointer flip
+  between them every frame (hover worked now and then, the wheel paged the wrong one). The quest list's page arrows are
+  in `menuptr_hit`'s table beside the pause menu's.
+* *A linked pair* - the World Map's 2 x 4 destinations are two list cursors, rows (`0x993d04`, Up / Down) and columns
+  (`0x993d2c`, Left / Right). `linked[]`: the row cursor is the menu (cells rows x 4, its column the other's,
+  `g_link_col`), the column cursor only reports and takes a jump's column, with no entry of its own (never a focus or
+  the unknown-screen safety net). Built in: first cell 322,213, 159 across, 148 down. Hidden run: hover onto Yukumo
+  (both cursors) and back to Soaratorium, a click on Kokoto opened its destinations, a right click came back.
+* *Geometries per item count* - the destinations list after a World Map choice (`0x992e7c`) spaces its rows by their
+  number (76 for four, at the Soaratorium; 94 for three, at Kokoto). `MenuGeom.count` (16th field of a line): a change
+  learned with another row step *and* another number of cells than a stored geometry of the same bar becomes a
+  geometry of its own with that count (`geom_put`; a list with rows not one step apart keeps one, its count being the
+  same); otherwise the count is dropped (0: any). `menuptr_geometry` takes the one with the cursor's cells, else the
+  last with count 0. Hidden run: three choices learned at Kokoto, Cancel and Go to Your House hovered; four at the
+  Soaratorium, Cancel hovered. Also: a frame of no known size whose corner is between x 200 and the middle is taken to
+  be centred (its row ends as far past the middle as it starts before it), not to end at the middle - the destinations'
+  bar is 384 to 896, so the right half missed.
+* *Banner lists, learned* (`find_slide`, menulearn.c): when `find_bar` finds no bar on a row change, every piece that
+  moved slid sideways in its own row by one distance, the new row's one way and the old row's back: the step is their
+  rows' distance, the box the new row's top left (a frame of no known size). The Smithy learned so (`0x8f1c7c`: 865,52,
+  48 down; its rows: a banner and two text pieces, the chosen one 32 left), and the other NPC menus like it.
+* *A button below a list* (`follow`, menulearn.c): the Palico training setups' last row is a button (Begin Training,
+  Select details) whose highlight is recoloured in place, so the learned rows put it one step below the list (on the
+  Cost row). Settled on the last row with none of the menu's bar on screen, the one button piece (layer 97, 210 x 34)
+  gives that row's place (`menuptr_row_seen`, kept like an uneven list's row). `0x96af8c`: row 2 at +146 (user's run);
+  `0x967514` (Intense Training) is also built in, row 2 at +145.
 
 ### The settings panel's drawing tabs and mouse clicks (2026-11-11)
 

@@ -13,7 +13,7 @@ import argparse
 import os
 import sys
 
-BUILTIN = {0x86F8EC, 0x87D824, 0x880798, 0x5E29A0, 0x87F8A0, 0x8874CC}  # (menuptr.c builtin[]: the pause menu, the front end's)
+BUILTIN = {0x86F8EC, 0x87D824, 0x880798, 0x5E29A0, 0x87F8A0, 0x8874CC, 0x931D1C, 0x9839B8, 0x984314, 0x981F1C, 0x993D04, 0x967514}  # (menuptr.c builtin[]: the pause menu, the front end's)
 MAX_VARIANTS = 4
 ROWS = 16
 
@@ -23,10 +23,11 @@ def near(a, b, tol=0.5):
 
 
 class Geom:
-    def __init__(self, lr, x, y, w, h, dx, dy, z=0.0, kw=0.0, kh=0.0, ox=0.0, oy=0.0, cdx=0.0, cdy=0.0, cols=0.0):
+    def __init__(self, lr, x, y, w, h, dx, dy, z=0.0, kw=0.0, kh=0.0, ox=0.0, oy=0.0, cdx=0.0, cdy=0.0, cols=0.0, count=0.0):
         self.lr, self.x, self.y, self.w, self.h, self.dx, self.dy = lr, x, y, w, h, dx, dy
         self.z, self.kw, self.kh, self.ox, self.oy, self.cdx, self.cdy = z, kw, kh, ox, oy, cdx, cdy
         self.cols = int(cols)
+        self.count = int(count)  # the cells it was learned with: only for a menu spaced by its count (0: any)
         self.off = {}  # row -> (x, y) from the first row's bar
 
     def same_kind(self, o):  # (menuptr.c same_kind)
@@ -41,21 +42,31 @@ class Geom:
         return self.kw and near(self.z, z) and abs(self.kw - kw) < 0.01 and abs(self.kh - kh) < 0.01
 
 
+def steps_differ(a, b):  # (menuptr.c steps_differ)
+    return (a.dx or a.dy) and (b.dx or b.dy) and (not near(a.dx, b.dx) or not near(a.dy, b.dy))
+
+
 def put(table, g):  # (menuptr.c geom_put)
     variants = table.setdefault(g.lr, [])
-    for o in variants:
-        if o.same_kind(g):
-            if not o.kw:
-                variants[variants.index(o)] = g
-                return
-            if not o.dx and not o.dy and (g.dx or g.dy):
-                o.dx, o.dy = g.dx, g.dy
-            if not o.cdx and not o.cdy and (g.cdx or g.cdy):
-                o.cdx, o.cdy = g.cdx, g.cdy
-            if not o.cols and g.cols:
-                o.cols = g.cols
-            o.x, o.y = g.x, g.y
+    o = next((o for o in variants if o.count and o.count == g.count and o.same_kind(g)), None)
+    if o is None:
+        o = next((o for o in variants if o.same_kind(g)), None)
+    if o is not None and o.kw and g.count and o.count != g.count and steps_differ(o, g):
+        o = None  # (another count with another step: a geometry of its own)
+    if o is not None:
+        if not o.kw:
+            variants[variants.index(o)] = g
             return
+        if not o.dx and not o.dy and (g.dx or g.dy):
+            o.dx, o.dy = g.dx, g.dy
+        if not o.cdx and not o.cdy and (g.cdx or g.cdy):
+            o.cdx, o.cdy = g.cdx, g.cdy
+        if not o.cols and g.cols:
+            o.cols = g.cols
+        o.x, o.y = g.x, g.y
+        return
+    if not any(v.same_kind(g) for v in variants):
+        g.count = 0  # (the count is kept only where it splits a menu)
     if len(variants) >= MAX_VARIANTS:
         variants[0] = g
     else:
@@ -82,9 +93,9 @@ def read(table, lines):  # (menuptr.c geoms_load)
             v = list(map(float, t[1:]))
         except ValueError:
             continue
-        if len(v) not in (6, 11, 13, 14) or lr in BUILTIN:
+        if len(v) not in (6, 11, 13, 14, 15) or lr in BUILTIN:
             continue
-        v += [0.0] * (14 - len(v))
+        v += [0.0] * (15 - len(v))
         put(table, Geom(lr, *v))
 
 
@@ -99,9 +110,9 @@ def lines_of(table):
         variants = table[lr]
         if any(g.kw for g in variants):
             variants = [g for g in variants if g.kw]
-        for g in variants:
-            out.append("%08x %s %d" % (lr, " ".join(fmt(v) for v in (g.x, g.y, g.w, g.h, g.dx, g.dy, g.z, g.kw, g.kh, g.ox, g.oy,
-                                                                      g.cdx, g.cdy)), g.cols))
+        for g in sorted(variants, key=lambda g: g.count != 0):  # (any count first: a count's own splits from it on loading)
+            out.append("%08x %s %d%s" % (lr, " ".join(fmt(v) for v in (g.x, g.y, g.w, g.h, g.dx, g.dy, g.z, g.kw, g.kh, g.ox, g.oy,
+                                                                        g.cdx, g.cdy)), g.cols, " %d" % g.count if g.count else ""))
             for row in sorted(g.off):
                 if row:
                     out.append("%08x off %d %s" % (lr, row, " ".join(fmt(v) for v in (*g.off[row], g.z, g.kw, g.kh))))
