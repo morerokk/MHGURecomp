@@ -532,7 +532,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Mouse 5", "Ratón 5"},
         {"Always", "Siempre"},
         {"Middle", "Central"},
-        {"Moving the pointer moves the selection in the game's menus, a row's height at a time; sideways it changes tabs and pages. Clicks are the buttons bound to the mouse (MenuConfirm and MenuCancel in Game actions).", "Mover el puntero mueve la selección en los menús del juego, una fila cada vez; a los lados cambia de pestaña y de página. Los clics son los botones asignados al ratón (MenuConfirm y MenuCancel en Acciones del juego)."},
+        {"The row of the game's menus under the pointer is selected (the menu's highlight is found in the picture and walked to the pointer while it moves). Clicks are the buttons bound to the mouse (MenuConfirm and MenuCancel in Game actions). Not with HDR output.", "Se selecciona la fila de los menús del juego que está bajo el puntero (el resaltado del menú se busca en la imagen y se lleva hasta el puntero mientras este se mueve). Los clics son los botones asignados al ratón (MenuConfirm y MenuCancel en Acciones del juego). No con salida HDR."},
         {"Click", "Clic"},
         {"Mouse sensitivity must be 0.1-10 and smoothing 0-0.9.", "La sensibilidad del ratón debe estar entre 0,1 y 10 y el suavizado entre 0 y 0,9."},
     };

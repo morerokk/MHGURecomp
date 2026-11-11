@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "../../cursor_nav.h"
 #include "../../engine_module.h"
 #include "../../overlay.h"
 #include "fsr.h"
@@ -776,6 +777,21 @@ static bool frame_begin(void) {
     return true;
 }
 
+// The menu cursor's eyes (runtime/cursor_nav.h): while the host asks (g_scan_request), the finished frame is read back
+// and scanned for the menu's highlight bars. Windowed SDR only (HDR output has no scan: the pointer then does not move a
+// menu's selection).
+volatile int g_scan_request;
+MenuScan g_menu_scan;
+static void publish_scan(const uint8_t *px, int w, int h, bool bgr) {
+    MenuBand b[MENU_BANDS_MAX];
+    int n = menu_scan_bands(px, w, h, bgr, b, MENU_BANDS_MAX);
+    __atomic_add_fetch(&g_menu_scan.seq, 1, __ATOMIC_ACQ_REL);
+    g_menu_scan.w = w, g_menu_scan.h = h, g_menu_scan.count = n;
+    for (int i = 0; i < n; i++) g_menu_scan.band[i] = b[i];
+    g_menu_scan.ns = plat_now_ns();
+    __atomic_add_fetch(&g_menu_scan.seq, 1, __ATOMIC_ACQ_REL);
+}
+
 // A screenshot being written: the window image's pixels (B8G8R8A8 or R8G8B8A8), made RGBA and saved as PNG.
 typedef struct { char path[300]; uint8_t *px; uint32_t w, h; bool bgr; uint16_t *half; } ShotJob;
 static float half_to_float(uint16_t h) {
@@ -809,6 +825,8 @@ static void *shot_thread(void *arg) {
 // End the window image's render pass and present it. shot_path: also save the window image as PNG.
 static void frame_end(const char *shot_path) {
     if (!cur_frame.ok) return;
+    bool scan = g_scan_request && !shot_path && g_hdr_out == HDR_OUT_NONE;
+    if (g_scan_request) g_scan_request = 0;
     VkCommandBuffer cb = vk_cmd();
     vkCmdEndRenderPass(cb);
     VkSpan shot = {0};
@@ -832,7 +850,7 @@ static void frame_end(const char *shot_path) {
         vkCmdEndRenderPass(cb);
         hdr_send_metadata(false);
     }
-    if (shot_path && !hdr) {  // PRESENT_SRC -> TRANSFER_SRC, copy, back
+    if ((shot_path || scan) && !hdr) {  // PRESENT_SRC -> TRANSFER_SRC, copy, back
         uint32_t w = g_vk.sc_extent.width, h = g_vk.sc_extent.height;
         shot = vk_readback((uint64_t)w * h * 4);
         VkImageMemoryBarrier b = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
@@ -864,6 +882,11 @@ static void frame_end(const char *shot_path) {
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) recreate_swapchain();
 #endif
     cur_frame.ok = false;
+    if (scan) {  // (the copy is waited for and read where it is)
+        vk_wait_seq(seq);
+        publish_scan((const uint8_t *)shot.ptr, (int)g_vk.sc_extent.width, (int)g_vk.sc_extent.height,
+                     g_vk.sc_format == VK_FORMAT_B8G8R8A8_UNORM || g_vk.sc_format == VK_FORMAT_B8G8R8A8_SRGB);
+    }
     if (shot_path) {  // (the copy is taken here; the PNG is made on a thread of its own: encoding the window's size
                       // stalled the game ~0.8 s on a Retina Mac)
         vk_wait_seq(seq);

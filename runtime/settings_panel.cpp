@@ -2089,7 +2089,7 @@ std::vector<Row> main_rows() {
         add_choice(r, "mouse.capture", "Mouse capture", c.mouse_capture, {tr("Click"), tr("Hunt")},
                    [](int v) { c.mouse_capture = v; }, ini("MouseCapture"));
         add_bool(r, "mouse.menu", "Mouse in menus", &c.mouse_menu_cursor, ini("MenuCursor"));
-        r.back().help = tr("Moving the pointer moves the selection in the game's menus, a row's height at a time; sideways it changes tabs and pages. Clicks are the buttons bound to the mouse (MenuConfirm and MenuCancel in Game actions).");
+        r.back().help = tr("The row of the game's menus under the pointer is selected (the menu's highlight is found in the picture and walked to the pointer while it moves). Clicks are the buttons bound to the mouse (MenuConfirm and MenuCancel in Game actions). Not with HDR output.");
         action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
         r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons, for moving and for the item bar, and the chat key.");
         action(r, "actions", tr("Game actions"), []() { push(View::Actions, "act.enable"); });

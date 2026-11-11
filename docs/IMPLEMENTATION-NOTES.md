@@ -528,51 +528,51 @@ New `[Mouse]` settings (settings menu: Controls tab, Spanish strings; live, no r
 | `MouseInvertY` | Off | up / down turned round, on top of the game's own invert options |
 | `MouseSmoothing` | 0.0 | 0 .. 0.9: each update takes (1 - s) of the counts waiting, the rest trails (hunt camera only; the same total turn: measured 101 + 164 + 196 ... decaying 5, 3, 1 against 240 a step unsmoothed) |
 | `MouseCapture` | Click | Click: a click in the window captures the mouse. Hunt: also captured by itself while the hunt camera is the mouse's (its handler ran in the last 200 ms), free again in menus, cutscenes and villages; Esc or losing focus stops it until a click or the hunt is over |
-| `MenuCursor` | On | the mouse moves the menus' selection (see "Cursor menus"): off, the mouse only clicks and scrolls |
+| `MenuCursor` | On | the row under the pointer is selected in the menus (see "Cursor menus"); off, the mouse only clicks and scrolls |
 
 Measured with `MouseSensitivityY=2 MouseInvertY=On MouseSmoothing=0.6`: the pitch per update went from +125 to -240 (twice,
 reversed), the yaw ramped up and trailed off. The mouse buttons bound to actions (`[Actions.Kbm]`) work while captured
 (the capture is the same, `mouse_held`), also with the automatic capture.
 
-### Cursor menus (2026-11-11): the mouse moves the menus' selection (relative, not row hover)
+### Cursor menus (2026-11-11): the row under the pointer is selected (position based, by looking at the picture)
 
-The aim was "hover a row = select it". That needs each row's screen rectangle and a way to set the list's selection, and
-neither exists in a form the host can use:
+The game gives the host no row data: the engine's pointer block is not read by the list controllers (P1 above: its 21
+readers never ran), the NSO imports no touch API (so there is no touch feed to give the game), the Plus menu's
+`+0xe4` row byte is a copy (writing it did not move the highlight), and the host has no registry of the HUD quads. A first
+version that turned the pointer's *movement* into presses was rejected (a pointer resting at the bottom of the screen must
+select what is under it). What is built reads the highlight from the finished picture instead:
 
-* **(c) The engine's pointer block** (P1 above): none of its 21 readers runs for the vanilla list controllers in the
-  screens tried.
-* **(a) HUD quads:** the host has no registry of the quads a menu is drawn with (a row of a list is a text quad with no
-  link to the list's selection); building one is a new registry in `nvn/vulkan/exec.c` plus a way to tell a row from
-  decoration: not built.
-* **(b) The list's own selection index:** the Plus menu object has `+0xe4` = `01 <row> 08 00`, but writing it did not move
-  the highlight (a copy the list recomputes); each list class (pouch, item box, shop, smithy...) would need its own state
-  found.
-
-So what is built is the fallback that needs none of that: **the pointer's movement is the selection's movement.**
-
-* `runtime/cursor_nav.h` (pure, host-tested in `tests/test_actions.c`: `test_cursor_nav`): the pointer's movement over the
-  window is gathered; each row's height moved (window height / 16: 45 px of 720) is one `MenuUp` / `MenuDown` press;
-  sideways it takes two rows' distance per `MenuLeft` / `MenuRight` (tabs and pages); the axis moved more wins and drops the
-  other's rest; a turn back starts again; a 250 ms pause forgets what was not pressed; at most 4 presses per movement
-  event and 6 waiting per direction (a flick is not a queue of seconds).
-* `host_input.c` (`cursor_motion`, `cursor_step`): the window thread turns motion events into queued presses; the game
-  thread presses them in turn, 140 ms apart (as the wheel's), each as `act_inject` of the menu action for 70 ms of
-  presented frames (the rate is measured). The presses go to the menu view only (`MenuUp` ... are mb2 actions): the
-  gameplay view, the right stick and the camera never see them.
-* **When:** `[Mouse] MenuCursor = On` (default; Controls tab, "Mouse in menus"), `[Actions] Enable=1 ManageMenus=1`
-  (`act_menus_on()`), the pointer free (not a hunt's camera: a hunt's pause menu counts, it frees the mouse), no host menu
-  or chat open, no mod holding the pointer. A jump of more than 40% of the window (the pointer re-entering) is not movement.
-* **Clicks** are not synthesised: they are the buttons bound to the mouse. With the default `[Keybinds]` (A = Mouse Right,
-  X = Mouse Left) a right click confirms (as A always did) and a left click is X. For left = confirm and right = cancel bind
-  them in Controls > Game actions (`MenuConfirm = mouse:left`, `MenuCancel = mouse:right` in `[Actions.Kbm]`): those are
-  claimed from the Tier 0 binds in the menus, so a left click is only a confirm.
-* **Verified (hidden runs, `mouse x y` / `mousebtn`, shots):** village Plus menu: 90 px down = two rows (Item Pouch -> Combo
-  List), 90 px more skips the greyed Quest Info to Palicoes, 45 px up goes back; with `MenuConfirm = mouse:left`
-  `MenuCancel = mouse:right` a left click opened the Combo List, a right click closed it and a second the menu; quest 101
-  (hunt pause menu): the same chain, and `camstat` showed hunt menu 1 / not captured while it was open and captured again
-  after; the Character Select (title) screen took presses and clicks too (seen in an accidental run); in the village with no menu open 14 presses
-  went into the menu view and nothing changed on screen (diff at the noise level) and the Plus menu opened normally after.
-* **Not verified:** a real mouse in a visible window (all scripted), the shop, smithy, item box and quest board lists, NPC
-  dialogs at a camp, the quest result screen. Rows are never hovered: the pointer position means nothing, only its
-  movement; moving the pointer to click a distant row moves the selection too, so click after the selection is where you
-  want it. `MenuCursor = Off` stops the movement and keeps the clicks and the wheel.
+* **The eyes** (`runtime/cursor_nav.h` `menu_scan_bands`, pure, host-tested on synthetic frames; called from
+  `nvn/vulkan/device.c` `frame_end`): while the host asks (`g_scan_request`, about 11 times a second, 2.5 a second while
+  nothing is found), the window image is copied back (as a screenshot is) and scanned for the list highlight, a saturated
+  gold bar (about 202,156,19, also the dimmed one of a list without the focus): runs of 12 to 90 scanlines that are gold
+  over at least 80 pixels, at least 120 pixels wide, thin gold lines and small patches are ignored. The result
+  (`MenuScan`: frame size and up to 6 bars, in window-image pixels) is published with a seqlock. HDR output has no scan
+  (the pointer then selects nothing; clicks and the wheel still work).
+* **The loop** (`cursor_nav_decide`, pure, host-tested; `host_input.c` `cursor_step`, game thread each update): with the
+  pointer moved in the last 1.5 s (so the keyboard and the pad have the menu when the mouse rests) and the menu view ours,
+  the bar under the pointer's x and nearest its y is compared with the pointer's y (scaled from the window to the image):
+  within 0.6 of a row = arrived; else `MenuUp` / `MenuDown` is pressed (`act_inject`: the menu view only, the gameplay
+  view, the right stick and the camera never see it), one to three presses when far (always leaving one for the next look),
+  110 ms apart, and the next look waits for a frame 150 ms after the last press. The row pitch is learned from the bar's
+  movement (starts at the bar's height x 1.05 = 36 px at 720p). Never turns back inside an episode (a new episode starts when
+  the pointer moves more than 12 px to a new place): a disabled row is skipped by the bar, which then stays where it landed;
+  two presses that move nothing, or 40 presses, give up.
+* **Clicks** are the buttons bound to the mouse. With the default `[Keybinds]` (A = Mouse Right, X = Mouse Left) a right click
+  confirms and a left click is X; for left = confirm and right = cancel bind them in Controls > Game actions
+  (`MenuConfirm = mouse:left`, `MenuCancel = mouse:right` in `[Actions.Kbm]`): those are claimed from the Tier 0 binds in
+  the menus. An unbound left / right click is `MenuConfirm` / `MenuCancel`.
+* **Setting:** `[Mouse] MenuCursor = On` (Controls tab, "Mouse in menus"); needs `[Actions] Enable=1 ManageMenus=1`.
+* **Verified (hidden runs, `mouse x y` / `mousebtn`, shots):** village Plus menu, the pointer parked at the rows' heights
+  (x 1100; y = 261 / 367 / 119 / 225 / 296 / 190): Palicoes, Chat, Item Pouch (7 rows up in under 2.5 s), Quest Info (greyed,
+  reached from above: the game lets it be highlighted), Hunter's Notes, Combo List, each within the 2.5 s; with the mouse
+  resting 2.5 s a pad Down (control command `DOWN`) moved the selection one row and the mouse did not pull it back; a left
+  click (`MenuConfirm = mouse:left`) on Combo List opened it, a right click closed it. Quest 101's pause menu: Pause (y 334),
+  Combo List (190) and Palicoes (262) selected; a click there. Village with no menu open: movement changed nothing on
+  screen. All as the game reads it (the highlight was moved by the game's own Up / Down handling).
+* **Not done / not verified:** sideways (tabs and pages: the `< >` arrows of a title bar) are not selected by position; the
+  pointer picks rows of vertical lists only (horizontal button rows such as Yes / No: not tried). A real mouse in a visible
+  window, the shop, smithy, item box, quest board, NPC dialogs at a camp, the quest result screen and the title's
+  Character Select were not run with the final code. Gold scenery behind a menu is the possible false bar (the loop only
+  presses MenuUp / MenuDown into the menu view; nothing is hurt, but it gives up after 40 presses). A scan stalls the
+  frame for the copy (about a frame), only while the pointer has moved in the last 1.5 s.

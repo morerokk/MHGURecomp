@@ -142,12 +142,17 @@ static SDL_SpinLock mods_lock;
 static struct { float x, y, dx, dy; bool inside; uint32_t held, pressed; } mods_mouse;
 static SDL_AtomicInt mods_free;
 
-// ---- the mouse as a menu cursor (runtime/cursor_nav.h): outside a hunt's camera, with the menu view ours, the pointer's
-// movement is presses of MenuUp / Down / Left / Right, a left click is MenuConfirm and a right click MenuCancel (unless
-// the click is bound to something). Queued here (window thread), pressed in turn by cursor_step (game thread).
+// ---- the mouse as a menu cursor (runtime/cursor_nav.h), by position: while the pointer has moved lately over a list, the
+// renderer scans the finished frame for the menu's highlight bar (nvn/vulkan/device.c) and the game thread presses
+// MenuUp / MenuDown (the menu view only) until the highlighted row is the one under the pointer. Clicks are the buttons
+// bound to the mouse; an unbound left click is MenuConfirm and an unbound right click MenuCancel.
 static CursorNav cnav;
-static int cnav_q[CNAV_DIRS];
 static int cnav_click[2];  // confirm, cancel
+static volatile float cur_x, cur_y;       // the pointer, window pixels
+static volatile uint64_t cur_move_ns;     // when it last moved over the window
+static volatile int cur_new_episode;      // it moved to a new place: the walk starts again
+extern volatile int g_scan_request;       // (nvn/vulkan/device.c: scan the next frame for highlight bars)
+extern MenuScan g_menu_scan;
 static bool cursor_nav_on(void) {
     return config_live_mouse_menu_cursor() && act_enabled() && act_menus_on() && !g_hunt_ctx && !mouse_captured && !overlay_menu_open() && !chat_active() &&
            !host_input_mouse_free();
@@ -161,20 +166,14 @@ static bool click_bound(int btn) {
     return false;
 }
 static void cursor_motion(float x, float y) {
-    static float lx, ly;
+    static float ref_x, ref_y;
     static bool have;
-    uint64_t now = plat_now_ns();
-    int h = 720;
-    SDL_Window *w = ui_window();
-    if (w) SDL_GetWindowSize(w, NULL, &h);
-    float dx = x - lx, dy = y - ly;
-    bool jump = !have || fabsf(dx) > 0.4f * (float)h || fabsf(dy) > 0.4f * (float)h;  // (the pointer came back into the window)
-    lx = x, ly = y, have = true;
-    if (jump || !cursor_nav_on()) return;
-    int out[CNAV_DIRS] = {0};
-    cursor_nav_feed(&cnav, dx, dy, (float)h / 16.0f, now, out);
-    for (int d = 0; d < CNAV_DIRS; d++)
-        if (out[d] && __atomic_load_n(&cnav_q[d], __ATOMIC_RELAXED) < 6) __atomic_fetch_add(&cnav_q[d], out[d], __ATOMIC_RELAXED);
+    cur_x = x, cur_y = y;
+    if (!have || fabsf(x - ref_x) > 12.0f || fabsf(y - ref_y) > 12.0f) {  // (a new place, not a tremor)
+        ref_x = x, ref_y = y, have = true;
+        __atomic_store_n(&cur_new_episode, 1, __ATOMIC_RELAXED);
+    }
+    if (cursor_nav_on()) cur_move_ns = plat_now_ns();
 }
 static void cursor_click(int btn) {
     if (!cursor_nav_on() || click_bound(btn)) return;
@@ -182,9 +181,11 @@ static void cursor_click(int btn) {
     else if (btn == SDL_BUTTON_RIGHT) __atomic_store_n(&cnav_click[1], 1, __ATOMIC_RELAXED);
 }
 static void cursor_step(void) {  // (game thread, once per update)
-    static const int ids[CNAV_DIRS] = {ACT_MENU_UP, ACT_MENU_DOWN, ACT_MENU_LEFT, ACT_MENU_RIGHT};
-    static uint64_t next, f_ns, f_cnt;
+    static uint64_t f_ns, f_cnt, scan_next, press_ns, used_ns, q_next;
+    static int q_left, q_dir;
     static float fps = 60.0f;
+    static bool init;
+    static int last_count;
     uint64_t now = plat_now_ns();
     if (now - f_ns >= 300000000ull) {  // (a press lasts 70 ms of presented frames, however fast they come)
         if (f_ns && g_present_count > f_cnt) fps = (float)(g_present_count - f_cnt) * 1e9f / (float)(now - f_ns);
@@ -194,14 +195,34 @@ static void cursor_step(void) {  // (game thread, once per update)
     if (frames < 3) frames = 3;
     for (int c = 0; c < 2; c++)
         if (__atomic_exchange_n(&cnav_click[c], 0, __ATOMIC_RELAXED)) act_inject(c ? ACT_MENU_CANCEL : ACT_MENU_CONFIRM, frames, g_present_count);
-    if (now < next) return;
-    for (int d = 0; d < CNAV_DIRS; d++)
-        if (__atomic_load_n(&cnav_q[d], __ATOMIC_RELAXED) > 0) {
-            __atomic_fetch_sub(&cnav_q[d], 1, __ATOMIC_RELAXED);
-            act_inject(ids[d], frames, g_present_count);
-            next = now + 140000000ull;  // (a gap between presses, as the wheel's)
-            break;
+    if (!init) cursor_nav_reset(&cnav), init = true;
+    if (!cursor_nav_on()) {
+        q_left = 0;
+        return;
+    }
+    if (__atomic_exchange_n(&cur_new_episode, 0, __ATOMIC_RELAXED)) cursor_nav_reset(&cnav);
+    if (q_left > 0) {  // (presses of one decision, a gap apart)
+        if (now >= q_next) {
+            act_inject(q_dir == CNAV_UP ? ACT_MENU_UP : ACT_MENU_DOWN, frames, g_present_count);
+            press_ns = now, q_next = now + 110000000ull, q_left--;
         }
+        return;
+    }
+    if (now - cur_move_ns > 1500000000ull) return;  // (the pointer rests: the keyboard and the pad have the menu)
+    if (now >= scan_next) g_scan_request = 1, scan_next = now + (last_count ? 90000000ull : 400000000ull);
+    MenuScan s;
+    uint32_t q0 = __atomic_load_n(&g_menu_scan.seq, __ATOMIC_ACQUIRE);
+    if (q0 & 1) return;
+    s = g_menu_scan;
+    if (__atomic_load_n(&g_menu_scan.seq, __ATOMIC_ACQUIRE) != q0) return;
+    if (s.ns == used_ns || s.ns < press_ns + 150000000ull) return;  // (a frame after the last press has shown its effect)
+    used_ns = s.ns, last_count = s.count;
+    SDL_Window *w = ui_window();
+    int ww = 0, wh = 0;
+    if (!s.count || !w || !SDL_GetWindowSize(w, &ww, &wh) || ww < 1 || wh < 1) return;
+    int k = 0;
+    int d = cursor_nav_decide(&cnav, s.band, s.count, cur_x * (float)s.w / (float)ww, cur_y * (float)s.h / (float)wh, &k);
+    if (d >= 0 && k > 0) q_dir = d, q_left = k, q_next = now, press_ns = now;
 }
 
 static int wheel_notches(const SDL_Event *e) {  // (> 0: up)
