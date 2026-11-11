@@ -2764,19 +2764,27 @@ void draw_grip(ImGuiWindow *w, const Theme &look) {
 }
 // The mouse on the menu, before it is drawn: a press on its top part (the tabs, or a dialog's title) and a drag moves
 // it, one on the grip at its bottom right corner sizes it. Either one detaches it (Menu Options: Attach menu puts it back).
-// The drawing in a window of its own beside the list, when the screen is wide enough
-void draw_bind_window(ImVec2 pos, float width, float min_h, float scale, float margin, const Theme &look) {
+// The drawing in a window of its own: beside the list when the screen is wide enough (as tall as the list, or as its own
+// content), over the list when it is not (fixed_h: a short window, the list below it)
+void draw_bind_window(ImVec2 pos, float width, float min_h, float fixed_h, float scale, float margin, const Theme &look) {
     ImGuiViewport *vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(width, std::min(min_h, vp->WorkSize.y - 2 * margin)),
-                                        ImVec2(width, std::max(min_h, vp->WorkSize.y - 2 * margin)));
+    if (fixed_h > 0)
+        ImGui::SetNextWindowSize(ImVec2(width, fixed_h), ImGuiCond_Always);
+    else
+        ImGui::SetNextWindowSizeConstraints(ImVec2(width, std::min(min_h, vp->WorkSize.y - 2 * margin)),
+                                            ImVec2(width, std::max(min_h, vp->WorkSize.y - 2 * margin)));
     ImGui::Begin("Settings##bind", nullptr,
-                 ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
-                     ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-                     ImGuiWindowFlags_NoNavInputs | ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoFocusOnAppearing);
+                 (fixed_h > 0 ? ImGuiWindowFlags_NoScrollbar : ImGuiWindowFlags_AlwaysAutoResize) | ImGuiWindowFlags_NoCollapse |
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoNavInputs | ImGuiWindowFlags_NoNavFocus |
+                     ImGuiWindowFlags_NoFocusOnAppearing);
     ImGui::SetWindowFontScale(scale);
     float fs = ImGui::GetFontSize();
-    draw_bind_view(ImGui::GetContentRegionAvail().x, vp->WorkSize.y - 2 * margin - fs * 14.f, true);
+    if (fixed_h > 0)
+        draw_bind_view(ImGui::GetContentRegionAvail().x, fixed_h - fs * 9.f, false);
+    else
+        draw_bind_view(ImGui::GetContentRegionAvail().x, vp->WorkSize.y - 2 * margin - fs * 14.f, true);
     g_bv_pointing |= ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);  // (a click anywhere in this window is not a mouse button chosen)
     draw_frame(ImGui::GetCurrentWindow(), look);
     ImGui::End();
@@ -2936,8 +2944,8 @@ void settings_panel(bool *open) {
     bool sized = s.custom_size.x > 0;
     // the drawing of the controller or the keyboard: above the list in the same window, or beside it in a window of its own
     bool bv_view = s.view == View::Actions || (s.view == View::KeyCapture && (acts().capture >= 0 || s.capture_from_actions));
-    int bv_mode = 0;  // 0 none, 1 in the window, 2 beside it
-    float bv_gap = std::max(6.f, base * scale * .6f), bv_width = 0;
+    int bv_mode = 0;  // 0 none, 1 in the window, 2 beside it, 3 over it (a short window, the list below)
+    float bv_gap = std::max(6.f, base * scale * .6f), bv_width = 0, bv_stack = 0;
     if (bv_view) {
         float least = base * scale * 30, list_min = base * scale * 40, want = base * scale * 72;
         float whole = vp->WorkSize.x - 2 * margin;
@@ -2949,6 +2957,8 @@ void settings_panel(bool *open) {
             room = vp->WorkPos.x + vp->WorkSize.x - margin - (s.move_position.x + list) - bv_gap;
         bv_mode = room >= least ? 2 : 1;
         bv_width = std::min(room, base * scale * 120);
+        if (bv_mode == 1 && !sized && !s.floating && vp->WorkSize.y >= base * scale * 50)
+            bv_mode = 3, bv_stack = std::min(vp->WorkSize.y * .48f, base * scale * 34);
     }
     if (sized) {
         ImVec2 least(std::min(base * scale * 26, vp->WorkSize.x), std::min(base * scale * 14, vp->WorkSize.y));
@@ -2957,7 +2967,7 @@ void settings_panel(bool *open) {
         width = s.custom_size.x;
         ImGui::SetNextWindowSize(s.custom_size, ImGuiCond_Always);
     } else {
-        ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0), ImVec2(width, vp->WorkSize.y - 2 * margin));
+        ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0), ImVec2(width, vp->WorkSize.y - 2 * margin - (bv_mode == 3 ? bv_stack + bv_gap : 0)));
     }
     mouse_drag(vp, width);
     if (s.view == View::Move) {
@@ -2981,7 +2991,7 @@ void settings_panel(bool *open) {
     }
     if (!s.floating) {
         float pair = width + (bv_mode == 2 ? bv_gap + bv_width : 0);
-        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - pair) * .5f, vp->WorkPos.y + margin), ImGuiCond_Always);
+        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - pair) * .5f, vp->WorkPos.y + margin + (bv_mode == 3 ? bv_stack + bv_gap : 0)), ImGuiCond_Always);
     }
     const Theme &look = theme();
     ImGui::PushStyleColor(ImGuiCol_WindowBg, vec(look.panel));
@@ -3294,11 +3304,12 @@ void settings_panel(bool *open) {
     draw_grip(window, look);
     ImVec2 main_pos = window->Pos, main_size = window->Size;
     ImGui::End();
-    if (bv_mode == 2) {
-        draw_bind_window(ImVec2(main_pos.x + main_size.x + bv_gap, main_pos.y), bv_width, main_size.y, scale, margin, look);
-        if (g_bv_pointing && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-            ImGui::SetWindowFocus("Settings##main");  // (a click on the drawing does not take the list's keyboard and controller)
-    }
+    if (bv_mode == 3)
+        draw_bind_window(ImVec2(main_pos.x, vp->WorkPos.y + margin), width, 0, bv_stack, scale, margin, look);
+    if (bv_mode == 2)
+        draw_bind_window(ImVec2(main_pos.x + main_size.x + bv_gap, main_pos.y), bv_width, main_size.y, 0, scale, margin, look);
+    if (bv_mode >= 2 && g_bv_pointing && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        ImGui::SetWindowFocus("Settings##main");  // (a click on the drawing does not take the list's keyboard and controller)
     if (s.dropdown.open && s.dropdown.anchored && !options.empty())
         draw_dropdown(options, scale, base);
     else
