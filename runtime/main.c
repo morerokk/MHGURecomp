@@ -85,6 +85,7 @@ static void boot(const char *root) {
     camjit_init();  // (FSR: the main camera and its jitter: runtime/hle/camera_jitter.c)
     mousecam_init();  // (mouse look on the hunt camera's angles: runtime/hle/mousecam.c)
     itembar_init();  // (the mouse wheel on the item bar: runtime/hle/itembar.c)
+    { void title_exit_init(void); title_exit_init(); }  // (B on the title screen's Main Menu asks to quit: runtime/hle/title_exit.c)
     { void textlayout_init(void); textlayout_init(); }  // (UI text spacing and kerning: runtime/hle/textlayout.c)
     { void chat_init(void); chat_init(); }  // (typed chat: a message's rows under one name: runtime/hle/chat.c)
     emtrace_init();  // (debug, MHGU_EMTRACE: runtime/hle/emtrace.c)

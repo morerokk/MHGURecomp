@@ -18,6 +18,7 @@ static char **launch_argv;
 static SDL_AtomicInt requested_action, action_failed;
 void ui_capture_launch_args(int argc, char **argv) { launch_argc = argc; launch_argv = argv; }
 void ui_request_action(bool restart) { SDL_SetAtomicInt(&requested_action, restart ? 2 : 1); }
+void ui_request_exit_menu(void) { SDL_SetAtomicInt(&requested_action, 12); }  // (B on the title screen's Main Menu)
 void ui_request_import(int what) { SDL_SetAtomicInt(&requested_action, 2 + what); }
 static SDL_AtomicInt away;
 bool ui_window_away(void) { return SDL_GetAtomicInt(&away) != 0; }
@@ -304,6 +305,13 @@ int ui_run(void) {
             } while (SDL_PollEvent(&e));
         }
         int action = SDL_SetAtomicInt(&requested_action, 0);
+        if (action == 12) {  // (the title screen's B: the same question as closing the window)
+            if (!config_confirm_exit() && !overlay_settings_dirty()) {
+                LOG("exit from the title screen\n");
+                exit(0);
+            }
+            overlay_request_close();
+        }
         if (action == 1) exit(0);
         if (action == 2) {
             if (restart_application()) exit(0);
