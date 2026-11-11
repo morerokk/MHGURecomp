@@ -1,7 +1,14 @@
 // Host-menu policy only. Never changes the Npad state delivered to gameplay.
 #pragma once
+#include "actions.h"
 #include "config.h"
 #include <stdint.h>
+// The policy the host menus use: what the game's Confirm is bound to on the controller (runtime/actions.h), else the
+// [Controls] MenuConfirm setting
+static inline int menu_confirm_policy_now(void) {
+    int p = act_menu_confirm_policy();
+    return p >= 0 ? p : config_live_menu_confirm();
+}
 static inline int menu_confirm_position(int policy, int original_a, int original_b, int cancel) {
     if (policy == MENU_CONFIRM_SOUTH) return cancel ? 1 : 0;
     if (policy == MENU_CONFIRM_EAST) return cancel ? 0 : 1;

@@ -94,6 +94,10 @@
     .menu_chord = 1,                                                                                \
     /* [Mouse] */                                                                                   \
     .mouse_sensitivity = 1.0f,                                                                      \
+    .mouse_sensitivity_y = 1.0f,                                                                    \
+    .mouse_invert_y = 0,                                                                            \
+    .mouse_smoothing = 0.0f,                                                                        \
+    .mouse_capture = MOUSE_CAPTURE_CLICK,                                                           \
     /* [Keybinds] */                                                                                \
     .binds = DEFAULT_BINDS,                                                                         \
     /* [Multiplayer] */                                                                             \
@@ -364,6 +368,24 @@ static const char DEFAULT_INI[] =
     "; Mouse sensitivity\n"
     "; Default: 1.0\n"
     "MouseSensitivity = 1.0\n"
+    "\n"
+    "; Vertical sensitivity: times the mouse sensitivity for looking up and down\n"
+    "; Default: 1.0\n"
+    "MouseSensitivityY = 1.0\n"
+    "\n"
+    "; Invert the mouse's up and down (on top of the game's own invert option)\n"
+    "; Default: Off\n"
+    "MouseInvertY = Off\n"
+    "\n"
+    "; Mouse smoothing for the camera in a hunt: 0 turns exactly with the mouse, higher values let the turn trail it\n"
+    "; Default: 0.0\n"
+    "MouseSmoothing = 0.0\n"
+    "\n"
+    "; Click: a click in the window captures the mouse (Esc lets it go). Hunt: it is also captured by itself while the\n"
+    "; hunt camera is yours, and free in menus and cutscenes\n"
+    "; Default: Click\n"
+    "MouseCapture = Click\n"
+    "\n"
     "\n"
     "[Keybinds]\n"
     "; The keys or mouse buttons for each Switch button, for moving (the left stick) and for turning the item bar\n"
@@ -681,6 +703,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_GAME_FOLDER "Invalid game files folder (one line, no ';' or '#')."
 #define ERR_HP "HP factors must be 0.05-20."
 #define ERR_VILLAGE "Invalid village HP or quest override count."
+#define ERR_MOUSE "Mouse sensitivity must be 0.1-10 and smoothing 0-0.9."
 #define ERR_CONFIRM "Invalid menu confirmation policy."
 #define ERR_SCALE "Invalid interface scale."
 #define ERR_ICONS "Invalid button icon layout."
@@ -747,6 +770,10 @@ const ConfigSetting g_settings[] = {
     {"Controls", "ComboInputWindow", SET_CHOICE, F(combo_window), 0, 0, 0, "Lenient,Strict", NULL, false, ERR_MISC},
     {"Controls", "ChatKey", SET_TEXT, F(chat_key), sizeof g_config.chat_key, 0, 0, NULL, NULL, false, ERR_MISC},
     {"Mouse", "MouseSensitivity", SET_FLOAT, F(mouse_sensitivity), 0, 0.1f, 10.0f, NULL, NULL, false, ERR_VIEW},
+    {"Mouse", "MouseSensitivityY", SET_FLOAT, F(mouse_sensitivity_y), 0, 0.1f, 10.0f, NULL, NULL, false, ERR_MOUSE},
+    ON_OFF("Mouse", "MouseInvertY", mouse_invert_y, false),
+    {"Mouse", "MouseSmoothing", SET_FLOAT, F(mouse_smoothing), 0, 0.0f, 0.9f, NULL, NULL, false, ERR_MOUSE},
+    {"Mouse", "MouseCapture", SET_CHOICE, F(mouse_capture), 0, 0, 0, "Click,Hunt", NULL, false, ERR_MISC},
     KEYS("MoveUp", BIND_MOVE_UP), KEYS("MoveDown", BIND_MOVE_DOWN), KEYS("MoveLeft", BIND_MOVE_LEFT),
     KEYS("MoveRight", BIND_MOVE_RIGHT), KEYS("Walk", BIND_WALK), KEYS("A", BIND_A), KEYS("B", BIND_B), KEYS("X", BIND_X),
     KEYS("Y", BIND_Y), KEYS("L", BIND_L), KEYS("R", BIND_R), KEYS("ZL", BIND_ZL), KEYS("ZR", BIND_ZR),
@@ -1179,9 +1206,12 @@ void config_load(void) {
     } else {
         char buf[512], seen[512] = "|";
         int line = 0;
+        bool own = false;  // in a section another module reads itself ([Actions*], runtime/actions.c)
         while (fgets(buf, sizeof buf, f)) {
             line++;
             char *s = trim(buf);
+            if (*s == '[') own = !strncasecmp(s + 1, "Actions", 7) && (s[8] == ']' || s[8] == '.');
+            if (own) continue;
             if (*s == '[' && strchr(s, ']') && strlen(seen) + strlen(s) + 2 < sizeof seen) {
                 for (char *q = s + 1; *q != ']'; q++) {
                     size_t n = strlen(seen);

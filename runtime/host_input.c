@@ -25,22 +25,30 @@
 
 #include <SDL3/SDL.h>
 
+#include "actions.h"
 #include "config.h"
 #include "menu_confirm.h"
 #include "forge.h"
 #include "hle/chat.h"
 #include "hle/input.h"
+#include "hle/input_view.h"
 #include "hle/itembar.h"
 #include "hle/mousecam.h"
 #include "keymap.h"
 #include "mods.h"
 #include "overlay.h"
+#include "settings_panel.h"
 #include "rt.h"
 #include "textinput.h"
 
 #define B(x) (1ull << (x))
 
 static bool keys[SDL_SCANCODE_COUNT];
+// What is held on the keyboard and the mouse as the window got it, also while Forge's menu or the settings menu has the input
+// (keys[] and mouse_held are the game's: they stop then): the settings menu's drawing lights these
+static bool ui_keys[SDL_SCANCODE_COUNT];
+static uint32_t ui_mouse;
+static uint64_t ui_wheel_until[2];
 static SDL_Gamepad *pad;  // the controller read: of those open, the one a button was last pressed on
 #define MAX_PADS 8
 static struct { SDL_Gamepad *pad; uint64_t opened_ns; } pads[MAX_PADS];
@@ -60,6 +68,11 @@ static uint32_t mouse_held;  // the mouse buttons held (bit: SDL_BUTTON_*), whil
 // game to see at 30 updates a second; notches closer together than that are one press)
 #define WHEEL_PRESS_NS 70000000ull
 static uint64_t wheel_until[2];  // up, down: pressed until then
+// A wheel bound to a game action (runtime/actions.h) is one press per notch, a gap between them, so that turning it n
+// notches moves a menu n rows: notches wait in a queue and are pressed in turn (act_wheel_step, every update)
+#define ACT_WHEEL_MAX 8
+static int act_wheel_q[2];
+static uint64_t act_wheel_until[2], act_wheel_next[2];
 static bool bind_held(int bind, bool wheel) {
     uint64_t now = wheel ? plat_now_ns() : 0;
     for (int k = 0; k < BIND_KEYS; k++) {
@@ -81,6 +94,17 @@ static void wheel_turn(int n) {
             else wheel_until[code - KEY_WHEEL_UP] = plat_now_ns() + WHEEL_PRESS_NS;
             break;
         }
+    // an action bound to the wheel (runtime/actions.h) is pressed the same way, unless the item bar has the wheel
+    if (act_uses_input(code) && !itembar_active() && act_wheel_q[code - KEY_WHEEL_UP] < ACT_WHEEL_MAX)
+        act_wheel_q[code - KEY_WHEEL_UP] += abs(n) < ACT_WHEEL_MAX ? abs(n) : ACT_WHEEL_MAX;
+}
+static void act_wheel_step(void) {
+    uint64_t now = plat_now_ns();
+    for (int i = 0; i < 2; i++)
+        if (act_wheel_q[i] > 0 && now >= act_wheel_next[i]) {
+            act_wheel_q[i]--;
+            act_wheel_until[i] = now + WHEEL_PRESS_NS, act_wheel_next[i] = now + 2 * WHEEL_PRESS_NS;
+        }
 }
 
 // ---- mouse: captured (relative mode) after a click in the window, Esc lets it go. In a hunt its movement turns the
@@ -95,10 +119,16 @@ static void wheel_turn(int n) {
 static bool mouse_grab;       // the player's choice: clicked in (true) or Esc / focus lost (false)
 static bool mouse_captured;   // relative mode on now (grabbed, and no Forge menu open)
 static bool mouse_no_capture; // relative mode refused (WSLg, some Wayland compositors): clicks are buttons, no mouse look
+void host_input_mouse_status(void);
+static volatile bool g_hunt_ctx;  // the hunt camera is the mouse's (its handler ran in the last 400 ms): mouse look is captured
+static uint64_t last_motion_ns;  // the pointer moved last (the cursor shows for a while after, even full screen)
+static bool mouse_released;   // Esc / focus lost: no automatic capture (MouseCapture = Hunt) until a click or the hunt is over
 static float mouse_dx, mouse_dy;  // counts moved since the last update
 // (tests: the control file's "mousemove <x> <y> <ms>", a mouse moving at that many counts a second, captured or not)
 static float test_vx, test_vy;
 static uint64_t test_until;
+// (tests: the control file's "ptr <x> <y> [down]" / "ptr off": a pointer in the 1280x720 UI space, [Actions] Pointer=1)
+static struct { int x, y; bool down, valid; } test_ptr;
 
 // ---- the mouse for mods (runtime/forge.c: forge_input_getMouse, getMouseMove, setMouseFree, the port's own calls):
 // where the pointer last moved in the window and whether it is over it, the buttons held and pressed since the last
@@ -445,15 +475,16 @@ static void control_poll(void) {
                 SDL_Event event = {0}; event.type = SDL_EVENT_QUIT; SDL_PushEvent(&event);
                 continue;
             }
-            if (!strcmp(cmd, "sdlkey")) {  // sdlkey [ctrl+]<SDL key name>: a key pressed and released (Insert: Forge's menu)
+            if (!strcmp(cmd, "sdlkey")) {  // sdlkey [ctrl+]<SDL key name> [down|up]: a key pressed and released, or only one (held)
                 bool ctrl = !SDL_strncasecmp(arg, "ctrl+", 5);
+                bool only_down = !strcmp(arg2, "down"), only_up = !strcmp(arg2, "up");
                 SDL_Scancode sc = SDL_GetScancodeFromName(arg + (ctrl ? 5 : 0));
                 SDL_Event e = {0};
                 e.key.type = SDL_EVENT_KEY_DOWN, e.key.scancode = sc, e.key.key = SDL_GetKeyFromScancode(sc, 0, false);
                 e.key.down = true, e.key.mod = ctrl ? SDL_KMOD_LCTRL : 0;
-                SDL_PushEvent(&e);
+                if (!only_up) SDL_PushEvent(&e);
                 e.key.type = SDL_EVENT_KEY_UP, e.key.down = false;
-                SDL_PushEvent(&e);
+                if (!only_down) SDL_PushEvent(&e);
                 if (ctrl) {  // (then Ctrl's own release, as a keyboard sends it: no modifier left)
                     e.key.scancode = SDL_SCANCODE_LCTRL, e.key.key = SDLK_LCTRL, e.key.mod = 0;
                     SDL_PushEvent(&e);
@@ -510,6 +541,56 @@ static void control_poll(void) {
                 sscanf(line, "%*s %*s %*s %15s", arg3);
                 test_vx = (float)atof(arg), test_vy = (float)atof(arg2);
                 test_until = plat_now_ns() + (uint64_t)atoi(arg3) * 1000000ull;
+                continue;
+            }
+            if (!strcmp(cmd, "act")) {  // act <Name> [frames]: the action held for that many presented frames (default 8)
+                int id = act_find(arg);
+                if (id < 0 || !act_enabled()) LOG("[control] act %s: %s\n", arg, act_enabled() ? "no such action" : "[Actions] Enable is 0");
+                else act_inject(id, (unsigned)atoi(arg2), g_present_count), LOG("[control] act %s %d\n", act_name(id), atoi(arg2) ? atoi(arg2) : 8);
+                continue;
+            }
+            if (!strcmp(cmd, "ptr")) {  // ptr <x> <y> [0|1] / ptr off: the engine's pointer at (x, y) in 1280x720 (Pointer=1)
+                int down = 0;
+                sscanf(line, "%*s %*s %*s %d", &down);
+                test_ptr.valid = strcmp(arg, "off") != 0;
+                test_ptr.x = atoi(arg), test_ptr.y = atoi(arg2), test_ptr.down = down != 0;
+                LOG("[control] ptr %s\n", test_ptr.valid ? arg : "off");
+                continue;
+            }
+            if (!strcmp(cmd, "actstat")) { input_view_status(); continue; }
+            if (!strcmp(cmd, "camstat")) { mousecam_status(); host_input_mouse_status(); continue; }
+            if (!strcmp(cmd, "mousebtn")) {  // mousebtn <1-5> <0|1>: that mouse button pressed / released (tests: SDL's own event)
+                SDL_Event b = {0};
+                int down = atoi(arg2);
+                b.button.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP, b.button.button = (Uint8)atoi(arg);
+                b.button.down = down != 0, b.button.clicks = 1;
+                SDL_PushEvent(&b);
+                continue;
+            }
+            if (!strcmp(cmd, "weapon")) {  // weapon <type 0-14> [id]: (debug) the local hunter holds that weapon type (before "depart")
+                uint32_t T = (uint32_t)atoi(arg), id = (uint32_t)strtoul(arg2, NULL, 0);
+                uint32_t sp = LD32(0x1a85b58u), gc = LD32(0x1a8ca48u), slot = LD32(gc + 0x30);
+                uint32_t pl = LD32(sp + 0x1c + 4 * slot), infos[2] = {LD32(pl + 0x13c4), sp + 0x5DC + 0x560 * slot};
+                for (int i = 0; i < 2; i++) {
+                    uint32_t in = infos[i];
+                    if (in < 0x1000000) continue;
+                    uint16_t tl = LD16(in + 0x1C);
+                    ST16(in + 0x1C, (uint16_t)((tl & ~0x1Fu) | ((T + 7) & 0x1Fu)));
+                    ST16(in + 0x1E, (uint16_t)id);
+                    ST8(in + 0x4D4, T);
+                    ST32(in + 0x14C, T);
+                    ST16(in + 0x150, (uint16_t)id);
+                    LOG("[control] weapon info %08x: type %u id %u (was type|lvl %04x)\n", in, T, id, tl);
+                }
+                continue;
+            }
+            if (!strcmp(cmd, "depart")) {  // depart <quest>: (debug) order that quest and depart, as MHGU_QUICKHUNT does
+                uint32_t sel = LD32(0x1a8ae38u);
+                if (sel) {
+                    ST32(sel + 0xd68u, (uint32_t)atoi(arg));
+                    ST8(sel + 0xd65u, (uint8_t)(LD8(sel + 0xd65u) | 0x09u));
+                    LOG("[control] depart on quest %d\n", atoi(arg));
+                } else LOG("[control] depart: no sQuestSelector\n");
                 continue;
             }
             if (!strcmp(cmd, "wheel")) {  // wheel <notches>: the mouse wheel turned (< 0 down), captured or not
@@ -643,8 +724,16 @@ static bool chat_mouse(const SDL_Event *e) {
     return false;
 }
 
+static volatile int g_last_dev = -1;  // the device a button was last pressed on: 0 controller, 1 keyboard and mouse
 void host_input_event(const SDL_Event *e) {
-    if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) pad_pressed(e->gbutton.which);
+    if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) g_last_dev = 0, pad_pressed(e->gbutton.which);
+    else if ((e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat) || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) g_last_dev = 1;
+    if (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_KEY_UP) {
+        if (e->key.scancode < SDL_SCANCODE_COUNT) ui_keys[e->key.scancode] = e->type == SDL_EVENT_KEY_DOWN;
+    } else if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) ui_mouse |= 1u << e->button.button;
+    else if (e->type == SDL_EVENT_MOUSE_BUTTON_UP) ui_mouse &= ~(1u << e->button.button);
+    else if (e->type == SDL_EVENT_MOUSE_WHEEL && e->wheel.integer_y) ui_wheel_until[e->wheel.integer_y > 0 ? 0 : 1] = plat_now_ns() + 150000000ull;
+    else if (e->type == SDL_EVENT_WINDOW_FOCUS_LOST) memset(ui_keys, 0, sizeof ui_keys), ui_mouse = 0;
     mods_mouse_event(e);  // (the mouse for mods: every event, whoever takes it)
     mods_key_event(e);
     if (overlay_event(e)) return;  // (Forge's menu open: keyboard and mouse are its)
@@ -664,8 +753,8 @@ void host_input_event(const SDL_Event *e) {
                 keys[e->key.scancode] = false;
                 chat_open();  // (a line to type, sent as chat: runtime/hle/chat.c)
             } else if (e->key.scancode == SDL_SCANCODE_ESCAPE) {
-                if (mouse_grab) LOG("[input] mouse released\n");
-                mouse_grab = false;
+                if (mouse_grab || mouse_captured) LOG("[input] mouse released\n");
+                mouse_grab = false, mouse_released = true;
             } else if (e->key.scancode == SDL_SCANCODE_F12 && !(e->key.mod & SDL_KMOD_SHIFT))
                 snprintf(g_shot_request, sizeof g_shot_request, "shots/shot_%llu_%d.png", (unsigned long long)t, nshot++);
             else if (e->key.scancode == SDL_SCANCODE_F11) {
@@ -691,11 +780,14 @@ void host_input_event(const SDL_Event *e) {
         }
         break;
     case SDL_EVENT_MOUSE_MOTION:
-        if (mouse_captured) mouse_dx += e->motion.xrel, mouse_dy += e->motion.yrel;
+        // (captured: the hunt camera's counts; a free pointer outside a hunt's camera also moves the right stick, below)
+        if (mouse_captured || (!g_hunt_ctx && !overlay_menu_open() && !chat_active() && !host_input_mouse_free()))
+            mouse_dx += e->motion.xrel, mouse_dy += e->motion.yrel;
+        if (!mouse_captured) last_motion_ns = plat_now_ns();
         break;
     case SDL_EVENT_MOUSE_WHEEL: {  // (what [Keybinds] says: by default the item bar)
         int n = wheel_notches(e);
-        if (mouse_captured && n) wheel_turn(n);
+        if ((mouse_captured || !g_hunt_ctx) && n) wheel_turn(n);  // (a free pointer's wheel scrolls menus, too)
         break;
     }
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: {
@@ -705,9 +797,10 @@ void host_input_event(const SDL_Event *e) {
             mouse_held &= ~(1u << btn);
         } else if (host_input_mouse_free()) {
             break;  // (a mod's free pointer: the click is the mod's only)
-        } else if (!mouse_captured && !mouse_no_capture) {  // (the click that captures the mouse is not a button press)
+        } else if (!mouse_captured && !mouse_no_capture && g_hunt_ctx) {
+            // (the click that captures the mouse is not a button press; elsewhere a click is a button: free pointer)
             if (!mouse_grab) LOG("[input] capturing the mouse\n");
-            mouse_grab = true;
+            mouse_grab = true, mouse_released = false;
         } else {
             mouse_held |= 1u << btn;
         }
@@ -715,7 +808,7 @@ void host_input_event(const SDL_Event *e) {
     }
     case SDL_EVENT_WINDOW_FOCUS_LOST:
         memset(keys, 0, sizeof keys);
-        mouse_held = 0, mouse_grab = false;
+        mouse_held = 0, mouse_grab = false, mouse_released = true;
         config_window_focus(false);  // ([Audio] MuteInBackground)
         if (config_editable().mute_in_background) LOG("[input] window in the background: sound muted\n");
         break;
@@ -735,9 +828,28 @@ void host_input_event(const SDL_Event *e) {
 static int32_t clamp_axis(int v) { return v < -32767 ? -32767 : v > 32767 ? 32767 : v; }
 
 // Capture or release the mouse as wanted, and give its movement to the hunt camera or the right stick.
+void host_input_mouse_status(void) {
+    LOG("[mouse] hunt camera %d, hunt menu %d, captured %d, grab %d, cursor shown %d\n", g_hunt_ctx,
+        input_view_hunt_menu_open(), mouse_captured, mouse_grab, !mouse_captured);
+}
+
 static void mouse_update(int *rx, int *ry) {
     // (Forge's menu, the chat box, a mod's free pointer: the pointer is theirs)
-    bool want = mouse_grab && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
+    // In a hunt the camera handler running means the mouse is the camera's: captured after a click (MouseCapture = Click)
+    // or by itself (Hunt); a menu, a cutscene or a carve stops the handler and the mouse is free again (cursor shown, a
+    // click is a button) until it runs again. Elsewhere (villages, the Hub, the title, menus) the mouse is a free pointer
+    // too and is never captured.
+    static uint64_t cam_seen_ns;
+    uint64_t now0 = plat_now_ns();
+    if (mousecam_active()) cam_seen_ns = now0;
+    else if (mouse_released && now0 - cam_seen_ns > 500000000ull) mouse_released = false;
+    bool hunt = mousecam_active() || now0 - cam_seen_ns < 400000000ull;
+    if (!hunt) input_view_hunt_menu_reset();  // (a new hunt starts with no menu)
+    bool hunt_menu = hunt && input_view_hunt_menu_open();  // the hunt's pause menu: the camera is not the mouse's meanwhile
+    g_hunt_ctx = hunt && !hunt_menu;
+    bool auto_cap = config_live_mouse_capture() == MOUSE_CAPTURE_HUNT && mousecam_active() && !hunt_menu && !mouse_released && !mouse_no_capture;
+    if (auto_cap && !mouse_captured) LOG("[input] capturing the mouse (a hunt)\n");
+    bool want = (g_hunt_ctx && (mouse_grab || auto_cap)) && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
     SDL_Window *w = ui_window();
     if (want != mouse_captured && w) {
         if (SDL_SetWindowRelativeMouseMode(w, want) || !want) {
@@ -750,7 +862,7 @@ static void mouse_update(int *rx, int *ry) {
     }
     // (full screen hides the pointer: shown while the chat box can be dragged or a mod has the mouse free)
     static bool pointer_shown;
-    bool show = chat_active() || host_input_mouse_free();
+    bool show = chat_active() || host_input_mouse_free() || (!mouse_captured && plat_now_ns() - last_motion_ns < 3000000000ull);
     if (show != pointer_shown && w) {
         pointer_shown = show;
         if (show) SDL_ShowCursor();
@@ -778,7 +890,6 @@ static void mouse_update(int *rx, int *ry) {
         vx += (mouse_dx / dt - vx) * a, vy += (mouse_dy / dt - vy) * a;
     }
     mouse_dx = mouse_dy = 0;
-    if (!mouse_captured && now >= test_until) vx = vy = 0;
     float s = config_live_mouse_sensitivity() / MOUSE_FULL_SPEED;
     float x = vx * s, y = -vy * s;  // (the mouse's y is down, the stick's up)
     float m = sqrtf(x * x + y * y);
@@ -826,6 +937,129 @@ static void rumble_update(void) {
     SDL_RumbleGamepad(pad, (Uint16)(out >> 16), (Uint16)out, out ? 200 : 0);
     if (change && v) sends++;
     sent = out, sent_ns = now;
+}
+
+// ---- game actions (runtime/actions.h): the host's keys, mouse and controller as the sampler asks for them
+static const SDL_GamepadButton face_sdl[4] = {SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_WEST,
+                                              SDL_GAMEPAD_BUTTON_NORTH};
+// The Switch button the controller's face button at a position presses (the settings' FaceButtons; as the loop in
+// host_input_update does)
+static int face_switch_button(int i) {
+    static const int switch_at[4] = {BTN_B, BTN_A, BTN_Y, BTN_X}, xbox_at[4] = {BTN_A, BTN_B, BTN_X, BTN_Y};
+    if (config_live_face_buttons() == FACE_LABEL && pad) {
+        switch (SDL_GetGamepadButtonLabel(pad, face_sdl[i])) {
+        case SDL_GAMEPAD_BUTTON_LABEL_A: return BTN_A;
+        case SDL_GAMEPAD_BUTTON_LABEL_B: return BTN_B;
+        case SDL_GAMEPAD_BUTTON_LABEL_X: return BTN_X;
+        case SDL_GAMEPAD_BUTTON_LABEL_Y: return BTN_Y;
+        default: return xbox_at[i];
+        }
+    }
+    return switch_at[i];
+}
+static bool act_phys_held(void *user, int code) {
+    (void)user;
+    if (code > 0 && code < SDL_SCANCODE_COUNT) return keys[code];
+    if (code > KEY_MOUSE && code <= KEY_MOUSE + SDL_BUTTON_X2) return mouse_held >> (code - KEY_MOUSE) & 1;
+    if (code == KEY_WHEEL_UP || code == KEY_WHEEL_DOWN) {
+        uint64_t now = plat_now_ns();
+        return now < wheel_until[code - KEY_WHEEL_UP] || now < act_wheel_until[code - KEY_WHEEL_UP];
+    }
+    if (code >= ACT_PAD && code < ACT_PAD + 0x80 && pad) {
+        if (code == ACT_PAD_LT) return SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 8000;
+        if (code == ACT_PAD_RT) return SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 8000;
+        return SDL_GetGamepadButton(pad, (SDL_GamepadButton)(code - ACT_PAD));
+    }
+    return false;
+}
+// What Tier 0 reads for a Switch button: the controller's buttons (dev 0), the [Keybinds] keys and buttons (dev 1)
+static int act_sw_sources(void *user, int btn, int dev, int *out, int max) {
+    (void)user;
+    int n = 0;
+    if (dev == 0) {
+        static const struct { int btn; int code; } fixed[] = {
+            {BTN_L, ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_SHOULDER}, {BTN_R, ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
+            {BTN_PLUS, ACT_PAD + SDL_GAMEPAD_BUTTON_START}, {BTN_MINUS, ACT_PAD + SDL_GAMEPAD_BUTTON_BACK},
+            {BTN_UP, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_UP}, {BTN_DOWN, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_DOWN},
+            {BTN_LEFT, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {BTN_RIGHT, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
+            {BTN_LSTICK, ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_STICK}, {BTN_RSTICK, ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_STICK},
+            {BTN_ZL, ACT_PAD_LT}, {BTN_ZR, ACT_PAD_RT},
+        };
+        for (unsigned i = 0; i < sizeof fixed / sizeof *fixed && n < max; i++)
+            if (fixed[i].btn == btn) out[n++] = fixed[i].code;
+        for (int i = 0; i < 4 && n < max; i++)
+            if (btn <= BTN_Y && face_switch_button(i) == btn) out[n++] = ACT_PAD + face_sdl[i];
+    } else {
+        for (int i = 0; i < BINDS; i++)
+            if (bind_buttons[i] == btn)
+                for (int k = 0; k < BIND_KEYS && n < max; k++)
+                    if (config_live_bind(i, k) > 0) out[n++] = config_live_bind(i, k);
+    }
+    return n;
+}
+// The settings menu is choosing a controller input for a game action (settings_panel_pad_capture): the next button or
+// trigger that goes down goes to it. What is down as the choice starts (the press that opened it, a trigger that rests
+// half way) does not count until it was let go.
+static const int pad_capture_codes[] = {ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH, ACT_PAD + SDL_GAMEPAD_BUTTON_EAST,
+                                        ACT_PAD + SDL_GAMEPAD_BUTTON_WEST, ACT_PAD + SDL_GAMEPAD_BUTTON_NORTH,
+                                        ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
+                                        ACT_PAD_LT, ACT_PAD_RT, ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_STICK,
+                                        ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_STICK, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_UP,
+                                        ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_DOWN, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_LEFT,
+                                        ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_RIGHT, ACT_PAD + SDL_GAMEPAD_BUTTON_START,
+                                        ACT_PAD + SDL_GAMEPAD_BUTTON_BACK};
+#define PAD_CAPTURE_N ((int)(sizeof pad_capture_codes / sizeof *pad_capture_codes))
+static bool pad_any_held(void) {
+    for (int i = 0; i < PAD_CAPTURE_N; i++)
+        if (act_phys_held(NULL, pad_capture_codes[i])) return true;
+    return false;
+}
+static int pad_capture_poll(bool capturing) {
+    static bool was[PAD_CAPTURE_N], started;
+    if (!capturing) return started = false, 0;
+    int pressed = 0;
+    for (int i = 0; i < PAD_CAPTURE_N; i++) {
+        bool held = act_phys_held(NULL, pad_capture_codes[i]);
+        if (started && held && !was[i] && !pressed) pressed = pad_capture_codes[i];
+        was[i] = held;
+    }
+    started = true;
+    return pressed;
+}
+
+// For the settings menu's Game actions screen: which scheme to show first, and what Tier 0 reads for a Switch button
+int host_input_last_device(void) { return g_last_dev >= 0 ? g_last_dev : pad ? 0 : 1; }
+int host_input_sw_sources(int btn, int dev, int *out, int max) { return act_sw_sources(NULL, btn, dev, out, max); }
+// The inputs that are down right now, for the settings menu's drawing of the controller or the keyboard (it lights them):
+// SDL scancodes, KEY_MOUSE + button, the wheel while a notch is a press, and ACT_PAD + the controller's buttons
+int host_input_held(int *out, int max) {
+    int n = 0;
+    static const int pad_codes[] = {
+        ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH, ACT_PAD + SDL_GAMEPAD_BUTTON_EAST, ACT_PAD + SDL_GAMEPAD_BUTTON_WEST,
+        ACT_PAD + SDL_GAMEPAD_BUTTON_NORTH, ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
+        ACT_PAD_LT, ACT_PAD_RT, ACT_PAD + SDL_GAMEPAD_BUTTON_LEFT_STICK, ACT_PAD + SDL_GAMEPAD_BUTTON_RIGHT_STICK,
+        ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_UP, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_DOWN, ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_LEFT,
+        ACT_PAD + SDL_GAMEPAD_BUTTON_DPAD_RIGHT, ACT_PAD + SDL_GAMEPAD_BUTTON_START, ACT_PAD + SDL_GAMEPAD_BUTTON_BACK};
+    for (int i = 0; i < (int)(sizeof pad_codes / sizeof *pad_codes) && n < max; i++)
+        if (act_phys_held(NULL, pad_codes[i])) out[n++] = pad_codes[i];
+    for (int sc = 1; sc < SDL_SCANCODE_COUNT && n < max; sc++)
+        if (ui_keys[sc]) out[n++] = sc;
+    for (int b = 1; b <= SDL_BUTTON_X2 && n < max; b++)
+        if (ui_mouse >> b & 1) out[n++] = KEY_MOUSE + b;
+    for (int w = 0; w < 2 && n < max; w++)
+        if (plat_now_ns() < ui_wheel_until[w]) out[n++] = KEY_WHEEL_UP + w;
+    return n;
+}
+
+static void act_update(uint64_t b, uint64_t script_b, bool suppress) {
+    if (!act_enabled()) return;
+    act_wheel_step();
+    ActHost h = {NULL, act_phys_held, act_sw_sources, b, script_b, suppress, input_view_dash_zr(), g_present_count};
+    ActSnap s;
+    memset(&s, 0, sizeof s);
+    act_sample(&h, &s);
+    if (test_ptr.valid) s.ptr_x = test_ptr.x, s.ptr_y = test_ptr.y, s.ptr_down = test_ptr.down, s.ptr_valid = true;
+    input_act_stage(&s);
 }
 
 void host_input_update(void) {
@@ -931,11 +1165,12 @@ void host_input_update(void) {
         if (!scanned) scanned = true, pick_pad();
     }
 
-    uint64_t frame = g_present_count;
+    uint64_t frame = g_present_count, script_b = 0;
     for (int i = 0; i < nscript; i++) {
         const ScriptStep *st = &script[i];
         if (frame < st->start || frame >= st->start + st->len) continue;
         b |= st->buttons;
+        script_b |= st->buttons;
         if (st->stick == 0) lx = st->x, ly = st->y;
         if (st->stick == 1) rx = st->x, ry = st->y;
     }
@@ -961,6 +1196,12 @@ void host_input_update(void) {
         OverlayPad p = {b & B(BTN_A), b & B(BTN_B), b & B(BTN_X), b & B(BTN_Y), b & B(BTN_UP), b & B(BTN_DOWN),
                         b & B(BTN_LEFT), b & B(BTN_RIGHT), b & B(BTN_L), b & B(BTN_R), b & B(BTN_PLUS),
                         b & B(BTN_MINUS), clamp_axis(lx) / 32767.0f, clamp_axis(ly) / 32767.0f};
+        static bool swallow;  // the button chosen stays down for a while: it is not a press in the menu either
+        bool choosing = settings_panel_pad_capture();
+        int chosen = pad_capture_poll(choosing);
+        if (chosen) settings_panel_pad(chosen), swallow = true;
+        else if (swallow && !pad_any_held()) swallow = false;
+        if (choosing || swallow) memset(&p, 0, sizeof p);
         overlay_pad(&p);
         b = 0, lx = ly = rx = ry = 0;
     }
@@ -981,5 +1222,6 @@ void host_input_update(void) {
         else if (down & B(BTN_B)) textinput_key(TI_CANCEL);
         b &= ~(B(BTN_PLUS) | B(BTN_B));
     }
+    act_update(b, script_b, menu || (typing && !chat_active()));
     input_set(b, clamp_axis(lx), clamp_axis(ly), clamp_axis(rx), clamp_axis(ry));
 }
