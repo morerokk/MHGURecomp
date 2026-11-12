@@ -198,15 +198,15 @@ static void bc3_encode_block(const uint8_t px[16][4], uint8_t *b) {
     }
     for (int i = 0; i < 6; i++) b[2 + i] = (uint8_t)(abits >> (8 * i));
     // colour: the two visible texels furthest apart, four steps between them
-    int e0 = -1, e1 = -1, far = -1;
+    int e0 = -1, e1 = -1, apart = -1;  // (not "far": a macro in the Android NDK's headers)
     for (int i = 0; i < 16; i++) {
         if (!px[i][3]) continue;
-        if (e0 < 0) e0 = e1 = i, far = 0;
+        if (e0 < 0) e0 = e1 = i, apart = 0;
         for (int j = i + 1; j < 16; j++) {
             if (!px[j][3]) continue;
             int d = 0;
             for (int k = 0; k < 3; k++) d += (px[i][k] - px[j][k]) * (px[i][k] - px[j][k]);
-            if (d > far) far = d, e0 = i, e1 = j;
+            if (d > apart) apart = d, e0 = i, e1 = j;
         }
     }
     int c0[3] = {0, 0, 0}, c1[3] = {0, 0, 0};
