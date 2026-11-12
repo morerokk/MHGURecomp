@@ -141,16 +141,16 @@ static void player_update(Cpu *c) {
         g_bar_raw = fn ? call(c, fn, pl, 1, 0) : 0;
         g_bar = (g_bar_raw & 0xff) != 0;
     }
-    fnhook_call_original(c, FN_PLAYER);
+    fnhook_call_next(c, FN_PLAYER);
 }
 static void town_update(Cpu *c) {
     g_town_frame = g_frame;
-    fnhook_call_original(c, FN_TOWN);
+    fnhook_call_next(c, FN_TOWN);
 }
 static void mapper_seen(Cpu *c, int cls, uint32_t fn) {
     uint32_t pl = c->r[0];
     if (sane(pl) && call(c, FN_PL_IS_LOCAL, pl, 0, 0) == 1) g_var = cls + 1, g_var_frame = g_frame, g_weapon_pub = cls;
-    fnhook_call_original(c, fn);
+    fnhook_call_next(c, fn);
 }
 #define MAPPER(n) static void mapper##n(Cpu *c) { mapper_seen(c, n, mappers[n]); }
 MAPPER(0) MAPPER(1) MAPPER(2) MAPPER(3) MAPPER(4) MAPPER(5) MAPPER(6) MAPPER(7) MAPPER(8) MAPPER(9) MAPPER(10) MAPPER(11)
@@ -170,7 +170,7 @@ static void mb_update(Cpu *c) {
         g_split = act_split();
     }
     if (!g_on) {  // (turned off in the settings menu: the game reads the pad as it is)
-        fnhook_call_original(c, FN_MB_UPDATE);
+        fnhook_call_next(c, FN_MB_UPDATE);
         return;
     }
     if (first) {
@@ -189,7 +189,7 @@ static void mb_update(Cpu *c) {
             if (g_snap.ptr_down) ST32(held, LD32(held) | 0x1000000u);
         }
     }
-    fnhook_call_original(c, FN_MB_UPDATE);
+    fnhook_call_next(c, FN_MB_UPDATE);
     if (g_log && first) {
         LOG("[actions] f%llu %s w%d mb1 in %08x out %08x cur %08x | mb2 in %08x out %08x cur %08x | act %llx v%d st %x:%x lock %x bar %x\n",
             (unsigned long long)g_frame, input_view_context(), g_weapon_pub, g_in[0], g_out[0], LD32(mb + 4), g_in[1],
@@ -225,7 +225,7 @@ static void tr_view(Cpu *c, int view, int slot, uint32_t fn) {
     uint32_t out = act_view(view, in, active, g_dash_zr);
     g_in[slot] = in, g_out[slot] = out;
     c->r[1] = out;
-    fnhook_call_original(c, fn);
+    fnhook_call_next(c, fn);
     // the weapon's R-action, apart from Dash: a bit no pad button gives, in the gameplay word the hunter reads
     if (view != ACT_VIEW_MB2 && view != ACT_VIEW_TOWN) c->r[0] |= act_virtual_bits(active);
 }
@@ -246,7 +246,7 @@ static uint32_t menu_word_of(uint32_t ew) { return ew | ((ew >> 16) & 0xf0u); }
 static void town_pad(Cpu *c) {
     uint32_t sp = spad();
     if (!g_on || !sp || gameplay_view() != ACT_VIEW_TOWN) {
-        fnhook_call_original(c, FN_TOWN_PAD);
+        fnhook_call_next(c, FN_TOWN_PAD);
         return;
     }
     uint32_t m = act_view_managed(ACT_VIEW_TOWN, g_dash_zr), saved[4];
@@ -256,16 +256,16 @@ static void town_pad(Cpu *c) {
         saved[k] = LD32(a);
         ST32(a, (saved[k] & ~m) | (mine[k] & m));
     }
-    fnhook_call_original(c, FN_TOWN_PAD);
+    fnhook_call_next(c, FN_TOWN_PAD);
     for (int k = 0; k < 4; k++) ST32(sp + MB2_OFF + 4 + 4 * k, saved[k]);
 }
 static void tr_mb1(Cpu *c) {
     if (g_on) tr_view(c, g_view = gameplay_view(), 0, FN_TR_MB1);
-    else fnhook_call_original(c, FN_TR_MB1);
+    else fnhook_call_next(c, FN_TR_MB1);
 }
 static void hunt_menu_seen(Cpu *c) {
     g_hunt_menu_ns = plat_now_ns();
-    fnhook_call_original(c, FN_HUNT_MENU);
+    fnhook_call_next(c, FN_HUNT_MENU);
 }
 // A hunt's pause menu is open: the handler has not run for a moment although it ran before in this hunt (any thread; only
 // meaningful while a hunt's camera is the mouse's: host_input.c). Villages run the same function always.
@@ -280,7 +280,7 @@ static void tr_mb2(Cpu *c) {
         g_town_mw = menu_word_of(act_view(ACT_VIEW_TOWN, c->r[1], g_snap.hold[g_var] | g_snap.pulse[g_var], g_dash_zr));
     }
     if (g_on && g_menus) tr_view(c, ACT_VIEW_MB2, 1, FN_TR_MB2);
-    else fnhook_call_original(c, FN_TR_MB2);
+    else fnhook_call_next(c, FN_TR_MB2);
 }
 
 // The R-role getter: with the weapon R-action split from Dash, the weapon's callers are told the virtual bit instead
@@ -293,7 +293,7 @@ static bool kcr_weapon_caller(uint32_t lr) {
 }
 static void kc_r(Cpu *c) {
     uint32_t lr = c->r[14];
-    fnhook_call_original(c, FN_KC_R);
+    fnhook_call_next(c, FN_KC_R);
     if (g_kclog) {
         bool seen = false;
         for (int i = 0; i < g_kc_n; i++) seen |= g_kc_seen[i] == lr;
@@ -313,7 +313,7 @@ void input_view_init(void) {
     act_set_log(log_line);
     act_init(path);
     // (and the hunt's pause menu handler: the mouse is free while that menu is open, host_input.c mouse_update)
-    if (!fnhook_get(FN_HUNT_MENU)) fnhook_set(FN_HUNT_MENU, hle_register("inputview:hunt_menu", hunt_menu_seen));
+    fnhook_set_outer(FN_HUNT_MENU, hle_register("inputview:hunt_menu", hunt_menu_seen));
     input_view_apply();
 }
 
@@ -324,28 +324,21 @@ void input_view_apply(void) {
     const ActProfile *p = act_profile();
     g_log = p->log, g_menus = p->menus, g_pointer = p->pointer;
     g_kclog = getenv("MHGU_ACTION_KCLOG") != NULL;
-    // (a hook something else put there first would be replaced, not chained: the layer stays off then; mods that hook
-    // these functions later chain behind ours, as Forge does for any hook already there)
-    static const uint32_t needed[] = {FN_MB_UPDATE, FN_TR_MB1, FN_TR_MB2, FN_PLAYER, FN_TOWN};
-    for (unsigned i = 0; i < sizeof needed / sizeof *needed; i++)
-        if (fnhook_get(needed[i])) {
-            LOG("[actions] %08x is hooked already: the action layer stays off\n", needed[i]);
-            return;
-        }
-    fnhook_set(FN_MB_UPDATE, hle_register("inputview:mb_update", mb_update));
-    fnhook_set(FN_TR_MB1, hle_register("inputview:tr_mb1", tr_mb1));
-    fnhook_set(FN_TR_MB2, hle_register("inputview:tr_mb2", tr_mb2));
-    fnhook_set(FN_PLAYER, hle_register("inputview:player", player_update));
-    fnhook_set(FN_TOWN, hle_register("inputview:town", town_update));
+    // The layer is an outer hook (fnhook_set_outer): it runs first whenever a mod hooks the same function, before or after
+    // it, so a mod's hook is given the rebound word (a mod that reads the buttons follows the player's bindings with no
+    // work of its own) and the bits a mod adds on the way are not stripped again.
+    fnhook_set_outer(FN_MB_UPDATE, hle_register("inputview:mb_update", mb_update));
+    fnhook_set_outer(FN_TR_MB1, hle_register("inputview:tr_mb1", tr_mb1));
+    fnhook_set_outer(FN_TR_MB2, hle_register("inputview:tr_mb2", tr_mb2));
+    fnhook_set_outer(FN_PLAYER, hle_register("inputview:player", player_update));
+    fnhook_set_outer(FN_TOWN, hle_register("inputview:town", town_update));
     for (int i = 0; i < ACT_WEAPONS; i++) {
         char name[32];
         snprintf(name, sizeof name, "inputview:mapper%d", i);
-        if (!fnhook_get(mappers[i])) fnhook_set(mappers[i], hle_register(name, mapper_fn[i]));
+        fnhook_set_outer(mappers[i], hle_register(name, mapper_fn[i]));
     }
-    if (!fnhook_get(FN_TOWN_PAD)) fnhook_set(FN_TOWN_PAD, hle_register("inputview:town_pad", town_pad));
-    else LOG("[actions] %08x is hooked already: the town's shortcuts read the menu buttons\n", FN_TOWN_PAD);
-    if (!fnhook_get(FN_KC_R)) fnhook_set(FN_KC_R, hle_register("inputview:kc_r", kc_r));
-    else LOG("[actions] %08x is hooked already: the weapon R-action stays one input with Dash\n", FN_KC_R);
+    fnhook_set_outer(FN_TOWN_PAD, hle_register("inputview:town_pad", town_pad));
+    fnhook_set_outer(FN_KC_R, hle_register("inputview:kc_r", kc_r));
     g_hooked = true;
     LOG("[actions] translators hooked\n");
 }
