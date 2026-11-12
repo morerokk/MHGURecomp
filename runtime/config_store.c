@@ -47,13 +47,14 @@ static SDL_AtomicInt live_fps;
 static SDL_AtomicInt live_vsync = {1};
 // [Controls]
 static SDL_AtomicInt live_face;
+static SDL_AtomicInt live_kbm_prompts;
 static SDL_AtomicInt live_menu_confirm;
 static SDL_AtomicInt live_background = {1};
 static SDL_AtomicInt live_combo;
 static SDL_AtomicInt live_chat_key;
 static SDL_AtomicInt menu_chord = {1};
 // [Mouse]
-static SDL_AtomicInt live_mouse;
+static SDL_AtomicInt live_mouse, live_mouse_y, live_mouse_invert, live_mouse_smooth, live_mouse_capture;
 // [Keybinds]
 static SDL_AtomicInt live_binds[BINDS][BIND_KEYS];
 // [Multiplayer]
@@ -92,11 +93,16 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->fps != saved.fps) set_float(&live_fps, (float)c->fps);
     if (all || c->fov != saved.fov) set_float(&live_fov, c->fov);
     if (all || c->mouse_sensitivity != saved.mouse_sensitivity) set_float(&live_mouse, c->mouse_sensitivity);
+    if (all || c->mouse_sensitivity_y != saved.mouse_sensitivity_y) set_float(&live_mouse_y, c->mouse_sensitivity_y);
+    if (all || c->mouse_invert_y != saved.mouse_invert_y) SDL_SetAtomicInt(&live_mouse_invert, c->mouse_invert_y);
+    if (all || c->mouse_smoothing != saved.mouse_smoothing) set_float(&live_mouse_smooth, c->mouse_smoothing);
+    if (all || c->mouse_capture != saved.mouse_capture) SDL_SetAtomicInt(&live_mouse_capture, c->mouse_capture);
     if (all || c->draw_distance != saved.draw_distance) set_float(&live_draw, c->draw_distance);
     if (all || c->fxaa != saved.fxaa) SDL_SetAtomicInt(&live_fxaa, c->fxaa);
     if (all || c->msaa != saved.msaa) SDL_SetAtomicInt(&live_msaa, c->msaa);
     if (all || c->vsync != saved.vsync) SDL_SetAtomicInt(&live_vsync, c->vsync);
     if (all || c->face_buttons != saved.face_buttons) SDL_SetAtomicInt(&live_face, c->face_buttons);
+    if (all || c->kbm_prompts != saved.kbm_prompts) SDL_SetAtomicInt(&live_kbm_prompts, c->kbm_prompts);
     if (all || c->menu_confirm != saved.menu_confirm) SDL_SetAtomicInt(&live_menu_confirm, c->menu_confirm);
     if (all || c->background_input != saved.background_input) SDL_SetAtomicInt(&live_background, c->background_input);
     if (all || c->combo_window != saved.combo_window) SDL_SetAtomicInt(&live_combo, c->combo_window);
@@ -177,12 +183,17 @@ float config_live_fps(void) { return get_float(&live_fps); }
 void config_set_live_fps(float f) { set_float(&live_fps, f < 30 ? 30 : f > 240 ? 240 : f); }  // (debug: the control file's "fps")
 float config_live_fov(void) { return get_float(&live_fov); }
 float config_live_mouse_sensitivity(void) { return get_float(&live_mouse); }
+float config_live_mouse_sensitivity_y(void) { return get_float(&live_mouse_y); }
+int config_live_mouse_invert_y(void) { return SDL_GetAtomicInt(&live_mouse_invert); }
+float config_live_mouse_smoothing(void) { return get_float(&live_mouse_smooth); }
+int config_live_mouse_capture(void) { return SDL_GetAtomicInt(&live_mouse_capture); }
 float config_live_draw_distance(void) { return get_float(&live_draw); }
 int config_live_fxaa(void) { return runtime_fsr ? 0 : SDL_GetAtomicInt(&live_fxaa); }
 int config_live_msaa(void) { return runtime_fsr ? 1 : SDL_GetAtomicInt(&live_msaa); }
 int config_live_vsync(void) { return SDL_GetAtomicInt(&live_vsync); }
 int config_live_menu_confirm(void) { return SDL_GetAtomicInt(&live_menu_confirm); }
 int config_live_face_buttons(void) { return SDL_GetAtomicInt(&live_face); }
+int config_live_kbm_prompts(void) { return SDL_GetAtomicInt(&live_kbm_prompts); }
 int config_live_background_input(void) { return SDL_GetAtomicInt(&live_background); }
 int config_live_combo_window(void) { return SDL_GetAtomicInt(&live_combo); }
 int config_live_chat_key(void) { return SDL_GetAtomicInt(&live_chat_key); }
@@ -372,7 +383,9 @@ bool config_save(const Config *c, char *error, size_t error_size) {
             flush_section(out, entries, n, section, newline);
             snprintf(section, sizeof section, "%.*s", (int)(strchr(s, ']') - s - 1), s + 1);
         }
-        char *eq = (*s && *s != ';' && *s != '#' && *s != '[') ? strchr(s, '=') : NULL;
+        // (the [Actions*] sections are runtime/actions.c's: their lines are kept as they are)
+        bool own = !strncasecmp(section, "Actions", 7) && (!section[7] || section[7] == '.');
+        char *eq = (!own && *s && *s != ';' && *s != '#' && *s != '[') ? strchr(s, '=') : NULL;
         bool handled = false;
         if (eq) {
             char key[128];

@@ -130,6 +130,8 @@ typedef struct TexBackend {
     VkFormat format;
     VkImageViewType base_type;
     uint32_t width, height, depth, layers, levels, samples;
+    float sx, sy;  // resolution scaling: width / the guest's width (and height), 1 for images made at the guest's size
+                   // (0 for the renderer's own images: treated as 1). textures.c tex_scalable
     VkImageAspectFlags aspect;
     bool gpu_owned, uploaded, dynamic;
     uint64_t data_hash, sample_hash, checked_frame, full_frame;
@@ -164,6 +166,10 @@ uint32_t vk_tex_texel_size(const TexBackend *b);
 void vk_tex_decode(const TexBackend *b, const uint8_t *blocks, uint32_t w, uint32_t h, uint8_t *out);
 
 TexBackend *vk_tex(NvnTexture *t, bool for_render);  // backend image (uploads CPU contents unless for_render)
+// Resolution scaling (textures.c): b's image is larger than the guest's texture (b->sx / b->sy above 1)
+static inline bool vk_tex_scaled(const TexBackend *b) { return b && b->sx > 1.0f; }
+static inline float vk_tex_sx(const TexBackend *b) { return b && b->sx > 0.0f ? b->sx : 1.0f; }
+static inline float vk_tex_sy(const TexBackend *b) { return b && b->sy > 0.0f ? b->sy : 1.0f; }
 VkFormat vk_format(uint32_t nvn_format);
 bool vk_format_alpha_one(uint32_t nvn_format);
 bool renderer_format_is_depth(uint32_t f);

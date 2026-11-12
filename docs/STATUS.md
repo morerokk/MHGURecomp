@@ -504,6 +504,34 @@ it (and has the Hub counter: run3\st hasn't met the Guild Manager). Possibly the
 kind of problem: 713 / 906 end with a type 1 Valstrax demo after the clear (see the 713 section); in a session it won't
 play, and whether the quest still ends is untested.
 
+## Resolution scaling: the game renders 1080 lines, the port renders larger (2026-11-12)
+
+Follows the GPU pool fix below: with it, the game's own render targets still took ~59 bytes a pixel of its fixed GPU pool
+in the 32-bit guest, so the render size was capped (~4724x2656 at 16:9). Now a 3D picture more than 1080 lines high
+(config.c) has the game render 1080 lines in the picture's shape (g_render_size: what gen.py's 0xdbcd34 patch, the
+cameras and the GPU pool see; 2520x1080 at 21:9) while the renderer makes its screen-sized targets larger
+(g_render_host, g_rscale = host / guest), the way emulators scale resolution. The game's GPU heap is then byte for byte
+what it is at 1920x1080 (town: 280 MB used, 35 MB largest free block in 848 MB) at 4320x2430 and at 7680x4320, so the
+size has no memory cap left (only the 16384 image limit). Off with FSR (its stand-ins are built for the game rendering
+at its input size: the old way, pool growth and cap) and with MHGU_NO_RSCALE=1 (A/B).
+- Which textures (textures.c tex_scalable): 2D, single-sample, NVN COMPRESSIBLE flag (every target the game makes; no
+  loaded texture has it), size = the guest render size or a halving of it, rounded down or up (the bloom chain down to
+  60x33). Not shadow maps (1024x3072), not the 1280x720 handheld twins the game makes at the same storage. TexBackend
+  sx / sy hold the image's scale; logged "[vk] render target WxH ... made WxH (resolution scaling)".
+- exec.c: begin_pass takes pass_sx / pass_sy from the targets (the FSR stand-in mechanism already scaled viewports and
+  scissors by them; FSR now flagged separately, fsr_standin); MSAA / model-AA size tests use g_render_host,
+  leading_clears the guest size; the HUD's screen-pass test is in guest units. The shaders' rscale table (binding 18,
+  translate.c) is filled: [0] the pass's scale (FragCoord in guest pixels: 62 of the game's fragment shaders read it),
+  [1 + i] each sampled texture's (texel fetches / size queries: none of the 6311 cached programs has any). Copies
+  scale their regions (a scale mismatch blits, filtered); copies between guest memory and a scaled target go through a
+  guest-size image (scale_temp / scale_blit; no such copy seen in play).
+- Tested (2026-11-12, quest 206, one-frame dumps compared with MHGU_NO_RSCALE=1 at the same size): 4320x2430,
+  2560x1440 with MSAA 4x, FXAA, SmoothGradients, HDR10, 21:9 3440x1440: every pass within run-to-run noise (measured with
+  two native runs: 0.3-16% of pixels > 8 codes apart by option, moving Palicos and smoke); 4320 crops match in
+  detail. A real clear (MHGU_KILL_AFTER) shows the quest photo at full detail (its buffer is a render-size target). No
+  fps cost on the RTX 5070 Ti (240 cap either way). Not tested: menus with 3D model previews, title / movies, the Hubs
+  and multiplayer, 16:10 above 1080 lines, weaker GPUs, the validation layer (not installed here).
+
 ## GPU pool at large render sizes: the Great Maccao demo crash (2026-11-11)
 
 Report (0.16.1, RenderResolution 4320x2430): Vaulting Outlaw (206) crashed as the hunter entered Jurassic Frontier area 5,

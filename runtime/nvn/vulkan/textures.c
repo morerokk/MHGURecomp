@@ -247,9 +247,38 @@ void vk_defer_view(VkImageView v) { vk_framebuffers_forget_view(v); defer((Dead)
 void vk_defer_framebuffer(VkFramebuffer f) { defer((Dead){.fb = f}); }
 void vk_defer_buffer(VkBuffer b, VmaAllocation mem) { defer((Dead){.buf = b, .mem = mem}); }
 
+// ---- resolution scaling (config.c: g_rscale above 1)
+// The game renders at g_render_size; its screen-sized render targets are made g_rscale times larger here, and exec.c
+// maps the guest's pixel units onto them (viewports, scissors, copies, the shaders' texel coordinates and FragCoord
+// through the rscale table). Scaled: 2D render targets (NVN's COMPRESSIBLE flag, which every target the game makes has
+// and its loaded textures don't) of the render size or a halving of it (1920x1080, 960x540 ... 60x33 in the game's
+// bloom chain: rounded down, or up). Not the shadow maps (their own sizes) nor the handheld-size twins the game makes
+// at the same storage (1280x720 and its halvings: never rendered to while docked).
+static bool tex_scalable(const NvnTexture *t) {
+    if (g_rscale[0] <= 1.0f && g_rscale[1] <= 1.0f) return false;
+    if (t->target != 1 || t->samples > 1 || !(t->flags & 8) || !t->width || !t->height) return false;
+    for (int k = 0; k < 8; k++) {
+        uint32_t m = (1u << k) - 1, w0 = g_render_size[0] >> k, h0 = g_render_size[1] >> k;
+        uint32_t w1 = (g_render_size[0] + m) >> k, h1 = (g_render_size[1] + m) >> k;
+        if (!w0 || !h0) break;
+        if ((t->width == w0 || t->width == w1) && (t->height == h0 || t->height == h1)) return true;
+    }
+    return false;
+}
+
 static void create_image(NvnTexture *t, TexBackend *b) {
     VkFmt mf = fmt_of(t->format);
     uint32_t tw = t->width ? t->width : 1, th = t->height ? t->height : 1;
+    b->sx = b->sy = 1.0f;
+    if (tex_scalable(t)) {
+        tw = (uint32_t)lroundf((float)tw * g_rscale[0]), th = (uint32_t)lroundf((float)th * g_rscale[1]);
+        if (!tw) tw = 1;
+        if (!th) th = 1;
+        b->sx = (float)tw / (float)t->width, b->sy = (float)th / (float)t->height;
+        static int nlog;
+        if (nlog++ < 24 || getenv("MHGU_TEX_LOG"))
+            LOG("[vk] render target %ux%u (format %#x) made %ux%u (resolution scaling)\n", t->width, t->height, t->format, tw, th);
+    }
     VkImageType type = VK_IMAGE_TYPE_2D;
     uint32_t layers = 1, depth = 1;
     switch (t->target) {
@@ -542,6 +571,9 @@ static void upload_texture(NvnTexture *t, TexBackend *b) {
     b->full_frame = frame;
     b->sample_hash = fnv_sample(mem, total);
     if (b->uploaded && h == b->data_hash) return;
+    // (hle/prompts.c: the button glyphs' textures, by their data - a backend is reused for a quest's textures, so not
+    // only its first upload)
+    { void prompts_texture_seen(uint32_t, const uint8_t *, uint64_t); prompts_texture_seen((uint32_t)t->addr, mem, total); }
     if (b->uploaded && h != b->data_hash) b->dynamic = true;
     b->data_hash = h;
     b->uploaded = true;

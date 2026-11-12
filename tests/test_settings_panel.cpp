@@ -21,6 +21,11 @@ extern "C" const char *g_game_dir = "obj/settings-test/game";  // (modorder.c co
 extern "C" volatile uint64_t g_present_count = 0;  // (runtime/ui.c's frame counter: config.c's model previews read it)
 extern "C" void ui_request_action(bool restart) { requested = restart ? 2 : 1; }
 extern "C" bool ui_action_failed(void) { return false; }
+extern "C" int host_input_last_device(void) { return 0; }
+extern "C" int host_input_sw_sources(int, int, int *, int) { return 0; }
+extern "C" int host_input_held(int *, int) { return 0; }
+extern "C" bool input_view_dash_zr(void) { return false; }
+extern "C" void input_view_apply(void) {}  // (the game side of the action layer: nothing to hook here)
 static int import_requested;
 static const char *picked_folder;  // (what the folder picker "chose": ui_take_picked_folder hands it out once)
 extern "C" void ui_request_import(int what) { import_requested = what; }
@@ -222,7 +227,7 @@ int main() {
     selected("face");
     // The Keybinds submenu: a key chosen for B, then a mouse button as its second; the recomp's own keys refused
     press(ImGuiKey_Home);
-    down(4);  // (background, combo, mouse, keybinds)
+    down(9);  // (background, keyboard prompts, combo, mouse, vertical, invert, smoothing, capture, keybinds)
     selected("keybinds");
     confirm();
     selected("bind.0");  // (past the section's title)
@@ -275,13 +280,40 @@ int main() {
     assert(config_live_bind(BIND_B, 0) == SDL_SCANCODE_G && config_live_bind(BIND_B, 1) == KEY_MOUSE + SDL_BUTTON_MIDDLE);
     assert(config_live_bind(BIND_X, 0) == KEY_MOUSE + SDL_BUTTON_X1);
     press(ImGuiKey_Home);
-    down(4);
+    down(9);
     confirm();
     press(ImGuiKey_End);
     press(ImGuiKey_GamepadDpadUp);
     selected("bind.reset");
     confirm();
     back();
+    selected("keybinds");
+    // The Game actions screen: the tabs over the drawing (Hunt | Town and Hub | Menus | Keys) answer the mouse
+    down();
+    selected("actions");
+    confirm();
+    selected("act.enable");
+    {
+        auto *bw = ImGui::FindWindowByName("Settings##bind");
+        assert(bw);
+        float y = bw->Pos.y + ImGui::GetStyle().WindowPadding.y + bw->FontWindowScale * ImGui::GetFontSize();
+        bool found = false;
+        for (float x = bw->Pos.x + 60; x < bw->Pos.x + bw->Size.x - 60 && !found; x += 8) {
+            io.AddMousePosEvent(x, y);
+            idle();
+            io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+            frame();
+            io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+            idle(4);
+            found = ImGui::GetCurrentContext()->NavId == id("act.tab");  // (a tab click puts the focus on the list's Show row)
+        }
+        assert(found);  // (a tab of the drawing took a click)
+        io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+        idle();
+    }
+    back();
+    selected("actions");
+    press(ImGuiKey_GamepadDpadUp);
     press(ImGuiKey_End);
     press(ImGuiKey_GamepadDpadUp);
     confirm();
@@ -293,7 +325,7 @@ int main() {
     tab();
     tab();
     selected("sync");  // (the Hub heading first)
-    down(3);
+    down(4);  // (lag compensation, village quests, urgent quests, then the HP heading is passed)
     selected("hp.0");
     tab();
     selected("mod.Aaa");
@@ -582,7 +614,7 @@ int main() {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);  // (Cheats, Mods, Misc)
     selected("sync");  // (the Hub heading first)
-    down(3);
+    down(4);  // (lag compensation, village quests, urgent quests, then the HP heading is passed)
     selected("hp.0");
     down(5);
     confirm();

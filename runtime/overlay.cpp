@@ -294,7 +294,7 @@ static void apply_input(ImGuiIO &io) {
     if (settings) {
         int a = overlay_face_position(0), b = overlay_face_position(1);
         int confirm, cancel;
-        menu_confirm_buttons(config_live_menu_confirm(), a, b, pad.a, pad.b, &confirm, &cancel);
+        menu_confirm_buttons(menu_confirm_policy_now(), a, b, pad.a, pad.b, &confirm, &cancel);
         pad.a = confirm; pad.b = cancel;
     }
     // A or B held from the menu that had the controller (the settings' row that opened Forge's menu, Cancel that
@@ -304,7 +304,7 @@ static void apply_input(ImGuiIO &io) {
     int owner = settings ? 1 : g_forge_open ? 2 : 0;
     if (owner && owner != was_owner) wait_release = true;
     was_owner = owner;
-    int policy = settings ? config_live_menu_confirm() : MENU_CONFIRM_ORIGINAL;
+    int policy = settings ? menu_confirm_policy_now() : MENU_CONFIRM_ORIGINAL;
     if (last_policy >= 0 && policy != last_policy) wait_release = true;
     last_policy = policy;
     if (wait_release) {

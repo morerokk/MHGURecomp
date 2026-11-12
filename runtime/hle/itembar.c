@@ -40,6 +40,11 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_steps;                  // notches waiting: < 0 left, > 0 right
 static volatile uint64_t g_seen_ns;  // when the handler last ran
 
+bool itembar_active(void) {
+    uint64_t seen = g_seen_ns;
+    return seen && plat_now_ns() - seen < ACTIVE_NS;
+}
+
 void itembar_scroll(int steps) {
     uint64_t seen = g_seen_ns;
     if (!seen || plat_now_ns() - seen >= ACTIVE_NS) return;  // (no item bar now)

@@ -4,4 +4,5 @@
 
 void mousecam_init(void);              // hooks the quest camera's stick handler
 bool mousecam_active(void);            // the hunt camera takes the mouse now (its stick handler ran just now)
+void mousecam_status(void);            // log where the hunt camera looks (control command "camstat")
 void mousecam_add(float dx, float dy);  // counts the mouse moved (x right, y down; any thread)

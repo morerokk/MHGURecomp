@@ -13,13 +13,34 @@
 static volatile uint64_t g_buttons;
 static volatile int32_t g_sticks[4];  // lx, ly, rx, ry (-32767..32767, y up)
 static int64_t sampling;
+// The game actions: staged by the host thread, published with the buttons (one lock), copied into the "delivered"
+// set when the game reads player 1's pad, so the buttons and the actions it latches come from the same host update.
+static pthread_mutex_t act_lock = PTHREAD_MUTEX_INITIALIZER;
+static ActSnap act_staged, act_pub, act_delivered;
 
 volatile uint64_t g_a_pressed_ns;
 
+void input_act_stage(const ActSnap *s) { act_staged = *s; }
+
 void input_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
-    if ((buttons & ~g_buttons) & (1ull << BTN_A)) g_a_pressed_ns = plat_now_ns();
+    // (a cutscene's skip, hle/evskip.c: the Switch's A; while the menus are the game actions', Confirm's press instead,
+    // host_input.c act_update, so it is the same input that confirms in the menus: left click on keyboard and mouse)
+    if (!(act_enabled() && act_profile()->menus) && ((buttons & ~g_buttons) & (1ull << BTN_A))) g_a_pressed_ns = plat_now_ns();
+    pthread_mutex_lock(&act_lock);
+    for (int v = 0; v < ACT_VARS; v++) act_pub.hold[v] = act_staged.hold[v], act_pub.pulse[v] |= act_staged.pulse[v];
+    act_pub.ptr_x = act_staged.ptr_x, act_pub.ptr_y = act_staged.ptr_y;
+    act_pub.ptr_down = act_staged.ptr_down, act_pub.ptr_valid = act_staged.ptr_valid;
+    memset(act_staged.pulse, 0, sizeof act_staged.pulse);
     g_buttons = buttons;
     g_sticks[0] = lx, g_sticks[1] = ly, g_sticks[2] = rx, g_sticks[3] = ry;
+    pthread_mutex_unlock(&act_lock);
+}
+
+void input_act_latch(ActSnap *out) {
+    pthread_mutex_lock(&act_lock);
+    *out = act_delivered;
+    memset(act_delivered.pulse, 0, sizeof act_delivered.pulse);
+    pthread_mutex_unlock(&act_lock);
 }
 
 void input_get(uint64_t *buttons, int32_t sticks[4]) {
@@ -59,7 +80,13 @@ static void fill_state(Cpu *c) {
     memcpy(s, &n, 8);
     if (id != 0) return;  // docked: only player 1
     int32_t st[4];
+    pthread_mutex_lock(&act_lock);
     uint64_t b = input_npad_state(st);
+    for (int v = 0; v < ACT_VARS; v++) act_delivered.hold[v] = act_pub.hold[v], act_delivered.pulse[v] |= act_pub.pulse[v];
+    act_delivered.ptr_x = act_pub.ptr_x, act_delivered.ptr_y = act_pub.ptr_y;
+    act_delivered.ptr_down = act_pub.ptr_down, act_delivered.ptr_valid = act_pub.ptr_valid;
+    memset(act_pub.pulse, 0, sizeof act_pub.pulse);
+    pthread_mutex_unlock(&act_lock);
     int32_t lx = st[0], ly = st[1], rx = st[2], ry = st[3];
     memcpy(s + 8, &b, 8);
     memcpy(s + 16, &lx, 4);

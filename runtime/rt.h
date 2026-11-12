@@ -33,6 +33,8 @@
 #define ALIAS_SIZE    0x28000000u
 #define STACK_BASE    0xD0000000u   // stack region (main thread stack, mapped thread stacks)
 #define STACK_SIZE    0x20000000u
+#define PLUGIN2_BASE  0xF0100000u   // Forge plugins that do not fit in PLUGIN_BASE..PLUGIN_END (unassigned above the stacks)
+#define PLUGIN2_END   0xF8100000u
 #define GUEST_SPACE   0x100000000ull
 
 // ---- loader.c
@@ -92,6 +94,11 @@ void hle_override(uint32_t guest_addr, HostFn fn, const char *name);
 bool fnhook_set(uint32_t addr, uint32_t detour);
 uint32_t fnhook_get(uint32_t addr);
 void fnhook_call_original(Cpu *c, uint32_t addr);
+// A host layer that always runs first at addr, in front of the hooks of mods and plugins made before or after it (they
+// see what it passes on, and what they change on the way back is not undone): fnhook_set_outer installs it, and it
+// continues with fnhook_call_next (the hook behind it, else the function). fnhook_get shows only the hooks behind it.
+bool fnhook_set_outer(uint32_t addr, uint32_t detour);
+void fnhook_call_next(Cpu *c, uint32_t addr);
 bool fnhook_add_trampoline(uint32_t at, uint32_t addr, bool original);  // false: the table is full
 bool fnhook_room(uint32_t addr, bool tramp);  // a hook at addr (with a trampoline) fits in the tables (1024 each)
 // A hook that writes over a function's first two words in guest memory (Forge's `ldr pc, [pc, #-4]; .word detour`)
