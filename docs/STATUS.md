@@ -1395,7 +1395,7 @@ old way while on.
    ui_group_end: by the nearer edge, or the centre; patched in transient memory before the pass ends; the game's scissor
    of a piece moves with it, as its group was anchored last frame, so the help windows' body is not cut), the village / Hub
    button guides on layer 96 go top, layers below 95 by thirds (the Guild Card name plate), the Meownster Hunters return screen (marked by its map frame, layer 105 at 215, 0) goes top but for
-   its prompts, the quest results screen (marked by its Time Left bar, layer 99 at y 643) centres its
+   its prompts (on the launch screen a window is on one side of the map frame's lower edge, y 530: the flight's dots bridged the map and the launcher), the quest results screen (marked by its Time Left bar, layer 99 at y 643) centres its
    middle: the stamp, reward table, item lists' parchment and rows, the title's PRESS A scales
    about the centre with its layout (layer 108), and a model preview follows the frame drawn over it (also from an earlier pass: the Smithy's model is drawn in a pass of
    its own), not the last quad; its camera, made for its box stretched to the taller picture, gets the box's 16:9 shape
