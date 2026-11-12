@@ -5,8 +5,9 @@
 // set when it polls the pad, and runtime/hle/input_view.c hooks the engine's two button translators (f_5de4b0 for the
 // gameplay view mb1, f_5de4f8 for the menu view mb2): act_view() replaces the buttons of the word they are given by
 // those of the active actions of the context (a hunt, a town, the menus). Every button of the game is an action in
-// each of the three contexts. Nothing else of the game is touched, and with [Actions] Enable=0 (the default) nothing is
-// hooked at all.
+// each of the three contexts. Nothing else of the game is touched, and with [Actions] Enable=0 nothing is hooked at
+// all. Enable and ManageMenus are on by default: with no bindings the game plays as without them, but for
+// act_default_binding's.
 //
 // Pure C: no guest memory and no window; the host's keys, mouse and controller come in through ActHost. The ini
 // parser needs only runtime/config.c's key names.
@@ -101,6 +102,11 @@ int act_weapon_find(const char *name);
 
 typedef struct { int n; int code[ACT_CHORD]; } ActChord;
 typedef struct { bool set; int n; ActChord alt[ACT_ALTS]; } ActBinding;  // set with n == 0: "None" (unbound)
+// A device's default for an action that is not Tier 0's button (NULL: Tier 0's, act_default_switch): keyboard and
+// mouse in the menus and in a town or the Hub have Confirm / TownInteract on left click, Cancel / TownCancel on right
+// click and MenuX / TownX on Space, as the menu pointer works. Read only where an action has no binding of its own and
+// follows none (a Simple row still counts it as Default).
+const ActBinding *act_default_binding(int id, int dev);
 typedef struct {
     ActBinding base[ACT_COUNT];
     ActBinding weapon[ACT_WEAPONS][ACT_COUNT];

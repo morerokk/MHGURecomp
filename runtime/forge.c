@@ -1526,7 +1526,7 @@ void forge_init(void) {
         if (d) closedir(d);
     }
     str_savedata = gstring("savedata");
-    uint32_t at = PLUGIN_BASE;
+    uint32_t at = PLUGIN_BASE, at2 = PLUGIN2_BASE;
     for (int i = 0; i < nf; i++) {
         size_t len;
         uint8_t *data = read_all(found[i], &len);
@@ -1535,7 +1535,9 @@ void forge_init(void) {
         if (data && len >= 0x3C) memcpy(&bss, data + 0x38, 4);
         // (the image, its bss and the 64 KiB alignment of the next one; the trampolines and stubs have their own regions)
         bool room = data && (uint64_t)at + len + bss + 0x10000 <= PLUGIN_END;
-        Module *m = room ? loader_load_nro(name, data, len, at) : NULL;
+        bool high = false;  // (the first region is full: the second one, as far from everything as the guest space allows)
+        if (data && !room && (uint64_t)at2 + len + bss + 0x10000 <= PLUGIN2_END) room = high = true;
+        Module *m = room ? loader_load_nro(name, data, len, high ? at2 : at) : NULL;
         free(data);
         if (!m) {
             if (!data) flog(3, "Failed to read plugin file app:/nativeNX/plugins/%s (%s)", name, found[i]);
@@ -1558,7 +1560,9 @@ void forge_init(void) {
         kernel_map_region(m->base + m->data_off, m->size - m->data_off, 4, 3);
         flog(0, "Found plugin file: app:/nativeNX/plugins/%s", name);
         LOG("[forge] plugin %s (%s)\n", name, found[i]);
-        at = (at + m->size + 0xFFFF) & ~0xFFFFu;
+        if (high) at2 = (at2 + m->size + 0xFFFF) & ~0xFFFFu;
+        else at = (at + m->size + 0xFFFF) & ~0xFFFFu;
+        if (high) LOG("[forge] %s is in the second plugin region (%08x)\n", name, m->base);
     }
     // Host settings need the overlay even when no Forge mods are installed.
     fnhook_set(text_addr(OFF_UPDATE), hle_register("forge:update", frame_update));

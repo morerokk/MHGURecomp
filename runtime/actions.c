@@ -143,6 +143,21 @@ const char *act_view_name(int view) {
 int act_default_switch(int id) { return defs[id].def_sw; }
 const char *act_shared_with(int id) { return defs[id].shared; }
 const int *act_fallbacks(int id) { return defs[id].fb; }
+// Keyboard and mouse defaults that are not Tier 0's button: in the menus (dialogs too) and in a town or the Hub the mouse
+// works as the menu pointer does, left click confirms / talks and right click backs out, and Space is X (the World Map,
+// a menu's X action). Tier 0 alone would give right click (A), Space (B) and left click (X) there; the hunt keeps them.
+static const ActBinding kbm_left = {true, 1, {{1, {KEY_MOUSE + SDL_BUTTON_LEFT}}}};
+static const ActBinding kbm_right = {true, 1, {{1, {KEY_MOUSE + SDL_BUTTON_RIGHT}}}};
+static const ActBinding kbm_space = {true, 1, {{1, {SDL_SCANCODE_SPACE}}}};
+const ActBinding *act_default_binding(int id, int dev) {
+    if (dev != 1) return NULL;
+    switch (id) {
+    case ACT_TOWN_INTERACT: case ACT_MENU_CONFIRM: return &kbm_left;
+    case ACT_TOWN_CANCEL: case ACT_MENU_CANCEL: return &kbm_right;
+    case ACT_TOWN_X: case ACT_MENU_X: return &kbm_space;
+    default: return NULL;
+    }
+}
 int act_order(int view, int *ids, int max) {
     int n = 0;
     for (unsigned i = 0; i < sizeof order / sizeof *order && n < max; i++)
@@ -358,6 +373,7 @@ static bool actions_section(const char *name) {  // "Actions" or "Actions.<...>"
 
 void act_parse(const char *text, ActProfile *p) {
     memset(p, 0, sizeof *p);
+    p->enable = p->menus = true;  // (on unless the ini says 0: with no bindings it plays as the game, but for act_default_binding)
     enum { NONE, MAIN, DEV } kind = NONE;
     int dev = 0, wc = -1;  // wc: the weapon class of the section, -1 none
     int line_no = 0;
@@ -719,7 +735,11 @@ static const ActBinding *binding_in(const ActProfile *p, int dev, int id, int v,
 const ActBinding *act_effective(const ActProfile *p, int dev, int id, int var, int *from) {
     return binding_in(p, dev, id, var, from);
 }
-static const ActBinding *binding_of(int dev, int id, int v) { return binding_in(&prof, dev, id, v, NULL); }
+// What the sampler reads: the binding, else the device's own default (act_default_binding), else NULL (Tier 0's button)
+static const ActBinding *binding_of(int dev, int id, int v) {
+    const ActBinding *b = binding_in(&prof, dev, id, v, NULL);
+    return b ? b : act_default_binding(id, dev);
+}
 
 static bool is_physical(int c) { return c < ACT_SW || c >= ACT_SW + 0x60; }
 
@@ -924,6 +944,7 @@ uint64_t act_row_claim(ActProfile *p, int dev, int row, int code, int (*sw_sourc
         if (b && !b->n) continue;            // (already not set)
         ActBinding nb;
         bool hit = false;
+        if (!b) b = act_default_binding(rows[o].head, dev);  // (a default of the device's own is taken from like a binding)
         if (b) {
             memset(&nb, 0, sizeof nb);
             nb.set = true;

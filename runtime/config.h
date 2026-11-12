@@ -118,6 +118,7 @@ typedef struct {
     int discord_hunter;       // [Discord] ShowHunter: your hunter's name and HR there too (runtime/hle/presence.c)
     int show_fps;             // [Performance] ShowFPS: the frame rate in a box on the screen (runtime/overlay.cpp)
     int menu_chord;           // [Controls] MenuChord: Plus + Minus together open the settings menu (runtime/host_input.c)
+    int kbm_prompts;          // [Controls] KeyboardPrompts: the game's button glyphs show keys and mouse buttons (hle/prompts.c)
     int show_battery;         // [Performance] ShowBattery: BATTERY_*, the battery's charge beside the frame rate or alone
     char save_location[256];  // [Application] SaveLocation (PC): the folder holding the save (save_0/), "" the default
                               // (%APPDATA%\MHGURecomp\save, ~/.local/share/MHGURecomp/save: main.c)
@@ -152,6 +153,9 @@ enum { FSR_NATIVE, FSR_QUALITY, FSR_BALANCED, FSR_PERFORMANCE, FSR_ULTRA_PERFORM
 
 extern Config g_config;
 extern uint32_t g_render_size[2];  // read by the game code (tools/gen.py PATCHES: its docked render size)
+extern uint32_t g_render_host[2];  // the 3D picture's real size: g_render_size, or larger with resolution scaling
+extern float g_rscale[2];          // resolution scaling: g_render_host / g_render_size (1: off). The game renders at
+                                   // g_render_size, the renderer its screen-sized targets this much larger (textures.c)
 extern float g_render_aspect;      // the picture's shape, 16:10 or wider: the 3D cameras' aspect (tools/gen.py PATCHES)
 extern float g_fov_scale;          // boot diagnostic value; camera_fovy reads config_live_fov()
 extern uint32_t g_ui_size[2];      // the game's 2D canvas size (tools/gen.py PATCHES: 0xdbcd48, 0xdbcd54)
@@ -221,6 +225,7 @@ int config_live_fxaa(void);
 int config_live_msaa(void);
 int config_live_vsync(void);
 int config_live_face_buttons(void);
+int config_live_kbm_prompts(void);  // [Controls] KeyboardPrompts (any thread)
 int config_live_menu_confirm(void);
 int config_live_background_input(void);
 int config_live_combo_window(void);

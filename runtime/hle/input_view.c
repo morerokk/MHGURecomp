@@ -35,6 +35,8 @@
 #define HUNT_MENU_STALE_NS 300000000ull
 #define FN_PLAYER      0x4a79ccu  // the hunter's update (r0 = the player)
 #define FN_TOWN        0x48d1f0u  // the town avatar's update
+#define FN_TOWN_PAD    0x992728u  // the town avatar's controls: its shortcuts (X World Map, Y Hunter Search, Plus / Minus)
+                                  // are read from the MENU word's pressed bits (sPad+0x6bfc), not the gameplay word's
 #define FN_PL_IS_LOCAL 0x47bcd0u  // (player) 1: ours
 #define FN_KC_R        0x85f93cu  // () the R-role mask the game tests: R (mb1 0x40), or ZR (0x800) with the second Control Type
 #define FN_PAD_INDEX   0xdad28cu  // (sPad) the index of the pad slot in use
@@ -235,6 +237,28 @@ static int gameplay_view(void) {
     if (g_town_frame && g_frame - g_town_frame <= 3) return ACT_VIEW_TOWN;
     return ACT_VIEW_HUNT_ANY;
 }
+// The town avatar's controls read some buttons from the menu word (its shortcuts: X World Map, Y Hunter Search) and the
+// rest from the gameplay word. The menu word the town's actions would give is kept beside the real one (tr_mb2: the
+// menu translator f_5de4f8 only adds the left stick's directions to the D-pad bits), and for this call the menu word's
+// buttons that the town's actions own are those; it is put back right after, so the menus never see them.
+static uint32_t g_town_mw, g_town_mw_prev;  // (game thread)
+static uint32_t menu_word_of(uint32_t ew) { return ew | ((ew >> 16) & 0xf0u); }
+static void town_pad(Cpu *c) {
+    uint32_t sp = spad();
+    if (!g_on || !sp || gameplay_view() != ACT_VIEW_TOWN) {
+        fnhook_call_next(c, FN_TOWN_PAD);
+        return;
+    }
+    uint32_t m = act_view_managed(ACT_VIEW_TOWN, g_dash_zr), saved[4];
+    uint32_t mine[4] = {g_town_mw, g_town_mw_prev, g_town_mw & ~g_town_mw_prev, g_town_mw_prev & ~g_town_mw};
+    for (int k = 0; k < 4; k++) {  // cur, prev, pressed, released (+4 .. +0x10)
+        uint32_t a = sp + MB2_OFF + 4 + 4 * k;
+        saved[k] = LD32(a);
+        ST32(a, (saved[k] & ~m) | (mine[k] & m));
+    }
+    fnhook_call_next(c, FN_TOWN_PAD);
+    for (int k = 0; k < 4; k++) ST32(sp + MB2_OFF + 4 + 4 * k, saved[k]);
+}
 static void tr_mb1(Cpu *c) {
     if (g_on) tr_view(c, g_view = gameplay_view(), 0, FN_TR_MB1);
     else fnhook_call_next(c, FN_TR_MB1);
@@ -251,6 +275,10 @@ bool input_view_hunt_menu_open(void) {
 }
 void input_view_hunt_menu_reset(void) { g_hunt_menu_ns = 0; }
 static void tr_mb2(Cpu *c) {
+    if (g_on) {  // (once a frame: the menu word the town's actions give, for town_pad)
+        g_town_mw_prev = g_town_mw;
+        g_town_mw = menu_word_of(act_view(ACT_VIEW_TOWN, c->r[1], g_snap.hold[g_var] | g_snap.pulse[g_var], g_dash_zr));
+    }
     if (g_on && g_menus) tr_view(c, ACT_VIEW_MB2, 1, FN_TR_MB2);
     else fnhook_call_next(c, FN_TR_MB2);
 }
@@ -309,6 +337,7 @@ void input_view_apply(void) {
         snprintf(name, sizeof name, "inputview:mapper%d", i);
         fnhook_set_outer(mappers[i], hle_register(name, mapper_fn[i]));
     }
+    fnhook_set_outer(FN_TOWN_PAD, hle_register("inputview:town_pad", town_pad));
     fnhook_set_outer(FN_KC_R, hle_register("inputview:kc_r", kc_r));
     g_hooked = true;
     LOG("[actions] translators hooked\n");

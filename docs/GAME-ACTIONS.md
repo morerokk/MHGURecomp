@@ -184,7 +184,7 @@ low; (6) mash / struggle and the raw-word readers, not worth it.
 
 ```ini
 [Actions]
-Enable=1                  ; 0 (default, and no section at all): nothing hooked, bit-for-bit today's behaviour
+Enable=1                  ; 1 is the default (no section at all too); 0: nothing hooked, bit-for-bit the game's own input
 ManageMenus=1             ; the menu view too
 SheathedAttackA=0         ; 1: AttackA presses A with the weapon away too (only matters once Interact is bound)
 Pointer=0                 ; feed the engine's (dormant) pointer block: experiment, see P1 below
@@ -469,6 +469,94 @@ smithy, equipment box, item box, shop, map, options: hover there is unknown (the
    (v0 weapon out, v3 weapon away, v2 town, v4 no hunter).
 4. Host tests: `make test-actions test-settings test-settings-panel test-settings-locale`.
 
+## Keyboard and mouse in the menus and the town by default; the town's shortcuts (2026-11-11)
+
+* **On by default.** `[Actions] Enable` and `ManageMenus` default to 1 (no section at all too). With no bindings the game
+  plays as without the layer (the golden test), except for the defaults below; `Enable=0` still hooks nothing. A player
+  whose ini already says `Enable=0` / `ManageMenus=0` (anyone who saved the Game actions screen before) keeps that;
+  choosing a binding in the Game actions screen while Enable is off turns it on (with a note).
+* **Device defaults** (`act_default_binding`): keyboard and mouse have `MenuConfirm` / `TownInteract = mouse:left`
+  (confirm, advance a dialog, talk), `MenuCancel` / `TownCancel = mouse:right` (back) and `MenuX` / `TownX = key:Space`
+  (a menu's X action, the World Map), as the menu pointer works. Tier 0 alone gives right click (A), Space (B) and left
+  click (X) there; the hunt keeps those. They are read only where the action has no binding of its own (the sampler's
+  `binding_of`, and so the claims: Tier 0's sources for those buttons are not read there). Simple counts them as
+  Default (`Default (Mouse left)`; the AttackX row `Default (in town: Space)`), Advanced reads `Default (Mouse left)`,
+  the drawing lights them, and giving one of those inputs to another row of the same context takes it from the default
+  (`act_row_claim`). The controller has none.
+* **Pointer mode is unchanged**: a released mouse's clicks go to the pointer (`menu_ptr_click`), never to the bindings,
+  so a learned menu's click is one Confirm and a right click one Back (pause menu: Item Pouch opened, one right click
+  back to the menu). Captured clicks (dialogs, menus not learned) go through the bindings.
+* **Cutscene skip** (`hle/evskip.c`, the Switch's A) follows MenuConfirm's press while the menus are the actions'
+  (`act_update`), so left click skips, not right click.
+* **The town's shortcuts read the menu word.** The town avatar's controls (`f_992728`, run every frame from `0x86ee1c`)
+  read X (World Map) and Y (Hunter Search) and the Plus / Minus option from the *menu* button object's pressed bits
+  (`sPad+0x6bfc`), talking and moving from the gameplay word. So the town's actions alone (gameplay word) moved Space's X
+  only where nothing looked for it, and the menu word still had Tier 0's B. `tr_mb2` now keeps the menu word the town's
+  actions would give (`f_5de4f8` is pure: the engine word plus the left stick's directions as D-pad bits), and a hook on
+  `f_992728` puts its town-owned bits into the menu object's cur / prev / pressed / released for that call only, then
+  restores them; the menus never see them. (The gameplay object's words are in another layout: X is 0x20 there.)
+* **In the game** (hidden, fresh ini with no `[Actions]`, the Soaratorium): log `[actions] on`, `translators hooked`;
+  Space opens the World Map (before the hook: mb1 `in 4000 out 1000` but nothing opened); left click in town no longer
+  opens it; walked to the Wyventurer, "A Wyventurer" shown, left click starts the dialog. `make test-actions`: 3,785,786
+  checks, 0 failures (`test_kbm_town`; the golden test skips the town's A / X / L pressed by key, whose keys differ now).
+* **Menus too** (same day, fresh ini): `[actions] on (menus on)`; at the Wyventurer left click talks and every further
+  left click advances the dialog to its end; Space opens the World Map and right click closes it. `make test-actions`:
+  2,982,980 checks, 0 failures (the golden test now skips the menu word too for A / X / L pressed by key).
+
+## Keyboard and mouse button prompts (2026-11-11, `runtime/hle/prompts.c`)
+
+While the keyboard and mouse are what was last pressed (`host_input_last_device`) and `[Controls] KeyboardPrompts` is
+On (the default; the settings' Controls tab, live), the game's button glyphs show the input that gives that button:
+the mouse's left / right / middle button or wheel as a picture, a key as a cap with its name. The controller gets the
+game's own glyphs back at its next button press.
+
+* **The glyphs.** The button font, `resident.arc` `GUI\02_common\font\button_festa` (a GFD: 70 cells of 24 x 24; its
+  glyph table starts right after the texture name, 20 bytes an entry, code / packed cell as in font_festa), draws from
+  `button_festa_00_ID` (256 x 256 BC3, block-linear, block height 8 GOBs). `fontIcon` (GII) names its codes: PAD_Y X
+  B A L at y 0 (x 0..96), PAD_R 0,24, KEY (the D-pad) 24,24, KEY_U 72,24, KEY_R 96,24, PAD_ZL 120,24, PAD_ZR 144,24,
+  ANALOG_LB / RB (L3 / R3) 168,24 / 192,24, KEY_D 0,48, KEY_L 24,48, KEY_UD 48,48, KEY_RL 72,48, PAD_START /
+  SELECT (Plus / Minus) 0,72 / 24,72; the sticks, arrows, weapons, elements and Palico icons are left alone.
+* **More sheets** (the 3DS had no ZL / ZR: the HUD's buttons are pictures of their own, found from the quest arc's
+  GUI files' texture names): `HD_custom_pnl2_BM_NOMIP` (512 x 512 BC3: the hunt HUD's L Y X B A R ZL ZR, D-pad up /
+  down / right, R3 at y ~247 on a 32 pitch, L3 at 360,184; the Hunter Arts' "ZL + X", the map's R3), `HD_hud00_BM_NOMIP`
+  (the item bar's L Y X B A R at y ~411) and `HD_window_BM_MQ_NOMIP` (the quest details' L / R pages at y 85, ZL / ZR at
+  y 193; it has words, so one file per language). Boxes measured from each picture's ink (`panel_cells`...), the
+  24 x 24 drawing fitted into each. The button font's file is also in each quest arc (the hunt's, the Hunting Horn's
+  notes): textures of their own, the same data.
+* **Swapping them.** The game copies a texture's data as it is into its GPU memory, and the renderer uploads a texture
+  again when its memory changes (page tracking / hashes). The renderer reports every upload (`prompts_texture_seen`,
+  textures.c: a backend is reused for a quest's textures, so not only first uploads); one whose data is a sheet's file
+  (any language's, `nativeNX/<lang>/GUI/...`) is a copy of it, up to 8 a sheet. Each frame (`prompts_frame`, device.c
+  at present) the inputs wanted are worked out; on a change each sheet's cells are drawn on its texels (decoded once)
+  and only the 4 x 4 blocks they touch encoded back to BC3 (alpha extremes in 8 steps, the two furthest-apart colours
+  in 4), the rest of the data the file's to the bit, and written over each copy - one that holds neither the file's
+  data nor what was last written is dropped (its memory is something else's now), never written. The controller gets
+  the file's data back.
+* **Which input.** The context on screen: a hunt (gameplay, and no menu: the pause menu's handler running, no known
+  menu in the pointer's focus, no menu cursor run in the last 150 ms - the focus alone once missed the pause menu with
+  the Hunting Horn out, so Signal showed the hunt's left click, not the menu's Space), a town (no known menu open),
+  else the menus. The Hunting Horn's Melody Effect panel (R in a hunt's pause menu) is the hunt's though a menu is up:
+  its notes are played in the hunt. Its toggle `0x8786d0` (opening and closing it, from the pause menu at 0x86f3f0 /
+  0x86f630) is hooked for the pause menu's object, whose byte `+0xdc` is 1 while the panel shows (0 with the menu;
+  `+0x48` is 3 / 0 too: found by saving the object in both states). Forgotten out of the hunt. Hidden run (`weapon 12`,
+  quest 101): the panel's notes are left click, right click, left + right click; the menu again: Signal Space. The button's first action in that context (`act_order`, by its default Switch button), its
+  keyboard and mouse binding: its own or the one it follows (`act_effective`), else the device's default
+  (`act_default_binding`), else the keybinds' first key for that button (Tier 0; also with the layer or its menus off).
+* **The pictures.** `extras/prompts/mouse_icons.png` (a 4 x 2 grid; used: left, right, middle, wheel up, wheel down)
+  and `keycap.png`, made into 24 x 24 cells by `tools/prompt_icons.py` (cut to their ink, area-averaged; the mouse to
+  22 px) as `runtime/hle/prompt_icons.h`. A key's name is drawn on the cap in the game's festa font (its first glyph
+  page, RGBA8, from `resident.arc`), near black, scaled into the cap's face: one letter or digit, F1..F12, N0..N9 for
+  the keypad, arrows as arrows, SPC ENT TAB BS ESC SHF CTL ALT CAP DEL INS HOM END PGU PGD, else the SDL name's first 3
+  letters; M4 / M5 for the side buttons. Two D-pad directions on one glyph (KEY_UD, KEY_RL) take both keys' symbols,
+  stacked when that draws them bigger (the left / right arrows).
+* **Tested** (hidden runs, a copy of the save, the Soaratorium): the town's HUD shows TAB Multiplayer Menu, SPC World Map,
+  R Hunter Search, T Chat (ZR), BS Help; a virtual controller's press brings back ZL / X / Y / ZR / Minus, a key press
+  the keys again. The atlas (`MHGU_PROMPTS_DUMP=<file>`: the RGBA drawn and its BC3 round trip) has A as the left
+  click and B as the right click in the menus. In a hunt (quest 101): the item bar Q / R, the Hunter Art TAB + left
+  click, R3 ALT; the pause menu's Signal SPC, Zoom In Map R; the context hunt / menus / hunt as the menu opens and closes.
+  Not checked by eye: the quest details' L / R (HD_window), the Hunting Horn's notes, other languages (the files are
+  compared, so a mod's own pictures are left alone).
+
 ## Mouse camera (2026-11-11)
 
 `runtime/hle/mousecam.c` turns the hunt camera's own angles (the quest camera's stick handler `f_2255cc`, and the aiming
@@ -528,6 +616,180 @@ the user, both removed (`91ac87d`, `ea2efba`, reverted): the pointer's *movement
 the bottom of the screen selected nothing) and a scan of the finished frame for the gold highlight bar walked to the
 pointer (slow scrolling, a bug in the Save menu). In menus a captured mouse is therefore the right stick, the wheel and
 its buttons, as above.
+
+### List menus with the mouse (2026-11-11)
+
+What made it possible: most list menus move a shared cursor object (`docs/research/title-menu.md`: update `0x74ee98(cursor,
+pad bits)`, +0xd the row on the page, +0xe rows a page, +0x10 / +0x12 page / pages, +0x14 items). The recompiled code
+calls it from 408 places; a menu is told apart by its call's return address (a hunt's pause menu `0x86f8ec`: 13 items,
+7 a page; Up 0x10, Down 0x40; greyed-out rows are not skipped; Gestures `0x874af0`). The cursor's +0xd is the real row
+(the pause menu's +0xe4 is a copy, which is why writing that did nothing): `runtime/hle/menuptr.c` sets it to the row
+beside the one under the pointer and gives that update one Up or Down bit, so the game makes one ordinary step onto it
+(highlight, sound and help line follow) - a jump in one update, top to bottom included. The menu in focus is the cursor
+that last moved or last appeared.
+
+Where the rows are is learned (`runtime/menulearn.c`): the renderer hands it every HUD piece of a frame (`cbuf_info`: a
+2D piece's matrix, m[12] / m[13] its top left at 1280x720, m[14] its layer, m[0] / m[5] half its size). When the menu in
+focus keeps a row for 12 frames and then keeps another, the two frames are compared: the highlight bar is what moved by
+a whole number of row steps along one axis with its size and layer kept (in the pause menu exactly one piece moves:
+layer 97, 282 x 34 at 970,101, +36 a row; the 3D name tags also move, but change place, size and layer at once). Two
+changes that agree make the menu's geometry, kept in `menus_learned.txt` beside the settings file and used at once; the
+learner found the pause menu's measured geometry exactly, and Gestures (928,101 324 x 34, +36) without any measuring.
+Learning is always on: moving a menu's cursor twice with keys or a controller is enough. Built-in geometries (the pause
+menu, with its page arrows) are not overridden; `MHGU_MENUPTR_NO_BUILTIN=1` leaves them out (to test the learner).
+
+A first playthrough showed three things a fixed place per call can't do: a popup that opens beside the row it came from
+(`0x86fc98`, from the pause menu's Hunter's Notes and others: learned at six heights), calls shared by several screens
+(`0x873e50`: three different lists), and screens in sections, which run a section cursor (one row a page, the page is the
+section: `0x873e60`, `0x876c14` / `0x876c38`, `0x877038` / `0x877078`, `0x749754`) beside their list every frame. So a
+geometry also keeps its bar's signature (the biggest piece's layer and size, and where the bar's box starts from it):
+every frame the renderer looks for that piece and places the rows from it (`menulearn.c` `follow`), a call keeps up to
+four geometries (the one whose bar is on screen is used), and the menu the pointer works on is the open cursor with
+known rows that last moved or appeared, while learning watches only cursors of more than one row (a section cursor
+never takes the focus). menus_learned.txt lines: `lr x y w h dx dy` (a fixed place, older) or with `z kw kh ox oy` after.
+
+Two more kinds of list came up in the playthrough. Item Sets and Equipment Sets (and the Multiplayer menu) don't use the
+list cursor: a heap diff around Down, Down, Up (`memsave` of 0x0c000000, 16 MB: one byte went 0, 1, 2, 1) and an
+`fntrace` filtered on its object found a grid cursor (vtable 0x196cb9c; +0x14 column, +0x15 row, +0x16 / +0x17 columns /
+rows a page, +0x18 / +0x1a page / pages, +0x1c items), updated through its vtable by `0x7530b8`, which runs `0x7530d4` or,
+when +0x1e is not 1, `0x7536e8`; both move the row by Up / Down. Both are hooked like the list cursor (grids of more than
+one column are seen but not done). The Multiplayer menu's rows sit under two group headers, so they are not one step
+apart: a geometry also keeps, for its first 16 rows, a row's own place from the first row's bar, written when the bar is
+seen on that row away from where the geometry put it (`lr off row x y z kw kh` lines; others are counted in steps from the
+nearest known row), and a bar seen again with another step (a jump across a gap) is the same list, only placed anew.
+
+Grids (the item box: call `0x9169dc`, 10 x 10 a page, 23 pages, 2300 items; the equipment box): a geometry has a column
+step (cdx, cdy) beside the row step, each learned from its own moves (Up / Down in one column, Left / Right in one row)
+and written as `lr x y w h dx dy z kw kh ox oy cdx cdy`. A cell is row * columns + column; the jump writes the target's
+column and puts the row one off (or, in the target's row, the column one off) and gives one step bit. The item box's
+cursor frame is drawn at matrix scale 1 (its size is in its vertices), so the learner, which skips pieces under 100
+square units, never saw it: a scale-1 piece is taken when it is the only piece that moved by whole cells, its corner is
+the cell's (the frame sits 4 pixels outside it), the cells are one step each way, and it is not followed every frame
+(many icons and letters on its layer have the same signature). The wheel turns the page of any menu of more than one:
+a grid gets the bits its own paging masks return (`0x85f8c4` previous, `0x85f914` next: L / R in the item box), a list
+Left / Right (as the pause menu's arrows).
+
+The front end can't be learned: on the title's Main Menu (`0x87d824`) and its Options (`0x880798`) no HUD piece moves
+(the bars stay where they are and the selected one is recoloured), and Character Select's frame (`0x5e29a0`) is drawn
+at scale 1, so its size is not known. All three are built in, measured at 1280x720 (Main Menu bars 170..1110 from y 153,
+64 tall, every 84; Options the same from y 195; save cards 55..620 from y 146, 98 tall, every 116), which also keeps the
+learner off them. A learned scale-1 list (no column step) has rows from its frame's corner to the screen's middle (or
+its edge, starting right of the middle). The host forgets the cell the pointer was over when another menu comes into
+focus (else the first hover over the same place on the new screen did nothing).
+
+New Game (2026-11-11): Create New Character / Reuse Data (`0x87f8a0`, bars as the Main Menu's) and Gender (`0x8874cc`,
+two cards side by side, the chosen one drawn bigger: nothing moves) are built in. The creation menu (`0x883804`, a grid
+of 3 x 4: Name ... Clothing, Done its last row) and its sub-screens' grids (4 columns: `0x773e58` Face / Voice / Hairstyle,
+`0x773c44` Features / Eye Color / Clothing, the same layout) are learned: their frames are small-scale pieces (2 x 2;
+three 1 x 1 pieces moving together), which the learner now takes when every small piece that moved moved alike. These
+grids run their cursor only when a button is pressed, which broke three things, each fixed: (1) learning dropped them
+between presses - it now watches a cursor for 3 s after it ran and keeps the last frame of a menu while none is in focus
+(30 s), so its next move is compared with it (a fresh screen's first move is still not seen: three presses each way);
+(2) a hover's jump waited for the next press - when a jump or page waits for a cursor that has not run lately the host
+presses Down for 3 frames, and the hook replaces the pad's steps with its own; (3) nothing knew the screen was open
+before its first press - the renderer looks for the frame of every known small-frame menu exactly (to a pixel) on one of
+its cells (`scan_small`), which opens it there, with the cell, and so a geometry keeps its cursor's column count (a 15th
+field). The two grid calls look alike, so both are found on either's screen; the update that runs takes a jump meant for
+its look-alike. Name is the port's typed text entry.
+Skin Tone is a slider, no cursor: found by a heap diff around Left, Left, Right (a u32 at its object +0x84 went 184,
+183, 182, 183) and an `fntrace` on its object: its update `0x8babe4(slider, ..., pad bits)` runs every frame (from
+`0x8ba920`); Left / Right step the tone (1..184; 10 at a time with L / R held), which it reads from its GUI object's
+parameter 0x10 (+0x24 the GUI; `0x745a78` gets it, `0x745a40` sets it, the value a float in s0). The marker is at x 143
++ 2 x tone. The hook sets that parameter one tone off the one asked for and gives the update one step, so the game moves
+the marker and colours the hunter. A press on the gradient sets the tone, dragging follows it, the wheel steps it; on
+this screen A keeps the tone (it stays open) and B leaves, dropping a tone not kept, so a double click on the gradient
+also confirms it and a click elsewhere on its panel confirms the current one; a right click is B as everywhere. The
+slider counts as an open pointer screen while its update runs. Checked: a click at tone 50 (marker and hunter moved), a
+double click kept it, tone 120 then the swatch kept that, a right click left with tone 120 kept.
+A first try by hand found Eye Color dead past its first cells after Skin Tone (until backing out and in): one call
+runs three screens of 15, 10 and 7 items and its look-alike one of 2, and a quiet cursor kept the last run's count, so
+a bigger screen's other cells were not offered. A quiet cursor's count now counts as unknown (any cell is offered; the
+update gives up one beyond the page's last), and a waiting jump's nudge is kept from the game also when the jump is
+given up (it had moved the selection down a row). Checked: Clothing, Skin Tone, ZR to Eye Color, its 7th cell by hover
+with no key pressed, an empty cell past its 10th left alone. Nudges are at most every 60 ms (were 150).
+
+Prompts (2026-11-11): "Create a character with these settings?" (and, it seems, the game's Yes / No prompts) use a third,
+tiny choice class: `0x74fbb0(choice, pad bits, back mask, on mask)`, the choice a byte (0 the first), A picks it (returns
+1 / 2), B moves to the second and then cancels, the masks (Left / Right from the prompt's call `0x84bd18`) move it. It
+is hooked as a two-cell cursor whose step bits are its caller's masks; learned like the rest (its brackets, 1 x 1 pieces,
+move 140 across: a small frame in a list laid out across has a cell a step wide centred on it). Found with a heap diff
+around Right, Left, Right (a byte 0, 1, 0, 1) and an `fntrace` on its object. Before it was hooked the prompt showed what
+an unknown screen in front of a known one does: the pointer stayed on the menu behind, a left click hit nothing and the
+right one (Cancel) was the only button - while Confirm is the right button on the default keyboard and mouse. So an
+unknown running cursor of several cells that appeared well (100 ms) after the known one now gives the mouse back to what
+it was (captured, its buttons the game's). Then the Style screen (`0x8838e0`, 3 x 2, learned) after it.
+Fixes on the way: (1) a jump or page not done in 400 ms is given up (a jump for the creation menu waited under a message
+box, and the nudge held Down there for good, which kept the message's Confirm out); (2) a nudge's Down is taken out of
+every update for a moment, so it never moves anything itself; (3) a grid's jump moves the row first and then the column,
+each one ordinary step (the Style grid took back a column written with the row); (4) look-alikes - the Style grid has the
+creation menu's frame, place and column step - are told apart by which cursor ran last (the frame scan skips the others),
+a jump for one that isn't running is moved to the look-alike that runs, its cell found again from the pointer's place by
+that one's geometry; (5) a menu known only from the frame scan comes last for the pointer, and a sighting is never its
+appearing anew (a stray piece where the Face grid's corner would be, on the Style screen, had taken the pointer); (6) the
+frame scan correcting a quiet cursor's cell is not a move (the creation menu behind the prompt had taken the pointer that
+way). Checked: the whole New Game flow by mouse in a hidden run, from Create New Character to the Style screen.
+
+What ships: `runtime/hle/menuptr_table.h`, made by `tools/menus_table.py` from menus_learned.txt files of playthroughs
+(`python tools/menus_table.py <menus_learned.txt>...`; it reads the table's own lines first, so a new playthrough adds to
+it). It merges them as the game does, leaves out a call's fixed-place lines once it has a geometry with a signature, and
+writes one line per geometry and per row place. The game parses it at start-up before the player's own
+menus_learned.txt, which can still add menus and correct places; learning stays on for menus the table lacks.
+`MHGU_MENUPTR_NO_SHIPPED=1` leaves it out (with `MHGU_MENUPTR_NO_BUILTIN=1`, both are). First table (2026-11-11): 44
+menus from one playthrough with the test save (title, village and hunt menus, item and equipment sets, the
+Multiplayer menu, the item box).
+
+`host_input.c` lets the mouse go while a known menu is open (and, in a hunt, while a screen it opened is: the pause
+handler `f_86eeec` is still stopped), puts the pointer on the selected row when the mouse was captured, and makes a left
+click pick a row (Confirm once it is selected; the pause menu's arrows turn its page), a right click Cancel, the wheel
+move the selection. On a picture not 16:9 the renderer places the HUD itself (narrowed toward a side wider than 16:9,
+flattened toward the top or bottom at 16:10, a window at a time; its matrices are final only once the window's group
+is complete), so the pointer is mapped by what it did: `menulearn.c` keeps each piece's final matrix (the copy
+`cbuf_info` hands the GPU, read at the frame's end) beside its layout, and for the menu in focus takes a piece inside its
+cells' area: its layout and final places give the offset, the renderer's scale the rest (`menuptr_screen_map`); until
+there is one, the menu counts as centred. Checked with `mouseat` (the pointer at a window point, so the mapping isn't
+what checks itself) on the pause menu's rows as screenshots showed them: at 16:10 (the first try at y 301, "Pause",
+had picked "Hunter's Notes": the flattening was not mapped), at 21:9 with the HUD centred (x had spread the 16:9 HUD
+over the whole picture: the left of the rows missed) and with Edges. The front end at 21:9 and 16:10 is not checked.
+Tested in hidden runs with `menuat`: hover, the pause menu's arrows, Quest Info opened and
+closed by right clicks, the pause menu learned from scratch, Gestures learned and a gesture performed by a click. Not
+done: menus whose highlight doesn't move (lists that scroll under a fixed bar), grids and other cursor types (the item
+pouch, item box, smithy), page arrows other than the pause menu's, a list laid out across (the step would be Left /
+Right: untested). `MHGU_MENUPTR_PROBE=1` logs every cursor of the class with its call ("(known)" once its rows are).
+
+**Menus the learner can't see (2026-11-11, the Soaratorium).** Found with `fnnew 700000 a00000 1` in a visible run while
+the user went through each menu (the first-call log, matched with the list cursor's call sites), measured with `pieces`
+before and after a Down and with screenshots:
+* *Banner lists* - the Bistro's Order a Meal (`0x931d1c`), the Quest Counter's ranks (`0x9839b8`), star levels
+  (`0x984314`) and quests: the chosen banner is drawn 32 further left (and recoloured), no piece of its own moves, so
+  nothing is learned. Built in (`builtin[]`, `tools/menus_table.py` BUILTIN) at their measured places.
+* *The list widget* `0x74c130` runs the list cursor itself (from `0x74c4ec` for its list at widget+4, `0x74c514` for a
+  second one at widget+0x28: the quest details' L / R pages); `list_widget` keeps its caller, and the cursor's call is
+  that caller (`0x981f1c`: the quest list), the second one with the top bit set. One id for both made the pointer flip
+  between them every frame (hover worked now and then, the wheel paged the wrong one). The quest list's page arrows are
+  in `menuptr_hit`'s table beside the pause menu's.
+* *A linked pair* - the World Map's 2 x 4 destinations are two list cursors, rows (`0x993d04`, Up / Down) and columns
+  (`0x993d2c`, Left / Right). `linked[]`: the row cursor is the menu (cells rows x 4, its column the other's,
+  `g_link_col`), the column cursor only reports and takes a jump's column, with no entry of its own (never a focus or
+  the unknown-screen safety net). Built in: first cell 322,213, 159 across, 148 down. Hidden run: hover onto Yukumo
+  (both cursors) and back to Soaratorium, a click on Kokoto opened its destinations, a right click came back.
+* *Geometries per item count* - the destinations list after a World Map choice (`0x992e7c`) spaces its rows by their
+  number (76 for four, at the Soaratorium; 94 for three, at Kokoto). `MenuGeom.count` (16th field of a line): a change
+  learned with another row step *and* another number of cells than a stored geometry of the same bar becomes a
+  geometry of its own with that count (`geom_put`; a list with rows not one step apart keeps one, its count being the
+  same); otherwise the count is dropped (0: any). `menuptr_geometry` takes the one with the cursor's cells, else the
+  last with count 0. Hidden run: three choices learned at Kokoto, Cancel and Go to Your House hovered; four at the
+  Soaratorium, Cancel hovered. Also: a frame of no known size whose corner is between x 200 and the middle is taken to
+  be centred (its row ends as far past the middle as it starts before it), not to end at the middle - the destinations'
+  bar is 384 to 896, so the right half missed.
+* *Banner lists, learned* (`find_slide`, menulearn.c): when `find_bar` finds no bar on a row change, every piece that
+  moved slid sideways in its own row by one distance, the new row's one way and the old row's back: the step is their
+  rows' distance, the box the new row's top left (a frame of no known size). The Smithy learned so (`0x8f1c7c`: 865,52,
+  48 down; its rows: a banner and two text pieces, the chosen one 32 left), and the other NPC menus like it.
+* *A button below a list* (`follow`, menulearn.c): the Palico training setups' last row is a button (Begin Training,
+  Select details) whose highlight is recoloured in place, so the learned rows put it one step below the list (on the
+  Cost row). Settled on the last row with none of the menu's bar on screen, the one button piece (layer 97, 210 x 34)
+  gives that row's place (`menuptr_row_seen`, kept like an uneven list's row). `0x96af8c`: row 2 at +146 (user's run);
+  `0x967514` (Intense Training) is also built in, row 2 at +145.
 
 ### The settings panel's drawing tabs and mouse clicks (2026-11-11)
 
