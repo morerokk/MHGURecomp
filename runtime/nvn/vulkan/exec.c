@@ -1013,8 +1013,13 @@ static void ui_group_add(float *m, float pos_z, float pos_x, float pos_y, int va
     bool apart = (g_render_aspect > 16.0f / 9.0f || !(ui_group.anchors & (1u << vanchor))) &&
                  (pos_x < ui_group.xmin - margin || pos_x > ui_group.xmax + margin) &&
                  (pos_y < ui_group.ymin - margin || pos_y > ui_group.ymax + margin);
+    // Meownster Hunters: the map in its frame (lower edge y 495 / 510) and the launcher under it (cannon, Palico picker,
+    // prompts, y 562 and below) are two windows of layer 100. After a launch the flight's dots (y 551..630) are drawn
+    // after the frame's lower edge and bridged the two: the map's tokens and the frame's edge went Bottom with the
+    // launcher, the edge a black bar ~70 px under the map until the dots were gone. A window there is on one side of y 530.
+    bool meownster_side = ui_meownster_pass && (pos_y > 530.0f) != (ui_group.y0 > 530.0f);
     if (ui_group.n && (fabsf(pos_z - ui_group.z) > 0.5f || pos_y < ui_group.ymin - 470.0f || pos_y > ui_group.ymax + 470.0f ||
-                       apart || ui_group.n == UI_GROUP_MAX))
+                       apart || meownster_side || ui_group.n == UI_GROUP_MAX))
         ui_group_end();
     if (!ui_group.n) {
         ui_group.z = pos_z, ui_group.x0 = ui_group.xmin = ui_group.xmax = pos_x, ui_group.y0 = ui_group.ymin = ui_group.ymax = pos_y;
