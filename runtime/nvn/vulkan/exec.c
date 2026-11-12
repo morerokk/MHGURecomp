@@ -1013,8 +1013,13 @@ static void ui_group_add(float *m, float pos_z, float pos_x, float pos_y, int va
     bool apart = (g_render_aspect > 16.0f / 9.0f || !(ui_group.anchors & (1u << vanchor))) &&
                  (pos_x < ui_group.xmin - margin || pos_x > ui_group.xmax + margin) &&
                  (pos_y < ui_group.ymin - margin || pos_y > ui_group.ymax + margin);
+    // Meownster Hunters: the map in its frame (lower edge y 495 / 510) and the launcher under it (cannon, Palico picker,
+    // prompts, y 562 and below) are two windows of layer 100. After a launch the flight's dots (y 551..630) are drawn
+    // after the frame's lower edge and bridged the two: the map's tokens and the frame's edge went Bottom with the
+    // launcher, the edge a black bar ~70 px under the map until the dots were gone. A window there is on one side of y 530.
+    bool meownster_side = ui_meownster_pass && (pos_y > 530.0f) != (ui_group.y0 > 530.0f);
     if (ui_group.n && (fabsf(pos_z - ui_group.z) > 0.5f || pos_y < ui_group.ymin - 470.0f || pos_y > ui_group.ymax + 470.0f ||
-                       apart || ui_group.n == UI_GROUP_MAX))
+                       apart || meownster_side || ui_group.n == UI_GROUP_MAX))
         ui_group_end();
     if (!ui_group.n) {
         ui_group.z = pos_z, ui_group.x0 = ui_group.xmin = ui_group.xmax = pos_x, ui_group.y0 = ui_group.ymin = ui_group.ymax = pos_y;
@@ -3469,9 +3474,10 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // Status HUD (Clock, HP bar, Stamina, gauges, palico status: y < 500) -> Left anchor
                         // Item Selector wheel (y >= 500) -> Right anchor
                         // The bowgun's ammo list (held L) stands over the item bar, x 970..1242, y 360..568: by height it was
-                        // split at 500, its upper rows Left / Top, a gap in the middle. The status HUD ends at x 742, so the
-                        // right side (x >= 900) is the item bar's whatever its height.
-                        if (pos_y < 500.0f && pos_x < 900.0f) {
+                        // split at 500, its upper rows Left / Top, a gap in the middle. So the right side (x >= 900) is the item
+                        // bar's, but only below the bars: the HP and stamina bars grow to the right with their maximum (a full
+                        // stamina bar's end piece is at x 1062, y 33), so the top (y < 300) is the status HUD's at any x.
+                        if (pos_y < 300.0f || (pos_y < 500.0f && pos_x < 900.0f)) {
                             anchor = ANCHOR_LEFT;
                             vanchor = V_TOP;
                         } else {
