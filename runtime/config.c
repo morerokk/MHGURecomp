@@ -133,6 +133,8 @@
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
 uint32_t g_render_size[2] = {1920, 1080};
+uint32_t g_render_host[2] = {1920, 1080};
+float g_rscale[2] = {1.0f, 1.0f};
 uint32_t g_gpu_pool_size = 0x35200000u;  // the game's GPU pool for render targets and textures (gen.py PATCHES)
 float g_render_aspect = 16.0f / 9.0f;
 float g_fov_scale = 1.0f;
@@ -1326,9 +1328,17 @@ void config_load(void) {
             "%.2f\n", names[g_config.fsr_quality], r, w, h, g_fsr_output[0], g_fsr_output[1], g_config.fsr_sharpness,
             g_fsr_lod_bias);
     }
-    {   // The game's 2.5 GB heap fits its GPU pool (below) grown by ~665 MB at most (4800x2700 played; 5120x2880, +774:
-        // "out of command memory" before the town). Larger render sizes never worked: their targets alone are more than
-        // the pool. Keep the shape, lower the size to what fits with 640 MB.
+    // Resolution scaling: a 3D picture more than 1080 lines high (the Switch's docked picture) is rendered by the game
+    // 1080 lines high, in the same shape (g_render_size: what its code, its cameras and its memory see), and the
+    // renderer makes its screen-sized render targets that much larger (textures.c tex_scalable; exec.c scales
+    // viewports, scissors, copies and shader texel coordinates). The game's GPU pool then holds what it holds on the
+    // Switch at any size: rendering at the size itself, its targets took ~59 bytes a pixel of it, which capped the size.
+    // Not with FSR (its stand-ins and inputs are made for the game rendering at its input size: that keeps the old way)
+    // nor with MHGU_NO_RSCALE=1 (A/B tests).
+    bool rscale = !g_config.fsr && h > 1080 && !getenv("MHGU_NO_RSCALE");
+    if (!rscale) {  // The game's 2.5 GB heap fits its GPU pool (below) grown by ~665 MB at most (4800x2700 played;
+        // 5120x2880, +774: "out of command memory" before the town). Larger render sizes never worked: their targets
+        // alone are more than the pool. Keep the shape, lower the size to what fits with 640 MB.
         const uint64_t max_px = 1920ull * 1080ull + (640ull << 20) / 64;
         uint64_t px = (uint64_t)w * (uint64_t)h;
         if (px > max_px) {
@@ -1339,15 +1349,26 @@ void config_load(void) {
             LOG("[config] 3D resolution %dx%d is more than the game's memory holds: using %dx%d\n", ow, oh, w, h);
             if (g_config.fsr && !getenv("MHGU_FSR_LODBIAS")) g_fsr_lod_bias = log2f((float)w / (float)g_fsr_output[0]);
         }
+    } else if (w > 16384 || h > 16384) {  // (the largest image GPUs make)
+        int ow = w, oh = h;
+        fit_aspect(w < 16384 ? w : 16384, h < 16384 ? h : 16384, aspect, &w, &h);
+        LOG("[config] 3D resolution %dx%d is larger than the GPU's images: using %dx%d\n", ow, oh, w, h);
     }
+    int gw = w, gh = h;
+    if (rscale) fit_aspect(w, 1080, aspect, &gw, &gh);
     g_config.render_w = w, g_config.render_h = h;
-    g_render_size[0] = (uint32_t)w;
-    g_render_size[1] = (uint32_t)h;
+    g_render_host[0] = (uint32_t)w, g_render_host[1] = (uint32_t)h;
+    g_render_size[0] = (uint32_t)gw;
+    g_render_size[1] = (uint32_t)gh;
+    g_rscale[0] = (float)w / (float)gw, g_rscale[1] = (float)h / (float)gh;
+    if (rscale) LOG("[config] resolution scaling: the game renders %dx%d, its picture is made %dx%d (x%.3f)\n", gw, gh, w, h,
+                    g_rscale[1]);
     {   // The game's screen-sized targets come out of its 848 MB GPU pool: ~59 bytes a pixel (measured at 720p to
         // 4320x2430). Above the Switch's 1920x1080 the pool grows by that much (64 a pixel), so what's left for
         // textures stays as on the Switch; at 4320x2430 the pool was otherwise too full for a boss demo's 5.6 MB
-        // texture, and the game copied it to address 0 over its own code.
-        uint64_t px = (uint64_t)w * (uint64_t)h, base = 1920ull * 1080ull;
+        // texture, and the game copied it to address 0 over its own code. (With resolution scaling only a picture wider
+        // than 16:9 is more pixels than that.)
+        uint64_t px = (uint64_t)gw * (uint64_t)gh, base = 1920ull * 1080ull;
         uint64_t size = 0x35200000ull + (px > base ? ((px - base) * 64 + 0xfffff) & ~0xfffffull : 0);
         g_gpu_pool_size = (uint32_t)size;
         if (px > base) LOG("[config] GPU memory pool %u MB (848 + %u for the render size)\n", (unsigned)(size >> 20),
