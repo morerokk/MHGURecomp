@@ -288,6 +288,7 @@ static void script_parse(void) {
 //   type <text>            type into the game's text entry (runtime/textinput.c); textkey enter|escape|backspace
 //   mousemove <x> <y> <ms> mouse look as if the mouse moved at that many counts a second (y down) for that long
 //   wheel <notches>        the mouse wheel turned that far (> 0 up; by default the item bar to the left)
+//   keyev <key> <0|1>      that key (SDL's name: Space, Return, Q) pressed or released, as the keyboard sends it
 //   menuat <x> <y> [btn]   the free pointer moved to that point of the 1280x720 screen (placed as the menu in focus is),
 //                          then that mouse button (1 left, 3 right) clicked there
 char g_shot_request[256];  // (runtime/nvn/vulkan/device.c saves it)
@@ -599,6 +600,15 @@ static void control_poll(void) {
                 SDL_PushEvent(&b);
                 continue;
             }
+            if (!strcmp(cmd, "keyev")) {  // keyev <SDL key name> <0|1>: that key pressed / released (tests: SDL's own event)
+                SDL_Scancode sc = SDL_GetScancodeFromName(arg);
+                if (sc == SDL_SCANCODE_UNKNOWN) { LOG("[control] keyev: no key '%s'\n", arg); continue; }
+                SDL_Event k = {0};
+                int down = atoi(arg2);
+                k.key.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP, k.key.scancode = sc, k.key.down = down != 0;
+                SDL_PushEvent(&k);
+                continue;
+            }
             if (!strcmp(cmd, "weapon")) {  // weapon <type 0-14> [id]: (debug) the local hunter holds that weapon type (before "depart")
                 uint32_t T = (uint32_t)atoi(arg), id = (uint32_t)strtoul(arg2, NULL, 0);
                 uint32_t sp = LD32(0x1a85b58u), gc = LD32(0x1a8ca48u), slot = LD32(gc + 0x30);
@@ -821,6 +831,9 @@ static void menu_ptr_click(int btn, float mx, float my, int clicks) {
     if (hit >= 0) menuptr_select_at(hit, true, menu_ptr_gx, menu_ptr_gy);
     else if (hit == MENUPTR_PAGE_LEFT) host_input_press("LEFT", 12);
     else if (hit == MENUPTR_PAGE_RIGHT) host_input_press("RIGHT", 12);
+    // (a screen of a hunt's menu with no known cells - an option being changed in Options, Quest Info...: the click is
+    // Confirm there, as a right click is Cancel; a click beside a known menu's rows still does nothing)
+    else if (!menuptr_open()) host_input_press("A", 12);
 }
 static void menu_ptr_wheel(int n) {  // (n > 0 up: a menu of pages turns to the previous one; else the row above)
     if (menuptr_slider_open()) return menuptr_slider_step(n > 0 ? 1 : -1);  // (Skin Tone: a tone a notch)

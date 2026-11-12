@@ -14,8 +14,11 @@
 // it: resident.arc's and the quest arcs' copies are textures of their own), and the renderer uploads a texture again
 // whenever that memory changes (nvn/vulkan/textures.c: page tracking, hashes). So a sheet's cells are redrawn, only the
 // 4 x 4 blocks they touch encoded again, and the result written over each of the game's copies; the file's data goes
-// back for the controller. The renderer reports every upload (prompts_texture_seen); a texture whose data is a sheet's
-// file (in any language) is a copy of it.
+// back for the controller. The renderer reports every upload (prompts_texture_seen); a texture whose data is one of a
+// sheet's versions is a copy of that version. The versions: each language's loose file and the sheet's entries in
+// resident.arc, resident_<language>.arc and quest_<language>.arc. They are often one picture encoded twice (English
+// HD_window: the loose file, resident.arc's and resident_eng.arc's are three encodings, and the game draws an arc's),
+// so each copy is redrawn from its own version.
 //
 // Which input: the button's action in the context on screen (the menus, a town, a hunt; actions.c), its binding for
 // the keyboard and mouse (its own, the one it follows, or the device's default: actions.c act_default_binding), else
@@ -76,21 +79,25 @@ static const Cell window_cells[] = {  // HD_window
 };
 static const char *const langs[] = {"eng", "fre", "ger", "ita", "spa", "chS", "chT", "jpn", "kor"};
 #define NLANG (int)(sizeof langs / sizeof *langs)
+#define MAX_VARS (3 * NLANG + 1)
+typedef struct { uint32_t addr; int v; } Copy;  // a copy in guest memory and the version it is
 typedef struct {
-    const char *file;  // under nativeNX/<language>/
+    const char *file;  // under nativeNX/<language>/ (in an arc: the same path with backslashes, no ".tex")
     int w, h;          // texels (BC3: a byte a texel)
     const Cell *cells;
     int ncells;
-    uint8_t *var[NLANG];  // each language's file's data (NULL: none, or the same as an earlier language's)
-    int active;           // the language the game's copies are (-1: none seen)
-    uint8_t *rgba;        // its texels
-    uint8_t *cur;         // what the copies hold now
+    uint8_t *var[MAX_VARS];  // the versions' data (no two alike)
+    char from[MAX_VARS][24];  // (where each was read, for the log)
+    uint8_t *cur[MAX_VARS];  // what the copies of a version hold now (NULL: none seen yet)
+    int nvar;
+    uint8_t *rgba;        // the texels of version rgba_var (-1: none decoded yet)
+    int rgba_var;
     uint8_t *work, *out;  // (a redraw's texels and data)
-    uint32_t addrs[MAX_COPIES];
-    int naddrs;
+    Copy copies[MAX_COPIES];
+    int ncopies;
     bool fresh;  // (a copy was found: it gets what the others have)
 } Sheet;
-#define SHEET(f, w, h, c) {f, w, h, c, (int)(sizeof c / sizeof *c), {0}, -1, NULL, NULL, NULL, NULL, {0}, 0, false}
+#define SHEET(f, w, h, c) {f, w, h, c, (int)(sizeof c / sizeof *c), {0}, {{0}}, {0}, 0, NULL, -1, NULL, NULL, {{0}}, 0, false}
 static Sheet sheets[] = {
     SHEET("GUI/02_common/font/button_festa_00_ID.tex", 256, 256, font_cells),
     SHEET("GUI/99_texture/HD_custom_pnl2_BM_NOMIP.tex", 512, 512, panel_cells),
@@ -107,25 +114,34 @@ static Letter g_letters[160];
 static int g_nletters;
 
 // ------------------------------------------------------------------ the game's files
-static uint8_t *arc_entry(FILE *f, const char *want, uint32_t *size) {
+// An arc's entry count (-1: not an arc), entry i's 80 bytes (name: the first 64), and an entry's data
+static int arc_count(FILE *f) {
     uint8_t head[12];
-    if (fseek(f, 0, SEEK_SET) || fread(head, 1, 12, f) != 12 || memcmp(head, "ARC", 4)) return NULL;
-    uint32_t n = head[6] | head[7] << 8;
-    for (uint32_t i = 0; i < n; i++) {
+    if (fseek(f, 0, SEEK_SET) || fread(head, 1, 12, f) != 12 || memcmp(head, "ARC", 4)) return -1;
+    return head[6] | head[7] << 8;
+}
+static bool arc_header(FILE *f, int i, uint8_t e[80]) {
+    return !fseek(f, 12 + 80 * (long)i, SEEK_SET) && fread(e, 1, 80, f) == 80;
+}
+static uint8_t *arc_read(FILE *f, const uint8_t e[80], uint32_t *size) {
+    uint32_t cs, ds, off;
+    memcpy(&cs, e + 68, 4), memcpy(&ds, e + 72, 4), memcpy(&off, e + 76, 4);
+    ds &= 0x1fffffffu;
+    uint8_t *src = malloc(cs ? cs : 1), *dst = malloc(ds ? ds : 1);
+    uLongf len = ds;
+    bool ok = src && dst && !fseek(f, off, SEEK_SET) && fread(src, 1, cs, f) == cs &&
+              (cs == ds ? (memcpy(dst, src, ds), true) : uncompress(dst, &len, src, cs) == Z_OK && len == ds);
+    free(src);
+    if (!ok) { free(dst); return NULL; }
+    *size = ds;
+    return dst;
+}
+static uint8_t *arc_entry(FILE *f, const char *want, uint32_t *size) {
+    int n = arc_count(f);
+    for (int i = 0; i < n; i++) {
         uint8_t e[80];
-        if (fseek(f, 12 + 80 * (long)i, SEEK_SET) || fread(e, 1, 80, f) != 80) return NULL;
-        if (strncmp((const char *)e, want, 64)) continue;
-        uint32_t cs, ds, off;
-        memcpy(&cs, e + 68, 4), memcpy(&ds, e + 72, 4), memcpy(&off, e + 76, 4);
-        ds &= 0x1fffffffu;
-        uint8_t *src = malloc(cs ? cs : 1), *dst = malloc(ds ? ds : 1);
-        uLongf len = ds;
-        bool ok = src && dst && !fseek(f, off, SEEK_SET) && fread(src, 1, cs, f) == cs &&
-                  (cs == ds ? (memcpy(dst, src, ds), true) : uncompress(dst, &len, src, cs) == Z_OK && len == ds);
-        free(src);
-        if (!ok) { free(dst); return NULL; }
-        *size = ds;
-        return dst;
+        if (!arc_header(f, i, e)) return NULL;
+        if (!strncmp((const char *)e, want, 64)) return arc_read(f, e, size);
     }
     return NULL;
 }
@@ -292,6 +308,51 @@ static const Letter *letter(uint32_t c) {
     return NULL;
 }
 
+// A TEX file's data as a version of a sheet, unless it is not the sheet's size and format or a version already
+static bool add_version(Sheet *s, const uint8_t *t, uint32_t n, const char *from) {
+    uint32_t w, h;
+    int fmt;
+    const uint8_t *data = tex_data(t, n, &w, &h, &fmt);
+    uint64_t bytes = (uint64_t)s->w * s->h;
+    if (!data || (int)w != s->w || (int)h != s->h || fmt != 0x17 || data + bytes > t + n || s->nvar == MAX_VARS) return false;
+    for (int k = 0; k < s->nvar; k++)
+        if (!memcmp(s->var[k], data, bytes)) return false;
+    if (!(s->var[s->nvar] = malloc(bytes))) return false;
+    memcpy(s->var[s->nvar], data, bytes);
+    snprintf(s->from[s->nvar++], sizeof s->from[0], "%s", from);
+    return true;
+}
+// The sheets' entries of an arc ("GUI\..." or "<language>\GUI\...")
+static int load_arc_versions(const char *rpath, const char *from) {
+    const char *path = romfs_host_path(rpath);
+    FILE *f = path ? fopen(path, "rb") : NULL;
+    if (!f) return 0;
+    char want[NSHEETS][96];
+    for (int i = 0; i < NSHEETS; i++) {
+        snprintf(want[i], sizeof want[i], "%s", sheets[i].file);
+        for (char *c = want[i]; *c; c++) *c = *c == '/' ? '\\' : *c;
+        char *dot = strrchr(want[i], '.');
+        if (dot) *dot = 0;
+    }
+    int found = 0, n = arc_count(f);
+    for (int k = 0; k < n; k++) {
+        uint8_t e[80];
+        if (!arc_header(f, k, e)) break;
+        char name[65];
+        memcpy(name, e, 64), name[64] = 0;
+        size_t nl = strlen(name);
+        for (int i = 0; i < NSHEETS; i++) {
+            size_t wl = strlen(want[i]);
+            if (nl < wl || strcmp(name + nl - wl, want[i]) || (nl > wl && name[nl - wl - 1] != '\\')) continue;
+            uint32_t size = 0;
+            uint8_t *t = arc_read(f, e, &size);
+            if (t && add_version(&sheets[i], t, size, from)) found++;
+            free(t);
+        }
+    }
+    fclose(f);
+    return found;
+}
 static void load_sheets(void) {
     int found = 0;
     for (int i = 0; i < NSHEETS; i++) {
@@ -308,30 +369,33 @@ static void load_sheets(void) {
             uint8_t *t = n > 0 ? malloc((size_t)n) : NULL;
             bool ok = t && fread(t, 1, (size_t)n, f) == (size_t)n;
             fclose(f);
-            uint32_t w, h;
-            int fmt;
-            const uint8_t *data = ok ? tex_data(t, (uint32_t)n, &w, &h, &fmt) : NULL;
-            uint64_t bytes = (uint64_t)s->w * s->h;
-            if (data && (int)w == s->w && (int)h == s->h && fmt == 0x17 && data + bytes <= t + n) {
-                bool same = false;  // (the languages' files are often one picture)
-                for (int k = 0; k < l && !same; k++) same = s->var[k] && !memcmp(s->var[k], data, bytes);
-                if (!same && (s->var[l] = malloc(bytes))) memcpy(s->var[l], data, bytes), found++;
-            }
+            if (ok && add_version(s, t, (uint32_t)n, langs[l])) found++;
             free(t);
         }
+    }
+    found += load_arc_versions(ARC_PATH, "resident.arc");
+    for (int l = 0; l < NLANG; l++) {
+        char rpath[160], from[24];
+        snprintf(rpath, sizeof rpath, "nativeNX/%s/arc/resident_%s.arc", langs[l], langs[l]);
+        snprintf(from, sizeof from, "resident_%s.arc", langs[l]);
+        found += load_arc_versions(rpath, from);
+        snprintf(rpath, sizeof rpath, "nativeNX/%s/arc/quest_%s.arc", langs[l], langs[l]);
+        snprintf(from, sizeof from, "quest_%s.arc", langs[l]);
+        found += load_arc_versions(rpath, from);
     }
     const char *path = romfs_host_path(ARC_PATH);
     FILE *f = path ? fopen(path, "rb") : NULL;
     if (f) load_font(f), fclose(f);
     g_ready = found ? 1 : -1;
-    LOG("[prompts] %d button glyph pictures read (sheets x languages), %d letters of the festa font for keys' names\n", found,
-        g_nletters);
+    LOG("[prompts] %d button glyph pictures read (sheets' versions: languages, arcs), %d letters of the festa font for keys' names\n",
+        found, g_nletters);
 }
 static pthread_once_t g_once = PTHREAD_ONCE_INIT;
 
 // ------------------------------------------------------------------ the game's copies
-// A copy is a texture whose data is a sheet's file on an upload; it then holds the file's data or what was last
-// written (cur), else its memory went to something else (a quest's, after the quest) and it is forgotten, not written.
+// A copy is a texture whose data is one of a sheet's versions on an upload; it then holds that version's data or what
+// was last written for that version (cur), else its memory went to something else (a quest's, after the quest) and it
+// is forgotten, not written.
 void prompts_texture_seen(uint32_t addr, const uint8_t *mem, uint64_t size) {
     bool any = false;
     for (int i = 0; i < NSHEETS && !any; i++) any = (uint64_t)sheets[i].w * sheets[i].h == size;
@@ -342,36 +406,40 @@ void prompts_texture_seen(uint32_t addr, const uint8_t *mem, uint64_t size) {
         Sheet *s = &sheets[i];
         uint64_t bytes = (uint64_t)s->w * s->h;
         if (bytes != size) continue;
-        for (int l = 0; l < NLANG; l++) {
-            if (!s->var[l] || memcmp(mem, s->var[l], bytes)) continue;
-            if (s->active != l) {  // (the first copy, or another language: the copies so far were the other one's)
-                if (!s->rgba) s->rgba = malloc(bytes * 4), s->work = malloc(bytes * 4), s->cur = malloc(bytes), s->out = malloc(bytes);
-                if (!s->rgba || !s->work || !s->cur || !s->out) return;
-                s->active = l, s->naddrs = 0;
-                sheet_decode(s, s->var[l], s->rgba);
-                memcpy(s->cur, s->var[l], bytes);
-            }
-            for (int k = 0; k < s->naddrs; k++)
-                if (s->addrs[k] == addr) { s->fresh = true; return; }
-            if (s->naddrs == MAX_COPIES) memmove(s->addrs, s->addrs + 1, sizeof s->addrs[0] * (MAX_COPIES - 1)), s->naddrs--;
-            s->addrs[s->naddrs++] = addr, s->fresh = true;
-            LOG("[prompts] %s (%s): a copy at %08x (%d known)\n", s->file, langs[l], addr, s->naddrs);
+        for (int v = 0; v < s->nvar; v++) {
+            if (memcmp(mem, s->var[v], bytes)) continue;
+            if (!s->work) s->rgba = malloc(bytes * 4), s->work = malloc(bytes * 4), s->out = malloc(bytes);
+            if (!s->cur[v]) s->cur[v] = malloc(bytes);
+            if (!s->rgba || !s->work || !s->out || !s->cur[v]) return;
+            bool known = false;  // (cur: as it was read, unless another copy of this version is already written)
+            for (int k = 0; k < s->ncopies && !known; k++) known = s->copies[k].v == v && s->copies[k].addr != addr;
+            if (!known) memcpy(s->cur[v], s->var[v], bytes);
+            for (int k = 0; k < s->ncopies; k++)
+                if (s->copies[k].addr == addr) {  // (uploaded again as it was: the file's data back, or another version)
+                    s->copies[k].v = v, s->fresh = true;
+                    return;
+                }
+            if (s->ncopies == MAX_COPIES) memmove(s->copies, s->copies + 1, sizeof s->copies[0] * (MAX_COPIES - 1)), s->ncopies--;
+            s->copies[s->ncopies++] = (Copy){addr, v}, s->fresh = true;
+            LOG("[prompts] %s (%s): a copy at %08x (%d known)\n", s->file, s->from[v], addr, s->ncopies);
             return;
         }
     }
 }
-static void write_copies(Sheet *s, const uint8_t *data) {
+// Data for version v into its copies
+static void write_copies(Sheet *s, int v, const uint8_t *data) {
     uint64_t bytes = (uint64_t)s->w * s->h;
-    for (int i = 0; i < s->naddrs; i++) {
-        uint8_t *dst = (uint8_t *)G2H(s->addrs[i]);
-        if (memcmp(dst, s->var[s->active], bytes) && memcmp(dst, s->cur, bytes)) {  // (no longer the texture)
-            LOG("[prompts] %s: the copy at %08x is gone\n", s->file, s->addrs[i]);
-            memmove(s->addrs + i, s->addrs + i + 1, sizeof s->addrs[0] * (size_t)(s->naddrs - i - 1)), s->naddrs--, i--;
+    for (int i = 0; i < s->ncopies; i++) {
+        if (s->copies[i].v != v) continue;
+        uint8_t *dst = (uint8_t *)G2H(s->copies[i].addr);
+        if (memcmp(dst, s->var[v], bytes) && memcmp(dst, s->cur[v], bytes)) {  // (no longer the texture)
+            LOG("[prompts] %s: the copy at %08x is gone\n", s->file, s->copies[i].addr);
+            memmove(s->copies + i, s->copies + i + 1, sizeof s->copies[0] * (size_t)(s->ncopies - i - 1)), s->ncopies--, i--;
             continue;
         }
         memcpy(dst, data, bytes);
     }
-    memcpy(s->cur, data, bytes);
+    memcpy(s->cur[v], data, bytes);
 }
 
 // ------------------------------------------------------------------ which input a button is now
@@ -623,32 +691,39 @@ void prompts_frame(void) {
     const char *dump = getenv("MHGU_PROMPTS_DUMP");  // (tests: each sheet's texels as drawn, <prefix><n>.raw)
     for (int i = 0; i < NSHEETS; i++) {
         Sheet *s = &sheets[i];
-        if (!s->naddrs || (!changed && !s->fresh)) continue;
+        if (!s->ncopies || (!changed && !s->fresh)) continue;
         s->fresh = false;
         uint64_t bytes = (uint64_t)s->w * s->h;
-        if (!kbm) { write_copies(s, s->var[s->active]); continue; }
-        memcpy(s->work, s->rgba, bytes * 4);
-        memcpy(s->out, s->var[s->active], bytes);
-        int drawn = 0;
-        for (int c = 0; c < s->ncells; c++) {
-            const Cell *cell = &s->cells[c];
-            uint8_t tile[CELL * CELL * 4];
-            if (!draw_tile(tile, cell, want[cell->btn], cell->btn2 >= 0 ? want[cell->btn2] : 0)) continue;
-            put_tile(s, s->work, cell, tile);
-            sheet_encode_box(s, s->work, s->out, cell->x, cell->y, cell->w, cell->h);
-            drawn++;
-        }
-        write_copies(s, s->out);
-        if (dump) {
-            char path[512];
-            snprintf(path, sizeof path, "%s%d.raw", dump, i);
-            FILE *df = fopen(path, "wb");
-            if (df) {
-                sheet_decode(s, s->out, s->work);  // (what the GPU gets: after BC3)
-                fwrite(s->work, 1, bytes * 4, df), fclose(df);
+        for (int v = 0; v < s->nvar; v++) {  // (each version that has copies, redrawn from its own data)
+            bool has = false;
+            for (int k = 0; k < s->ncopies && !has; k++) has = s->copies[k].v == v;
+            if (!has) continue;
+            if (!kbm) { write_copies(s, v, s->var[v]); continue; }
+            if (s->rgba_var != v) sheet_decode(s, s->var[v], s->rgba), s->rgba_var = v;
+            memcpy(s->work, s->rgba, bytes * 4);
+            memcpy(s->out, s->var[v], bytes);
+            int drawn = 0;
+            for (int c = 0; c < s->ncells; c++) {
+                const Cell *cell = &s->cells[c];
+                uint8_t tile[CELL * CELL * 4];
+                if (!draw_tile(tile, cell, want[cell->btn], cell->btn2 >= 0 ? want[cell->btn2] : 0)) continue;
+                put_tile(s, s->work, cell, tile);
+                sheet_encode_box(s, s->work, s->out, cell->x, cell->y, cell->w, cell->h);
+                drawn++;
             }
+            write_copies(s, v, s->out);
+            if (dump) {
+                char path[512];
+                snprintf(path, sizeof path, "%s%d.raw", dump, i);
+                FILE *df = fopen(path, "wb");
+                if (df) {
+                    sheet_decode(s, s->out, s->work);  // (what the GPU gets: after BC3)
+                    fwrite(s->work, 1, bytes * 4, df), fclose(df);
+                }
+            }
+            static int logged;
+            if (logged++ < 32)
+                LOG("[prompts] %s (%s): %d of %d button glyphs drawn for keyboard and mouse\n", s->file, s->from[v], drawn, s->ncells);
         }
-        static int logged;
-        if (logged++ < 32) LOG("[prompts] %s: %d of %d button glyphs drawn for keyboard and mouse\n", s->file, drawn, s->ncells);
     }
 }
