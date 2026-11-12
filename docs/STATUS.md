@@ -292,6 +292,15 @@ Plan and security notes: docs/research/internet-hubs.md.
   the fuller, then the newest). Since then (server.go list) the server's ListMax is 18 and, with more hubs than
   that, each LIST is a random 18 (shuffled, hubs with a free place kept before full ones), then sorted as before: a
   Retry shows others.
+- Hunter Search networks apart (2026-11-12): with Hunter Search on (R in a village or the offline Hub / Hunters'
+  Pub) the game hosts a 2-player network for ~10 s, scans, and hosts again, as long as it is on; each of those was
+  listed on the hub server like a hub (the "6-10 s hubs"). A public LIST then held 12 hubs and 6 of them, so Join
+  Hub showed 2 pages instead of 3. They have room for 2 and 0xFF at advertise byte 0x1C (hubs: 1, a 2-player hub too, checked;
+  0x14-0x1B is the constant 0x90abcdef 0x12345678). The game scans
+  for 24 and its Hunter Search list has 6 rows, so most likely 18 hubs + 6 Hunter Search players (not seen in its
+  code). Since then (server.go huntSearch / pick) a LIST answers up to ListMax hubs, then up to ListSearchMax (6) of
+  those networks, each kind picked and sorted the same way; they come last, so whatever doesn't fit is theirs.
+  Hunter Search showed 0 players between two port games even with different hunters (shared account id?).
 - Passcoded hubs last (2026-11-08): MHGU's advertise data (NetworkInfo +0x26C, 200 bytes) has a u16 passcode at
   +0xC0: 0xFFFF = none, else the 4-digit code in bits 0-14 (1234 = 0x04D2), bit 15 set for "Everyone", clear for
   "Exclude Friends" (measured: open 0xFFFF, Everyone 1234 = 0x84D2, Exclude Friends 0000 = 0x0000). server.go list

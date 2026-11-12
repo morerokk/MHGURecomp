@@ -90,7 +90,10 @@ const (
 	// MHGU's advertise data: u16 passcode at 0xC0, 0xFFFF = none, else the 4-digit code in bits 0-14 and bit 15 set
 	// when it applies to everyone (clear: everyone but friends)
 	advPasscode = 0xC0
-	maxNodes    = 8
+	// ... and 0xFF at 0x1C in a Hunter Search network (hubs have 1 there, after the constant 0x90abcdef 0x12345678
+	// at 0x14): see huntSearch
+	advHuntSearch = 0x1C
+	maxNodes      = 8
 )
 
 type Config struct {
@@ -100,6 +103,7 @@ type Config struct {
 	MaxHubs       int     // hubs listed at once
 	MaxHubsPerIP  int     // hubs one IP address hosts
 	ListMax       int     // hubs in one LIST answer (the game's Join Hub list shows 18: 3 pages of 6)
+	ListSearchMax int     // Hunter Search networks in one LIST answer, after the hubs (its list shows 6; the game scans for 24)
 	ReqRate       float64 // LIST / JOIN requests a second per IP address (burst: ReqBurst)
 	ReqBurst      float64
 	Bandwidth     float64       // bytes a second per pair and direction (TCP), and per pair (UDP)
@@ -115,7 +119,7 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		Addr: ":39510", MaxConns: 4000, MaxConnsPerIP: 24, MaxHubs: 2000, MaxHubsPerIP: 4, ListMax: 18,
+		Addr: ":39510", MaxConns: 4000, MaxConnsPerIP: 24, MaxHubs: 2000, MaxHubsPerIP: 4, ListMax: 18, ListSearchMax: 6,
 		ReqRate: 2, ReqBurst: 15, Bandwidth: 1 << 20, HandshakeTime: 10 * time.Second, PingEvery: 15 * time.Second,
 		SeparatePhones: true,
 	}
@@ -468,25 +472,28 @@ func passcoded(info []byte) bool {
 	return binary.LittleEndian.Uint16(info[niAdv+advPasscode:]) != 0xFFFF
 }
 
-// The hubs a player with this key and version sees: the ones with room for more players first (without a passcode
-// before passcoded ones), then the fullest, then the newest.
-func (s *Server) list(c *net.TCPConn, proto uint16, room [16]byte) {
-	type entry struct {
-		id      uint64
-		info    [netInfoSize]byte
-		created time.Time
-		rank    int // 0 room and no passcode, 1 room and a passcode, 2 full, 3 full with a passcode
-	}
-	var es []entry
-	sep := s.separate.Load()
-	room = meet(room, sep)
-	s.mu.Lock()
-	for _, h := range s.hubs {
-		if h.proto == proto && meet(h.room, sep) == room {
-			es = append(es, entry{id: h.id, info: h.info, created: h.created})
-		}
-	}
-	s.mu.Unlock()
+// huntSearch: a Hunter Search network, not a hub. With Hunter Search on (in a village or the offline Hub) the game
+// hosts one for ~10 s between its searches, over and over: room for 2 players, and 0xFF at advertise byte 0x1C,
+// where hubs have 1 (a 2-player hub too: checked). The game scans for 24 networks and shows up to 18 hubs in Join Hub and 6 players in its Hunter
+// Search list, so in an answer these get places of their own instead of taking the hubs'.
+func huntSearch(info []byte) bool {
+	adv := info[niAdv:]
+	return info[niNodeMax] == 2 && int(binary.LittleEndian.Uint16(info[niAdvSize:])) > advHuntSearch &&
+		binary.LittleEndian.Uint32(adv[0x14:]) == 0x90abcdef && binary.LittleEndian.Uint32(adv[0x18:]) == 0x12345678 &&
+		adv[advHuntSearch] == 0xFF
+}
+
+type listEntry struct {
+	id      uint64
+	info    [netInfoSize]byte
+	created time.Time
+	rank    int // 0 room and no passcode, 1 room and a passcode, 2 full, 3 full with a passcode
+}
+
+// pick: at most max of es for an answer, sorted: the ones with room for more players first (without a passcode before
+// passcoded ones), then the fullest, then the newest. With more than max, a random choice by rank (so passcoded hubs
+// only take the places open hubs with room leave), so each search (the game's Retry) can show others.
+func pick(es []listEntry, max int) []listEntry {
 	for i := range es {
 		e := &es[i]
 		if e.info[niNodeCount] >= e.info[niNodeMax] {
@@ -496,12 +503,13 @@ func (s *Server) list(c *net.TCPConn, proto uint16, room [16]byte) {
 			e.rank++
 		}
 	}
-	// more hubs than one answer holds: a random ListMax of them, by rank (so passcoded hubs only take the places
-	// open hubs with room leave), so each search (the game's Retry) can show others
-	if len(es) > s.cfg.ListMax {
+	if max < 0 {
+		max = 0
+	}
+	if len(es) > max {
 		mrand.Shuffle(len(es), func(i, j int) { es[i], es[j] = es[j], es[i] })
 		sort.SliceStable(es, func(i, j int) bool { return es[i].rank < es[j].rank })
-		es = es[:s.cfg.ListMax]
+		es = es[:max]
 	}
 	sort.Slice(es, func(i, j int) bool {
 		a, b := &es[i], &es[j]
@@ -513,6 +521,29 @@ func (s *Server) list(c *net.TCPConn, proto uint16, room [16]byte) {
 		}
 		return a.created.After(b.created)
 	})
+	return es
+}
+
+// The hubs a player with this key and version sees (up to ListMax, picked and sorted by pick), then the Hunter
+// Search networks (up to ListSearchMax, the same way). They come last: the game puts LAN hubs before the server's,
+// and an older game keeps fewer, so what doesn't fit is theirs.
+func (s *Server) list(c *net.TCPConn, proto uint16, room [16]byte) {
+	var hubs, searches []listEntry
+	sep := s.separate.Load()
+	room = meet(room, sep)
+	s.mu.Lock()
+	for _, h := range s.hubs {
+		if h.proto == proto && meet(h.room, sep) == room {
+			e := listEntry{id: h.id, info: h.info, created: h.created}
+			if huntSearch(h.info[:]) {
+				searches = append(searches, e)
+			} else {
+				hubs = append(hubs, e)
+			}
+		}
+	}
+	s.mu.Unlock()
+	es := append(pick(hubs, s.cfg.ListMax), pick(searches, s.cfg.ListSearchMax)...)
 	out := u32(uint32(len(es)))
 	for i := range es {
 		out = append(out, u64(es[i].id)...)

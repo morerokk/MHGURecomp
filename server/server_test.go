@@ -365,6 +365,79 @@ func testInfoCode(players byte, code uint16) []byte {
 	return i
 }
 
+// testPairInfo: a NetworkInfo for 2 players with MHGU's advertise data, byte 0x1C = kind (0xFF: Hunter Search
+// network, 1: hub), as the game sends them (0x14: the constant 0x90abcdef 0x12345678).
+func testPairInfo(kind byte) []byte {
+	i := testInfoCode(1, 0xFFFF)
+	i[niNodeMax] = 2
+	binary.LittleEndian.PutUint32(i[niAdv+0x14:], 0x90abcdef)
+	binary.LittleEndian.PutUint32(i[niAdv+0x18:], 0x12345678)
+	i[niAdv+advHuntSearch] = kind
+	return i
+}
+
+// What counts as a Hunter Search network: room for 2, MHGU's constant at 0x14, 0xFF at 0x1C.
+func TestHuntSearch(t *testing.T) {
+	noMagic := testPairInfo(0xFF)
+	binary.LittleEndian.PutUint32(noMagic[niAdv+0x14:], 0)
+	four := testPairInfo(0xFF)
+	four[niNodeMax] = 4
+	short := testPairInfo(0xFF)
+	binary.LittleEndian.PutUint16(short[niAdvSize:], advHuntSearch)
+	for _, c := range []struct {
+		name string
+		info []byte
+		want bool
+	}{{"Hunter Search", testPairInfo(0xFF), true}, {"2-player hub", testPairInfo(1), false},
+		{"no constant", noMagic, false}, {"room for 4", four, false}, {"short advertise data", short, false},
+		{"plain hub", testInfo(1), false}} {
+		if got := huntSearch(c.info); got != c.want {
+			t.Errorf("%s: huntSearch = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// Hunter Search networks get places of their own after the hubs: never one of the ListMax hubs, at most
+// ListSearchMax of them; a 2-player hub (1 at byte 0x1C) is a hub.
+func TestListHunterSearchApart(t *testing.T) {
+	s := start(t, func(c *Config) {
+		c.ListMax, c.ListSearchMax, c.MaxHubsPerIP, c.MaxConnsPerIP, c.ReqRate, c.ReqBurst = 4, 2, 20, 100, 1000, 1000
+	})
+	hostInfo := func(info []byte) uint64 {
+		c := dial(t, s)
+		send(t, c, tHost, header(2, 0), info)
+		return binary.LittleEndian.Uint64(expect(t, c, tHosted))
+	}
+	searches := map[uint64]bool{}
+	for i := 0; i < 5; i++ {
+		searches[hostInfo(testPairInfo(0xFF))] = true
+	}
+	noMagic := testPairInfo(0xFF) // 0xFF without MHGU's constant before it: not taken for a Hunter Search network
+	binary.LittleEndian.PutUint32(noMagic[niAdv+0x14:], 0)
+	hubs := map[uint64]bool{hostInfo(testPairInfo(1)): true, hostInfo(noMagic): true}
+	for i := 0; i < 5; i++ {
+		hubs[hostInfo(testInfo(byte(1+i%3)))] = true
+	}
+	for n := 0; n < 20; n++ {
+		c := dial(t, s)
+		send(t, c, tList, header(2, 0))
+		p := expect(t, c, tHubs)
+		c.Close()
+		if k := binary.LittleEndian.Uint32(p); k != 6 {
+			t.Fatalf("%d entries in an answer, want 4 hubs + 2 Hunter Search", k)
+		}
+		for i := 0; i < 6; i++ {
+			id := binary.LittleEndian.Uint64(p[4+i*(8+netInfoSize):])
+			if i < 4 && !hubs[id] {
+				t.Fatalf("entry %d is not a hub", i)
+			}
+			if i >= 4 && !searches[id] {
+				t.Fatalf("entry %d is not a Hunter Search network", i)
+			}
+		}
+	}
+}
+
 // Passcoded hubs come after open ones with room: left out while those fill the answer, listed after them otherwise.
 func TestListPasscodedLast(t *testing.T) {
 	s := start(t, func(c *Config) {
