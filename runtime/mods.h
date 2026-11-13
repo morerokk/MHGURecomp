@@ -31,6 +31,8 @@ void forge_init(void);  // Forge plugins from the mods' RomFS (runtime/forge.c):
 void hpscale_init(void);  // large monster HP by the number of hunters (runtime/hle/hpscale.c)
 bool hpscale_village_from_hub(uint32_t quest);  // a Village quest started from the Hub or the Pub (hpscale.c)
 void villagehub_init(void);  // Village quests at the Hub / Pub counter (runtime/hle/villagehub.c)
+struct Cpu;
+void villagehub_tick(struct Cpu *c);  // game thread, each frame: drops the Village text bundle on leaving the Hub / Pub
 void urgentcredit_init(void);  // Urgent quests count for all who clear them (runtime/hle/urgentcredit.c)
 void mashrate_init(void);  // mashing out of a stun at the Switch's rate at high frame rates (runtime/hle/mashrate.c)
 void hatestep_init(void);  // monsters' attention scores as at 30 fps at high frame rates (runtime/hle/hatestep.c)
