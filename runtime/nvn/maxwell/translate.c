@@ -83,7 +83,7 @@ typedef struct {
     uint32_t cbuf_need[18];  // highest constant vec4 index + 1 per cbuf (array size of the GLSL block)
     bool guarded;            // the instruction being translated has a predicate: its write may not happen
     uint8_t tex_alpha[256];  // register holds a texture sample's alpha here
-    uint8_t inf_now[256];    // register may hold 1 / a texture's alpha here (fragment FMZ multiplies, emit_insn)
+    uint8_t inf_now[256];    // register may hold 1 / a texture's alpha, or (vertex) a texel here (FMZ multiplies, emit_insn)
     uint8_t inf_ever[256];   // ... has held one so far: what a branch target may see
     bool static_flow;        // SSY / PBK / PCNT stacks resolved at translation (flow_resolve): no run-time stacks
     uint32_t *flow_tgt;      // (static_flow) per instruction index: where its SYNC / BRK / CONT goes (~0u: unreached)
@@ -185,10 +185,14 @@ static void set_reg(Ctx *c, int r, const char *expr) {
 
 // FMUL / FFMA with FMZ: on the Switch 0 x anything is 0, in Vulkan 0 x infinity is NaN, which comes out black (an
 // environment cube's rgb / alpha where alpha is 0). Only a register straight from 1 / a texture's alpha gets the
-// check on the zero, in fragment shaders: it costs GPU time (on every FMZ multiply it would be most of them), and the
-// depth pre-pass needs its vertex shaders' math untouched. A stale flag only adds a check that is right anyway.
+// check on the zero, in fragment shaders: it costs GPU time (on every FMZ multiply it would be most of them). In vertex
+// shaders a register straight from a texture does: skinning multiplies every bone's rows from a palette texture by its
+// weight, and an unused bone's texels may be stale Inf / NaN, so a 0 weight gave a NaN vertex (character shadows
+// flickering as huge triangles on RADV). The depth pre-pass and colour pass shaders both get it, and the result only
+// differs where today's was NaN, so their positions still match. A stale flag only adds a check that is right anyway.
 static bool fmz_check(const Ctx *c, uint64_t mode, int ra, int rb) {
-    return c->glsl && c->stage == STAGE_FRAGMENT && mode == 1 && ((ra != RZ && c->inf_now[ra]) || (rb != RZ && c->inf_now[rb]));
+    return c->glsl && (c->stage == STAGE_FRAGMENT || c->stage == STAGE_VERTEX) && mode == 1 &&
+           ((ra != RZ && c->inf_now[ra]) || (rb != RZ && c->inf_now[rb]));
 }
 
 static const char *fneg_abs(const char *e, bool neg, bool abs_, char *buf) {
@@ -545,6 +549,7 @@ static void write_tex_result(Ctx *c, int slot, const char *call, uint32_t mask, 
             c->reg_used[r] = 1;
             if (comp == 3) c->tex_alpha[r] = 1;
             else if (!c->guarded) c->tex_alpha[r] = 0;
+            if (c->stage == STAGE_VERTEX) c->inf_now[r] = c->inf_ever[r] = 1;  // (a bone palette's texel: fmz_check)
             sp(&c->body, "      r%d = as_type<uint>(t[%d]);\n", r, comp);
         }
     }
