@@ -232,6 +232,12 @@ static void set_window_icon(void) {}
 #endif
 
 void ui_init(void) {
+#ifdef __ANDROID__
+    // SDL's poll sentinel makes SDL_WaitEventTimeout spin on Android: every pump pushes one, and pushing an event queues
+    // a WAKE lifecycle event that releases the next wait at once, so the wait never blocks (this thread sat at 100% of a
+    // core, with no syscalls). Without the sentinel it blocks until an event arrives or the timeout is up.
+    SDL_SetHint(SDL_HINT_POLL_SENTINEL, "0");
+#endif
     if (!SDL_Init(SDL_INIT_VIDEO)) FATAL("SDL_Init: %s\n", SDL_GetError());
     int sdl = SDL_GetVersion();
 #ifdef MHGU_SDL_BUNDLED
@@ -294,16 +300,7 @@ int ui_run(void) {
             background = wanted_background;
         }
         SDL_Event e;
-#ifdef __ANDROID__
-        // SDL_WaitEventTimeout never sleeps here on Android: this thread sat at 100% of a core (no syscalls, no context
-        // switches, perf: SDL_PumpEventsInternal and clock_gettime in a tight loop), whatever the frame rate. Poll once,
-        // then sleep for real.
-        bool got = SDL_PollEvent(&e);
-        if (!got) SDL_Delay(2);
-#else
-        bool got = SDL_WaitEventTimeout(&e, 4);
-#endif
-        if (got) {
+        if (SDL_WaitEventTimeout(&e, 4)) {
             do {
                 if (e.type == SDL_EVENT_QUIT) {
                     if (!config_confirm_exit() && !overlay_settings_dirty()) { LOG("window closed\n"); exit(0); }
