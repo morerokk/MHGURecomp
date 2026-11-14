@@ -88,6 +88,10 @@ static const MenuGeom builtin[] = {
      .offmask = 0x7, .offy = {0, 36, 145}, .cols = 1},
     // the World Map: 2 rows of 4 destinations, picture and name (a linked pair of cursors: cursor_update_as, linked[])
     {.lr = 0x993d04u, .x = 322, .y = 213, .w = 159, .h = 148, .dy = 148, .builtin = true, .cdx = 159, .cols = 4},
+    // the Reward Box after a quest (Take Items and Send to the Item Box both): 8 x 6 cells whose chosen one is
+    // recoloured in place - nothing moves, nothing to learn - measured from the HUD pieces (the cell's piece at 888 +
+    // 44 a column, 138 + 40 a row, about 33 wide; 2026-11-14, quest 101)
+    {.lr = 0x5890a8u, .x = 883, .y = 135, .w = 44, .h = 40, .dy = 40, .builtin = true, .cdx = 44, .cols = 8},
     {CALL_PAUSE_MENU, 970, 101, 282, 34, 0, 36, 97, 141, 17, 0, 0, true},
     {CALL_TITLE_MENU, 170, 153, 940, 64, 0, 84, 0, 0, 0, 0, 0, true},
     {CALL_TITLE_OPTIONS, 170, 195, 940, 64, 0, 84, 0, 0, 0, 0, 0, true},
