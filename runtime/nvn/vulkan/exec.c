@@ -5,12 +5,16 @@
 //   MHGU_SYNC_SHADERS=1   build shaders / pipelines on first use, blocking (deterministic runs; default: on worker
 //                         threads, draws needing them wait a bounded time, then are skipped until ready)
 //   MHGU_PIPE_WAIT_MS=n   per-frame budget for those waits (default 6; 0: skip at once)
+//   MHGU_PIPE_WORKERS=n   pipeline build workers (default: CPU cores - 2, 3 to 8)
+//   MHGU_PREBUILD=0|1     warm the prewarmed programs' Metal libraries ahead of their first draws (warm_program;
+//                         default: on under MoltenVK only)
 //   MHGU_NO_PROGRAM_CACHE=1  don't keep translated programs / pipeline states in cache/ for the next run to prebuild
 //   MHGU_SAVE_GLSL=1      translated shaders -> build/glsl/<code address>_<stage>.glsl
 //   MHGU_VK_STATS=1       draw / pass / skip counts in the log every 2 s (and shader / pipeline build stats)
 //   MHGU_SKIP_LOG=1       every draw skipped for a building program / pipeline: its shaders and colour target
 //   MHGU_NO_PREWARM=1     don't translate the game's programs ahead of their first use (see "prewarm"; the ini's
 //                         [Performance] ShaderPrewarm = Off does the same)
+#include <SDL3/SDL_cpuinfo.h>
 #include <math.h>
 #include <pthread.h>
 #include <sched.h>
@@ -19,6 +23,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>  // ftruncate (mingw pulls it in through another header; POSIX does not)
+#ifdef __APPLE__
+#include <sys/sysctl.h>  // (kern.osversion: warmed.bin)
+#endif
 #ifdef __x86_64__
 #include <immintrin.h>
 #endif
@@ -519,12 +526,20 @@ typedef struct Job { void (*fn)(void *); void *arg; struct Job *next; } Job;
 typedef struct { Job *head, *tail, *lhead, *ltail; pthread_mutex_t lock; pthread_cond_t cond; bool started; } JobQueue;
 static JobQueue compile_q = {NULL, NULL, NULL, NULL, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, false};
 static JobQueue translate_q = {NULL, NULL, NULL, NULL, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, false};
+static JobQueue program_q = {NULL, NULL, NULL, NULL, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, false};
+static JobQueue warm_q = {NULL, NULL, NULL, NULL, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, false};
+
+// Exit (vk_jobs_quiesce): the workers take no new job, and the jobs running are let finish before the device is
+// drained and the pipeline cache saved - a pipeline being created during that save crashed in MoltenVK.
+static _Atomic bool jobs_stop;
+static _Atomic int jobs_running;
 
 static void *worker(void *a) {
     JobQueue *q = a;
     for (;;) {
         pthread_mutex_lock(&q->lock);
         while (!q->head && !q->lhead) pthread_cond_wait(&q->cond, &q->lock);
+        if (atomic_load(&jobs_stop)) { pthread_mutex_unlock(&q->lock); for (;;) sleep(3600); }
         Job *j;
         if (q->head) {
             j = q->head;
@@ -535,11 +550,22 @@ static void *worker(void *a) {
             q->lhead = j->next;
             if (!q->lhead) q->ltail = NULL;
         }
+        atomic_fetch_add(&jobs_running, 1);
         pthread_mutex_unlock(&q->lock);
         j->fn(j->arg);
         free(j);
+        atomic_fetch_sub(&jobs_running, 1);
     }
     return NULL;
+}
+
+bool vk_jobs_quiesce(void) {  // true: none running any more (within 3 s)
+    atomic_store(&jobs_stop, true);
+    for (uint64_t t0 = plat_now_ns(); atomic_load(&jobs_running) > 0;) {
+        if (plat_now_ns() - t0 > 3000000000ull) return false;
+        plat_sleep_until_ns(plat_now_ns() + 1000000);
+    }
+    return true;
 }
 
 static bool sync_shaders(void) {
@@ -564,10 +590,66 @@ static void enqueue(JobQueue *q, int nthreads, bool low, void (*fn)(void *), voi
     pthread_mutex_unlock(&q->lock);
 }
 
-// The translator isn't re-entrant: one thread translates, the compiles run on a few workers.
+// The translator isn't re-entrant: one thread translates. The pipeline builds run on a worker per CPU core but two
+// (left for the game and the renderer), 3 to 8: 3 on a 4-core PC, 8 on a 10-core Apple Silicon Mac. Measured there in
+// a new area with warm shaders (warm_program): 8 workers skipped 27,000 draws where 3 skipped 33,000. (Cold, more
+// didn't help: MoltenVK's Metal compiles top out at ~15 pipelines a second.) MHGU_PIPE_WORKERS=n: n of them.
 static pthread_mutex_t translate_lock = PTHREAD_MUTEX_INITIALIZER;
 static void run_translate(void (*fn)(void *), void *arg) { enqueue(&translate_q, 1, false, fn, arg); }
-static void run_job(void (*fn)(void *), void *arg) { enqueue(&compile_q, 3, false, fn, arg); }
+static int pipe_workers(void) {
+    static int n;
+    if (!n) {
+        const char *e = getenv("MHGU_PIPE_WORKERS");
+        if (e && atoi(e) > 0) {
+            n = atoi(e);
+        } else {
+            n = SDL_GetNumLogicalCPUCores() - 2;
+            n = n < 3 ? 3 : n > 8 ? 8 : n;
+        }
+        LOG("[vk] %d pipeline build workers\n", n);
+    }
+    return n;
+}
+static void run_job(void (*fn)(void *), void *arg) { enqueue(&compile_q, pipe_workers(), false, fn, arg); }
+// A program's SPIR-V compiles (a few ms) have workers of their own: queued behind pipeline builds, which take
+// 200-500 ms each under MoltenVK, they waited seconds after an area load, and their draws were skipped meanwhile.
+static void run_program(void (*fn)(void *), void *arg) { enqueue(&program_q, 2, false, fn, arg); }
+// Warming Metal libraries (warm_program): workers of their own beside the ones that build what draws need, the
+// pipeline workers but two (2 to 6: 6 on a 10-core Apple Silicon Mac). WARM_STEADY of them warm at any time, the
+// others only while no draw has waited for a build in the last second, so a new area's builds have the Metal compiler.
+// M1 Pro, macOS 27, cold: all ~10,300 programs warm in ~3 min with 6 (with 2, ~1,100 after 2 min); first sight of
+// Verdant Hills right after boot (quick-hunt) skipped 10,000-14,000 draws (7,000 with 2; 17,500 with 6 ungated;
+// 160,000 with MoltenVK's pipeline cache lock, see create_pipeline). MHGU_WARM_WORKERS=n: n of them.
+#define WARM_STEADY 2
+static _Atomic uint64_t draw_waited_ns;  // (await_build) when a draw last found its build not ready
+static _Atomic int warm_running;
+static int warm_workers(void) {
+    static int n;
+    if (!n) {
+        const char *e = getenv("MHGU_WARM_WORKERS");
+        if (e && atoi(e) > 0) {
+            n = atoi(e);
+        } else {
+            n = pipe_workers() - 2;
+            n = n < WARM_STEADY ? WARM_STEADY : n > 6 ? 6 : n;
+        }
+        LOG("[shader] %d warm-up workers\n", n);
+    }
+    return n;
+}
+static bool warm_slot_take(void) {  // false: exiting (vk_jobs_quiesce)
+    for (;;) {
+        if (atomic_load(&jobs_stop)) return false;
+        int n = atomic_load(&warm_running);
+        bool busy = plat_now_ns() - atomic_load(&draw_waited_ns) < 1000000000ull;
+        if (n < WARM_STEADY || !busy) {
+            if (atomic_compare_exchange_weak(&warm_running, &n, n + 1)) return true;
+        } else {
+            plat_sleep_until_ns(plat_now_ns() + 20000000);
+        }
+    }
+}
+static void run_warm(void (*fn)(void *), void *arg) { enqueue(&warm_q, warm_workers(), false, fn, arg); }
 void vk_run_job(void (*fn)(void *), void *arg) { run_job(fn, arg); }  // (fsr.c: its capture shaders / pipelines)
 
 // A queued job a draw is waiting for goes to the front of its queue (the queues are FIFO, and an area load queues a
@@ -629,7 +711,9 @@ static uint64_t wait_frame = ~0ull;
 static bool await_build(_Atomic int *state, void *job, int64_t at_least_ns) {
     int s = atomic_load(state);
     if (s) return s == 1;
+    atomic_store(&draw_waited_ns, plat_now_ns());  // (the warm-up holds back: warm_slot_take)
     promote(&translate_q, job);
+    promote(&program_q, job);
     promote(&compile_q, job);
     static int64_t budget = -1;
     if (budget < 0) {
@@ -656,6 +740,7 @@ static bool await_build(_Atomic int *state, void *job, int64_t at_least_ns) {
         pthread_cond_timedwait(&ready_cond, &ready_lock, &ts);
         if (!atomic_load(state)) {
             pthread_mutex_unlock(&ready_lock);
+            promote(&program_q, job);
             promote(&compile_q, job);
             pthread_mutex_lock(&ready_lock);
         }
@@ -2283,11 +2368,13 @@ typedef struct {
     _Atomic int state;  // 0 building, 1 ready, 2 failed, 3 dormant (in programs.bin, not built: prog_want)
     uint64_t t_req;     // (stats) when first needed
     uint64_t chash[2], ck;  // program cache: hashes of the vertex / fragment code, the lookup key
+    uint64_t wk;            // its translated sources' hash: the warm-up's key (warmed.bin; 0: not translated)
     long src_off;           // program cache: where its sources are in programs.src (when src_saved)
     uint32_t vlen, flen;
     bool src_saved;
     bool wanted;            // (under ready_lock) a draw needs it: a prewarm build goes on to make its modules
     struct Pipe *prewarm;   // pipelines of earlier runs to build once this is (pipeline cache)
+    bool warm;              // prewarmed: warm its Metal library once built (warm_program)
     FsrCapProg *fsrcap;     // FSR object motion: the capture variant of its vertex shader (fsr.c)
 } Prog;
 static void prewarm_pipelines(Prog *p);
@@ -2369,9 +2456,34 @@ static void compile_program(void *arg) {
 
 static void progcache_store(Prog *p);
 
+// Textures a stage binds against the GPU's per-stage limit (16 under MoltenVK, where a desktop driver has hundreds):
+// a stage over it would fail or draw wrongly, so each is reported once, and prebuild_report gives the game's most.
+static _Atomic int tex_most, tex_over;
+static void tex_limit_check(Prog *p) {
+    uint32_t limit = g_vk.props.limits.maxPerStageDescriptorSamplers;
+    ShaderInfo *st[2] = {p->vi, p->fi};
+    for (int i = 0; i < 2; i++) {
+        if (!st[i]) continue;
+        int n = st[i]->ntex, m = atomic_load(&tex_most);
+        while (n > m && !atomic_compare_exchange_weak(&tex_most, &m, n)) {}
+        if ((uint32_t)n > limit && atomic_fetch_add(&tex_over, 1) < 20)
+            LOG("[shader] %s shader %llx binds %d textures, over the GPU's %u per stage\n", i ? "fragment" : "vertex",
+                (unsigned long long)p->code[i], n, limit);
+    }
+}
+
 // Translates p and records it in programs.bin; false: failed (state 2). quiet: the prewarm's (not logged: a program
 // no draw uses may hit translator gaps no one sees)
 static _Atomic uint64_t stat_pw_failed;
+// The warm-up's key for a program (warmed.bin): its translated sources, which decide the SPIR-V (cache/spirv is keyed
+// the same way) and so the Metal libraries macOS keeps. A translator change re-warms only the programs it changed.
+static uint64_t warm_key(const char *vs, const char *fs) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (const char *s = vs; *s; s++) h = (h ^ (uint8_t)*s) * 0x100000001B3ull;
+    h = (h ^ 0xFF) * 0x100000001B3ull;  // (between the stages)
+    for (const char *s = fs; *s; s++) h = (h ^ (uint8_t)*s) * 0x100000001B3ull;
+    return h ? h : 1;
+}
 static bool translate_core(Prog *p, bool quiet) {
     uint64_t t0 = plat_now_ns();
     maxwell_gmem_base = HEAP_BASE;
@@ -2392,6 +2504,7 @@ static bool translate_core(Prog *p, bool quiet) {
         prewarm_pipelines(p);  // (a pipeline list's, waiting for it: failed too)
         return false;
     }
+    tex_limit_check(p);
     if (!quiet && (p->vi->uses_gmem || p->fi->uses_gmem)) {
         static int n;
         if (n++ < 10) LOG("[shader] program %llx/%llx reads global memory (not available: zeros)\n",
@@ -2402,13 +2515,14 @@ static bool translate_core(Prog *p, bool quiet) {
     if (p->fkey.alpha_func)  // (alpha-test variants)
         snprintf(fsuf, sizeof fsuf, "fs_at%d%s", p->fkey.alpha_func, p->fkey.alpha_coverage ? "c" : "");
     save_glsl(p->fi->msl, p->code[1], fsuf);
+    p->wk = warm_key(p->vi->msl, p->fi->msl);
     progcache_store(p);
     return true;
 }
 
 static void translate_program(void *arg) {
     Prog *p = arg;
-    if (translate_core(p, false)) run_job(compile_program, p);
+    if (translate_core(p, false)) run_program(compile_program, p);
 }
 
 // ---- program cache: cache/programs.bin keeps every translated program (reflection, keyed by a hash of the guest code
@@ -2429,6 +2543,7 @@ typedef struct {
     ShaderInfo vi, fi;  // (msl: NULL)
     uint64_t src_off;   // its sources in programs.src: vlen + flen bytes there
     uint32_t vlen, flen;
+    uint64_t wk;        // (Prog's)
 } ProgRec;
 #define PROGREC_MAGIC 0x31475250u  // "PRG1"
 #define PROGCACHE_PATH "cache/programs.bin"
@@ -2436,8 +2551,11 @@ typedef struct {
 static FILE *progcache_f, *progsrc_f;
 static bool progcache_on;
 typedef struct { char magic[8]; uint64_t stamp; } CacheHeader;
-#define CACHE_FORMAT 1  // bump when what a programs.bin / pipelines.bin record means changes here (ProgRec, PipeKey)
+#define CACHE_FORMAT 2  // bump when what a programs.bin / pipelines.bin record means changes here (ProgRec, PipeKey)
 static void pipecache_init(const CacheHeader *hdr);
+static void warmed_init(void);
+static bool prebuild_on(void);
+static bool warmed_has(uint64_t wk, bool add);
 static void plist_load(void);
 static void plist_export_finish(void);
 static uint64_t stat_prog_cached;
@@ -2553,10 +2671,12 @@ static void progcache_open(void) {
             memcpy(p->cmax, r.cmax, sizeof p->cmax);
             memcpy(p->chash, r.chash, sizeof p->chash);
             p->ck = r.ck;
+            p->wk = r.wk;
             p->vkey = r.vkey;
             p->fkey = r.fkey;
             atomic_store(&p->state, 3);
             *slot = p;
+            tex_limit_check(p);
             n++;
         }
         fseek(f, good, SEEK_SET);
@@ -2578,15 +2698,26 @@ static void progcache_open(void) {
     pipecache_init(&hdr);  // (attaches the recorded pipelines to their programs before these are built)
     plist_load();          // (and the shipped list's whose programs are in programs.bin)
     plist_export_finish();
+    warmed_init();
     // Programs a draw has used (each has recorded pipelines) are built now; the others (the prewarm's) stay dormant
-    // until a draw wants one (prog_want)
+    // until a draw wants one (prog_want). Under MoltenVK (prebuild_on) those whose Metal library an earlier run didn't
+    // get to warm are built on the low list and warmed (warm_program).
+    int to_warm = 0;
     for (int i = 0; i < PROG_TAB; i++) {
         Prog *p = progcache_tab[i].prog;
-        if (!p || !p->prewarm) continue;
-        atomic_store(&p->state, 0);
-        run_job(load_program, p);
-        used++;
+        if (!p) continue;
+        if (p->prewarm) {
+            atomic_store(&p->state, 0);
+            run_program(load_program, p);
+            used++;
+        } else if (prebuild_on() && !warmed_has(p->wk, false)) {
+            p->warm = true;
+            atomic_store(&p->state, 0);
+            enqueue(&program_q, 2, true, load_program, p);
+            to_warm++;
+        }
     }
+    if (to_warm) LOG("[shader] program cache: %d programs to warm\n", to_warm);
     LOG("[shader] program cache: %d programs (%d used before: building on the workers), read in %.0f ms\n", n, used,
         (plat_now_ns() - t0) / 1e6);
 }
@@ -2609,6 +2740,7 @@ static void progcache_store(Prog *p) {
     memset(&r, 0, sizeof r);
     r.magic = PROGREC_MAGIC;
     r.ck = p->ck;
+    r.wk = p->wk;
     memcpy(r.chash, p->chash, sizeof r.chash);
     memcpy(r.code, p->code, sizeof r.code);
     memcpy(r.cmax, p->cmax, sizeof r.cmax);
@@ -2642,7 +2774,7 @@ static void prog_want(Prog *p) {
     if (atomic_load(&p->state) == 3) { atomic_store(&p->state, 0); load = true; }
     pthread_mutex_unlock(&ready_lock);
     if (!atomic_load(&p->state)) p->t_req = plat_now_ns();
-    if (load) run_job(load_program, p);
+    if (load) run_program(load_program, p);
 }
 
 // ---- prewarm: the game makes all its programs at start-up (nvnProgramSetShaders, ~6300 vertex / fragment pairs
@@ -2652,9 +2784,11 @@ static void prog_want(Prog *p) {
 // its modules come from the SPIR-V cache in about a millisecond, within the per-frame wait. So a program is ready
 // the first time it is drawn even on a first run once the prewarm has got to it (it starts at the first frame; a
 // draw needing one it has not reached yet is skipped, as before, never waited for past the budget). Variants with
-// other keys (integer vertex inputs: skinned models; alpha-tested materials) are still made on first use.
+// other keys (integer vertex inputs: skinned models; alpha-tested materials) are still made on first use, except under
+// MoltenVK (prebuild_on), where the skinned variants are prewarmed too and each program is built rather than left
+// dormant, so its Metal library can be warmed (warm_program).
 // MHGU_NO_PREWARM=1: off.
-typedef struct { uint64_t code[2], cmax[2]; } PrewarmReq;
+typedef struct { uint64_t code[2], cmax[2]; bool skinned; } PrewarmReq;
 static void plist_seen(const uint64_t code[2], const uint64_t cmax[2], const uint64_t chash[2]);  // (pipelines.list)
 static uint64_t pw_t0;
 static _Atomic uint64_t pw_total_new, pw_total_known, pw_created;
@@ -2679,6 +2813,12 @@ static void prewarm_done(void) {
 // already wants it.
 static void prewarm_compile(void *arg) {
     Prog *p = arg;
+    if (prebuild_on() && !warmed_has(p->wk, false)) {  // (MoltenVK: built, then its Metal library warmed)
+        p->warm = true;
+        compile_program(p);
+        prewarm_done();
+        return;
+    }
     size_t n;
     free(vk_glsl_to_spirv(p->vi->msl, STAGE_VERTEX, "vs", &n));
     free(vk_glsl_to_spirv(p->fi->msl, STAGE_FRAGMENT, "fs", &n));
@@ -2695,18 +2835,31 @@ static void prewarm_compile(void *arg) {
     prewarm_done();
 }
 
+static void prewarm_translate(void *arg);
+// (translate thread) Under MoltenVK: skinned meshes take their bone indices (attribute 3) as unsigned integers, a
+// variant of their own (most of the variants an Arena fight still needed): prewarmed after p, the common one.
+static void prewarm_skinned(const PrewarmReq *r, const Prog *p) {
+    if (r->skinned || !p || !p->vi || atomic_load(&p->state) == 2 || !(p->vi->attr_mask & 8) || !prebuild_on()) return;
+    PrewarmReq *v = malloc(sizeof *v);
+    *v = *r;
+    v->skinned = true;
+    atomic_fetch_add(&stat_pw_left, 1);
+    enqueue(&translate_q, 1, true, prewarm_translate, v);
+}
+
 // (translate thread, low list)
 static void prewarm_translate(void *arg) {
     PrewarmReq *r = arg;
     pthread_mutex_lock(&progcache_lock);
     while (!progcache_ready) pthread_cond_wait(&progcache_cond, &progcache_lock);
     pthread_mutex_unlock(&progcache_lock);
-    Prog *p = NULL;
+    Prog *p = NULL, *known = NULL;
     if (progcache_on) {
         ShaderKey vkey = {0}, fkey = {0};  // (as draw() makes them)
         vkey.glsl = fkey.glsl = 1;
         vkey.flip_y = fkey.flip_y = nvn_window_origin() == 0;
         vkey.depth_minus_one = nvn_depth_mode() == 0;
+        if (r->skinned) vkey.attr_kind[3] = 2;
         uint64_t chash[2];
         for (int i = 0; i < 2; i++) chash[i] = code_hash(r->code[i], r->cmax[i], i);
         uint64_t ck = prog_content_key(chash, &vkey, &fkey);
@@ -2722,15 +2875,28 @@ static void prewarm_translate(void *arg) {
             p->vkey = vkey;
             p->fkey = fkey;
             *c = p;
+        } else if (c) {
+            known = *c;
         }
         pthread_mutex_unlock(&progcache_lock);
     }
-    free(r);
-    if (!p) { atomic_fetch_add(&stat_pw_known, 1); atomic_fetch_add(&pw_total_known, 1); prewarm_done(); return; }
+    if (!p) {
+        atomic_fetch_add(&stat_pw_known, 1);
+        atomic_fetch_add(&pw_total_known, 1);
+        prewarm_skinned(r, known);  // (its translation, if a draw queued it, came before: this is the translate thread)
+        free(r);
+        prewarm_done();
+        return;
+    }
     atomic_fetch_add(&stat_pw_new, 1);
     atomic_fetch_add(&pw_total_new, 1);
-    if (translate_core(p, true)) enqueue(&compile_q, 3, true, prewarm_compile, p);
-    else prewarm_done();
+    if (translate_core(p, true)) {
+        prewarm_skinned(r, p);
+        enqueue(&program_q, 2, true, prewarm_compile, p);
+    } else {
+        prewarm_done();
+    }
+    free(r);
 }
 
 // (game thread) nvnProgramSetShaders
@@ -2738,7 +2904,7 @@ void backend_program_created(const NvnProgram *np) {
     static int on = -1;
     if (on < 0) on = g_config.shader_prewarm && !getenv("MHGU_NO_PREWARM") && !sync_shaders();
     if (!on || !(np->stage_mask & 1) || !(np->stage_mask & 2)) return;
-    PrewarmReq *r = malloc(sizeof *r);
+    PrewarmReq *r = calloc(1, sizeof *r);
     for (int i = 0; i < 2; i++) {
         r->code[i] = np->stages[i].code_addr;
         r->cmax[i] = np->stages[i].const_offset ? np->stages[i].const_offset : 0x10000;
@@ -2818,6 +2984,7 @@ typedef struct {
     uint8_t cull, front_ccw, prim_restart, depth_bias, depth_clamp;
     uint8_t depth_test, depth_write, depth_op, stencil_test;
     uint8_t sten_ops[2][4];  // per face: fail, pass, depth fail, compare
+    uint8_t alpha_func;      // NVN's alpha test (1..7, 0 none): the fragment program's specialization constant 0
     uint8_t sample_shading;  // (MSAA) every sample shaded (exec.c pass_models)
 } PipeKey;
 
@@ -2862,16 +3029,33 @@ typedef struct {
 static FILE *pipecache_f;
 
 static void build_pipeline(void *arg);
+static bool warmed_has(uint64_t wk, bool add);
+static void warm_program(void *arg);
+static _Atomic int stat_warm_queued;
 static void prewarm_pipelines(Prog *p) {
     pthread_mutex_lock(&ready_lock);  // (the render thread adds to the list too: plist_attach)
     Pipe *q = p->prewarm;
     p->prewarm = NULL;
     pthread_mutex_unlock(&ready_lock);
+    bool recorded = q != NULL;  // (its pipelines of earlier runs compile its library anyway)
     for (Pipe *next; q; q = next) {
         next = q->next;
         if (atomic_load(&p->state) == 1) run_job(build_pipeline, q);
         else set_state(&q->state, 2, 0);
     }
+    if (!recorded && p->warm && atomic_load(&p->state) == 1 && !warmed_has(p->wk, false)) {
+        atomic_fetch_add(&stat_warm_queued, 1);
+        run_warm(warm_program, p);
+    }
+}
+
+// cache/pipelines.bin goes with the programs' file and the pipeline code too (PIPELINE_ID: exec.c and vk.h as well).
+static uint64_t pipecache_stamp(const CacheHeader *hdr) {
+    uint64_t h = hash_words(hdr->stamp, (uint64_t[]){sizeof(PipeRec)}, 8);
+#ifdef PIPELINE_ID
+    h = hash_words(h, PIPELINE_ID, strlen(PIPELINE_ID));
+#endif
+    return h;
 }
 static void plist_export_add(const Prog *p, const PipeRec *r);
 
@@ -2880,8 +3064,7 @@ static void pipecache_init(const CacheHeader *hdr) {
     int n = 0;
     long good = 0;
     FILE *f = fopen(PIPECACHE_PATH, "r+b");
-    if (f && fread(&fh, sizeof fh, 1, f) == 1 && !memcmp(fh.magic, "MHGUPRG", 8) &&
-        fh.stamp == hash_words(hdr->stamp, (uint64_t[]){sizeof(PipeRec)}, 8)) {
+    if (f && fread(&fh, sizeof fh, 1, f) == 1 && !memcmp(fh.magic, "MHGUPRG", 8) && fh.stamp == pipecache_stamp(hdr)) {
         good = (long)sizeof fh;
         PipeRec r;
         while (fread(&r, sizeof r, 1, f) == 1 && r.magic == PIPEREC_MAGIC && r.k.ncolor <= 8) {
@@ -2904,7 +3087,7 @@ static void pipecache_init(const CacheHeader *hdr) {
         if (f) fclose(f);
         f = fopen(PIPECACHE_PATH, "wb");
         fh = *hdr;
-        fh.stamp = hash_words(hdr->stamp, (uint64_t[]){sizeof(PipeRec)}, 8);
+        fh.stamp = pipecache_stamp(hdr);
         if (f) fwrite(&fh, sizeof fh, 1, f);
     }
     pipecache_f = f;
@@ -3014,6 +3197,10 @@ static void plist_load(void) {
         if (bs > s) s = bs;
         if (s) s[1] = 0; else exe[0] = 0;
         snprintf(path, sizeof path, "%spipelines.list", exe);
+#ifdef __APPLE__
+        // (a macOS app carries it in Contents/Resources, beside Contents/MacOS: tools/make_app.py)
+        if (plat_in_app_bundle()) snprintf(path, sizeof path, "%s../Resources/pipelines.list", exe);
+#endif
 #endif
     }
     FILE *f = fopen(path, "rb");
@@ -3135,13 +3322,15 @@ static void plist_export_finish(void) {
     LOG("[vk] pipeline list exported: %s (%d pipelines)\n", getenv("MHGU_PIPELIST_EXPORT"), plist_ex_n);
 }
 
-static void build_pipeline(void *arg) {
-    Pipe *pp = arg;
-    uint64_t t0 = plat_now_ns();
-    PipeKey *k = &pp->k;
+// The pipeline for a key (on a worker: everything it needs is in the key).
+static VkResult create_pipeline(const PipeKey *k, VkPipeline *out) {
     VkPipelineShaderStageCreateInfo stages[2] = {
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = k->prog->vs, .pName = "main"},
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = k->prog->fs, .pName = "main"}};
+    int32_t alpha_func = k->alpha_func;  // (the alpha test: the fragment program's specialization constant 0)
+    VkSpecializationMapEntry alpha_entry = {0, 0, sizeof alpha_func};
+    VkSpecializationInfo alpha_spec = {1, &alpha_entry, sizeof alpha_func, &alpha_func};
+    if (alpha_func) stages[1].pSpecializationInfo = &alpha_spec;
     VkVertexInputAttributeDescription va[32];
     VkVertexInputBindingDescription vb[17];
     VkVertexInputBindingDivisorDescriptionEXT vd[17];
@@ -3201,14 +3390,175 @@ static void build_pipeline(void *arg) {
                                        .pStages = stages, .pVertexInputState = &vi, .pInputAssemblyState = &ia, .pViewportState = &vs,
                                        .pRasterizationState = &rs, .pMultisampleState = &ms, .pDepthStencilState = &ds,
                                        .pColorBlendState = &cb, .pDynamicState = &dy, .layout = k->prog->layout, .renderPass = k->rp};
-    VkResult r = vkCreateGraphicsPipelines(g_vk.dev, g_vk.pcache, 1, &pi, NULL, &pp->pipe);
+    // No pipeline cache under MoltenVK: it converts and compiles a pipeline's shaders into Metal libraries under one
+    // lock per pipeline cache (MVKPipelineCache::getShaderLibrary), so every build on every worker waited for the one
+    // before it, a single Metal compiler busy (~8 programs a second warmed on an M1 Pro, macOS 27). Without one the
+    // lock is the shader module's: the workers compile side by side. Nothing is lost: MoltenVK's cache isn't saved
+    // (device.c) and macOS keeps the compiled libraries itself.
+    VkResult r = vkCreateGraphicsPipelines(g_vk.dev, g_vk.portability ? VK_NULL_HANDLE : g_vk.pcache, 1, &pi, NULL, out);
     if (r != VK_SUCCESS) {
         static int n;
         if (n++ < 10) LOG("[vk] pipeline creation failed: %d\n", r);
     }
+    return r;
+}
+
+static void build_pipeline(void *arg) {
+    Pipe *pp = arg;
+    uint64_t t0 = plat_now_ns();
+    VkResult r = create_pipeline(&pp->k, &pp->pipe);
     atomic_fetch_add(&stat_compiles, 1);
     job_stat(2, t0);
     set_state(&pp->state, r == VK_SUCCESS ? 1 : 2, pp->t_req);
+}
+
+// ---- warming Metal libraries. Under MoltenVK most of a new pipeline's time goes into compiling its shaders' Metal
+// library (~86 ms, against ~11 ms for the pipeline itself), which macOS keeps in its shader cache on disk: so each
+// program the prewarm translates (and its skinned variant) is built rather than left dormant, and gets a throwaway
+// pipeline (a target per output, float4 vertex inputs) on the warm workers, and an area's real pipelines come quickly
+// the first time it is seen. cache/warmed.bin lists the programs warmed (by their sources: warm_key), so a later run
+// warms only what an earlier one didn't get to (progcache_open), and after a translator change only the programs it
+// changed (programs.bin starts over, warmed.bin doesn't).
+// On by default under MoltenVK only, where it was measured; MHGU_PREBUILD=1 / 0 turns it on / off on any driver. Off
+// with the prewarm (ShaderPrewarm = Off, MHGU_NO_PREWARM=1).
+#define WARMED_PATH "cache/warmed.bin"
+#define WARMED_FORMAT 2  // bump when the same sources may no longer make the same Metal libraries (warm_key, shaders.c)
+// The sources of earlier translators stay listed, so the table is bigger than the programs' and warmed.bin keeps the
+// newest WARMED_KEEP entries once it lists more than WARMED_TAB / 2.
+#define WARMED_TAB 65536
+#define WARMED_KEEP 16384
+static pthread_mutex_t warm_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t warmed_tab[WARMED_TAB];
+static int warmed_n;
+static FILE *warmed_f;
+static _Atomic int stat_warmed;
+
+static bool prebuild_on(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("MHGU_PREBUILD");
+        on = e ? atoi(e) != 0 : g_vk.portability;
+        if (!g_config.shader_prewarm || getenv("MHGU_NO_PREWARM") || sync_shaders()) on = 0;
+    }
+    return on;
+}
+
+static bool warmed_has(uint64_t wk, bool add) {  // add: record it (it is warm now)
+    if (!wk) return false;
+    pthread_mutex_lock(&warm_lock);
+    uint32_t slot = (uint32_t)(wk ^ (wk >> 29)) & (WARMED_TAB - 1);
+    while (warmed_tab[slot] && warmed_tab[slot] != wk) slot = (slot + 1) & (WARMED_TAB - 1);  // (never full: warmed_init)
+    bool had = warmed_tab[slot] == wk;
+    if (add && !had && warmed_n < WARMED_TAB - 1) {
+        warmed_tab[slot] = wk;
+        warmed_n++;
+        if (warmed_f) { fwrite(&wk, sizeof wk, 1, warmed_f); fflush(warmed_f); }
+    }
+    pthread_mutex_unlock(&warm_lock);
+    return had;
+}
+
+// cache/warmed.bin says what the driver's own shader cache has (macOS's, for MoltenVK: it keeps an app's compiled
+// Metal libraries across updates of the app, measured): it goes with the driver and GPU, and on macOS the OS build (a
+// new Metal compiler). Not with the translator: its entries are the sources themselves.
+static void warmed_init(void) {
+    if (!prebuild_on()) return;
+    CacheHeader hdr = {"MHGUWRM", WARMED_FORMAT}, fh;
+    VkPhysicalDeviceProperties *pp = &g_vk.props;
+    hdr.stamp = hash_words(hdr.stamp, (uint32_t[]){pp->driverVersion, pp->vendorID, pp->deviceID, 0}, 16);
+#ifdef __APPLE__
+    char os[64] = "";
+    size_t osn = sizeof os;
+    if (sysctlbyname("kern.osversion", os, &osn, NULL, 0) == 0) hdr.stamp = hash_words(hdr.stamp, os, strlen(os));
+#endif
+    FILE *f = fopen(WARMED_PATH, "rb");
+    uint64_t *keys = NULL;
+    long n = 0;
+    if (f && fread(&fh, sizeof fh, 1, f) == 1 && !memcmp(&fh, &hdr, sizeof fh)) {
+        fseek(f, 0, SEEK_END);
+        n = (ftell(f) - (long)sizeof fh) / (long)sizeof(uint64_t);  // (a cut-short last entry: left out)
+        fseek(f, (long)sizeof fh, SEEK_SET);
+        keys = n > 0 ? malloc((size_t)n * sizeof *keys) : NULL;
+        if (!keys || fread(keys, sizeof *keys, (size_t)n, f) != (size_t)n) n = 0;
+    }
+    if (f) fclose(f);
+    long from = n > WARMED_TAB / 2 ? n - WARMED_KEEP : 0;
+    for (long i = from; i < n; i++) warmed_has(keys[i], true);
+    // written again whole: without what was cut short or left out (warmed_f is set after: not written twice)
+    f = fopen(WARMED_PATH, "wb");
+    if (f) {
+        fwrite(&hdr, sizeof hdr, 1, f);
+        if (n > from) fwrite(keys + from, sizeof *keys, (size_t)(n - from), f);
+        fflush(f);
+    }
+    free(keys);
+    warmed_f = f;
+    if (n) LOG("[shader] %d programs' sources warmed in earlier runs%s\n", warmed_n, from ? " (the oldest dropped)" : "");
+}
+
+static void warm_program(void *arg) {
+    Prog *p = arg;
+    PipeKey k;
+    memset(&k, 0, sizeof k);
+    k.prog = p;
+    VkFormat color[8] = {0};
+    uint32_t nc = 0;
+    for (uint32_t i = 0; i < 8; i++) if (p->fi->out_mask & (1u << i)) nc = i + 1;
+    for (uint32_t i = 0; i < nc; i++) {
+        color[i] = p->fkey.rt_kind[i] == 1 ? VK_FORMAT_R32G32B32A32_SINT : p->fkey.rt_kind[i] == 2 ? VK_FORMAT_R32G32B32A32_UINT
+                 : vk_wide_rt_on() ? VK_FORMAT_R16G16B16A16_UNORM : VK_FORMAT_R8G8B8A8_UNORM;  // (the game's targets: RGBA8)
+        k.write_mask[i] = 0xF;
+    }
+    k.rp = vk_render_pass(color, nc, VK_FORMAT_D32_SFLOAT_S8_UINT, 1);
+    k.ncolor = nc, k.samples = 1;
+    for (uint32_t i = 0; i < 32; i++) {
+        if (!(p->vi->attr_mask & (1u << i))) continue;
+        k.attr_fmt[i] = p->vkey.attr_kind[i] == 1 ? VK_FORMAT_R32G32B32A32_SINT : p->vkey.attr_kind[i] == 2 ? VK_FORMAT_R32G32B32A32_UINT
+                                                                                                          : VK_FORMAT_R32G32B32A32_SFLOAT;
+        k.attr_off[i] = 16 * i;
+    }
+    k.attr_mask = p->vi->attr_mask;
+    k.stride[0] = 16 * 32, k.used_streams = 1;
+    k.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, k.poly_fill = 1, k.depth_test = 1, k.depth_write = 1;
+    VkPipeline pipe = VK_NULL_HANDLE;
+    if (!warm_slot_take()) return;
+    if (create_pipeline(&k, &pipe) == VK_SUCCESS) {
+        vkDestroyPipeline(g_vk.dev, pipe, NULL);  // (its Metal library is what was wanted: macOS has it now)
+        warmed_has(p->wk, true);
+    }
+    atomic_fetch_sub(&warm_running, 1);
+    atomic_fetch_add(&stat_warmed, 1);
+}
+
+// (the log) how far prebuilding is, every 5 s while it has work
+static void prebuild_report(void) {
+    static uint64_t last;
+    static int last_warmed = -1;
+    uint64_t now = plat_now_ns();
+    if (now - last < 5000000000ull) return;
+    last = now;
+    int warmed = atomic_load(&stat_warmed), queued = atomic_load(&stat_warm_queued);
+    static bool tex_told;
+    uint64_t seen = atomic_load(&pw_total_new) + atomic_load(&pw_total_known);
+    if (!tex_told && !atomic_load(&stat_pw_left) && seen > 1000) {  // (every program set up is translated by now)
+        tex_told = true;
+        LOG("[shader] textures per stage: at most %d (the GPU allows %u), %d stages over\n", atomic_load(&tex_most),
+            g_vk.props.limits.maxPerStageDescriptorSamplers, atomic_load(&tex_over));
+    }
+    if (warmed == last_warmed && warmed >= queued) return;
+    last_warmed = warmed;
+    LOG("[shader] warm-up: %llu programs set up, %d warmed of %d to warm\n", (unsigned long long)seen, warmed, queued);
+}
+
+// The Metal warm-up's progress for the loading indicator (runtime/overlay.cpp), a line under the prewarm's: programs
+// warm of those queued so far; false once everything queued is warm (or there is no warm-up: prebuild_on). The count
+// to warm grows while the prewarm is still compiling; a program is queued before the prewarm counts it done
+// (prewarm_compile), so the two are never both idle while work is left. Any thread.
+bool shader_warmup_progress(uint64_t *done, uint64_t *total) {
+    int warmed = atomic_load(&stat_warmed), queued = atomic_load(&stat_warm_queued);  // (warmed first: queued >= it)
+    if (done) *done = warmed > 0 ? (uint64_t)warmed : 0;
+    if (total) *total = queued > 0 ? (uint64_t)queued : 0;
+    return warmed < queued;
 }
 
 // ================================================================== feedback: sampling a texture that is an attachment
@@ -4040,7 +4390,8 @@ static void draw(CmdRec *r, bool indexed) {
     vkey.depth_minus_one = nvn_depth_mode() == 0;
     for (int i = 0; i < st.nattrib; i++) vkey.attr_kind[i] = (uint8_t)attr_kind(st.attrib[i] & 0xFF);
     for (int i = 0; i < st.rt.ncolor; i++) if (st.rt.color[i]) fkey.rt_kind[i] = (uint8_t)rt_kind(st.rt.color[i]->format);
-    if (st.color_state[2] >= 1 && st.color_state[2] <= 7) fkey.alpha_func = st.color_state[2];  // (NVN alpha test)
+    // NVN's alpha test: a specialization constant of the fragment program, in the pipeline key (translate.c)
+    uint8_t af = st.color_state[2] >= 1 && st.color_state[2] <= 7 ? (uint8_t)st.color_state[2] : 0;
     Prog *pr = get_program(st.program, &vkey, &fkey);
     if (!pr) { stat_skipped++; return; }
     if (!await_build(&pr->state, pr, 0)) { skip_draw(&stat_skip_prog); return; }
@@ -4083,8 +4434,8 @@ static void draw(CmdRec *r, bool indexed) {
         if (st.rt.color[i] && ((st.channel_mask >> (i * 4)) & 0xF)) snapshots_invalidate(st.rt.color[i]);
     begin_pass();
     VkCommandBuffer cb = vk_cmd();
-    int af = fkey.alpha_func;
     if (pass_samples > 1 && (af == 2 || af == 4 || af == 5 || af == 7)) {  // MSAA: the alpha test as sample coverage
+        fkey.alpha_func = af;  // (a program of its own, the test written in)
         fkey.alpha_coverage = (uint8_t)pass_samples;
         pr = get_program(st.program, &vkey, &fkey);
         if (!pr) { stat_skipped++; return; }
@@ -4098,6 +4449,7 @@ static void draw(CmdRec *r, bool indexed) {
     k.rp = pass_rp;
     k.ncolor = pass_ncolor;
     k.samples = pass_samples;
+    k.alpha_func = pr->fkey.alpha_coverage ? 0 : af;
     for (int i = 0; i < 32; i++) {
         if (!(pr->vi->attr_mask & (1u << i))) continue;
         k.attr_mask |= 1u << i;
@@ -4356,7 +4708,7 @@ static void draw(CmdRec *r, bool indexed) {
                           " fill %d restart %d ccw %d",
                           (void *)st.rt.depth, pass_depth, pass_w, pass_h, k.depth_test, k.depth_write, k.depth_op, k.stencil_test,
                           k.ncolor, pass_color[0], pass_ncolor > 1 ? pass_color[1] : 0, pass_ncolor > 2 ? pass_color[2] : 0, k.samples,
-                          k.a2c, fkey.alpha_func, k.poly_fill, k.prim_restart, k.front_ccw);
+                          k.a2c, k.alpha_func, k.poly_fill, k.prim_restart, k.front_ccw);
             {  // compiler constants (cbuf 1) stored after the fragment code
                 NvnShaderStage *fs = &st.program->stages[1];
                 if (fs->code_addr && guest_range_ok(fs->code_addr + fs->const_offset, 16)) {
@@ -4942,6 +5294,7 @@ static void exec_list(uint64_t handle, int depth) {
 void backend_execute(uint64_t handle) {
     vk_lock();
     plist_drain();  // (the pipeline list's programs the prewarm met)
+    if (prebuild_on()) prebuild_report();
     uint64_t t0 = plat_now_ns();
     exec_list(handle, 0);
     stat_exec_ns += plat_now_ns() - t0;

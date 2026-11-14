@@ -31,6 +31,9 @@ const char *g_game_dir = "game";  // folder holding exefs/ and romfs/ (the playe
 #ifdef __ANDROID__
 #define DATA_FOLDER "Android/data/io.github.morerokk.mhgurecomp/files/data on this device"
 #define DATA_SUB(s) "data/" s
+#elif defined(__APPLE__)
+#define DATA_FOLDER "the data folder next to mhgurecomp"
+#define DATA_SUB(s) "data/" s
 #else
 #define DATA_FOLDER "the data folder next to mhgurecomp.exe"
 #define DATA_SUB(s) "data\\" s
@@ -250,7 +253,24 @@ int main(int argc, char **argv) {
         } else {
             fprintf(stderr, "[main] no user data folder: saves go to save\\ beside the executable\n");
         }
+#ifdef __APPLE__
+        {  // (or in MHGU_HOME's data/: a macOS release app has no game files inside)
+            char main_path[1200];
+            struct stat st;
+            snprintf(main_path, sizeof main_path, "%s/exefs/main", data);
+            if (stat(main_path, &st) && strcmp(data, "data")) snprintf(data, sizeof data, "data");
+        }
+#endif
         for (char msg[900]; game_files_problem(data, msg, sizeof msg);) {
+#ifdef __APPLE__
+            if (plat_in_app_bundle() && !strncmp(msg, "The game files were not found", 29)) {
+                // (the player's folder is MHGU_HOME: open its data folder for them)
+                snprintf(msg, sizeof msg, "The game files were not found. Put your own dump's exefs and romfs folders "
+                         "in the data folder that just opened (~/Library/Application Support/MHGURecomp/data).");
+                mkdir("data", 0755);
+                if (system("open data") != 0) { /* the message says where it is */ }
+            }
+#endif
             fprintf(stderr, "%s\n", msg);
 #ifdef __ANDROID__
             if (android_offer_import(msg, data, sizeof data)) continue;  // (from a folder the player picked: check again)
@@ -258,6 +278,10 @@ int main(int argc, char **argv) {
             plat_error_box(msg);
             return 1;
         }
+#ifdef __APPLE__
+        // a release app carries no game code: it builds it from these files on the player's Mac, once
+        if (plat_in_app_bundle() && !plat_gamecode_ready(data)) return 1;
+#endif
     }
     LOG("MHGU Recomp %s\n", MHGU_VERSION);
     { void fnprof_init(void); fnprof_init(); }

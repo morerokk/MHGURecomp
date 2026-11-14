@@ -18,10 +18,18 @@
 #include <windows.h>
 #else
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#ifdef __APPLE__  // (no SOCK_CLOEXEC, and send's MSG_NOSIGNAL only in newer SDKs: FD_CLOEXEC and SO_NOSIGPIPE set
+                  // on the socket instead)
+#define SOCK_CLOEXEC 0
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+#endif
 #endif
 
 #include "../config.h"
@@ -83,6 +91,10 @@ static bool conn_open(void) {
                     continue;
                 int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
                 if (fd < 0) return false;
+#ifdef __APPLE__
+                fcntl(fd, F_SETFD, FD_CLOEXEC);
+                setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &(int){1}, sizeof(int));
+#endif
                 if (!connect(fd, (struct sockaddr *)&a, sizeof a)) { g_sock = fd; return true; }
                 close(fd);
             }

@@ -45,6 +45,15 @@ bool plat_wait_process(unsigned long pid); // Restart child waits for old host t
 // Started without a game folder: work in the executable's folder; log to log.txt there when there is no terminal
 // (plat_fatal_notice then tells the player about a fatal error).
 void plat_standalone(void);
+#ifdef __APPLE__
+bool plat_in_app_bundle(void);  // running from a macOS .app (runtime/platform/darwin.c)
+// The game code library for an app: its own (beside the executable), or the one built from the game files in
+// game_dir on this Mac, building it first when there is none for this runtime (runtime/platform/darwin_gamecode.m).
+// false: not there (the player cancelled, or the build failed: they were told).
+bool plat_gamecode_ready(const char *game_dir);
+void plat_menu_init(void);      // the Settings menu in the menu bar (runtime/platform/darwin_menu.m)
+bool plat_restart_game(void);   // (macOS) the game starts again once this process has ended (runtime/ui.c then quits)
+#endif
 // The player's own folder for this game, created if missing (save data lives there, away from the game folder so a
 // rebuilt or deleted build folder can't take it along): Windows %APPDATA%\MHGURecomp.
 // TODO(Linux): $XDG_DATA_HOME/MHGURecomp, else ~/.local/share/MHGURecomp (see docs/STATUS.md "Save data").

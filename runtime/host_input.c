@@ -487,18 +487,20 @@ static void control_poll(void) {
                 SDL_Event event = {0}; event.type = SDL_EVENT_QUIT; SDL_PushEvent(&event);
                 continue;
             }
-            if (!strcmp(cmd, "sdlkey")) {  // sdlkey [ctrl+]<SDL key name> [down|up]: a key pressed and released, or only one (held)
-                bool ctrl = !SDL_strncasecmp(arg, "ctrl+", 5);
+            if (!strcmp(cmd, "sdlkey")) {  // sdlkey [ctrl+|alt+]<SDL key name> [down|up]: a key pressed and released, or only one
+                                           // (held) (Insert: Forge's menu; alt+Return: full screen <-> window)
+                bool ctrl = !SDL_strncasecmp(arg, "ctrl+", 5), alt = !SDL_strncasecmp(arg, "alt+", 4);
                 bool only_down = !strcmp(arg2, "down"), only_up = !strcmp(arg2, "up");
-                SDL_Scancode sc = SDL_GetScancodeFromName(arg + (ctrl ? 5 : 0));
+                SDL_Scancode sc = SDL_GetScancodeFromName(arg + (ctrl ? 5 : alt ? 4 : 0));
                 SDL_Event e = {0};
                 e.key.type = SDL_EVENT_KEY_DOWN, e.key.scancode = sc, e.key.key = SDL_GetKeyFromScancode(sc, 0, false);
-                e.key.down = true, e.key.mod = ctrl ? SDL_KMOD_LCTRL : 0;
+                e.key.down = true, e.key.mod = ctrl ? SDL_KMOD_LCTRL : alt ? SDL_KMOD_LALT : 0;
                 if (!only_up) SDL_PushEvent(&e);
                 e.key.type = SDL_EVENT_KEY_UP, e.key.down = false;
                 if (!only_down) SDL_PushEvent(&e);
-                if (ctrl) {  // (then Ctrl's own release, as a keyboard sends it: no modifier left)
-                    e.key.scancode = SDL_SCANCODE_LCTRL, e.key.key = SDLK_LCTRL, e.key.mod = 0;
+                if ((ctrl || alt) && !only_down) {  // (then the modifier's own release, as a keyboard sends it: no modifier left)
+                    e.key.scancode = ctrl ? SDL_SCANCODE_LCTRL : SDL_SCANCODE_LALT, e.key.key = ctrl ? SDLK_LCTRL : SDLK_LALT;
+                    e.key.mod = 0;
                     SDL_PushEvent(&e);
                 }
                 LOG("[control] key %s (%d)\n", arg, (int)sc);
@@ -555,6 +557,24 @@ static void control_poll(void) {
                 test_until = plat_now_ns() + (uint64_t)atoi(arg3) * 1000000ull;
                 continue;
             }
+            if (!strcmp(cmd, "set") || !strcmp(cmd, "unset")) {  // set <Key> <Value...> / unset <Quest<n>>: as the
+                                                                   // Settings window does (config_set / config_remove)
+                const char *v = strstr(line + strlen(cmd), arg);
+                char value[256] = "";
+                if (v) snprintf(value, sizeof value, "%s", v + strlen(arg) + strspn(v + strlen(arg), " \t"));
+                value[strcspn(value, "\r\n")] = 0;
+                if (!strcmp(cmd, "unset")) config_remove(arg);
+                else if (config_set(arg, value) && config_live(arg)) ui_setting_changed(arg);
+                else if (!config_check(arg, value)) LOG("[control] set %s: \"%s\" refused\n", arg, value);
+                continue;
+            }
+#ifdef __APPLE__
+            if (!strcmp(cmd, "settingsshot")) {  // settingsshot <folder>: the Settings window's tabs as PNGs (macOS)
+                void plat_settings_snapshot(const char *dir);
+                plat_settings_snapshot(arg[0] ? arg : ".");
+                continue;
+            }
+#endif
             if (!strcmp(cmd, "act")) {  // act <Name> [frames]: the action held for that many presented frames (default 8)
                 int id = act_find(arg);
                 if (id < 0 || !act_enabled()) LOG("[control] act %s: %s\n", arg, act_enabled() ? "no such action" : "[Actions] Enable is 0");

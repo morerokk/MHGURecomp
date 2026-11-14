@@ -42,7 +42,7 @@ static bool colorspace_ext;
 static PFN_vkSetHdrMetadataEXT set_hdr_metadata;
 
 static pthread_mutex_t g_vk_mutex = PTHREAD_MUTEX_INITIALIZER;
-static volatile bool g_vk_owner;  // who holds it: exit() may run inside a submission, from the guest's own code
+static pthread_t volatile g_vk_owner;  // who holds it: exit() may run inside a submission, from the guest's own code
 static volatile bool exiting;     // exit() has begun: the driver's own teardown may be one step away
 static pthread_t vk_exit_thread;  // the thread running exit(): it may still enter here (the atexit handler drains)
 
@@ -84,7 +84,11 @@ static void create_instance(void) {
     if (!sdl_ext) FATAL("SDL_Vulkan_GetInstanceExtensions: %s (is the window a Vulkan window?)\n", SDL_GetError());
     const char *ext[16];
     uint32_t n_ext = 0;
-    for (Uint32 i = 0; i < n_sdl && n_ext < 13; i++) ext[n_ext++] = sdl_ext[i];
+    for (Uint32 i = 0; i < n_sdl && n_ext < 12; i++) ext[n_ext++] = sdl_ext[i];
+#ifdef __APPLE__
+    // MoltenVK is a "portability" driver: the loader lists it only for an instance that asks for those.
+    ext[n_ext++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+#endif
     uint32_t ni = 0;  // VK_EXT_full_screen_exclusive (create_device) needs this one
     vkEnumerateInstanceExtensionProperties(NULL, &ni, NULL);
     VkExtensionProperties *ip = calloc(ni ? ni : 1, sizeof *ip);
@@ -105,6 +109,9 @@ static void create_instance(void) {
     VkInstanceCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &app,
                                .enabledExtensionCount = n_ext, .ppEnabledExtensionNames = ext,
                                .enabledLayerCount = validate ? 1 : 0, .ppEnabledLayerNames = layers};
+#ifdef __APPLE__
+    ci.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
     VkResult r = vkCreateInstance(&ci, NULL, &g_vk.inst);
     if (r != VK_SUCCESS && validate) {
         LOG("[vk] validation layer unavailable (%d); continuing without\n", r);
@@ -198,6 +205,9 @@ static void create_device(void) {
     if (g_vk.divisor) ext[n_ext++] = VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME;
     g_vk.stencil_export = has_ext(ep, ne, VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);  // (MSAA stencil resolve)
     if (g_vk.stencil_export) ext[n_ext++] = VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME;
+    // A device that advertises VK_KHR_portability_subset (MoltenVK) must have it enabled.
+    g_vk.portability = has_ext(ep, ne, "VK_KHR_portability_subset");
+    if (g_vk.portability) ext[n_ext++] = "VK_KHR_portability_subset";
     no_exclusive = surface_caps2 && has_ext(ep, ne, "VK_EXT_full_screen_exclusive") && !getenv("MHGU_VK_EXCLUSIVE");
     if (no_exclusive) ext[n_ext++] = "VK_EXT_full_screen_exclusive";
     // (only where DEPTH24_STENCIL8 is made as D32S8: textures.c; MHGU_VK_NO_BIAS_CONTROL=1 leaves it off)
@@ -337,10 +347,15 @@ static void create_device(void) {
                                   .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = g_vk.qfam};
     VK_CHECK(vkCreateCommandPool(g_vk.dev, &pi, NULL, &g_vk.pool));
 
-    // pipeline cache: cache/vk_pipelines.bin (written at exit)
+    // pipeline cache: cache/vk_pipelines.bin (written at exit). Not under MoltenVK: it compiles every shader of a
+    // pipeline cache's initial data into a Metal library in vkCreatePipelineCache, one after the other (~86 ms each
+    // with macOS's own shader cache cold: a new or updated app), and a 200 MB cache held the first frame back for
+    // minutes. macOS keeps compiled shaders itself, and the shader warm-up (exec.c) fills its cache in the background.
     size_t sz = 0;
     void *data = NULL;
-    FILE *fp = fopen("cache/vk_pipelines.bin", "rb");
+    if (g_vk.portability && remove("cache/vk_pipelines.bin") == 0)
+        LOG("[vk] cache/vk_pipelines.bin removed: MoltenVK compiled all of it before the first frame\n");
+    FILE *fp = g_vk.portability ? NULL : fopen("cache/vk_pipelines.bin", "rb");
     if (fp) {
         fseek(fp, 0, SEEK_END);
         sz = (size_t)ftell(fp);
@@ -358,6 +373,7 @@ static void create_device(void) {
 }
 
 static void pipeline_cache_save(void) {
+    if (g_vk.portability) return;  // (create_device: no file under MoltenVK)
     size_t sz = 0;
     if (vkGetPipelineCacheData(g_vk.dev, g_vk.pcache, &sz, NULL) != VK_SUCCESS || !sz) return;
     void *data = malloc(sz);
@@ -415,6 +431,8 @@ static VkPresentModeKHR present_mode(void) {
 
 static VkRenderPass sc_pass;
 static VkFramebuffer sc_fb[SC_MAX];
+static int sc_req_w, sc_req_h;  // the window's pixel size the swapchain was made for (its extent may differ: MoltenVK)
+static bool sc_stale;           // the surface's size changed under the swapchain (SUBOPTIMAL): recreate when it settles
 
 // HDR ([HDR] HDR = On, hdr.c): the game and the overlay draw into the composition image (sc_pass, RGBA16F, ends in
 // GENERAL) instead of the window image; hdr_pass then draws it into the HDR10 / scRGB window image (hdr.c
@@ -486,6 +504,11 @@ static int hdr_surface_format(const VkSurfaceFormatKHR *fmts, uint32_t nf, int w
     }
     int fmt = want - 1;  // HDR_FORMAT_*
     if (fmt == HDR_FORMAT_SCRGB && lin >= 0) return *out = HDR_OUT_SCRGB, lin;
+#ifdef __APPLE__
+    // (macOS: Auto is scRGB, the system's own EDR format. With HDR10 the system converts each frame from PQ, and other
+    // windows flashed through the game now and then, in full screen and borderless alike; with scRGB they did not)
+    if (fmt == HDR_FORMAT_AUTO && lin >= 0) return *out = HDR_OUT_SCRGB, lin;
+#endif
     if (pq >= 0) return *out = HDR_OUT_PQ, pq;
     if (lin >= 0) return *out = HDR_OUT_SCRGB, lin;
     return *out = HDR_OUT_NONE, -1;
@@ -494,6 +517,12 @@ static int hdr_surface_format(const VkSurfaceFormatKHR *fmts, uint32_t nf, int w
 static void hdr_send_metadata(bool force) {
     static float sent_peak = -1, sent_avg = -1;
     if (!set_hdr_metadata || !g_hdr_out || !g_vk.swapchain) return;
+#ifdef __APPLE__
+    // (macOS: MoltenVK hands it to the window as HDR10 EDR metadata with an optical output scale of 1, which for a
+    // linear scRGB image says 1.0 is 1 nit: the system tone maps the picture down to almost black. scRGB goes without,
+    // where 1.0 is SDR white: hdr.c hdr_peak. HDRFormat is ini only, so the window never had HDR10's metadata before.)
+    if (g_hdr_out == HDR_OUT_SCRGB) return;
+#endif
     float peak, avg;
     vk_hdr_metadata_values(&peak, &avg);
     if (!force && peak == sent_peak && avg == sent_avg) return;
@@ -629,6 +658,7 @@ static void create_swapchain(void) {
     if (out) hdr_pass = window_pass(sf.format, false, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     g_vk.sc_format = sf.format;
     g_vk.sc_extent = ext;
+    sc_req_w = w, sc_req_h = h, sc_stale = false;
     if (out && !compose_make(ext)) {  // (no memory for it: SDR from now on, the swapchain made again)
         LOG("[hdr] could not create the %ux%u composition image: SDR\n", ext.width, ext.height);
         hdr_broken = true;
@@ -654,6 +684,15 @@ static void create_swapchain(void) {
     if (g_hdr_out) hdr_send_metadata(true);
     LOG("[vk] swapchain %ux%u, %u images (asked for %u), format %d%s\n", ext.width, ext.height, g_vk.sc_count, count, sf.format,
         g_hdr_out == HDR_OUT_PQ ? " (HDR10)" : g_hdr_out == HDR_OUT_SCRGB ? " (scRGB)" : "");
+}
+
+// SUBOPTIMAL: only a change of the surface's own size counts (MoltenVK reports it while a window animates).
+static void check_suboptimal(void) {
+    VkSurfaceCapabilitiesKHR caps;
+    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk.phys, g_vk.surface, &caps) != VK_SUCCESS) return;
+    if (caps.currentExtent.width != UINT32_MAX &&
+        (caps.currentExtent.width != g_vk.sc_extent.width || caps.currentExtent.height != g_vk.sc_extent.height))
+        sc_stale = true;
 }
 
 static void recreate_swapchain(void) {
@@ -744,8 +783,16 @@ static bool frame_begin(void) {
     int msaa = config_live_msaa();
     if (configured_msaa < 0) configured_msaa = g_config.msaa;
     if (msaa != configured_msaa) { vk_set_msaa((uint32_t)msaa); configured_msaa = msaa; }
-    if (!g_vk.swapchain || (uint32_t)w != g_vk.sc_extent.width || (uint32_t)h != g_vk.sc_extent.height ||
-        config_live_vsync() != swapchain_vsync || hdr_wanted() != swapchain_hdr) recreate_swapchain();
+    // Recreate once the window has held its new pixel size for a few frames: during a full-screen switch or a live
+    // resize it changes every frame, each recreation waits for the GPU, and on macOS SDL's size and the Metal layer's
+    // (MoltenVK's currentExtent) disagree until the animation ends - leaving full screen recreated it 85 frames in a
+    // row. Until then the current images are drawn and scaled to the window.
+    static int last_w, last_h, held;
+    if (w != last_w || h != last_h) last_w = w, last_h = h, held = 0;
+    else if (held < 3) held++;
+    if (!g_vk.swapchain || config_live_vsync() != swapchain_vsync || hdr_wanted() != swapchain_hdr ||
+        (held >= 3 && (sc_stale || w != sc_req_w || h != sc_req_h)))
+        recreate_swapchain();
     if (!g_vk.swapchain) return false;
     slot = (slot + 1) % FRAMES;
     if (!acquire_sem[slot]) acquire_sem[slot] = binary_semaphore();
@@ -759,6 +806,7 @@ static bool frame_begin(void) {
     if (r == VK_ERROR_SURFACE_LOST_KHR) { surface_lost = true; return false; }
 #endif
     if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) { LOG("[vk] acquire failed: %d\n", r); return false; }
+    if (r == VK_SUBOPTIMAL_KHR) check_suboptimal();
     cur_frame.acquired = acquire_sem[slot];
     slot_seq[slot] = vk_pending_seq();
     VkCommandBuffer cb = vk_cmd();
@@ -861,7 +909,8 @@ static void frame_end(const char *shot_path) {
     if (r == VK_ERROR_OUT_OF_DATE_KHR) recreate_swapchain();
     if (r == VK_ERROR_SURFACE_LOST_KHR) surface_lost = true;
 #else
-    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) recreate_swapchain();
+    if (r == VK_ERROR_OUT_OF_DATE_KHR) sc_stale = true;  // (the next acquire recreates it at once)
+    else if (r == VK_SUBOPTIMAL_KHR) check_suboptimal();
 #endif
     cur_frame.ok = false;
     if (shot_path) {  // (the copy is taken here; the PNG is made on a thread of its own: encoding the window's size
@@ -914,6 +963,7 @@ static bool shot_frame(uint64_t f) {
 void backend_present(NvnTexture *t) {
     extern void vi_apply_framerate(void);
     vi_apply_framerate();
+    overlay_tick();  // (its frame, when no Forge plugin builds it: notices. Before the lock: it takes it)
     vk_lock();
     if (vk_hdr_tracking()) vk_hdr_present(t);  // (HDR: learns the frame's full-screen image, hdr.c)
     if (g_fsr_on) t = vk_fsr_present(t);  // FSR: its output-size picture with the HUD (fsr.c)
@@ -971,17 +1021,34 @@ void backend_present(NvnTexture *t) {
     vk_unlock();
     static int fps = -1;
     if (fps < 0) fps = getenv("MHGU_FPS") != NULL;
-    static uint64_t t0, n0;
+    static uint64_t t0, n0, prev;
+    static float ft[1024];  // (MHGU_FPS) frame times of the window, ms: present to present
+    static int nft;
     uint64_t now = plat_now_ns();
     if (!t0) t0 = now;
+    if (fps && prev && nft < 1024) ft[nft++] = (float)((now - prev) / 1e6);
+    prev = now;
     if (now - t0 >= 2000000000ull) {
-        if (fps) LOG("[vk] %.1f fps (frame %llu)\n", (g_frames - n0) * 1e9 / (double)(now - t0), (unsigned long long)g_frames);
-        t0 = now, n0 = g_frames;
+        if (fps && nft) {  // pacing: percentiles, and hitches = frames taking more than 1.5 frame periods of the target
+            for (int i = 1; i < nft; i++) { float v = ft[i]; int j = i; for (; j > 0 && ft[j - 1] > v; j--) ft[j] = ft[j - 1]; ft[j] = v; }
+            float period = 1000.0f / (float)(g_config.fps > 0 ? g_config.fps : 60);
+            int hitches = 0;
+            for (int i = 0; i < nft; i++) hitches += ft[i] > 1.5f * period;
+            LOG("[vk] %.1f fps (frame %llu) | frame ms p50 %.1f p95 %.1f p99 %.1f max %.1f | %d over %.1f ms\n",
+                (g_frames - n0) * 1e9 / (double)(now - t0), (unsigned long long)g_frames, ft[nft / 2], ft[nft * 95 / 100],
+                ft[nft * 99 / 100], ft[nft - 1], hitches, 1.5f * period);
+        }
+        t0 = now, n0 = g_frames, nft = 0;
     }
 }
 
 // ================================================================== init
 void vk_exec_init(void);
+static bool backend_ready;  // (backend_init done: there is a device to drain on quitting)
+static void exit_handler(void);
+void backend_quit(void) {
+    if (backend_ready) exit_handler();  // (does not return)
+}
 void vk_shaders_init(void);
 static SDL_AtomicInt vk_up;  // backend_init has finished (the loading screen waits for it)
 
@@ -989,6 +1056,9 @@ static SDL_AtomicInt vk_up;  // backend_init has finished (the loading screen wa
 // driver down while other threads are still inside nvnQueueSubmitCommands / vkWaitSemaphores (the exit-time
 // SIGSEGV in libnvidia-glcore). So: park the guest threads (vk_lock), drain what is in flight, let the GPU
 // finish, keep the pipeline cache - and leave with _exit, running no further teardown.
+// The window closing calls it before exit() (backend_quit): exit() runs the C++ static destructors registered after
+// this handler first, and MoltenVK registers some lazily, at its first shader compile - a shader worker still building
+// a pipeline then used a destroyed one (Quit from the macOS app menu crashed in MoltenVK).
 static void exit_handler(void) {
     exiting = true;
     vk_exit_thread = pthread_self();
@@ -996,14 +1066,25 @@ static void exit_handler(void) {
         pthread_mutex_lock(&g_vk_mutex);
         pthread_mutex_unlock(&g_vk_mutex);
     }
+    bool vk_jobs_quiesce(void);  // (exec.c: shader / pipeline workers stop, the jobs running finish)
+    bool quiet = vk_jobs_quiesce();
     if (g_vk.dev) {
         vkDeviceWaitIdle(g_vk.dev);
-        pipeline_cache_save();
+        if (quiet) pipeline_cache_save();  // (not under a pipeline still being created)
     }
     engine_modules_shutdown();  // (its own atexit handler was registered before this one, so it would never run)
     fflush(stdout);
     fflush(stderr);
     _exit(0);
+}
+
+// The window's Vulkan surface. On macOS it is a Metal view + CAMetalLayer that SDL adds to the window, which AppKit only
+// takes from the main thread: made from the game thread that initialises NVN, the layer never reached the screen
+// (a black window, frames presented without an error). The main thread is in ui_run's event loop, which runs it.
+static bool surface_ok;
+static void create_surface(void *unused) {
+    (void)unused;
+    surface_ok = SDL_Vulkan_CreateSurface(ui_window(), g_vk.inst, NULL, &g_vk.surface);
 }
 
 void backend_init(void) {
@@ -1015,7 +1096,12 @@ void backend_init(void) {
 #ifdef __ANDROID__
     while (!android_window()) SDL_Delay(50);  // (minimised right at the start: no window until the app comes back)
 #endif
-    if (!SDL_Vulkan_CreateSurface(ui_window(), g_vk.inst, NULL, &g_vk.surface)) FATAL("SDL_Vulkan_CreateSurface: %s\n", SDL_GetError());
+#ifdef __APPLE__
+    if (!SDL_RunOnMainThread(create_surface, NULL, true)) FATAL("SDL_RunOnMainThread: %s\n", SDL_GetError());
+#else
+    create_surface(NULL);
+#endif
+    if (!surface_ok) FATAL("SDL_Vulkan_CreateSurface: %s\n", SDL_GetError());
 #ifdef __ANDROID__
     surface_window = android_window();
 #endif
@@ -1026,6 +1112,7 @@ void backend_init(void) {
     vk_fsr_init();  // ([Upscaler] FSR: fsr.c)
     create_swapchain();
     atexit(exit_handler);
+    backend_ready = true;
     SDL_SetAtomicInt(&vk_up, 1);
 }
 

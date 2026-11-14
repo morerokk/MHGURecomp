@@ -49,10 +49,12 @@ void vk_lock(void);
 void vk_unlock(void);
 SDL_Window *ui_window(void);
 bool shader_prewarm_progress(uint64_t *done, uint64_t *total);  // (runtime/nvn/vulkan/exec.c)
+bool shader_warmup_progress(uint64_t *done, uint64_t *total);   // (the same: MoltenVK's Metal warm-up)
 bool romfs_mods_progress(int *done, int *total);                // (runtime/romfs.c)
 }
 
 static std::atomic<bool> g_enabled, g_ready, g_open, g_wants_text;
+static std::atomic<bool> g_forge_frames;  // forge.c's frame hook builds the frames (else overlay_tick)
 static std::atomic<bool> g_settings_open, g_forge_open;
 static std::atomic<bool> g_forge_over;  // the Forge menu was opened from the settings: they wait under it, not drawn
 static std::mutex g_frame_lock;  // ImGui's frame: the game's thread, or the loading screen's before the game's first
@@ -189,7 +191,7 @@ bool overlay_event(const SDL_Event *e) {
         overlay_toggle_settings();
         return true;
     }
-    if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && (int)e->key.scancode == g_menu_key) {
+    if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && g_menu_key > 0 && (int)e->key.scancode == g_menu_key) {
         set_open(!g_forge_open);
         return true;
     }
@@ -445,8 +447,17 @@ void overlay_init(const char *font_path, float font_size, int menu_key) {
     bool font = font_path && ImGui::GetIO().FontDefault;
     g_menu_key = menu_key;
     g_enabled = true;
-    LOG("[forge] ImGui %s overlay: %s opens the menu (font %s, %.0f px)\n", IMGUI_VERSION,
-        SDL_GetScancodeName((SDL_Scancode)menu_key), font ? font_path : "ImGui's", g_font_size);
+    if (menu_key > 0)
+        LOG("[forge] ImGui %s overlay: %s opens the menu (font %s, %.0f px)\n", IMGUI_VERSION,
+            SDL_GetScancodeName((SDL_Scancode)menu_key), font ? font_path : "ImGui's", g_font_size);
+}
+
+static bool notice_due(uint64_t now);
+
+void overlay_tick(void) {
+    if (g_forge_frames || (!g_enabled && !notice_due(SDL_GetTicksNS()))) return;
+    if (!g_enabled) overlay_init(nullptr, 0, 0);  // (ImGui's own font; no menu)
+    overlay_frame(nullptr);
 }
 
 // ------------------------------------------------------------------ notices (any thread -> game thread)
@@ -658,11 +669,11 @@ static void draw_hdr_analysis(const HdrStats &st, float scale) {
 }
 
 // ------------------------------------------------------------------ loading indicator
-// A spinner and "Loading" in the bottom right corner, with the mods' count while romfs.c layers them and then the
-// shader prewarm's while it runs: on the black
-// window until the game's first frame (overlay_loading: device.c's loading screen), then over the game while the
-// prewarm still has programs left, and for the game's first second at least (its own first frames are black too).
-// Then it fades and stays gone. (Under g_frame_lock: the loading screen's thread and the game's both draw it.)
+// A spinner and "Loading" in the bottom right corner, with the mods' count while romfs.c layers them, then the shader
+// prewarm's count while it runs (and on macOS the Metal warm-up's under it): on the black window until the game's first
+// frame (overlay_loading: device.c's loading screen), then over the game while either still has programs left, and for
+// the game's first second at least (its own first frames are black too). Then it fades and stays gone. (Under
+// g_frame_lock: the loading screen's thread and the game's both draw it.)
 static const uint64_t LOADING_HOLD_NS = 1000000000ull, LOADING_FADE_NS = 400000000ull;
 static uint64_t g_loading_t0, g_loading_fade;  // the game's first overlay frame; when the fade began (0: not yet)
 static bool g_loading_over;
@@ -671,7 +682,8 @@ static float loading_alpha(uint64_t now) {  // (the game's frames)
     if (!g_config.loading_indicator) g_loading_over = true;  // ([Performance] LoadingIndicator = Off: never)
     if (g_loading_over) return 0;
     if (!g_loading_t0) g_loading_t0 = now;
-    if (!g_loading_fade && now - g_loading_t0 >= LOADING_HOLD_NS && !shader_prewarm_progress(nullptr, nullptr))
+    if (!g_loading_fade && now - g_loading_t0 >= LOADING_HOLD_NS && !shader_prewarm_progress(nullptr, nullptr) &&
+        !shader_warmup_progress(nullptr, nullptr))
         g_loading_fade = now;
     if (!g_loading_fade) return 1;
     float a = 1 - (now - g_loading_fade) / (float)LOADING_FADE_NS;
@@ -685,31 +697,43 @@ static void draw_loading(uint64_t now, float scale, float alpha) {
     };
     int language = config_language();
     const char *title = settings_text(language, "Loading");
-    uint64_t done, total;
-    int mods_done, mods_total;
-    char line[128] = "", widest[128] = "";
-    if (romfs_mods_progress(&mods_done, &mods_total)) {  // (before the game's first frame: a big mod can take a while)
-        if (!mods_total) {
-            snprintf(line, sizeof line, "%s  %d %s", settings_text(language, "Reading mods"), mods_done,
-                     settings_text(language, "files"));
-            snprintf(widest, sizeof widest, "%s", line);
-        } else {
-            const char *what = settings_text(language, "Applying mods");
-            snprintf(line, sizeof line, "%s  %d / %d", what, mods_done, mods_total);
-            snprintf(widest, sizeof widest, "%s  %d / %d", what, mods_total, mods_total);
-        }
-    } else if (shader_prewarm_progress(&done, &total) && total) {
-        const char *what = settings_text(language, "Compiling shaders");
-        snprintf(line, sizeof line, "%s  %llu / %llu", what, (unsigned long long)done, (unsigned long long)total);
-        snprintf(widest, sizeof widest, "%s  %llu / %llu", what, (unsigned long long)total, (unsigned long long)total);
-    }
-    ImGuiViewport *vp = ImGui::GetMainViewport();
+    // the counts under the title: the mods' while romfs.c layers them; else the prewarm's, then the Metal warm-up's
+    // (macOS), each while it has work
+    char line[2][128], widest[128];
+    int nlines = 0;
     ImFont *font = ImGui::GetFont();
     float size = ImGui::GetFontSize() * 1.25f, small = ImGui::GetFontSize(), pad = 10 * scale, gap = 3 * scale;
+    ImVec2 ls(0, 0);
+    auto count = [&](bool (*progress)(uint64_t *, uint64_t *), const char *label) {
+        uint64_t done, total;
+        if (!progress(&done, &total) || !total) return;
+        const char *what = settings_text(language, label);
+        snprintf(line[nlines++], sizeof line[0], "%s  %llu / %llu", what, (unsigned long long)done, (unsigned long long)total);
+        snprintf(widest, sizeof widest, "%s  %llu / %llu", what, (unsigned long long)total, (unsigned long long)total);
+        ImVec2 s = font->CalcTextSizeA(small, FLT_MAX, 0, widest);  // (no jitter as it counts)
+        ls = ImVec2(std::max(ls.x, s.x), ls.y + gap + s.y);
+    };
+    int mods_done, mods_total;
+    if (romfs_mods_progress(&mods_done, &mods_total)) {  // (before the game's first frame: a big mod can take a while)
+        if (!mods_total) {
+            snprintf(line[nlines], sizeof line[0], "%s  %d %s", settings_text(language, "Reading mods"), mods_done,
+                     settings_text(language, "files"));
+            snprintf(widest, sizeof widest, "%s", line[nlines++]);
+        } else {
+            const char *what = settings_text(language, "Applying mods");
+            snprintf(line[nlines++], sizeof line[0], "%s  %d / %d", what, mods_done, mods_total);
+            snprintf(widest, sizeof widest, "%s  %d / %d", what, mods_total, mods_total);
+        }
+        ImVec2 s = font->CalcTextSizeA(small, FLT_MAX, 0, widest);
+        ls = ImVec2(std::max(ls.x, s.x), ls.y + gap + s.y);
+    } else {
+        count(shader_prewarm_progress, "Compiling shaders");
+        count(shader_warmup_progress, "Building Metal shaders");
+    }
+    ImGuiViewport *vp = ImGui::GetMainViewport();
     float r = size * 0.55f, margin = 24 * scale;
     ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0, title);
-    ImVec2 ls = line[0] ? font->CalcTextSizeA(small, FLT_MAX, 0, widest) : ImVec2(0, 0);  // (no jitter as it counts)
-    float w = pad + 2 * r + pad + std::max(ts.x, ls.x) + pad, h = pad + ts.y + (line[0] ? gap + ls.y : 0) + pad;
+    float w = pad + 2 * r + pad + std::max(ts.x, ls.x) + pad, h = pad + ts.y + ls.y + pad;
     ImVec2 p1(vp->WorkPos.x + vp->WorkSize.x - margin, vp->WorkPos.y + vp->WorkSize.y - margin), p0(p1.x - w, p1.y - h);
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     dl->AddRectFilled(p0, p1, color(.025f, .04f, .065f, .85f), 6 * scale);
@@ -720,7 +744,11 @@ static void draw_loading(uint64_t now, float scale, float alpha) {
     dl->PathStroke(color(1, .72f, .3f, 1), ImDrawFlags_None, 3 * scale);
     ImVec2 at(c.x + r + pad, p0.y + pad);
     dl->AddText(font, size, at, color(.96f, .97f, 1, 1), title);
-    if (line[0]) dl->AddText(font, small, ImVec2(at.x, at.y + ts.y + gap), color(.72f, .76f, .84f, 1), line);
+    float y = at.y + ts.y;
+    for (int i = 0; i < nlines; i++, y += small) {
+        y += gap;
+        dl->AddText(font, small, ImVec2(at.x, y), color(.72f, .76f, .84f, 1), line[i]);
+    }
 }
 
 // ------------------------------------------------------------------ frames (game thread)
@@ -780,10 +808,11 @@ static bool tex_create_failed(ImTextureData *) { return false; }
 #endif
 
 void overlay_frame(void *cpu) {
+    if (cpu) g_forge_frames = true;
     if (!g_ready) return;
     std::lock_guard<std::mutex> frame(g_frame_lock);
     if (!g_settings_open) { bool closed = false; settings_panel(&closed); }
-    bool open = g_open, free_render = forge_plugins_have(FORGE_IMGUI_FREE_RENDER);
+    bool open = g_open, free_render = cpu && forge_plugins_have(FORGE_IMGUI_FREE_RENDER);
     uint64_t now = SDL_GetTicksNS();
     bool notice = notice_due(now);
     char line[256];
@@ -813,7 +842,7 @@ void overlay_frame(void *cpu) {
     float scale = frame_setup(io, w, h, now);
     apply_input(io);
 
-    if (!g_plugins_init) {  // (Forge: right after its context is made)
+    if (cpu && !g_plugins_init) {  // (Forge: right after its context is made)
         g_plugins_init = true;
         forge_imgui_init(cpu);
     }
@@ -866,7 +895,7 @@ void overlay_frame(void *cpu) {
         ImGui::End();
         if (!keep) set_open(false);
     }
-    forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);
+    if (cpu) forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);
     if (notice) draw_notice(now, scale);
     if (chat) draw_chat(line, now, scale);
     if (fps) draw_fps(now);

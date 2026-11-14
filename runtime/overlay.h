@@ -37,6 +37,10 @@ void overlay_pad(const OverlayPad *p);
 // The game's thread, once a frame (after the plugins' forge_onUpdate): the overlay's frame, plugins' UI included.
 void overlay_frame(void *cpu);
 
+// The game's thread, as it presents a frame (runtime/nvn/vulkan/device.c, before taking the Vulkan lock): the overlay's
+// frame when no Forge plugin hooks the game's frame update (forge.c calls overlay_frame then).
+void overlay_tick(void);
+
 // Render thread, inside the window image's render pass (runtime/nvn/vulkan/device.c, under the Vulkan lock).
 typedef struct {
     VkInstance inst;

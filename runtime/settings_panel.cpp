@@ -3068,12 +3068,14 @@ void settings_panel(bool *open) {
     auto *window = ImGui::GetCurrentWindow();
     float spacing = ImGui::GetStyle().ItemSpacing.y;
     GuideLayout guides = guide_layout(ImGui::GetContentRegionAvail().x);
-    // pinned above the guides: the help of the row focused or pointed at, with room for the longest of the tab
-    float help_area = pinned_guides && s.help_height > 0 ? s.help_height + spacing * 2 : 0;
-    s.guide_height = pinned_guides ? guides.height + help_area : 0;
     float guide_top =
         std::max(window->Pos.y + window->Size.y - ImGui::GetStyle().WindowPadding.y - guides.height,
                  window->InnerClipRect.Min.y);
+    // pinned above the guides: the help of the row focused or pointed at, with room for the longest of the tab (at most
+    // half of what is above the guides, so a small window at a large menu size keeps room for the rows)
+    float help_area = pinned_guides && s.help_height > 0 ? s.help_height + spacing * 2 : 0;
+    help_area = std::min(help_area, (guide_top - window->InnerClipRect.Min.y) / 2);
+    s.guide_height = pinned_guides ? guides.height + help_area : 0;
     float help_top = std::max(guide_top - help_area, window->InnerClipRect.Min.y);
     if (pinned_guides)
         ImGui::PushClipRect(
@@ -3336,8 +3338,11 @@ void settings_panel(bool *open) {
         draw->AddRectFilled(ImVec2(x0, help_top - spacing), ImVec2(x1, guide_top),
                             ImGui::GetColorU32(ImGuiCol_WindowBg) | IM_COL32_A_MASK);
         draw->AddLine(ImVec2(x0 + pad, help_top), ImVec2(x1 - pad, help_top), look.divider);
-        if (!help.empty())
+        if (!help.empty()) {
+            draw->PushClipRect(ImVec2(x0 + pad, help_top), ImVec2(x1, guide_top), true);  // (a help cut to its room)
             draw_help(draw, ImVec2(x0 + pad, help_top + spacing), look.text_dim, help, help_wrap);
+            draw->PopClipRect();
+        }
     }
     if (pinned_guides && s.view == View::Main)
         draw_guides(window, guides, guide_top);
