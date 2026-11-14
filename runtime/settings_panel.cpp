@@ -383,6 +383,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(combo_window);
     SAME(volume);
     SAME(mute_in_background);
+    SAME(audio_output);
     SAME(button_icons);
     SAME(menu_theme);
     SAME(discord);
@@ -1668,6 +1669,7 @@ void reset_section() {
         c.fxaa_mode = f.fxaa_mode;
         c.volume = f.volume;
         c.mute_in_background = f.mute_in_background;
+        c.audio_output = f.audio_output;
         break;
     case 2:
         c.face_buttons = f.face_buttons;
@@ -1990,6 +1992,9 @@ std::vector<Row> main_rows() {
         header(r, "audio.header", tr("Audio"));
         number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
         add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
+        add_choice(r, "audio.output", "Output", c.audio_output, {tr("Stereo"), tr("5.1 surround")},
+                   [](int v) { c.audio_output = v; }, ini("Output"));
+        r.back().help = tr("5.1 surround sends the game's own 5.1 mix (front, center, subwoofer, rear) to a surround system; Stereo folds it down to two speakers or headphones. With 5.1 on a stereo device, the system folds it down instead.");
         header(r, "graphics.header", tr("Graphics"));
         add_bool(r, "show.fps", "FPS counter", &c.show_fps, ini("ShowFPS"));
 #ifdef __ANDROID__

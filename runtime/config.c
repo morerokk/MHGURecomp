@@ -121,6 +121,7 @@
     /* [Audio] */                                                                                   \
     .volume = 100,                                                                                  \
     .mute_in_background = 0,                                                                        \
+    .audio_output = AUDIO_OUT_STEREO,                                                               \
     /* [Application] */                                                                             \
     .confirm_exit = 1,                                                                              \
     .language = 0,                                                                                  \
@@ -555,6 +556,11 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "MuteInBackground = Off\n"
     "\n"
+    "; Speakers: Stereo, or 5.1 (front left / right, center, subwoofer, rear left / right) for a surround system.\n"
+    "; The game mixes its sound in 5.1 either way; Stereo folds it down to two channels.\n"
+    "; Default: Stereo\n"
+    "Output = Stereo\n"
+    "\n"
     "[Application]\n"
     "; Ask before the game window closes (closing does not save the game)\n"
     "; Default: On\n"
@@ -820,6 +826,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Bonus Content", "BonusContent", bonus_content, false),
     {"Audio", "Volume", SET_INT, F(volume), 0, 0, 100, NULL, NULL, false, ERR_MISC},
     ON_OFF("Audio", "MuteInBackground", mute_in_background, false),
+    {"Audio", "Output", SET_CHOICE, F(audio_output), 0, 0, 0, "Stereo|2.0,5.1|surround|5.1surround", NULL, false, ERR_MISC},
     ON_OFF("Application", "ConfirmExit", confirm_exit, false),
     {"Application", "Language", SET_CHOICE, F(language), 0, 0, 0, "English|en,Spanish|es", NULL, false, ERR_LANGUAGE},
     {"Application", "ButtonIcons", SET_CHOICE, F(button_icons), 0, 0, 0, "Xbox,Switch,PlayStation", NULL, false, ERR_ICONS},

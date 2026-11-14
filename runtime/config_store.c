@@ -73,6 +73,7 @@ static SDL_AtomicInt live_bonus;
 // [Audio]
 static SDL_AtomicInt volume = {100};
 static SDL_AtomicInt mute_in_background;
+static SDL_AtomicInt audio_output;
 // [Application]
 static SDL_AtomicInt confirm_exit = {1};
 static SDL_AtomicInt language = {0};
@@ -163,6 +164,7 @@ void config_store_loaded(const Config *c) {
     SDL_SetAtomicInt(&language, c->language);
     SDL_SetAtomicInt(&volume, c->volume);
     SDL_SetAtomicInt(&mute_in_background, c->mute_in_background);
+    SDL_SetAtomicInt(&audio_output, c->audio_output);
     SDL_SetAtomicInt(&confirm_exit, c->confirm_exit);
     SDL_SetAtomicInt(&show_fps, c->show_fps);
     SDL_SetAtomicInt(&menu_chord, c->menu_chord);
@@ -270,6 +272,7 @@ float config_audio_gain(void) {
     if (SDL_GetAtomicInt(&mute_in_background) && !SDL_GetAtomicInt(&window_focused)) return 0.0f;
     return SDL_GetAtomicInt(&volume) / 100.0f;
 }
+int config_audio_output(void) { return SDL_GetAtomicInt(&audio_output); }
 void config_window_focus(bool focused) { SDL_SetAtomicInt(&window_focused, focused); }
 bool config_confirm_exit(void) { return SDL_GetAtomicInt(&confirm_exit) != 0; }
 bool config_menu_chord(void) { return SDL_GetAtomicInt(&menu_chord) != 0; }

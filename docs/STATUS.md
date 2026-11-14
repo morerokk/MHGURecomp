@@ -1343,6 +1343,24 @@ old way while on.
   side by side (Equipment Box, 1080p): better, but the stretched one reads more easily for some, so it stays an option
   ("Bold text"; its help names dyslexia).
 
+## 5.1 surround output: [Audio] Output (2026-11-14)
+
+- MHGU always mixes in 5.1: its device sink has six inputs (FL FR FC LFE BL BR, the final mix's buffers 0-5) and it
+  never asks IAudioDevice for the channel count (only cmds 4, 7, 10) or set:sys for the TV sound mode. Measured per
+  channel over 5 s in quest 101: center about as loud as the fronts, rears ~30-60 with peaks ~300 when a sound is
+  behind, LFE always 0 (the game sends no bass to it). Before, audio.c folded it to stereo and opened a 2-channel stream.
+- [Audio] Output = Stereo (default, the same fold as before: center and rears -3 dB, LFE -12 dB) or 5.1 (aliases
+  Surround, "5.1 surround"); settings menu Graphics & Audio > Output, live: the audio thread reopens the SDL stream when
+  the saved value changes (open_stream / pacing in renderer_tick; the queue levels are in sample frames now). SDL's 5.1
+  order is the sink's, so 5.1 is passed as it is; SDL converts to the device (a stereo device: SDL folds it down; 7.1:
+  the six on their speakers). The log says "[audren] output 5.1; device ... N channels".
+- MHGU_AUDIO_WAV writes WAVE_FORMAT_EXTENSIBLE float with the channel mask, in the Output it was opened with (6 tracks
+  in Audacity for 5.1).
+- Checked here (stereo device): both modes into quest 101, no underruns; the 5.1 dump's channels as measured above;
+  Stereo -> 5.1 and 5.1 -> Stereo through the menu with Save, reopened, no underruns. Not yet heard on real surround
+  speakers (the user's other PC, before release). Without speakers: the WAV dump, or Windows Sonic for Headphones
+  (the device then reports 7.1 and SDL places the 5.1 on it).
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,
