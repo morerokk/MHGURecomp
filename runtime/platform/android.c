@@ -54,8 +54,8 @@ const char *android_home(void) {
     }
     if (line[0] == '/') {  // (not made here if it's missing: moved or deleted, an empty one would pass for it)
         if (access(line, W_OK | X_OK) == 0) snprintf(home_dir, sizeof home_dir, "%s", line);
-        else snprintf(chosen_note, sizeof chosen_note, "The app's files folder, %s, can't be used now (%s): \"All files access\" "
-                      "turned off, the folder moved or deleted, or its drive or SD card gone?", line, strerror(errno));
+        else snprintf(chosen_note, sizeof chosen_note, "Can't use the app's files folder, %s (%s). Is \"All files access\" off, or "
+                      "was the folder moved or its SD card or drive removed?", line, strerror(errno));
     }
     return home_dir;
 }
@@ -238,8 +238,8 @@ bool android_import(int what, bool running) {
             {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Forget it"},
         };
         char text[1600];
-        snprintf(text, sizeof text, "%s\n\nForget that folder and keep the app's files in its own folder from now on? Nothing is copied or "
-                 "deleted, and you can choose it again later. The app closes: start it again.", chosen_note);
+        snprintf(text, sizeof text, "%s\n\nForget it and use the app's own folder from now on? Nothing is copied or deleted. The app "
+                 "then closes.", chosen_note);
         return ask(text, b, 2) == 1 && note_files_folder(app_folder());
     }
     if (what == 1) snprintf(folder, sizeof folder, "%s", android_path("data"));  // (the files folder's, whatever the settings point at: see below)
@@ -302,11 +302,11 @@ bool android_offer_import(const char *msg, char *data, size_t size) {
     char text[2600], where[1300] = "";
     if (strcmp(data, "data")) {
         bool own = !strncmp(data, app_folder(), strlen(app_folder()));  // (a reinstall deletes those, the settings kept in a chosen folder still name them)
-        snprintf(where, sizeof where, own ? "\n\nThe app looked in %s, in its own folder: uninstalling the app deletes what's there, so they need importing again."
-                                          : "\n\nThe app looked in %s. If it's on a drive, is the drive connected?", data);
+        snprintf(where, sizeof where, own ? "\n\nLooked in %s, the app's own folder (uninstalling the app empties it)."
+                                          : "\n\nLooked in %s. If that's a drive, is it connected?", data);
     }
-    snprintf(text, sizeof text, "%s%s\n\nPick the folder that holds the exefs and romfs folders. The app can copy them into its own "
-             "folder (13 GB of free space, 26 GB while copying), or use them where they are, for example on a USB drive or SD card.",
+    snprintf(text, sizeof text, "%s%s\n\nPick the folder with exefs and romfs in it. The app can copy them (13 GB free needed, 26 GB "
+             "while copying) or use them where they are, such as on an SD card or USB drive.",
              msg, where);
     const SDL_MessageBoxButtonData buttons[] = {
         {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Quit"},
@@ -341,9 +341,8 @@ void android_first_start(void) {
     for (;;) {
         android_home();
         if (chosen_note[0]) {  // (chosen, but not usable now)
-            snprintf(text, sizeof text, "%s\n\nChoose it again (Android asks for \"All files access\" again if it's off), or use the app's own "
-                     "folder this time: your files in the chosen folder are then not used until you choose it again. (If it's gone for good, the "
-                     "settings' Android tab can forget it.)", chosen_note);
+            snprintf(text, sizeof text, "%s\n\nChoose it again, or use the app's own folder for now (the files in the chosen folder then "
+                     "aren't used).", chosen_note);
             const SDL_MessageBoxButtonData b[] = {
                 {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Quit"},
                 {0, 1, "Use the app's folder"},
@@ -360,14 +359,12 @@ void android_first_start(void) {
         if (SDL_GetAndroidSDKVersion() < 30) return;  // (a chosen folder takes "All files access": Android 11 on)
         snprintf(ini, sizeof ini, "%s/mhgurecomp.ini", app_folder());
         bool had = access(ini, F_OK) == 0;
-        snprintf(text, sizeof text, "%s In a folder you choose (a new MHGURecomp folder in the device's storage, say) you can open them, "
-                 "back them up and put mods in them yourself.%s\n\nYou can change this later in the settings' Android tab.",
-                 had ? "The app keeps its files (settings, save, mods, cheats, screenshots, log.txt) in its own folder, in Android/data, "
-                       "which this device's file managers can't open. It can copy them into a folder you choose and keep them there instead."
-                     : "Where should the app keep its files (settings, save, mods, cheats, screenshots, log.txt)? Its own folder is in "
-                       "Android/data, which this device's file managers can't open.",
-                 had ? "" : " If you chose one before reinstalling the app, choose it again: what's in it is used. (Game files that were "
-                            "in the app's own folder went with the old install and need importing again.)");
+        snprintf(text, sizeof text, "%s\n\nYou can change this later in the settings' Android tab.",
+                 had ? "The app keeps its files (settings, save, mods) in Android/data, which file managers usually can't open. Copy "
+                       "them to a folder you choose, where you can back them up and add mods?"
+                     : "Where should the app keep its files (settings, save, mods)? Its own folder is in Android/data, which file "
+                       "managers usually can't open. In a folder you choose you can back them up and add mods. Reinstalled? Choose "
+                       "the same folder again.");
         const SDL_MessageBoxButtonData b[] = {
             {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 1, "The app's own folder"},
             {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 2, "Choose a folder"},

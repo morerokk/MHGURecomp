@@ -1353,7 +1353,8 @@ old way while on.
   Surround, "5.1 surround"); settings menu Graphics & Audio > Output, live: the audio thread reopens the SDL stream when
   the saved value changes (open_stream / pacing in renderer_tick; the queue levels are in sample frames now). SDL's 5.1
   order is the sink's, so 5.1 is passed as it is; SDL converts to the device (a stereo device: SDL folds it down; 7.1:
-  the six on their speakers). The log says "[audren] output 5.1; device ... N channels".
+  SDL_Convert51To71 puts the six on their speakers and leaves the sides silent). The game has no more than 5.1, so
+  that's all the port sends: a 7.1 upmix is left to the system / receiver (decided 2026-11-14). The log says "[audren] output 5.1; device ... N channels".
 - MHGU_AUDIO_WAV writes WAVE_FORMAT_EXTENSIBLE float with the channel mask, in the Output it was opened with (6 tracks
   in Audacity for 5.1).
 - Checked here (stereo device): both modes into quest 101, no underruns; the 5.1 dump's channels as measured above;

@@ -2,15 +2,21 @@
 // system UI flags it set before Android 11, which newer Android versions (the app targets 15) don't always follow, so
 // the bars stayed over the game on some devices. A swipe from the edge still shows them for a moment (and they hide
 // again by themselves).
-// It also asks to share the log after a crash (LogActivity), before the game starts and writes a new one.
+// It also asks to share the log after a crash (LogActivity), before the game starts and writes a new one, and shows
+// SDL_ShowMessageBox's boxes as plain AlertDialogs (messageboxCreateAndShow).
 package io.github.morerokk.mhgurecomp;
 
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.KeyEvent;
+import android.view.View;
 import android.view.Window;
+import android.widget.Button;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
@@ -50,6 +56,69 @@ public class MHGUActivity extends SDLActivity {
             return;
         }
         startActivity(new Intent(this, LogActivity.class).putExtra(LogActivity.CRASH, true));
+    }
+
+    // SDL's own box puts the text and the buttons in a plain layout, so a text taller than the screen (a phone held
+    // sideways, a large font) pushed the buttons off it and the box couldn't be answered; Back didn't answer it either.
+    // An AlertDialog's message scrolls and its buttons stay on screen. SDL's thread waits on messageboxSelection until
+    // the dialog is dismissed. The last of SDL's buttons (the main choice in the app's boxes) goes in the positive slot,
+    // the one before it in the negative one, a first of three in the neutral one; where they sit is up to the theme
+    // (this one puts the positive first). Back, Escape and a controller's B press the escape button, Enter the return
+    // one when no button has the focus.
+    @Override
+    protected void messageboxCreateAndShow(Bundle args) {
+        final int[] flags = args.getIntArray("buttonFlags"), ids = args.getIntArray("buttonIds");
+        final String[] texts = args.getStringArray("buttonTexts");
+        if (texts == null || flags == null || ids == null || texts.length == 0 || texts.length > 3) {
+            super.messageboxCreateAndShow(args);  // (AlertDialog has three button slots; the app never asks more)
+            return;
+        }
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(args.getString("title"))
+                .setMessage(args.getString("message"))
+                .create();
+        dialog.setCancelable(false);
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface unused) {
+                synchronized (messageboxSelection) {
+                    messageboxSelection.notify();
+                }
+            }
+        });
+        final int[] slots = {DialogInterface.BUTTON_POSITIVE, DialogInterface.BUTTON_NEGATIVE, DialogInterface.BUTTON_NEUTRAL};
+        int escape = -1, enter = -1;
+        for (int i = 0; i < texts.length; i++) {
+            final int id = ids[i];
+            dialog.setButton(slots[texts.length - 1 - i], texts[i], new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface d, int which) {
+                    messageboxSelection[0] = id;  // (AlertDialog dismisses itself after this)
+                }
+            });
+            if ((flags[i] & 1) != 0) enter = id;   // SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT
+            if ((flags[i] & 2) != 0) escape = id;  // SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT
+        }
+        final int escapeId = escape, enterId = enter;
+        dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
+            @Override
+            public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
+                int id;
+                if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_ESCAPE || keyCode == KeyEvent.KEYCODE_BUTTON_B) id = escapeId;
+                else if (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                    View focus = dialog.getCurrentFocus();
+                    if (focus instanceof Button) return false;  // (the focused button takes it)
+                    id = enterId;
+                } else return false;
+                if (id < 0 && keyCode != KeyEvent.KEYCODE_BACK) return false;
+                if (id >= 0 && event.getAction() == KeyEvent.ACTION_UP) {
+                    messageboxSelection[0] = id;
+                    dialog.dismiss();
+                }
+                return true;  // (Back with no escape button: nothing, the box stays)
+            }
+        });
+        dialog.show();
     }
 
     @Override
