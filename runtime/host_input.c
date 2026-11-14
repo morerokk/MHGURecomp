@@ -127,9 +127,15 @@ static bool mouse_released;   // Esc / focus lost: no automatic capture (MouseCa
 // turns the pause menu's page), a right click is Cancel (also in the screens it opens, in a hunt). Clicks there are not
 // the game's buttons.
 static bool menu_ptr;         // (mouse_update) such a menu (or, in a hunt, a screen it opened) is open, nothing else has the mouse
-static bool menu_ptr_live;    // the mouse is in use there: it was captured when the menu opened, or it moved since
+static bool menu_ptr_live;    // the mouse is in use there: it was captured when the menu opened with keyboard and mouse the
+                              // device last used, or it moved since (a few pixels: not the motion SDL sends as the capture
+                              // is let go or the pointer warped); a controller's press or stick puts it away again
 static bool menu_ptr_warp;    // put the pointer on the selected row once the capture is off
 static int menu_ptr_hover = MENUPTR_NONE;  // the row the pointer was last over
+static bool menu_ptr_anchored;  // (not live) the pointer was seen at menu_ptr_ax/ay: it is live once it moves away from there
+static float menu_ptr_ax, menu_ptr_ay;
+#define MENU_PTR_WAKE_PX 8.0f
+static void menu_ptr_idle(void) { menu_ptr_live = menu_ptr_anchored = false, menu_ptr_hover = MENUPTR_NONE; }
 static bool menu_ptr_geometry(SDL_Window *w, float *left, float *top, float *sx, float *sy);
 static float mouse_dx, mouse_dy;  // counts moved since the last update
 // (tests: the control file's "mousemove <x> <y> <ms>", a mouse moving at that many counts a second, captured or not)
@@ -810,7 +816,15 @@ static bool menu_ptr_slider(float mx, float my, int clicks) {  // (clicks 0: a m
     return true;
 }
 static void menu_ptr_move(float mx, float my) {
-    menu_ptr_live = true;
+    if (!menu_ptr_live) {  // (a controller's menu: the pointer stays away until the mouse itself moves)
+        if (!menu_ptr_anchored) {
+            menu_ptr_anchored = true, menu_ptr_ax = mx, menu_ptr_ay = my;
+            return;
+        }
+        float dx = mx - menu_ptr_ax, dy = my - menu_ptr_ay;
+        if (dx * dx + dy * dy < MENU_PTR_WAKE_PX * MENU_PTR_WAKE_PX) return;
+        menu_ptr_live = true;
+    }
     if (menu_ptr_slider(mx, my, 0)) return;
     static uint64_t menu_id;  // (another menu in focus: the pointer is over none of its cells yet)
     uint64_t id = menuptr_menu_id();
@@ -847,7 +861,8 @@ static void menu_ptr_wheel(int n) {  // (n > 0 up: a menu of pages turns to the 
 
 static volatile int g_last_dev = -1;  // the device a button was last pressed on: 0 controller, 1 keyboard and mouse
 void host_input_event(const SDL_Event *e) {
-    if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) g_last_dev = 0, pad_pressed(e->gbutton.which);
+    if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) g_last_dev = 0, pad_pressed(e->gbutton.which), menu_ptr_idle();
+    else if (e->type == SDL_EVENT_GAMEPAD_AXIS_MOTION && (e->gaxis.value > 16000 || e->gaxis.value < -16000)) menu_ptr_idle();
     else if ((e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat) || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) g_last_dev = 1;
     if (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_KEY_UP) {
         if (e->key.scancode < SDL_SCANCODE_COUNT) ui_keys[e->key.scancode] = e->type == SDL_EVENT_KEY_DOWN;
@@ -988,8 +1003,9 @@ static void mouse_update(int *rx, int *ry) {
     if (menuptr_open()) menu_tree = true;
     else if (!input_view_hunt_menu_open()) menu_tree = false;
     bool menu = menu_tree && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
-    if (menu && !menu_ptr) menu_ptr_live = menu_ptr_warp = mouse_captured, menu_ptr_hover = MENUPTR_NONE;
-    if (!menu) menu_ptr_live = menu_ptr_warp = false;
+    // (a mouse captured with a controller in use - MouseCapture = Hunt, or a click long ago - is not the one in use)
+    if (menu && !menu_ptr) menu_ptr_idle(), menu_ptr_live = menu_ptr_warp = mouse_captured && host_input_last_device() == 1;
+    if (!menu) menu_ptr_idle(), menu_ptr_warp = false;
     menu_ptr = menu;
     bool want = (mouse_grab || auto_cap) && !menu && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
     SDL_Window *w = ui_window();
@@ -1011,14 +1027,13 @@ static void mouse_update(int *rx, int *ry) {
         if (menuptr_geometry(&g) && menu_ptr_geometry(w, &left, &top, &sx, &sy)) SDL_WarpMouseInWindow(w, left + x * sx, top + y * sy);
         menu_ptr_warp = false;
     }
-    // (full screen hides the pointer: shown while the chat box can be dragged, a mod has the mouse free or the pause
-    // menu's pointer is in use)
-    static bool pointer_shown;
+    // The pointer is shown while the chat box can be dragged, a mod has the mouse free or the menu's pointer is in use
+    // (and Forge's menu shows its own: runtime/overlay.cpp). Otherwise a menu with the pointer hides it, windowed too (a
+    // controller's menu shows none until the mouse moves), and full screen hides it everywhere (runtime/ui.c).
     bool show = chat_active() || host_input_mouse_free() || (menu_ptr && menu_ptr_live);
-    if (show != pointer_shown && w) {
-        pointer_shown = show;
-        if (show) SDL_ShowCursor();
-        else if ((SDL_GetWindowFlags(w) & SDL_WINDOW_FULLSCREEN) && !overlay_menu_open()) SDL_HideCursor();
+    if (w) {
+        bool visible = show || overlay_menu_open() || (!menu_ptr && !(SDL_GetWindowFlags(w) & SDL_WINDOW_FULLSCREEN));
+        if (visible != SDL_CursorVisible()) visible ? SDL_ShowCursor() : SDL_HideCursor();
     }
     static uint64_t last;
     static float vx, vy;  // the speed, smoothed: counts a second
