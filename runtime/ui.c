@@ -294,7 +294,16 @@ int ui_run(void) {
             background = wanted_background;
         }
         SDL_Event e;
-        if (SDL_WaitEventTimeout(&e, 4)) {
+#ifdef __ANDROID__
+        // SDL_WaitEventTimeout never sleeps here on Android: this thread sat at 100% of a core (no syscalls, no context
+        // switches, perf: SDL_PumpEventsInternal and clock_gettime in a tight loop), whatever the frame rate. Poll once,
+        // then sleep for real.
+        bool got = SDL_PollEvent(&e);
+        if (!got) SDL_Delay(2);
+#else
+        bool got = SDL_WaitEventTimeout(&e, 4);
+#endif
+        if (got) {
             do {
                 if (e.type == SDL_EVENT_QUIT) {
                     if (!config_confirm_exit() && !overlay_settings_dirty()) { LOG("window closed\n"); exit(0); }
