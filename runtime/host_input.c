@@ -1392,10 +1392,17 @@ void host_input_update(void) {
     // lock-up: with no keyboard on screen (the game's own inline keyboard needs nativeNX/arc/swkbd_eu.arc, which is
     // missing), a pad-only player had no way out - B only reopened the entry. A line of chat (runtime/hle/chat.c)
     // leaves them to the game: it is typed on the keyboard, and B mid-hunt is a dodge, not losing the line.
+    // On a controller Cancel is where the menus have it (menu_confirm.h): with Confirm bound to the B position (south on
+    // an Xbox pad) that button is Confirm and Cancel is the A position, as in the settings menu.
     if (typing && !chat_active()) {
+        int cancel = BTN_B;
+        if (host_input_last_device() == 0) {
+            int a_pos = overlay_face_position(0), b_pos = overlay_face_position(1);
+            if (menu_confirm_position(menu_confirm_policy_now(), a_pos, b_pos, 1) == a_pos) cancel = BTN_A;
+        }
         if (down & B(BTN_PLUS)) textinput_key(TI_ENTER);
-        else if (down & B(BTN_B)) textinput_key(TI_CANCEL);
-        b &= ~(B(BTN_PLUS) | B(BTN_B));
+        else if (down & B(cancel)) textinput_key(TI_CANCEL);
+        b &= ~(B(BTN_PLUS) | B(cancel));
     }
     act_update(b, script_b, menu || (typing && !chat_active()));
     input_set(b, clamp_axis(lx), clamp_axis(ly), clamp_axis(rx), clamp_axis(ry));

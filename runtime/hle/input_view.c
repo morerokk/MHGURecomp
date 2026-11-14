@@ -274,6 +274,12 @@ bool input_view_hunt_menu_open(void) {
     return seen && plat_now_ns() - seen > HUNT_MENU_STALE_NS;
 }
 void input_view_hunt_menu_reset(void) { g_hunt_menu_ns = 0; }
+// The menus' Cancel as they see it (game thread): while the layer has the menus it is MenuCancel, whatever that is bound
+// to (with Confirm put on the pad's B position, that button is Confirm and Cancel is elsewhere); else the pad's own B
+bool input_view_menu_cancel(bool pad_b) {
+    if (!g_on || !g_menus) return pad_b;
+    return ((g_snap.hold[g_var] | g_snap.pulse[g_var]) >> ACT_MENU_CANCEL) & 1;
+}
 static void tr_mb2(Cpu *c) {
     if (g_on) {  // (once a frame: the menu word the town's actions give, for town_pad)
         g_town_mw_prev = g_town_mw;

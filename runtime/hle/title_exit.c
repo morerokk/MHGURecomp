@@ -5,6 +5,7 @@
 #include "../app_actions.h"
 #include "../overlay.h"
 #include "input.h"
+#include "input_view.h"
 
 #define FN_TITLE_UPDATE 0x87b544u  // the title sequence's update (r0 = the title object)
 #define TITLE_STATE     4u         // u8: the state the update switches on
@@ -24,12 +25,14 @@ static void title_update(Cpu *c) {
     int32_t sticks[4];
     uint64_t buttons;
     input_get(&buttons, sticks);
-    static uint64_t was;
+    static bool was;
     static bool swallow;  // (the B that cancelled the confirmation: wait for its release)
     static bool armed;    // (a B pressed on the Main Menu: the request waits for its release)
-    bool down = (buttons >> BTN_B) & 1;
-    bool pressed = down && !((was >> BTN_B) & 1);
-    was = buttons;  // (kept fresh in every state: a B held over from another screen is no press here)
+    // B as the menu sees it: the game's Cancel (Game actions: MenuCancel), not the pad's B position. With Confirm bound
+    // there (south on an Xbox pad) the pad's B is the menu's Confirm, and every pick on the Main Menu asked to quit
+    bool down = input_view_menu_cancel((buttons >> BTN_B) & 1);
+    bool pressed = down && !was;
+    was = down;  // (kept fresh in every state: a B held over from another screen is no press here)
 
     if (overlay_menu_open()) { swallow = true; armed = false; return; }  // (B there is the menu's, not the game's)
     if (swallow) {
