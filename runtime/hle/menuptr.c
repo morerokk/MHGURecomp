@@ -342,11 +342,13 @@ static int pages_of(uint32_t cur, const Layout *L) { return L->fixed ? 1 : LD16(
 // learning for LEARN_NS after it ran; a cursor that ran within FRESH_NS of its last run is the same opening of its menu.
 #define LEARN_NS  3000000000ull
 #define FRESH_NS  3000000000ull
+#define REOPEN_NS 100000000ull   // (a pause this long, with another menu stepping meanwhile, is a new opening too)
 #define RECENT_NS 30000000000ull  // (the renderer looks for the highlights of menus seen this lately)
 typedef struct {
     uint32_t lr;
     uint64_t seen_ns, appeared_ns, moved_ns, since;  // since: presented frame its cell / page last changed (or it appeared)
     uint64_t bar_ns;                                 // when the renderer last saw its highlight where it should be
+    uint64_t shown_ns;                               // ... when that highlight came (back) on screen after a while away
     int row, col, cells, cols, page, pages;          // cells: on its page now
     bool known;                                      // its cells' places are known
 } Cursor;
@@ -379,6 +381,12 @@ enum { PICK_POINTER, PICK_LEARN, PICK_RECENT };
 static Cursor *pick(int how) {
     uint64_t now = plat_now_ns(), best_t = 0;
     Cursor *best = NULL;
+    // (none of the open ones running - each known only from its frame on screen: the one that came on screen last, or
+    // that last ran, is in front. A menu left a while ago, whose frame's key piece happens to sit on one of its cells on
+    // the screen now - the item box's grid on Equipment Sets -, lost to the prompt there whose cursor never runs)
+    bool any_running = false;
+    for (int i = 0; i < MAX_CURSORS && how == PICK_POINTER; i++)
+        any_running |= g_cursors[i].lr && g_cursors[i].known && now - g_cursors[i].seen_ns < OPEN_NS;
     for (int i = 0; i < MAX_CURSORS; i++) {
         Cursor *c = &g_cursors[i];
         if (!c->lr) continue;
@@ -389,6 +397,9 @@ static Cursor *pick(int how) {
         // (one known only from its frame on screen, never run, comes last: a small frame's key piece can sit where
         // another screen happens to have a piece too - the Face grid's corner on the Style screen)
         uint64_t t = !c->seen_ns ? 0 : c->moved_ns > c->appeared_ns ? c->moved_ns : c->appeared_ns;
+        // (one that ran: when it last did - its frame on screen since may well be another screen's piece -, one that never
+        // runs: when its frame last came on screen)
+        if (how == PICK_POINTER && !any_running) t = c->seen_ns ? c->seen_ns : c->shown_ns;
         if (!best || t >= best_t) best = c, best_t = t;
     }
     // A screen in front that isn't known - a running cursor of several cells that appeared well after the known one (a
@@ -479,8 +490,16 @@ void menuptr_bar_at(const MenuGeom *g, int row, int col) {
     // update gives up one beyond the page's last)
     if (quiet) e->cells = e->cols * 16;
     if (!e->cols) e->cols = g->cols;
+    if (now - e->bar_ns >= OPEN_NS) e->shown_ns = now;
     e->bar_ns = now, e->known = true;
+    int cell = e->row * e->cols + e->col;
     pthread_mutex_unlock(&g_cur_lock);
+    // (a cursor that doesn't run - a prompt whose own code moves its choice: the host steps it, menuptr_nudge_key - is
+    // where a jump wanted it once its highlight is shown there)
+    if (quiet && atomic_load(&g_target_lr) == g->lr && atomic_load(&g_target) == cell) {
+        atomic_store(&g_target, -1);
+        if (atomic_exchange(&g_click, false)) atomic_store(&g_confirm, true);
+    }
 }
 
 int menuptr_small_geoms(MenuGeom *out, int max) {
@@ -651,6 +670,7 @@ static void cursor_update_as(Cpu *c, const Layout *L) {
         if (target >= 0) c->r[1] &= ~(BIT_UP | BIT_DOWN | BIT_LEFT | BIT_RIGHT | back | on);
         if (target != last_target) steps = 0, last_target = target;
         if (target >= cells || (target >= 0 && ++steps > 4)) {
+            LOG("[menuptr] %08x: cell %d given up (cells %d, steps %d, at %d,%d)\n", lr, target, cells, steps, row0, col0);
             atomic_store(&g_target, -1), atomic_store(&g_click, false);
             target = last_target = -1;
         }
@@ -684,6 +704,14 @@ static void cursor_update_as(Cpu *c, const Layout *L) {
         else if (g_cursors[i].seen_ns < oldest->seen_ns) oldest = &g_cursors[i];
     }
     bool fresh = !e || now - e->seen_ns >= FRESH_NS;
+    // (back after a pause in which another menu that ran stepped or appeared: opened anew, in front of it - a prompt
+    // asked again soon after its last answer, over the list a row was just picked in, stayed behind that list for the
+    // pointer, and its Yes / No took no clicks)
+    if (!fresh && now - e->seen_ns >= REOPEN_NS)
+        for (int i = 0; i < MAX_CURSORS && !fresh; i++) {
+            const Cursor *o = &g_cursors[i];
+            fresh = o != e && o->lr && o->seen_ns && (o->moved_ns > e->seen_ns || o->appeared_ns > e->seen_ns);
+        }
     if (!e) e = oldest, e->lr = lr;
     if (fresh) e->appeared_ns = now, e->moved_ns = 0, e->since = g_present_count;
     else if (e->row != row || e->col != col || e->page != page) e->moved_ns = now, e->since = g_present_count;
@@ -879,6 +907,7 @@ void menuptr_page_turn(int dir) {
 
 bool menuptr_take_confirm(void) { return atomic_exchange(&g_confirm, false); }
 
+
 // ---- character creation's Skin Tone slider: a gradient of 184 tones (1..184, 0xb8) with a marker. Its update
 // 0x8babe4(slider, ..., pad bits r2), every frame from 0x8ba920: Left (0x80) / Right (0x20) step the tone by 1 (10 with
 // L / R held); the tone is read from its GUI object's parameter 0x10 (+0x24 the GUI: 0x745a78 gets, 0x745a40 sets it, the
@@ -938,12 +967,46 @@ void menuptr_slider_step(int d) {
     atomic_store(&g_slider_target, t < 1 ? 1 : t > SLIDER_MAX ? SLIDER_MAX : t);
 }
 
-// A jump or a page waits for a cursor whose update has not run lately: one that only runs on a press (character
-// creation's grids). The host then presses Down briefly, so that the menu runs it (the hook gives it its own bits instead).
-bool menuptr_needs_nudge(void) {
+// A jump or a page waits for a cursor whose update has not run lately. One that only runs on a press (character
+// creation's grids): the host presses Down briefly, so that the menu runs it (the hook gives it its own bits instead).
+// One that never ran, known only from its frame - a prompt whose own code moves its choice (Equipment Sets' "Change
+// equipment?"): the host presses the way to the cell, a step at a time, and the frame shown there ends the jump
+// (menuptr_bar_at); a step that brought it no nearer (the end of the list, or round it) gives the jump up.
+static bool needs_nudge(void);
+const char *menuptr_nudge_key(bool *nudge) {
+    *nudge = false;
+    if (!needs_nudge()) return NULL;
+    uint32_t lr = atomic_load(&g_page_dir) ? atomic_load(&g_page_lr) : atomic_load(&g_target_lr);
+    int target = atomic_load(&g_target), row = 0, col = 0, cols = 1;
+    bool ran = true;
+    pthread_mutex_lock(&g_cur_lock);
+    for (int i = 0; i < MAX_CURSORS; i++)
+        if (g_cursors[i].lr == lr) ran = g_cursors[i].seen_ns != 0, row = g_cursors[i].row, col = g_cursors[i].col, cols = g_cursors[i].cols;
+    pthread_mutex_unlock(&g_cur_lock);
+    if (ran || atomic_load(&g_page_dir) || target < 0) return *nudge = true, "DOWN";
+    if (cols < 1) cols = 1;
+    int tr = target / cols, tc = target % cols, dist = abs(tr - row) + abs(tc - col);
+    static uint64_t mine;  // (the jump these steps are for: the time it was asked at, as this last set it)
+    static int last_dist;
+    uint64_t asked = atomic_load(&g_asked_ns);
+    if (asked == mine && dist >= last_dist) {
+        LOG("[menuptr] %08x: cell %d not reached by steps (at %d,%d), given up\n", lr, target, row, col);
+        atomic_store(&g_target, -1), atomic_store(&g_click, false);
+        return NULL;
+    }
+    mine = plat_now_ns(), last_dist = dist;
+    atomic_store(&g_asked_ns, mine);
+    MenuGeom g;
+    if (menuptr_variants(lr, &g, 1) < 1) return NULL;
+    if (tr != row) return g.dy == 0 && g.dx != 0 ? (tr > row ? "RIGHT" : "LEFT") : (tr > row ? "DOWN" : "UP");
+    return g.cdy != 0 && g.cdx == 0 ? (tc > col ? "DOWN" : "UP") : (tc > col ? "RIGHT" : "LEFT");
+}
+
+static bool needs_nudge(void) {
     // (a jump or page not done in ASK_NS is given up: its menu stopped - a message over it - and nudging on would hold
     // Down there for good, which kept the message's own Confirm from getting through)
     if ((atomic_load(&g_target) >= 0 || atomic_load(&g_page_dir)) && plat_now_ns() - atomic_load(&g_asked_ns) > ASK_NS) {
+        LOG("[menuptr] %08x: cell %d not reached in time, given up\n", atomic_load(&g_target_lr), atomic_load(&g_target));
         atomic_store(&g_target, -1), atomic_store(&g_click, false), atomic_store(&g_page_dir, 0);
         return false;
     }

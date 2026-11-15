@@ -10,7 +10,8 @@
 //    so they are pictures of their own, not glyphs of the font).
 //  - HD_hud00 (512 x 512): the item bar's L Y X B A R.
 //  - HD_window (512 x 512, words in it: one per language): L and R (the quest details' pages), ZL and ZR.
-// All BC3, Tegra block-linear. The game copies a texture's data as it is into its GPU memory (once per arc that holds
+// All BC3, Tegra block-linear. HD texture mods replace them with the same layout at 2 or 4 times the size (button_festa
+// 512 x 512, the others 2048 x 2048): those are versions too, their cells' boxes scaled. The game copies a texture's data as it is into its GPU memory (once per arc that holds
 // it: resident.arc's and the quest arcs' copies are textures of their own), and the renderer uploads a texture again
 // whenever that memory changes (nvn/vulkan/textures.c: page tracking, hashes). So a sheet's cells are redrawn, only the
 // 4 x 4 blocks they touch encoded again, and the result written over each of the game's copies; the file's data goes
@@ -26,6 +27,7 @@
 // glyph page, the letters measured from their ink), short: "SPC", "ENT", "F5", arrows as arrows.
 //
 // Render thread (prompts_frame, at present; prompts_texture_seen from the texture upload).
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -87,17 +89,20 @@ typedef struct {
     const Cell *cells;
     int ncells;
     uint8_t *var[MAX_VARS];  // the versions' data (no two alike)
+    int vk[MAX_VARS];        // each version's scale: 1 the game's size; a mod's sheet 2 or 4 times it, laid out alike (HD)
     char from[MAX_VARS][24];  // (where each was read, for the log)
     uint8_t *cur[MAX_VARS];  // what the copies of a version hold now (NULL: none seen yet)
     int nvar;
-    uint8_t *rgba;        // the texels of version rgba_var (-1: none decoded yet)
-    int rgba_var;
-    uint8_t *work, *out;  // (a redraw's texels and data)
+    uint8_t *out;   // (a redraw's data)
+    uint64_t cap;   // (the bytes it has room for)
     Copy copies[MAX_COPIES];
     int ncopies;
     bool fresh;  // (a copy was found: it gets what the others have)
 } Sheet;
-#define SHEET(f, w, h, c) {f, w, h, c, (int)(sizeof c / sizeof *c), {0}, {{0}}, {0}, 0, NULL, -1, NULL, NULL, {{0}}, 0, false}
+#define SHEET(f, sw, sh, c) {.file = f, .w = sw, .h = sh, .cells = c, .ncells = (int)(sizeof c / sizeof *c)}
+static int vw(const Sheet *s, int v) { return s->w * s->vk[v]; }
+static int vh(const Sheet *s, int v) { return s->h * s->vk[v]; }
+static uint64_t vbytes(const Sheet *s, int v) { return (uint64_t)vw(s, v) * (uint64_t)vh(s, v); }
 static Sheet sheets[] = {
     SHEET("GUI/02_common/font/button_festa_00_ID.tex", 256, 256, font_cells),
     SHEET("GUI/99_texture/HD_custom_pnl2_BM_NOMIP.tex", 512, 512, panel_cells),
@@ -238,28 +243,29 @@ static int bh_log2(int h) {
     while ((1 << l) < gobs && l < 4) l++;
     return l;
 }
-static uint32_t block_off(const Sheet *s, int bx, int by) {
-    uint32_t width_gobs = (uint32_t)(s->w / 4 * 16 + 63) / 64, bh = (uint32_t)bh_log2(s->h);
+static uint32_t block_off(int w, int h, int bx, int by) {
+    uint32_t width_gobs = (uint32_t)(w / 4 * 16 + 63) / 64, bh = (uint32_t)bh_log2(h);
     uint32_t xb = (uint32_t)bx * 16, gob_x = xb >> 6, gob_y = (uint32_t)by >> 3;
     uint32_t block_y = gob_y >> bh, gin = gob_y & ((1u << bh) - 1), bs = 512u << bh;
     uint32_t off = block_y * width_gobs * bs + gob_x * bs + gin * 512, xi = xb & 63, yi = (uint32_t)by & 7;
     return off + (((xi >> 5) << 8) | ((yi >> 1) << 6) | (((xi >> 4) & 1) << 5) | ((yi & 1) << 4) | (xi & 15));
 }
-static void sheet_decode(const Sheet *s, const uint8_t *data, uint8_t *rgba) {
-    for (int by = 0; by < s->h / 4; by++)
-        for (int bx = 0; bx < s->w / 4; bx++) {
+// The texels of bw x bh blocks from block (bx0, by0) of a sheet of sw x sh texels, into rgba (bw * 4 texels a row) -
+// a redraw decodes and encodes only the blocks a cell touches (an HD sheet is 2048 x 2048: 16 MB of texels)
+static void region_decode(int sw, int sh, const uint8_t *data, int bx0, int by0, int bw, int bh, uint8_t *rgba) {
+    for (int by = 0; by < bh; by++)
+        for (int bx = 0; bx < bw; bx++) {
             uint8_t px[16][4];
-            bc3_decode_block(data + block_off(s, bx, by), px);
-            for (int i = 0; i < 16; i++) memcpy(rgba + (((size_t)(by * 4 + i / 4) * s->w) + bx * 4 + i % 4) * 4, px[i], 4);
+            bc3_decode_block(data + block_off(sw, sh, bx0 + bx, by0 + by), px);
+            for (int i = 0; i < 16; i++) memcpy(rgba + (((size_t)(by * 4 + i / 4) * (size_t)bw * 4) + bx * 4 + i % 4) * 4, px[i], 4);
         }
 }
-// The blocks of box (x, y, w, h) encoded again from rgba into data
-static void sheet_encode_box(const Sheet *s, const uint8_t *rgba, uint8_t *data, int x, int y, int w, int h) {
-    for (int by = y / 4; by <= (y + h - 1) / 4 && by < s->h / 4; by++)
-        for (int bx = x / 4; bx <= (x + w - 1) / 4 && bx < s->w / 4; bx++) {
+static void region_encode(int sw, int sh, const uint8_t *rgba, uint8_t *data, int bx0, int by0, int bw, int bh) {
+    for (int by = 0; by < bh; by++)
+        for (int bx = 0; bx < bw; bx++) {
             uint8_t px[16][4];
-            for (int i = 0; i < 16; i++) memcpy(px[i], rgba + (((size_t)(by * 4 + i / 4) * s->w) + bx * 4 + i % 4) * 4, 4);
-            bc3_encode_block(px, data + block_off(s, bx, by));
+            for (int i = 0; i < 16; i++) memcpy(px[i], rgba + (((size_t)(by * 4 + i / 4) * (size_t)bw * 4) + bx * 4 + i % 4) * 4, 4);
+            bc3_encode_block(px, data + block_off(sw, sh, bx0 + bx, by0 + by));
         }
 }
 
@@ -308,18 +314,22 @@ static const Letter *letter(uint32_t c) {
     return NULL;
 }
 
-// A TEX file's data as a version of a sheet, unless it is not the sheet's size and format or a version already
+// A TEX file's data as a version of a sheet, unless it is not the sheet's format, nor its size or 2 or 4 times it (a
+// mod's HD sheet: the HD texture mods' are the game's layout at that scale), or a version already
 static bool add_version(Sheet *s, const uint8_t *t, uint32_t n, const char *from) {
     uint32_t w, h;
     int fmt;
     const uint8_t *data = tex_data(t, n, &w, &h, &fmt);
-    uint64_t bytes = (uint64_t)s->w * s->h;
-    if (!data || (int)w != s->w || (int)h != s->h || fmt != 0x17 || data + bytes > t + n || s->nvar == MAX_VARS) return false;
-    for (int k = 0; k < s->nvar; k++)
-        if (!memcmp(s->var[k], data, bytes)) return false;
+    int k = (int)w == s->w ? 1 : (int)w == 2 * s->w ? 2 : (int)w == 4 * s->w ? 4 : 0;
+    if (!data || !k || (int)h != s->h * k || fmt != 0x17 || s->nvar == MAX_VARS) return false;
+    uint64_t bytes = (uint64_t)w * h;
+    if (data + bytes > t + n) return false;
+    for (int v = 0; v < s->nvar; v++)
+        if (s->vk[v] == k && !memcmp(s->var[v], data, bytes)) return false;
     if (!(s->var[s->nvar] = malloc(bytes))) return false;
     memcpy(s->var[s->nvar], data, bytes);
-    snprintf(s->from[s->nvar++], sizeof s->from[0], "%s", from);
+    s->vk[s->nvar] = k;
+    snprintf(s->from[s->nvar++], sizeof s->from[0], "%s%s", from, k == 1 ? "" : k == 2 ? ", 2x" : ", 4x");
     return true;
 }
 // The sheets' entries of an arc ("GUI\..." or "<language>\GUI\...")
@@ -398,19 +408,19 @@ static pthread_once_t g_once = PTHREAD_ONCE_INIT;
 // is forgotten, not written.
 void prompts_texture_seen(uint32_t addr, const uint8_t *mem, uint64_t size) {
     bool any = false;
-    for (int i = 0; i < NSHEETS && !any; i++) any = (uint64_t)sheets[i].w * sheets[i].h == size;
+    for (int i = 0; i < NSHEETS && !any; i++)
+        for (uint64_t k = 1; k <= 4 && !any; k *= 2) any = (uint64_t)sheets[i].w * sheets[i].h * k * k == size;
     if (!any) return;
     pthread_once(&g_once, load_sheets);
     if (g_ready <= 0) return;
     for (int i = 0; i < NSHEETS; i++) {
         Sheet *s = &sheets[i];
-        uint64_t bytes = (uint64_t)s->w * s->h;
-        if (bytes != size) continue;
         for (int v = 0; v < s->nvar; v++) {
-            if (memcmp(mem, s->var[v], bytes)) continue;
-            if (!s->work) s->rgba = malloc(bytes * 4), s->work = malloc(bytes * 4), s->out = malloc(bytes);
+            uint64_t bytes = vbytes(s, v);
+            if (bytes != size || memcmp(mem, s->var[v], bytes)) continue;
+            if (s->cap < bytes) free(s->out), s->out = malloc(bytes), s->cap = s->out ? bytes : 0;  // (the biggest version seen)
             if (!s->cur[v]) s->cur[v] = malloc(bytes);
-            if (!s->rgba || !s->work || !s->out || !s->cur[v]) return;
+            if (!s->out || !s->cur[v]) return;
             bool known = false;  // (cur: as it was read, unless another copy of this version is already written)
             for (int k = 0; k < s->ncopies && !known; k++) known = s->copies[k].v == v && s->copies[k].addr != addr;
             if (!known) memcpy(s->cur[v], s->var[v], bytes);
@@ -428,7 +438,7 @@ void prompts_texture_seen(uint32_t addr, const uint8_t *mem, uint64_t size) {
 }
 // Data for version v into its copies
 static void write_copies(Sheet *s, int v, const uint8_t *data) {
-    uint64_t bytes = (uint64_t)s->w * s->h;
+    uint64_t bytes = vbytes(s, v);
     for (int i = 0; i < s->ncopies; i++) {
         if (s->copies[i].v != v) continue;
         uint8_t *dst = (uint8_t *)G2H(s->copies[i].addr);
@@ -640,12 +650,32 @@ static bool draw_tile(uint8_t *tile, const Cell *c, int code, int code2) {
     put_label(tile, t, n);
     return true;
 }
-// The tile into a cell's box of a sheet's texels: the box cleared, the tile fitted into its square (the smaller side),
-// centred; scaled by area, colour weighted by alpha
-static void put_tile(const Sheet *s, uint8_t *rgba, const Cell *c, const uint8_t *tile) {
-    for (int y = c->y; y < c->y + c->h; y++) memset(rgba + ((size_t)y * s->w + c->x) * 4, 0, (size_t)c->w * 4);
+// The tile into a cell's box of a sheet's texels (sw a row): the box cleared, the tile fitted into its square (the
+// smaller side), centred; scaled down by area, up (an HD sheet's bigger box) bilinearly, colour weighted by alpha
+static void put_tile(int sw, uint8_t *rgba, const Cell *c, const uint8_t *tile) {
+    for (int y = c->y; y < c->y + c->h; y++) memset(rgba + ((size_t)y * sw + c->x) * 4, 0, (size_t)c->w * 4);
     int side = c->w < c->h ? c->w : c->h, ox = c->x + (c->w - side) / 2, oy = c->y + (c->h - side) / 2;
     float f = (float)CELL / (float)side;
+    if (side > CELL) {
+        for (int py = 0; py < side; py++)
+            for (int px = 0; px < side; px++) {
+                float tx = ((float)px + 0.5f) * f - 0.5f, ty = ((float)py + 0.5f) * f - 0.5f;
+                int x0 = (int)floorf(tx), y0 = (int)floorf(ty);
+                float fx = tx - (float)x0, fy = ty - (float)y0, acc[4] = {0, 0, 0, 0};
+                for (int j = 0; j < 4; j++) {
+                    int sx = x0 + (j & 1), sy = y0 + (j >> 1);
+                    float wgt = ((j & 1) ? fx : 1 - fx) * ((j >> 1) ? fy : 1 - fy);
+                    if (sx < 0 || sy < 0 || sx >= CELL || sy >= CELL || wgt <= 0) continue;  // (outside: clear)
+                    const uint8_t *p = tile + (sy * CELL + sx) * 4;
+                    float a = (float)p[3] * wgt;
+                    acc[0] += (float)p[0] * a, acc[1] += (float)p[1] * a, acc[2] += (float)p[2] * a, acc[3] += a;
+                }
+                uint8_t *d = rgba + ((size_t)(oy + py) * sw + ox + px) * 4;
+                if (acc[3] > 0) for (int k = 0; k < 3; k++) d[k] = (uint8_t)(acc[k] / acc[3] + 0.5f);
+                d[3] = (uint8_t)(acc[3] + 0.5f);
+            }
+        return;
+    }
     for (int py = 0; py < side; py++)
         for (int px = 0; px < side; px++) {
             float sx0 = (float)px * f, sx1 = (float)(px + 1) * f, sy0 = (float)py * f, sy1 = (float)(py + 1) * f;
@@ -659,7 +689,7 @@ static void put_tile(const Sheet *s, uint8_t *rgba, const Cell *c, const uint8_t
                     float a = (float)p[3] * wx * wy;
                     acc[0] += (float)p[0] * a, acc[1] += (float)p[1] * a, acc[2] += (float)p[2] * a, acc[3] += a, area += wx * wy;
                 }
-            uint8_t *d = rgba + ((size_t)(oy + py) * s->w + ox + px) * 4;
+            uint8_t *d = rgba + ((size_t)(oy + py) * sw + ox + px) * 4;
             if (acc[3] > 0) for (int k = 0; k < 3; k++) d[k] = (uint8_t)(acc[k] / acc[3] + 0.5f);
             d[3] = (uint8_t)(area > 0 ? acc[3] / area + 0.5f : 0);
         }
@@ -693,22 +723,33 @@ void prompts_frame(void) {
         Sheet *s = &sheets[i];
         if (!s->ncopies || (!changed && !s->fresh)) continue;
         s->fresh = false;
-        uint64_t bytes = (uint64_t)s->w * s->h;
         for (int v = 0; v < s->nvar; v++) {  // (each version that has copies, redrawn from its own data)
             bool has = false;
             for (int k = 0; k < s->ncopies && !has; k++) has = s->copies[k].v == v;
             if (!has) continue;
             if (!kbm) { write_copies(s, v, s->var[v]); continue; }
-            if (s->rgba_var != v) sheet_decode(s, s->var[v], s->rgba), s->rgba_var = v;
-            memcpy(s->work, s->rgba, bytes * 4);
+            uint64_t bytes = vbytes(s, v);
+            int sw = vw(s, v), sh = vh(s, v), k = s->vk[v];
+            if (s->cap < bytes) continue;
             memcpy(s->out, s->var[v], bytes);
             int drawn = 0;
             for (int c = 0; c < s->ncells; c++) {
                 const Cell *cell = &s->cells[c];
                 uint8_t tile[CELL * CELL * 4];
                 if (!draw_tile(tile, cell, want[cell->btn], cell->btn2 >= 0 ? want[cell->btn2] : 0)) continue;
-                put_tile(s, s->work, cell, tile);
-                sheet_encode_box(s, s->work, s->out, cell->x, cell->y, cell->w, cell->h);
+                // (the cell's box at this version's scale, and the blocks it touches)
+                Cell box = {cell->x * k, cell->y * k, cell->w * k, cell->h * k, cell->btn, cell->btn2};
+                int bx0 = box.x / 4, by0 = box.y / 4, bx1 = (box.x + box.w - 1) / 4, by1 = (box.y + box.h - 1) / 4;
+                if (bx1 >= sw / 4) bx1 = sw / 4 - 1;
+                if (by1 >= sh / 4) by1 = sh / 4 - 1;
+                int bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
+                uint8_t *region = bw > 0 && bh > 0 ? malloc((size_t)bw * bh * 64) : NULL;
+                if (!region) continue;
+                region_decode(sw, sh, s->var[v], bx0, by0, bw, bh, region);
+                box.x -= bx0 * 4, box.y -= by0 * 4;
+                put_tile(bw * 4, region, &box, tile);
+                region_encode(sw, sh, region, s->out, bx0, by0, bw, bh);
+                free(region);
                 drawn++;
             }
             write_copies(s, v, s->out);
@@ -716,10 +757,10 @@ void prompts_frame(void) {
                 char path[512];
                 snprintf(path, sizeof path, "%s%d.raw", dump, i);
                 FILE *df = fopen(path, "wb");
-                if (df) {
-                    sheet_decode(s, s->out, s->work);  // (what the GPU gets: after BC3)
-                    fwrite(s->work, 1, bytes * 4, df), fclose(df);
-                }
+                uint8_t *all = df ? malloc(bytes * 4) : NULL;
+                if (all) region_decode(sw, sh, s->out, 0, 0, sw / 4, sh / 4, all), fwrite(all, 1, bytes * 4, df);  // (what the GPU gets: after BC3)
+                if (df) fclose(df);
+                free(all);
             }
             static int logged;
             if (logged++ < 32)

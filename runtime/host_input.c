@@ -1235,10 +1235,16 @@ void host_input_update(void) {
     if (nscript < 0) script_parse();
     rumble_update();
     if (menuptr_take_confirm()) host_input_press("A", 12);  // (a menu's row clicked and now selected)
-    {   // (a menu that runs its cursor only on a press: a short Down makes it run, and the jump or page goes with it)
-        static uint64_t nudged;
+    {   // (a menu that runs its cursor only on a press: a short Down makes it run, and the jump or page goes with it; one
+        // whose cursor never runs - a prompt: a step toward the cell, given time to show before the next)
+        static uint64_t nudged, wait_ns = 60000000ull;
         uint64_t now = plat_now_ns();
-        if (menuptr_needs_nudge() && now - nudged > 60000000ull) host_input_press("DOWN", 3), menuptr_nudged(), nudged = now;
+        bool nudge;
+        const char *key = now - nudged > wait_ns ? menuptr_nudge_key(&nudge) : NULL;
+        if (key) {
+            host_input_press(key, nudge ? 3 : 6), nudged = now, wait_ns = nudge ? 60000000ull : 200000000ull;
+            if (nudge) menuptr_nudged();
+        }
     }
     control_poll();
     quickhunt_poll();  // (debug, MHGU_QUICKHUNT: runtime/hle/quickhunt.c)

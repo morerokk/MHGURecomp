@@ -46,7 +46,9 @@ void menuptr_select_at(int cell, bool pick, float x, float y);  // the same, fro
 void menuptr_nudged(void);               // the host pressed Down to wake a quiet cursor: no update takes it as a step
 bool menuptr_frame_taken(const MenuGeom *g);  // another menu with g's frame ran lately (render thread: menulearn.c)
 bool menuptr_take_confirm(void);         // a picked cell is selected: Confirm it now (once)
-bool menuptr_needs_nudge(void);          // a jump or page waits for a cursor that runs only on a press: press Down briefly
+// a jump or page waits for a cursor that isn't running: the key to press briefly now - Down to wake one that runs only
+// on a press (*nudge: then menuptr_nudged), or a step toward the cell for one that never runs (a prompt) - else NULL
+const char *menuptr_nudge_key(bool *nudge);
 // Character creation's Skin Tone slider (open: its update ran just now; menuptr_open counts it): a point of the 1280x720
 // layout on its gradient, or on its panel; the tone at x (pick: then Confirm, as B drops the change there); a step of
 // the tone (the wheel)
