@@ -61,4 +61,5 @@ KEvent *kernel_create_event_pair(uint32_t *writable, uint32_t *readable);
 KThread *kernel_current_thread(void);
 int kernel_stack_callers(uint32_t sp, char *line, size_t size);  // " addr addr ...": the game's calls, from the stack
 void kernel_log_guest_stack(const char *tag, const Cpu *c);       // logs tag, lr and those callers
+void kernel_dump_threads(const char *why, bool all_callers);      // every guest thread's state to the log (see kernel.c)
 uint32_t kernel_heap_size(void);

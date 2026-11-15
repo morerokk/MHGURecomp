@@ -33,6 +33,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
+#include <stddef.h>
 #include <string.h>
 
 #include "../../updater/updater.h"  // (sha256)
@@ -167,7 +168,9 @@ enum { SE_NOT_FOUND = 1, SE_NO_ANSWER, SE_BUSY, SE_VERSION };
 
 typedef struct {
     hsock s;
-    pthread_mutex_t wmu;  // one writer at a time; s is closed only with it held (alive cleared first)
+    pthread_mutex_t wmu;  // one writer at a time; s is closed only with it held (alive cleared first). Initialized
+                          // once, with L (link_reset keeps it): winpthreads gives every pthread_mutex_init a Windows
+                          // event, and re-initializing them for each network leaked 8 a beacon under Hunter Search
     pthread_t th;
     bool alive, has_thread;
     uint32_t ip;
@@ -220,7 +223,14 @@ static struct {
     pthread_t lobby_th;
     volatile bool lobby_run, lobby_dirty;  // dirty: the NetworkInfo changed, send it
     struct sockaddr_in lobby_addr;
-} L = {.mu = PTHREAD_MUTEX_INITIALIZER, .listen_s = BADSOCK, .disc_s = BADSOCK, .us = BADSOCK};
+} L = {.mu = PTHREAD_MUTEX_INITIALIZER, .listen_s = BADSOCK, .disc_s = BADSOCK, .us = BADSOCK,
+       .nodes = {[0 ... MAX_NODES - 1] = {.wmu = PTHREAD_MUTEX_INITIALIZER}}, .up = {.wmu = PTHREAD_MUTEX_INITIALIZER}};
+
+static void link_reset(Link *l) {  // every field back to zero for a new network, but the mutex
+    l->s = 0;
+    char *after = (char *)&l->wmu + sizeof l->wmu;
+    memset(after, 0, sizeof *l - (size_t)(after - (char *)l));
+}
 
 // Scan results: where each found network's host is (hub: on the hub server at addr, 0: the host's own address).
 #define MAX_FOUND 32
@@ -269,6 +279,47 @@ static bool info_sane(uint8_t *info) {
 }
 
 #define ONCE(...) do { static int once_; if (!once_++) LOG(__VA_ARGS__); } while (0)
+
+// A thread that ends by itself, nobody waiting for it. Detached threads leak a handle each in winpthreads (14.0), and
+// under Hunter Search some start every beacon (the hub's listing, the search's list request): so they are created
+// joinable, and each start first joins those that said they are done (a join of a thread that has ended returns at
+// once). False: not started.
+#define SPAWN_MAX 64
+typedef struct { void *(*fn)(void *); void *arg; int slot; } SpawnArg;
+static pthread_mutex_t spawn_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct { pthread_t th; bool used; volatile bool done; } spawned[SPAWN_MAX];
+static void *spawn_main(void *p) {
+    SpawnArg a = *(SpawnArg *)p;
+    free(p);
+    void *r = a.fn(a.arg);
+    if (a.slot >= 0) __atomic_store_n(&spawned[a.slot].done, true, __ATOMIC_RELEASE);
+    return r;
+}
+static bool spawn(void *(*fn)(void *), void *arg) {
+    SpawnArg *a = malloc(sizeof *a);
+    if (!a) return false;
+    a->fn = fn, a->arg = arg, a->slot = -1;
+    pthread_mutex_lock(&spawn_mu);
+    for (int i = 0; i < SPAWN_MAX; i++) {
+        if (spawned[i].used && __atomic_load_n(&spawned[i].done, __ATOMIC_ACQUIRE)) {
+            pthread_join(spawned[i].th, NULL);
+            spawned[i].used = false;
+        }
+        if (!spawned[i].used && a->slot < 0) a->slot = i;
+    }
+    pthread_t th;
+    bool ok;
+    if (a->slot >= 0) {  // (all 64 still running: detached after all)
+        spawned[a->slot].used = true, spawned[a->slot].done = false;
+        ok = !pthread_create(&spawned[a->slot].th, NULL, spawn_main, a);
+        if (!ok) spawned[a->slot].used = false;
+    } else if ((ok = !pthread_create(&th, NULL, spawn_main, a))) {
+        pthread_detach(th);
+    }
+    pthread_mutex_unlock(&spawn_mu);
+    if (!ok) free(a);
+    return ok;
+}
 
 // ---- frames
 static bool send_all(hsock s, const void *b, size_t n) {
@@ -879,9 +930,7 @@ static void *host_thread(void *arg) {
             if (a->s == BADSOCK) { free(a); continue; }
             int one = 1;
             setsockopt(a->s, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof one);
-            pthread_t t;
-            if (pthread_create(&t, NULL, station_thread, a)) { hclose(a->s); free(a); }
-            else pthread_detach(t);
+            if (!spawn(station_thread, a)) { hclose(a->s); free(a); }
         }
         if (ds != BADSOCK && FD_ISSET(ds, &r)) {
             static uint8_t probe[RELAY_PREFIX + sizeof(UHdr) + sizeof(VPacket) + UDP_MAX_PAYLOAD];
@@ -1183,10 +1232,8 @@ static void *lobby_thread(void *arg) {
             last_rx = plat_now_ns();
             if (type == S_INCOMING && n >= 8) {
                 LobbyTicket *t = malloc(sizeof *t);
-                pthread_t th;
                 t->gen = gen, t->addr = addr, t->ticket = rd64(buf);
-                if (pthread_create(&th, NULL, lobby_attach_thread, t)) free(t);
-                else pthread_detach(th);
+                if (!spawn(lobby_attach_thread, t)) free(t);
             }
         }
         hclose(s);
@@ -1200,12 +1247,11 @@ static void *lobby_thread(void *arg) {
 
 static void lobby_host_start(void) {
     uint32_t gen = ++lobby_gen;
-    pthread_t th;
     char srv[LOBBY_NAME];
     pthread_mutex_lock(&hub_mu);
     note_last[NOTE_HOST] = HUB_ONLINE;  // (each hub tells of its own first failure)
     pthread_mutex_unlock(&hub_mu);
-    if (lobby_server(srv) && !pthread_create(&th, NULL, lobby_thread, (void *)(uintptr_t)gen)) pthread_detach(th);
+    if (lobby_server(srv)) spawn(lobby_thread, (void *)(uintptr_t)gen);
 }
 static void lobby_host_stop(void) { lobby_gen++; }
 
@@ -1303,14 +1349,12 @@ static ScanList *scan_list_start(void) {
     pthread_cond_init(&s->cv, NULL);
     s->refs = 2;
     __atomic_add_fetch(&scan_lists_out, 1, __ATOMIC_ACQ_REL);
-    pthread_t th;
-    if (pthread_create(&th, NULL, lobby_list_thread, s)) {
+    if (!spawn(lobby_list_thread, s)) {
         __atomic_sub_fetch(&scan_lists_out, 1, __ATOMIC_ACQ_REL);
         s->refs = 1;
         scan_list_release(s);
         return NULL;
     }
-    pthread_detach(th);
     return s;
 }
 
@@ -1351,7 +1395,6 @@ static void *hub_check_thread(void *arg) {
 
 void ldn_hub_check(const char *server, const char *key) {
     HubCheck *c = calloc(1, sizeof *c);
-    pthread_t th;
     if (!c) return;
     hnet_init();
     bool on = lobby_server_of(server, c->server);
@@ -1360,10 +1403,7 @@ void ldn_hub_check(const char *server, const char *key) {
     c->check = ++hub_now.check;
     hub_set_locked(c->server, c->key, on ? HUB_CHECKING : HUB_OFF, -1, -1);
     pthread_mutex_unlock(&hub_mu);
-    if (on && !pthread_create(&th, NULL, hub_check_thread, c)) {
-        pthread_detach(th);
-        return;
-    }
+    if (on && spawn(hub_check_thread, c)) return;
     if (on) {
         pthread_mutex_lock(&hub_mu);
         hub_set_locked(c->server, c->key, HUB_UNKNOWN, -1, -1);
@@ -1976,7 +2016,31 @@ static void ryusrv_unwanted(void) {
 
 // ---- nn::ldn
 
-HLE_FUNC("_ZN2nn3ldn10InitializeEv", ldn_initialize) { NTRACE();
+// The last nn::ldn call that changes the state: which, when it started and whether it returned (its scope ended, by
+// any return). The window's close logs it (ldn_log_state), to tell a call that never returned (a hang of ours) from a
+// game that stopped asking.
+static const char *volatile ldn_call = "none";
+static volatile uint64_t ldn_call_ns;
+static volatile bool ldn_call_done = true;
+static void ldn_call_end(int *unused) { (void)unused; ldn_call_done = true; }
+#define LDN_CALL()                                                                                                 \
+    __attribute__((cleanup(ldn_call_end))) int ldn_call_scope_ =                                                   \
+        (ldn_call = __func__, ldn_call_ns = plat_now_ns(), ldn_call_done = false, 0);                             \
+    (void)ldn_call_scope_
+
+void ldn_log_state(void) {
+    static const char *const states[] = {"none", "initialized", "access point", "network created", "station",
+                                         "connected", "error"};
+    int nodes = 0;
+    for (int i = 1; i < MAX_NODES; i++) nodes += L.nodes[i].alive;
+    LOG("[ldn] state: %s%s%s, %d player(s) joined; last call %s, %.1f s ago, %s; hub server list requests out: %d\n",
+        L.state >= 0 && L.state <= ST_ERROR ? states[L.state] : "?", L.hosting ? ", hosting" : "",
+        L.ryu ? ", Ryujinx server" : L.room ? ", room" : "", nodes, ldn_call,
+        ldn_call_ns ? (double)(plat_now_ns() - ldn_call_ns) / 1e9 : 0.0, ldn_call_done ? "returned" : "NOT RETURNED",
+        __atomic_load_n(&scan_lists_out, __ATOMIC_ACQUIRE));
+}
+
+HLE_FUNC("_ZN2nn3ldn10InitializeEv", ldn_initialize) { NTRACE(); LDN_CALL();
     pthread_mutex_lock(&L.mu);
     if (!L.ev) L.ev = kernel_create_event_pair(&(uint32_t){0}, &L.ev_r);
     static bool hooked;
@@ -2011,7 +2075,7 @@ static void to_initialized(void) {
     L.own_ip = L.subnet = 0;
 }
 
-HLE_FUNC("_ZN2nn3ldn8FinalizeEv", ldn_finalize) { NTRACE();
+HLE_FUNC("_ZN2nn3ldn8FinalizeEv", ldn_finalize) { NTRACE(); LDN_CALL();
     to_initialized();
     room_shutdown();
     roomsrv_unwanted();
@@ -2065,13 +2129,13 @@ HLE_FUNC("_ZN2nn3ldn16GetNetworkConfigEPNS0_13NetworkConfigE", ldn_get_net_confi
 }
 
 // ---- access point (host)
-HLE_FUNC("_ZN2nn3ldn15OpenAccessPointEv", ldn_open_ap) { NTRACE();
+HLE_FUNC("_ZN2nn3ldn15OpenAccessPointEv", ldn_open_ap) { NTRACE(); LDN_CALL();
     if (L.state != ST_INITIALIZED) { RET(R_INVALID_STATE); return; }
     L.state = ST_ACCESS_POINT;
     signal_change();
     RET(0);
 }
-HLE_FUNC("_ZN2nn3ldn16CloseAccessPointEv", ldn_close_ap) { NTRACE();
+HLE_FUNC("_ZN2nn3ldn16CloseAccessPointEv", ldn_close_ap) { NTRACE(); LDN_CALL();
     if (L.state != ST_ACCESS_POINT && L.state != ST_AP_CREATED) { RET(R_INVALID_STATE); return; }
     to_initialized();
     L.state = ST_INITIALIZED;
@@ -2148,8 +2212,7 @@ static uint32_t create_network(const uint8_t *cfg, const uint8_t *sec, const uin
     memcpy(L.info + NI_ADV, L.adv, L.adv_size);
     uint64_t auth = ((uint64_t)arc4random() << 32) | arc4random();
     memcpy(L.info + NI_AUTH_ID, &auth, 8);
-    memset(L.nodes, 0, sizeof L.nodes);
-    for (int i = 0; i < MAX_NODES; i++) pthread_mutex_init(&L.nodes[i].wmu, NULL);
+    for (int i = 0; i < MAX_NODES; i++) link_reset(&L.nodes[i]);
     pthread_mutex_unlock(&L.mu);
     if (via_room) L.room = true;
     else host_start();
@@ -2160,16 +2223,17 @@ static uint32_t create_network(const uint8_t *cfg, const uint8_t *sec, const uin
 }
 
 // CreateNetwork(const NetworkConfig &, const SecurityConfig &, const UserConfig &)
-HLE_FUNC("_ZN2nn3ldn13CreateNetworkERKNS0_13NetworkConfigERKNS0_14SecurityConfigERKNS0_10UserConfigE", ldn_create) { NTRACE();
+HLE_FUNC("_ZN2nn3ldn13CreateNetworkERKNS0_13NetworkConfigERKNS0_14SecurityConfigERKNS0_10UserConfigE", ldn_create) { NTRACE(); LDN_CALL();
     RET(create_network(ARGP(0), ARGP(1), NULL, ARGP(2)));
 }
 // CreateNetworkPrivate(config, security, SecurityParameter, user, address entry count, const AddressEntry *)
 HLE_FUNC("_ZN2nn3ldn20CreateNetworkPrivateERKNS0_13NetworkConfigERKNS0_14SecurityConfigERKNS0_17SecurityParameterERKNS0_10UserConfigEiPKNS0_12AddressEntryE",
          ldn_create_private) {
+    LDN_CALL();
     RET(create_network(ARGP(0), ARGP(1), ARGP(2), ARGP(3)));
 }
 
-HLE_FUNC("_ZN2nn3ldn14DestroyNetworkEv", ldn_destroy) { NTRACE();
+HLE_FUNC("_ZN2nn3ldn14DestroyNetworkEv", ldn_destroy) { NTRACE(); LDN_CALL();
     if (L.state != ST_AP_CREATED) { RET(R_INVALID_STATE); return; }
     if (L.ryu) ryu_stop();
     else if (L.room) room_stop();
@@ -2215,7 +2279,7 @@ HLE_FUNC("_ZN2nn3ldn22SetStationAcceptPolicyENS0_12AcceptPolicyE", ldn_set_accep
 }
 
 // Reject(Ipv4Address): the host sends a player away
-HLE_FUNC("_ZN2nn3ldn6RejectENS0_11Ipv4AddressE", ldn_reject) { NTRACE();
+HLE_FUNC("_ZN2nn3ldn6RejectENS0_11Ipv4AddressE", ldn_reject) { NTRACE(); LDN_CALL();
     uint32_t r = DR_REJECTED;
     if (L.ryu) {
         for (int i = 1; i < MAX_NODES; i++)
@@ -2251,13 +2315,13 @@ HLE_FUNC("_ZN2nn3ldn6RejectENS0_11Ipv4AddressE", ldn_reject) { NTRACE();
 }
 
 // ---- station (joining)
-HLE_FUNC("_ZN2nn3ldn11OpenStationEv", ldn_open_station) { NTRACE();
+HLE_FUNC("_ZN2nn3ldn11OpenStationEv", ldn_open_station) { NTRACE(); LDN_CALL();
     if (L.state != ST_INITIALIZED) { RET(R_INVALID_STATE); return; }
     L.state = ST_STATION;
     signal_change();
     RET(0);
 }
-HLE_FUNC("_ZN2nn3ldn12CloseStationEv", ldn_close_station) { NTRACE();
+HLE_FUNC("_ZN2nn3ldn12CloseStationEv", ldn_close_station) { NTRACE(); LDN_CALL();
     if (L.state != ST_STATION && L.state != ST_STATION_CONNECTED && L.state != ST_ERROR) { RET(R_INVALID_STATE); return; }
     to_initialized();
     L.state = ST_INITIALIZED;
@@ -2275,7 +2339,7 @@ static bool filter_ok(const uint8_t *info, const uint8_t *f) {
 }
 
 // Scan(NetworkInfo *out, int *count, int max, const ScanFilter &, int channel)
-HLE_FUNC("_ZN2nn3ldn4ScanEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi", ldn_scan) { NTRACE();
+HLE_FUNC("_ZN2nn3ldn4ScanEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi", ldn_scan) { NTRACE(); LDN_CALL();
     uint32_t out = ARG(0), pcount = ARG(1);
     int max = (int)ARG(2);
     const uint8_t *filter = ARGP(3);
@@ -2434,7 +2498,6 @@ static uint32_t connect_network(const uint8_t *info, const uint8_t *user, uint16
     memcpy(L.info, buf + 8, NETINFO_SIZE);
     L.own_ip = rd32(node_at(L.info, node) + NODE_IP);
     L.subnet = L.own_ip & 0xFFFFFF00u;
-    pthread_mutex_init(&L.up.wmu, NULL);
     L.up.s = s, L.up.alive = true, L.up.ip = L.subnet | 1;
     L.up.token = rd32(buf + 4), L.up.udp_up = false, L.up.udp_rx_ns = 0;
     L.up.relay_pair = pair, L.up.relay_secret = secret;
@@ -2465,10 +2528,10 @@ static uint32_t connect_network(const uint8_t *info, const uint8_t *user, uint16
 }
 
 // Connect(const NetworkInfo &, const SecurityConfig &, const UserConfig &, int version, ConnectOption)
-HLE_FUNC("_ZN2nn3ldn7ConnectERKNS0_11NetworkInfoERKNS0_14SecurityConfigERKNS0_10UserConfigEiNS0_13ConnectOptionE", ldn_connect) { NTRACE();
+HLE_FUNC("_ZN2nn3ldn7ConnectERKNS0_11NetworkInfoERKNS0_14SecurityConfigERKNS0_10UserConfigEiNS0_13ConnectOptionE", ldn_connect) { NTRACE(); LDN_CALL();
     RET(connect_network(ARGP(0), ARGP(2), (uint16_t)ARG(3)));
 }
-HLE_FUNC("_ZN2nn3ldn7ConnectERKNS0_11NetworkInfoERKNS0_14SecurityConfigERKNS0_10UserConfigEi", ldn_connect2) { NTRACE();
+HLE_FUNC("_ZN2nn3ldn7ConnectERKNS0_11NetworkInfoERKNS0_14SecurityConfigERKNS0_10UserConfigEi", ldn_connect2) { NTRACE(); LDN_CALL();
     RET(connect_network(ARGP(0), ARGP(2), (uint16_t)ARG(3)));
 }
 // ConnectPrivate(config, security, SecurityParameter, user, int version, ConnectOption): a network known by its
@@ -2487,10 +2550,11 @@ static uint32_t connect_private(Cpu *c) {
 }
 HLE_FUNC("_ZN2nn3ldn14ConnectPrivateERKNS0_13NetworkConfigERKNS0_14SecurityConfigERKNS0_17SecurityParameterERKNS0_10UserConfigEiNS0_13ConnectOptionE",
          ldn_connect_private) {
+    LDN_CALL();
     RET(connect_private(c));
 }
 
-HLE_FUNC("_ZN2nn3ldn10DisconnectEv", ldn_disconnect) { NTRACE();
+HLE_FUNC("_ZN2nn3ldn10DisconnectEv", ldn_disconnect) { NTRACE(); LDN_CALL();
     if (L.state != ST_STATION_CONNECTED && L.state != ST_ERROR) { RET(R_INVALID_STATE); return; }
     if (L.ryu) ryu_stop();
     else if (L.room) room_stop();

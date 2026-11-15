@@ -768,33 +768,43 @@ static void svc_impl(Cpu *c, uint32_t imm, uint32_t pc) {
     }
 }
 
-// MHGU_DUMP_THREADS=<seconds>: then (and every 10 s after) every guest thread's state: what it waits for and its
-// last return address (the lr of its most recent call), to find out what a stalled game waits on.
+// Every guest thread's state: what it waits for and its last return address (the lr of its most recent call), to
+// find out what a stalled game waits on. all_callers: the game's calls from the stack for running threads too (a
+// thread stuck inside one of our HLE calls shows as running, its lr in the function that called it).
+// MHGU_DUMP_THREADS=<seconds> logs one then and every 10 s after; closing the window logs one (ui.c), so a player's
+// log of a game that hung holds it. The kernel lock is waited for 1 s at most: a dump never hangs the close.
+void kernel_dump_threads(const char *why, bool all_callers) {
+    static const char *const kinds[] = {"running", "mutex", "condvar", "arbiter"};
+    bool locked = false;
+    for (uint64_t end = plat_now_ns() + 1000000000ull; !(locked = !pthread_mutex_trylock(&g_klock)) && plat_now_ns() < end;)
+        plat_sleep_until_ns(plat_now_ns() + 5000000ull);
+    if (!locked) { LOG("[threads] ---- no dump (%s): the kernel lock stayed held for 1 s\n", why); return; }
+    LOG("[threads] ---- dump (%s)\n", why);
+    for (KThread *t = g_threads; t; t = t->anext) {
+        if (!t->started || t->finished) continue;
+        uint32_t off = 0;
+        const char *s = loader_symbol_at(t->cpu.r[14], &off);
+        LOG("[threads] id %llu handle %x entry %x prio %d %s%s addr %x lr %x (%s+%x) sp %x\n", (unsigned long long)t->id,
+            t->handle, t->entry, t->prio, kinds[t->wait_kind & 3], t->in_sync_wait ? " (WaitSynchronization)" : "",
+            t->wait_addr, t->cpu.r[14], s ? s : "?", off, t->cpu.r[13]);
+        if (t->wait_kind == WAIT_MUTEX && t->wait_addr) LOG("[threads]     mutex word %x\n", LD32(t->wait_addr));
+        if (t->in_sync_wait)
+            for (uint32_t i = 0; i < t->sync_count && i < 8; i++) LOG("[threads]     handle %x\n", LD32(t->sync_handles + 4 * i));
+        if (all_callers || t->wait_kind != WAIT_NONE || t->in_sync_wait) {
+            char line[400];
+            kernel_stack_callers(t->cpu.r[13], line, sizeof line);
+            LOG("[threads]     callers:%s\n", line);
+        }
+    }
+    pthread_mutex_unlock(&g_klock);
+}
+
 static void *dump_threads(void *arg) {
     int secs = (int)(intptr_t)arg;
     for (;;) {
         plat_sleep_until_ns(plat_now_ns() + (uint64_t)secs * 1000000000ull);
         secs = 10;
-        static const char *const kinds[] = {"running", "mutex", "condvar", "arbiter"};
-        pthread_mutex_lock(&g_klock);
-        LOG("[threads] ---- dump\n");
-        for (KThread *t = g_threads; t; t = t->anext) {
-            if (!t->started || t->finished) continue;
-            uint32_t off = 0;
-            const char *s = loader_symbol_at(t->cpu.r[14], &off);
-            LOG("[threads] id %llu handle %x entry %x prio %d %s%s addr %x lr %x (%s+%x) sp %x\n", (unsigned long long)t->id,
-                t->handle, t->entry, t->prio, kinds[t->wait_kind & 3], t->in_sync_wait ? " (WaitSynchronization)" : "",
-                t->wait_addr, t->cpu.r[14], s ? s : "?", off, t->cpu.r[13]);
-            if (t->wait_kind == WAIT_MUTEX && t->wait_addr) LOG("[threads]     mutex word %x\n", LD32(t->wait_addr));
-            if (t->in_sync_wait)
-                for (uint32_t i = 0; i < t->sync_count && i < 8; i++) LOG("[threads]     handle %x\n", LD32(t->sync_handles + 4 * i));
-            if (t->wait_kind != WAIT_NONE || t->in_sync_wait) {
-                char line[400];
-                kernel_stack_callers(t->cpu.r[13], line, sizeof line);
-                LOG("[threads]     callers:%s\n", line);
-            }
-        }
-        pthread_mutex_unlock(&g_klock);
+        kernel_dump_threads("MHGU_DUMP_THREADS", false);
     }
     return NULL;
 }
