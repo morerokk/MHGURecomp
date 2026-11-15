@@ -107,6 +107,11 @@ PATCHES = {
     # Quest photo request (sScreenShot, 0xa6f97c: `mov r1, #1` before the store to +0x2c that asks for the capture): the
     # renderer doesn't skip draws for building shaders while the one-off capture is drawn (exec.c, PHOTO_FRAMES)
     ('main', 0xa6f9ac): (0xE3A01001, '{ extern void backend_photo_requested(void); backend_photo_requested(); c->r[1] = 1; }'),
+    # Cut-in views at high frame rates (runtime/hle/stageview.c): the common script's camera helper 0x5d6df0 pushes
+    # its view once more every update the script still asks for it, and pops it once; with the view already up (state
+    # 10, s16 at r5) it now skips the push (`ldr r0, [r4, #0x18]`, the push's first instruction) for its end
+    ('main', 0x5d6e74): (0xE5940018, '{ extern int stageview_skip_push(uint32_t); if (stageview_skip_push(c->r[5])) '
+                         'goto L_5d6fc4; c->r[0] = LD32(c->r[4] + 0x18u); }'),
 }
 
 # Monster jump physics (runtime/hle/emjump.c): the stores of `pos += vel; vel += acc; acc.y += -0.2`, done once per
