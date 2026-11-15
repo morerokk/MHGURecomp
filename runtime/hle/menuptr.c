@@ -92,6 +92,18 @@ static const MenuGeom builtin[] = {
     // recoloured in place - nothing moves, nothing to learn - measured from the HUD pieces (the cell's piece at 888 +
     // 44 a column, 138 + 40 a row, about 33 wide; 2026-11-14, quest 101)
     {.lr = 0x5890a8u, .x = 883, .y = 135, .w = 44, .h = 40, .dy = 40, .builtin = true, .cdx = 44, .cols = 8},
+    // the Meownster Hunters' reward box (0x3b607c: its menu is the list at 0x3b6110, its grid 8 x 6, set up at
+    // 0x3b6678): the same cells in the same place as the quest's, recoloured in place too (2026-11-15, a screenshot)
+    {.lr = 0x3b6278u, .x = 883, .y = 135, .w = 44, .h = 40, .dy = 40, .builtin = true, .cdx = 44, .cols = 8},
+    // the Meownster Hunters' setup (0x3b3fcc): the Palicos to send (left, as learned; Expedition Info's bars move as
+    // they are picked, which the learner took for a second place of this menu's - built in, so it isn't kept)
+    {.lr = 0x3b4420u, .x = 28, .y = 135, .w = 372, .h = 34, .dy = 36, .z = 97, .kw = 186, .kh = 17, .builtin = true,
+     .cols = 1},
+    // ... then Expedition Info: Locale and the four members 38 apart (as learned), then Start Expedition, a button below
+    // the Cost line that is recoloured in place (240 wide: not the 210 x 34 button the learner knows), measured from a
+    // screenshot (2026-11-15)
+    {.lr = 0x3b8514u, .x = 896, .y = 100, .w = 356, .h = 36, .dy = 38, .z = 97, .kw = 178, .kh = 18, .builtin = true,
+     .offmask = 0x3f, .offy = {0, 38, 76, 114, 152, 254}, .cols = 1},  // (every row: one not given goes by the nearest)
     {CALL_PAUSE_MENU, 970, 101, 282, 34, 0, 36, 97, 141, 17, 0, 0, true},
     {CALL_TITLE_MENU, 170, 153, 940, 64, 0, 84, 0, 0, 0, 0, 0, true},
     {CALL_TITLE_OPTIONS, 170, 195, 940, 64, 0, 84, 0, 0, 0, 0, 0, true},
