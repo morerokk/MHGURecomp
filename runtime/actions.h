@@ -121,13 +121,13 @@ typedef struct ActProfile {
     int shared_frames;     // SharedInteractFrames: how long Interact is tried first on an input other hunt actions share (0: 1)
     bool log;       // Log: one line per frame
     int scheme;     // Scheme: which control scheme the settings screen shows (ACT_SCHEME_*; 0: the device last used)
-    int layout;     // Layout: Simple or Advanced (ACT_LAYOUT_*; 0: Simple, unless the profile already has bindings)
+    int layout;     // Layout: Simple or Advanced (ACT_LAYOUT_*; 0: Advanced)
     ActDevice dev[2];  // 0 [Actions.Pad], 1 [Actions.Kbm]
 } ActProfile;
 
 enum { ACT_SCHEME_AUTO, ACT_SCHEME_PAD, ACT_SCHEME_KBM };           // [Actions] Scheme = Controller | Keyboard
 enum { ACT_LAYOUT_AUTO, ACT_LAYOUT_SIMPLE, ACT_LAYOUT_ADVANCED };  // [Actions] Layout = Simple | Advanced
-int act_layout(const ActProfile *p);  // SIMPLE or ADVANCED: the profile's, else Advanced if it has any binding, else Simple
+int act_layout(const ActProfile *p);  // SIMPLE or ADVANCED: the profile's, else Advanced (the default)
 
 // ---- the Simple layout: merged rows (the settings screen; the engine only ever sees the actions)
 // A row is one action (its head) and the actions that go with it in other contexts: Confirm is MenuConfirm and the
