@@ -55,6 +55,7 @@ typedef struct {
     int lag_compensation;     // multiplayer: melee and bow/bowgun hits count as the hunter saw them (runtime/net/hitsync.c)
     int bonus_content;        // free downloads copied from a donor save into saves without any (runtime/services/bonus.c)
     int village_in_hub;       // L / R at the Hub's / Pub's quest counter switch to Village quests (runtime/hle/villagehub.c)
+    int quest_hold_send;      // [Quest Rewards] HoldASend: A held on the Reward Box sends the items one after another (runtime/hle/rewardbox.c)
     int share_urgent;         // an unlocked Urgent quest someone else posted counts when cleared (runtime/hle/urgentcredit.c)
     HpScale hp;               // large monster HP in Hub-type quests (runtime/hle/hpscale.c)
     float mouse_sensitivity;  // mouse look: times the hunt camera's angle per count (runtime/hle/mousecam.c), and
@@ -264,6 +265,7 @@ float config_live_fsr_reactive(void);   // [Upscaler] Reactive, read by each FSR
 void config_live_hp(HpScale *out);      // [Monster HP] and [Village Quests] HubHP as saved now (hle/hpscale.c)
 float config_live_hp_village(void);     // [Village Quests] HubHP as saved now
 int config_live_village_in_hub(void);   // [Village Quests] VillageQuestsInHub (hle/villagehub.c)
+int config_live_quest_hold_send(void);  // [Quest Rewards] HoldASend (hle/rewardbox.c)
 int config_live_ldn_port(void);         // [Multiplayer] Port: the next hub hosted and the next search (net/ldn.c)
 void config_live_ldn_join(char *join, size_t size);  // [Multiplayer] Join: the next search (net/ldn.c)
 int config_live_ldn_direct(void);  // [Multiplayer] Direct (net/ldn.c: for the next player link)

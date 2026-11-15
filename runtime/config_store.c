@@ -65,6 +65,8 @@ static SDL_AtomicInt live_ldn_direct;
 static SDL_AtomicInt live_share_urgent;
 // [Monster HP, Village Quests]
 static SDL_AtomicInt live_village;
+// [Quest Rewards]
+static SDL_AtomicInt live_hold_send = {1};
 // [Discord]
 static SDL_AtomicInt live_discord;
 static SDL_AtomicInt live_discord_hunter;
@@ -137,6 +139,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->fsr_sharpness != saved.fsr_sharpness) set_float(&live_fsr_sharpness, c->fsr_sharpness);
     if (all || c->fsr_reactive != saved.fsr_reactive) set_float(&live_fsr_reactive, c->fsr_reactive);
     if (all || c->village_in_hub != saved.village_in_hub) SDL_SetAtomicInt(&live_village, c->village_in_hub);
+    if (all || c->quest_hold_send != saved.quest_hold_send) SDL_SetAtomicInt(&live_hold_send, c->quest_hold_send);
     if (all || memcmp(&c->hp, &saved.hp, sizeof c->hp)) {
         SDL_LockSpinlock(&live_hp_lock);
         live_hp = c->hp;
@@ -223,6 +226,7 @@ float config_live_hdr_bloom(void) { return get_float(&live_hdr_bloom); }
 float config_live_fsr_sharpness(void) { return get_float(&live_fsr_sharpness); }
 float config_live_fsr_reactive(void) { return get_float(&live_fsr_reactive); }
 int config_live_village_in_hub(void) { return SDL_GetAtomicInt(&live_village); }
+int config_live_quest_hold_send(void) { return SDL_GetAtomicInt(&live_hold_send); }
 int config_live_ldn_port(void) { return SDL_GetAtomicInt(&live_ldn_port); }
 int config_live_sync_small_monsters(void) { return SDL_GetAtomicInt(&live_sync_zako); }
 int config_live_lag_compensation(void) { return SDL_GetAtomicInt(&live_lagcomp); }

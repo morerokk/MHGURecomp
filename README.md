@@ -307,6 +307,8 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   original game)
 - `[Village Quests]`: `VillageQuestsInHub` (default On), `HubHP` (default 2.0: Village quests posted in the Hub
   multiply their monsters' HP and part HP by this first, then by the `[Monster HP]` factor)
+- `[Quest Rewards]`: `HoldASend` (default On: at the end of a quest, hold A on the Reward Box's Send to the Item Box
+  screen to send the items to the box one after another)
 - `[Discord]`: `RichPresence` (default On: your Discord profile shows where you are, the monsters you're hunting
   and the map, how many are in your hub or quest; Discord must be running on the same computer), `ShowHunter`
   (default On: your hunter's name, HR and weapon type too)
