@@ -381,6 +381,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(ldn_direct);
     SAME(bonus_content);
     SAME(village_in_hub);
+    SAME(quest_hold_send);
     SAME(share_urgent);
     SAME(mouse_sensitivity);
     SAME(mouse_sensitivity_y);
@@ -1707,6 +1708,7 @@ void reset_section() {
         c.sync_small_monsters = f.sync_small_monsters;
         c.lag_compensation = f.lag_compensation;
         c.village_in_hub = f.village_in_hub;
+        c.quest_hold_send = f.quest_hold_send;
         c.share_urgent = f.share_urgent;
         c.hp = f.hp;
         quest_keys();
@@ -2157,6 +2159,7 @@ std::vector<Row> main_rows() {
         add_bool(r, "lagcomp", "Lag compensation (experimental)", &c.lag_compensation, ini("LagCompensation"));
         add_bool(r, "village", "Village quests in Hub", &c.village_in_hub, ini("VillageQuestsInHub"));
         add_bool(r, "urgent", "Urgent quests count for all", &c.share_urgent, ini("ShareUrgentCredit"));
+        add_bool(r, "rewards.hold", "Hold A to send items to box", &c.quest_hold_send, ini("HoldASend"));
         header(r, "hp.header", tr("Monster HP Scaling"));
         for (int i = 0; i < 4; i++)
             number(r, "hp." + std::to_string(i), std::to_string(i + 1) + " " + tr(i == 0 ? "Hunter" : "Hunters"), &c.hp.scale[i],

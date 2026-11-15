@@ -78,6 +78,7 @@ static void boot(const char *root) {
     forge_init();  // (Forge plugins in the mods: runtime/forge.c)
     hpscale_init();  // (large monster HP by the number of hunters: runtime/hle/hpscale.c)
     villagehub_init();  // (Village quests at the Hub / Pub counter: runtime/hle/villagehub.c)
+    rewardbox_init();  // (quest rewards: Send to the Item Box in one go: runtime/hle/rewardbox.c)
     urgentcredit_init();  // (Urgent quests count for all who clear them: runtime/hle/urgentcredit.c)
     mashrate_init();  // (mashing out of a stun at high frame rates: runtime/hle/mashrate.c)
     hatestep_init();  // (monsters' attention scores at high frame rates: runtime/hle/hatestep.c)

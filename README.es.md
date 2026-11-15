@@ -307,6 +307,8 @@ Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
 - `[Village Quests]`: `VillageQuestsInHub` (On por defecto), `HubHP` (2.0 por defecto: las misiones de la Aldea
   publicadas en la Sala multiplican primero la vida de sus monstruos y de sus partes por este valor y luego por el factor de
   `[Monster HP]`)
+- `[Quest Rewards]`: `HoldASend` (On por defecto: al final de una misión, mantén A en la pantalla Enviar a la caja de objetos
+  de la caja de recompensas para enviar los objetos a la caja uno tras otro)
 - `[Discord]`: `RichPresence` (On por defecto: tu perfil de Discord muestra dónde estás, los monstruos que cazas y el
   mapa, y cuántos hay en tu sala o misión; Discord tiene que estar abierto en el mismo ordenador), `ShowHunter` (On
   por defecto: también el nombre de tu cazador, su RC y su tipo de arma)
