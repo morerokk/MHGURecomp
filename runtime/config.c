@@ -113,6 +113,8 @@
     /* [Monster HP, Village Quests] */                                                              \
     .hp = {{1, 1, 1, 1}, 2},                                                                        \
     .village_in_hub = 1,                                                                            \
+    /* [Quest Rewards] */                                                                           \
+    .quest_hold_send = 1,                                                                           \
     /* [Discord] */                                                                                 \
     .discord = 1,                                                                                   \
     .discord_hunter = 1,                                                                            \
@@ -529,6 +531,11 @@ static const char DEFAULT_INI[] =
     "; Default: 2.0\n"
     "HubHP = 2.0\n"
     "\n"
+    "[Quest Rewards]\n"
+    "; At the end of a quest, press and hold A on the Reward Box (Send to the Item Box option) to rapidly send items one-by-one, similar to World/Rise/Wilds.\n"
+    "; Default: On\n"
+    "HoldASend = On\n"
+    "\n"
     "[Discord]\n"
     "; Show what you're doing in the game on your Discord profile (Discord must be running on this computer):\n"
     "; where you are, the quest's monsters and how many hunters are with you\n"
@@ -810,6 +817,7 @@ const ConfigSetting g_settings[] = {
     {"Monster HP", "4Players|4Player", SET_FACTOR, F(hp.scale[3]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
     ON_OFF("Village Quests", "VillageQuestsInHub", village_in_hub, false),
     {"Village Quests", "HubHP", SET_FACTOR, F(hp.village), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_VILLAGE},
+    ON_OFF("Quest Rewards", "HoldASend", quest_hold_send, false),
     {"Multiplayer", "RyuServers", SET_TEXT, F(ldn_ryu_servers), sizeof g_config.ldn_ryu_servers, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "RyuHost", SET_TEXT, F(ldn_ryu_host), sizeof g_config.ldn_ryu_host, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "RyuPassphrase", SET_TEXT, F(ldn_ryu_pass), sizeof g_config.ldn_ryu_pass, 0, 0, NULL, NULL, false, ERR_SERVER},
