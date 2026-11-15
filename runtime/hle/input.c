@@ -5,6 +5,7 @@
 
 #include "../hle.h"
 #include "../kernel.h"
+#include "../mods.h"
 #include "chat.h"
 #include "input.h"
 #include "../net/discord.h"
@@ -72,6 +73,7 @@ static void fill_state(Cpu *c) {
     hpscale_tick();  // (the hub host's [Monster HP] settings to the others)
     hitsync_tick();  // (multiplayer: tells the others this game reports its hunter's hits)
     chat_tick(c);  // (a line typed after "/": sent as a shoutout is, runtime/hle/chat.c)
+    villagehub_tick(c);  // (the Village quest text bundle held at the Hub / Pub, let go when leaving: villagehub.c)
     presence_tick();  // (Discord Rich Presence, once a second: runtime/hle/presence.c)
     uint8_t *s = ARGP(0);
     uint32_t id = LD32(ARG(1));

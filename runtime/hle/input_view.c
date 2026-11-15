@@ -55,13 +55,17 @@
 #define PL_DRAWN       0x114cu    // u8: 1 the weapon is out, 0 put away (constant over idle, walk, roll and attacks of
                                   // either state: compared in memory snapshots of a Hammer hunt, 2026-11-10)
 #define VF_BAR_OPEN    0x25cu     // vfunc (player, 1) 1: the item bar is open (L held; hle/itembar.c)
-#define CLS_PROWLER    14         // (no weapon to put away: its A button attacks and gathers)
+#define PL_LOCAL_FLAG  0x13ccu    // u8: bit 0 the local player's (hle/combowin.c)
+#define CLS_PROWLER    14        // (no weapon to put away: its A button attacks and gathers)
 
 // The callers of the R-role getter (return addresses; f_XXXXXX = main + 0x200000) that are the weapon's R-action
 // (guard, charge, aim, special), found with the PadRemap mod (getter log + play) and the research's P16: the
 // 15 weapon mappers and their state functions, and these sites of the input update (f_47ca28 builds the intent word,
-// f_47e774 and f_4a79cc convert the events). The dash tests (f_47ca28 +0x80 .. +0x1fc, f_47e774's second) are not here.
-static const uint32_t kcr_weapon_sites[] = {0x47e7b0, 0x4a7bb0, 0x47d480, 0x47d508, 0x47d530, 0x47d564, 0x47cc58, 0x47d2fc, 0x47d3f8};
+// f_4a79cc converts the events). The dash tests (f_47ca28 +0x80 .. +0x1fc) are not here. Nor is f_47e774, the R-role
+// hold timer (+0x144c, the HBG's quick aim...): it doesn't test the mask, it compares it with 0x40 to pick R's or ZR's
+// bit from a table, so the virtual bit read as ZR there and the timer never ran; it gets the real mask and reads the
+// held word as the weapon sees it (input_view_weapon_held, tools/gen.py PATCHES).
+static const uint32_t kcr_weapon_sites[] = {0x4a7bb0, 0x47d480, 0x47d508, 0x47d530, 0x47d564, 0x47cc58, 0x47d2fc, 0x47d3f8};
 #define MAPPER_LO 0x1360000u  // the weapon classes' code: mappers and states of the 15 classes
 #define MAPPER_HI 0x13f0000u
 static const uint32_t mappers[ACT_WEAPONS] = {0x1360058, 0x1369554, 0x136f404, 0x137731c, 0x137eb58, 0x138c920, 0x1399114,
@@ -85,6 +89,7 @@ static bool g_menus, g_pointer;
 static bool g_split;           // Dash and the weapon R-action are two inputs: the getter answers the virtual bit to weapon callers
 static bool g_kclog;           // MHGU_ACTION_KCLOG=1: log each return address the R-role getter is called from (once)
 static uint32_t g_kc_seen[256];
+static uint32_t g_kc_real = 0x40;  // the R-role getter's own answer (R 0x40, or ZR 0x800 with the second Control Type)
 static int g_kc_n;
 static bool g_on;      // the layer is on this frame ([Actions] Enable; the settings menu can turn it on and off)
 static volatile uint64_t g_hunt_menu_ns;  // when that handler last ran (0: not in this hunt yet)
@@ -274,6 +279,12 @@ bool input_view_hunt_menu_open(void) {
     return seen && plat_now_ns() - seen > HUNT_MENU_STALE_NS;
 }
 void input_view_hunt_menu_reset(void) { g_hunt_menu_ns = 0; }
+// The menus' Cancel as they see it (game thread): while the layer has the menus it is MenuCancel, whatever that is bound
+// to (with Confirm put on the pad's B position, that button is Confirm and Cancel is elsewhere); else the pad's own B
+bool input_view_menu_cancel(bool pad_b) {
+    if (!g_on || !g_menus) return pad_b;
+    return ((g_snap.hold[g_var] | g_snap.pulse[g_var]) >> ACT_MENU_CANCEL) & 1;
+}
 static void tr_mb2(Cpu *c) {
     if (g_on) {  // (once a frame: the menu word the town's actions give, for town_pad)
         g_town_mw_prev = g_town_mw;
@@ -302,7 +313,24 @@ static void kc_r(Cpu *c) {
             LOG("[actions] kcr caller %08x: %s (mask %x)\n", lr, kcr_weapon_caller(lr) ? "weapon R-action" : "dash / other", c->r[0]);
         }
     }
+    g_kc_real = c->r[0];
     if (g_on && g_split && kcr_weapon_caller(lr)) c->r[0] = ACT_VBIT_WEAPON_R;
+}
+// The two-button input window keeps the press that opened it in 12 bits (0x47d564: `(R-role | A B X Y) & new`,
+// shifted to bits 13..24 of the player's +0x1444), and every one of gameplay bits 0..11 is a pad button: the virtual
+// bit fell off there, and with WeaponR split from Dash no R-action came out of the window (the HBG never aimed, a
+// guard never raised). The press is kept as the real R-role bit, the one the code that closes the window tests for
+// (its getter callers are not the weapon's). (game thread: tools/gen.py PATCHES)
+uint32_t input_view_window_press(uint32_t press) {
+    if (press & ACT_VBIT_WEAPON_R) press = (press & ~ACT_VBIT_WEAPON_R) | g_kc_real;
+    return press;
+}
+// The held word (+0x13f4) the R-role hold timer f_47e774 reads (its two `ldrh r1, [r6]`): with the weapon out the
+// R-role is the weapon's, so for the local hunter the real bit there is WeaponR (the virtual bit) and Dash's R doesn't
+// count; with it away the R-role is Dash, as it was. (game thread: tools/gen.py PATCHES)
+uint32_t input_view_weapon_held(uint32_t pl, uint32_t held) {
+    if (!g_on || !g_split || !(LD8(pl + PL_LOCAL_FLAG) & 1) || !LD8(pl + PL_DRAWN)) return held;
+    return (held & ~(g_kc_real | ACT_VBIT_WEAPON_R)) | (held & ACT_VBIT_WEAPON_R ? g_kc_real : 0);
 }
 
 static void log_line(const char *line) { LOG("%s\n", line); }

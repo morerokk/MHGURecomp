@@ -82,9 +82,26 @@ translator hook ORs the **virtual bit 0x8000** into the gameplay word while `Wea
 `Dash` still delivers the real R / ZR), and a hook on `f_85f93c` answers 0x8000 to the weapon's callers and the real role
 bit to every other. The callers are told apart by return address (found with the PadRemap mod's getter log and confirmed
 here with `MHGU_ACTION_KCLOG=1`, which logs each one once): the 15 classes' code `0x1360000..0x13f0000` and the sites
-`0x47e7b0 0x4a7bb0 0x47d480 0x47d508 0x47d530 0x47d564 0x47cc58 0x47d2fc 0x47d3f8` of the input update; the dash tests
+`0x4a7bb0 0x47d480 0x47d508 0x47d530 0x47d564 0x47cc58 0x47d2fc 0x47d3f8` of the input update; the dash tests
 `0x47caa8 0x47cad0 0x47cb48 0x47cc24 0x47cd3c 0x47e7fc` and the two at `0x48d358 / 0x48d3f0` keep the real bit. A mod
 that hooks `f_85f93c` before this layer starts keeps Dash and WeaponR one input (log line).
+
+Two places of the input update can't take the virtual bit, and with the split on the HBG never aimed (0.17.1 report: R
+did nothing, a ZR given to WeaponR aimed for a frame). Both are `tools/gen.py` PATCHES calling `hle/input_view.c`:
+* **The two-button window's saved press** (`0x47d564`, then `and r0, r1, r0, lsl #13` at `0x47d574`): the press that
+  opens the window is kept in bits 13..24 of `+0x1444`, gameplay bits 0..11 only, and all twelve are pad buttons (the
+  translator's table, main + 0x162aa24: D-pad 1 2 4 8, Y 0x10, X 0x20, R 0x40, B 0x80, A 0x100, ZL 0x200, L 0x400, ZR
+  0x800). 0x8000 fell off and the code that closes the window (its getter calls are the dash-classified ones above)
+  found no R. `input_view_window_press` keeps it as the real role bit.
+* **The R-role hold timer** `f_47e774` (`+0x144c` counting while R is held, `+0x1454` its state: the HBG's quick aim)
+  compares the getter's answer with 0x40 to pick R's or ZR's bit from a table: 0x8000 read as ZR. `0x47e7b0` is no
+  longer a weapon site, and its two `ldrh r1, [r6]` of the held word (`0x47e7c8`, `0x47e814`) go through
+  `input_view_weapon_held`: for the local hunter with the weapon out the role bit there is WeaponR (Dash's R doesn't
+  count); with it away it is Dash, as before.
+The weapon classes' own 67 calls all use the answer as a bit mask (checked: `and` / `tst` against a held or new word).
+Tested with a virtual controller (control file `vpad`) on an HBG: default, `SplitDashWeaponR=1`, and `WeaponR` on L3
+(tap: scope, again: out, hold: quick aim; R then aims no more). `hle/combowin.c` (Lenient window) still treats only the
+real R / ZR as the modifier: with WeaponR on its own input, R+X+A rolled at high fps gets none of its help (not tested).
 
 Weapon classes for per-class overrides: GreatSword SnS Hammer Lance HBG LBG LongSword SwitchAxe Gunlance Bow DualBlades Horn
 InsectGlaive ChargeBlade Prowler.

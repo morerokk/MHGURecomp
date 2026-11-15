@@ -14,8 +14,8 @@
 // ------------------------------------------------------------------ audren: a CPU mixer modelled on
 // Ryujinx's AudioRenderer (VoiceState / DataSourceHelper / StateUpdater, copies in notes/ryujinx_audio).
 // Voices decode PCM16 / ADPCM wave buffers, resample to 48 kHz, and mix into their destination mix's
-// buffers; sub mixes route into their destination; the final mix feeds the device sink, which we
-// downmix to stereo and push to an SDL audio stream. Splitters route voices / sub mixes to several destinations (MHGU
+// buffers; sub mixes route into their destination; the final mix feeds the device sink (5.1), which we fold
+// down to stereo or play as 5.1 ([Audio] Output) through an SDL audio stream. Splitters route voices / sub mixes to several destinations (MHGU
 // sends every voice through one). Effects: buffer mixer (1), Aux (2: send / return rings through which the game runs
 // its own CPU-side effects), reverb (4) and I3DL2 reverb (5), the types MHGU uses; others are ignored.
 #define WB_COUNT 4
@@ -125,8 +125,11 @@ typedef struct {
     SplitDest *sdest;
     uint32_t nsdest;
     SDL_AudioStream *stream;
+    bool output;     // sound on (not MHGU_NO_AUDIO, SDL audio up): the stream follows [Audio] Output
+    int out_ch;      // the stream's channels: 2, or 6 (5.1)
     FILE *wav;
     uint32_t wav_bytes;
+    int wav_ch;
     pthread_t thread;
     volatile bool quit;  // reboot (audio_reset)
     VoiceTrace *vt;  // MHGU_AUDIO_TRACE only
@@ -945,7 +948,9 @@ static void apply_effects(Renderer *r, int32_t mix_id, Mix *m) {
 static int hf_log = -1;
 static double hf[1024];
 
-static void render_frame(Renderer *r, float *stereo) {
+// One frame of the device sink's six channels (FL FR FC LFE BL BR, as SDL's 5.1), interleaved, 1.0 = full scale
+// (not clamped: to_device does that after the stereo fold)
+static void render_frame(Renderer *r, float *sink) {
     if (hf_log < 0) hf_log = getenv("MHGU_AUDIO_HF") ? 1 : 0;
     uint32_t N = r->sample_count;
     for (uint32_t m = 0; m < r->nmix; m++)
@@ -1090,22 +1095,67 @@ static void render_frame(Renderer *r, float *stereo) {
                 }
         }
     }
-    // final mix -> device sink (FL FR FC LFE BL BR) -> stereo
+    // final mix -> device sink (FL FR FC LFE BL BR). MHGU always gives the sink six inputs and pans its sounds over
+    // them (center and rears carry sound in a hunt; LFE stays silent), whatever the device's channel count.
     Mix *f = find_mix(r, 0);
     if (f) apply_effects(r, 0, f);
     for (uint32_t i = 0; i < N; i++) {
-        float ch[6] = {0};
+        float *ch = sink + i * 6;
+        memset(ch, 0, 6 * sizeof *ch);
         if (f && r->sink_used)
             for (int c = 0; c < r->sink_inputs && c < 6; c++)
-                if (r->sink_input[c] < f->bufs) ch[c] = f->buf[r->sink_input[c] * N + i] * f->volume;
-        float L = ch[0], R = ch[1];
-        if (r->sink_inputs >= 6) {
-            L += 0.707f * ch[2] + 0.251f * ch[3] + 0.707f * ch[4];
-            R += 0.707f * ch[2] + 0.251f * ch[3] + 0.707f * ch[5];
-        }
-        stereo[i * 2] = clampf(L / 32768.f, -1, 1);
-        stereo[i * 2 + 1] = clampf(R / 32768.f, -1, 1);
+                if (r->sink_input[c] < f->bufs) ch[c] = f->buf[r->sink_input[c] * N + i] * f->volume / 32768.f;
     }
+}
+
+// The sink's 5.1 to the device's channels: 6 as they are, or 2, folded down (center and rears at -3 dB, LFE -12 dB)
+static void to_device(const float *sink, float *out, uint32_t n, int channels) {
+    for (uint32_t i = 0; i < n; i++, sink += 6) {
+        if (channels == 6) {
+            for (int c = 0; c < 6; c++) out[i * 6 + c] = clampf(sink[c], -1, 1);
+            continue;
+        }
+        float c = 0.707f * sink[2] + 0.251f * sink[3];
+        out[i * 2] = clampf(sink[0] + c + 0.707f * sink[4], -1, 1);
+        out[i * 2 + 1] = clampf(sink[1] + c + 0.707f * sink[5], -1, 1);
+    }
+}
+
+static int output_channels(void) { return config_audio_output() == AUDIO_OUT_51 ? 6 : 2; }
+static void apply_gain(SDL_AudioStream *st);
+
+// (Re)opens the SDL stream with `channels` (2, or 6 in SDL's 5.1 order, the sink's own). SDL converts to what the
+// device has: a stereo device gets 5.1 folded down by SDL, a 7.1 one gets it on its front / center / rear speakers.
+static void open_stream(Renderer *r, int channels) {
+    if (r->stream) SDL_DestroyAudioStream(r->stream);
+    SDL_AudioSpec spec = {SDL_AUDIO_F32, channels, (int)r->sample_rate};
+    r->stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
+    r->out_ch = channels;  // (also after a failure: no retry every frame, only when the setting changes again)
+    if (!r->stream) { LOG("[audren] SDL audio open failed (%d channels): %s\n", channels, SDL_GetError()); return; }
+    apply_gain(r->stream);
+    SDL_ResumeAudioStreamDevice(r->stream);
+}
+
+static int64_t queued_frames(Renderer *r) {
+    return r->stream ? SDL_GetAudioStreamQueued(r->stream) / (r->out_ch * (int)sizeof(float)) : 0;
+}
+
+// Device queue levels for renderer_tick, in sample frames
+typedef struct { int dev, target, low, high, prime; } Pacing;
+static Pacing pacing(Renderer *r, uint32_t N) {
+    Pacing p = {0, 4 * (int)N};  // target: queued audio to keep ahead of the device, >= 2 device periods
+    SDL_AudioSpec dev;
+    int dev_frames = 0;
+    if (r->stream && SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(r->stream), &dev, &dev_frames) && dev_frames > 0) {
+        p.dev = dev_frames * (int)r->sample_rate / (dev.freq ? dev.freq : 48000);
+        if (2 * p.dev + (int)N > p.target) p.target = 2 * p.dev + (int)N;
+        LOG("[audren] output %s; device %d Hz, %d channels, %d frames/period; queue target %d samples\n",
+            r->out_ch == 6 ? "5.1" : "stereo", dev.freq, dev.channels, dev_frames, p.target);
+    }
+    p.low = p.target - p.dev - (int)N;
+    p.high = p.target + p.dev + (int)N;
+    p.prime = p.target - p.dev / 2;
+    return p;
 }
 
 // Output gain: menu volume times MHGU_AUDIO_GAIN (applied live).
@@ -1116,63 +1166,57 @@ static void apply_gain(SDL_AudioStream *st) {
     if (st && SDL_GetAudioStreamGain(st) != g) SDL_SetAudioStreamGain(st, g);
 }
 
-static void wav_header(FILE *f, uint32_t bytes) {
-    uint32_t h[11] = {0x46464952, 36 + bytes, 0x45564157, 0x20746d66, 16, 0x00020003, 48000, 48000 * 8,
-                      0x00200008, 0x61746164, bytes};
+// MHGU_AUDIO_WAV: 48 kHz float, WAVE_FORMAT_EXTENSIBLE with the channel mask (FL FR, or FL FR FC LFE BL BR), so
+// Audacity and the like name a 5.1 dump's six tracks
+static void wav_header(FILE *f, uint32_t bytes, int ch) {
+    uint32_t h[17] = {0x46464952, 60 + bytes, 0x45564157, 0x20746d66, 40, 0xFFFEu | (uint32_t)ch << 16, 48000,
+                      48000u * ch * 4, (uint32_t)ch * 4 | 32u << 16, 22u | 32u << 16, ch == 6 ? 0x3Fu : 0x3u,
+                      0x00000003, 0x00100000, 0xaa000080, 0x719b3800,  // KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
+                      0x61746164, bytes};
     fseek(f, 0, SEEK_SET);
-    fwrite(h, 4, 11, f);
+    fwrite(h, 4, 17, f);
     fseek(f, 0, SEEK_END);
 }
 
 static void *renderer_tick(void *arg) {
     Renderer *r = arg;
-    float out[2 * 4096];
     uint32_t N = r->sample_count > 4096 ? 4096 : r->sample_count;
-    int frame_bytes = (int)(N * 2 * sizeof(float));
+    float *sink = calloc((size_t)N * 6, sizeof(float)), *out = calloc((size_t)N * 6, sizeof(float));
     uint64_t next = 0;
-    int target = 4 * frame_bytes;  // queued audio to keep ahead of the device: >= 2 device periods
-    int dev_bytes = 0;
-    if (r->stream) {
-        SDL_AudioSpec dev;
-        int dev_frames = 0;
-        if (SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(r->stream), &dev, &dev_frames) && dev_frames > 0) {
-            dev_bytes = dev_frames * (int)r->sample_rate / (dev.freq ? dev.freq : 48000) * 2 * (int)sizeof(float);
-            int t = 2 * dev_bytes + frame_bytes;
-            if (t > target) target = t;
-            LOG("[audren] device %d Hz, %d frames/period; queue target %d samples\n", dev.freq, dev_frames,
-                target / (2 * (int)sizeof(float)));
-        }
-    }
+    Pacing p = pacing(r, N);
     // One frame per period by the clock, as the DSP renders, so the game gets an update between every two frames and
     // a sound it starts is heard a frame later, not after the next burst of frames (the game ends sounds by its own
     // clock, so that delay came off their ends). The device queue only corrects the clock's drift from the device's:
     // a frame at once when it runs low, a frame skipped when it runs high. Frames go out back to back until the queue
     // first holds half a device period less than the target (the device's pulls then swing it around the target).
     uint64_t period = (uint64_t)N * 1000000000ull / r->sample_rate;
-    int low = target - dev_bytes - frame_bytes, high = target + dev_bytes + frame_bytes;
-    int prime = target - dev_bytes / 2;
     bool primed = !r->stream;
     while (!r->quit) {
+        if (r->output && output_channels() != r->out_ch) {  // [Audio] Output changed in the settings menu
+            open_stream(r, output_channels());
+            p = pacing(r, N);
+            primed = !r->stream, next = 0;
+        }
         uint64_t t = plat_now_ns();
-        int q = r->stream ? SDL_GetAudioStreamQueued(r->stream) : 0;
+        int64_t q = queued_frames(r);
         if (!primed) {
-            if (q >= prime) primed = true, next = t;
-        } else if (!r->stream || q >= low) {
+            if (q >= p.prime) primed = true, next = t;
+        } else if (!r->stream || q >= p.low) {
             if (!next || t > next + 4 * period) next = t;  // (behind after a stall: no burst to make up for it)
             plat_sleep_until_ns(next);  // (Windows: a high-resolution timer, not nanosleep's whole milliseconds)
             next += period;
-            if (r->stream && SDL_GetAudioStreamQueued(r->stream) >= high) {
+            if (r->stream && queued_frames(r) >= p.high) {
                 if (r->vt) r->ts.skips++;
                 continue;
             }
         } else if (r->vt) {
             r->ts.catch_ups++;
         }
-        int64_t queued = r->stream && r->vt ? SDL_GetAudioStreamQueued(r->stream) / (2 * (int)sizeof(float)) : -1;
+        int64_t queued = r->stream && r->vt ? queued_frames(r) : -1;
         pthread_mutex_lock(&r->lock);
         if (r->state == 0) {
             double t0 = r->vt ? now_ms() : 0;
-            render_frame(r, out);
+            render_frame(r, sink);
             r->elapsed_frames++;
             if (r->vt) {
                 TraceStats *ts = &r->ts;
@@ -1183,7 +1227,7 @@ static void *renderer_tick(void *arg) {
                 if (queued == 0 && r->elapsed_frames > r->sample_rate / N) ts->underruns++;  // not counting start-up
             }
         } else {
-            memset(out, 0, frame_bytes);
+            memset(sink, 0, (size_t)N * 6 * sizeof(float));
         }
         TraceStats snap;
         uint32_t open = 0;
@@ -1208,16 +1252,23 @@ static void *renderer_tick(void *arg) {
                 snap.catch_ups, snap.skips, aux, snap.in_use_min == UINT32_MAX ? 0 : snap.in_use_min, snap.in_use_max,
                 open, snap.playing_max, snap.started, snap.skipped, snap.silent, snap.cut);
         }
-        if (r->stream) { apply_gain(r->stream); SDL_PutAudioStreamData(r->stream, out, frame_bytes); }
-        if (r->wav && r->state == 0) {
-            fwrite(out, 1, frame_bytes, r->wav);
-            r->wav_bytes += frame_bytes;
-            if ((r->elapsed_frames & 255) == 0) { wav_header(r->wav, r->wav_bytes); fflush(r->wav); }
+        if (r->stream) {
+            to_device(sink, out, N, r->out_ch);
+            apply_gain(r->stream);
+            SDL_PutAudioStreamData(r->stream, out, (int)(N * r->out_ch * sizeof(float)));
+        }
+        if (r->wav && r->state == 0) {  // (in the Output the dump was opened with, whatever the device does since)
+            to_device(sink, out, N, r->wav_ch);
+            uint32_t bytes = N * r->wav_ch * (uint32_t)sizeof(float);
+            fwrite(out, 1, bytes, r->wav);
+            r->wav_bytes += bytes;
+            if ((r->elapsed_frames & 255) == 0) { wav_header(r->wav, r->wav_bytes, r->wav_ch); fflush(r->wav); }
         }
         pthread_mutex_lock(&g_klock);
         kernel_signal(r->event);
         pthread_mutex_unlock(&g_klock);
     }
+    free(sink), free(out);
     return NULL;
 }
 
@@ -1531,15 +1582,13 @@ static void request_update(Renderer *r, IpcReq *req, IpcResp *resp) {
 static void renderer_open_output(Renderer *r) {
     if (getenv("MHGU_AUDIO_WAV")) {
         r->wav = fopen(getenv("MHGU_AUDIO_WAV"), "wb");
-        if (r->wav) wav_header(r->wav, 0);
+        r->wav_ch = output_channels();
+        if (r->wav) wav_header(r->wav, 0, r->wav_ch);
     }
     if (getenv("MHGU_NO_AUDIO") && strcmp(getenv("MHGU_NO_AUDIO"), "0")) return;
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) { LOG("[audren] SDL audio init failed: %s\n", SDL_GetError()); return; }
-    SDL_AudioSpec spec = {SDL_AUDIO_F32, 2, (int)r->sample_rate};
-    r->stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
-    if (!r->stream) { LOG("[audren] SDL audio open failed: %s\n", SDL_GetError()); return; }
-    apply_gain(r->stream);
-    SDL_ResumeAudioStreamDevice(r->stream);
+    r->output = true;
+    open_stream(r, output_channels());
 }
 
 static void audio_renderer(Service *s, IpcReq *req, IpcResp *resp) {
@@ -1690,7 +1739,7 @@ RT_ON_RESET(audio_reset) {
             r->quit = true;
             pthread_join(r->thread, NULL);
             if (r->stream) SDL_DestroyAudioStream(r->stream);
-            if (r->wav) { wav_header(r->wav, r->wav_bytes); fclose(r->wav); }
+            if (r->wav) { wav_header(r->wav, r->wav_bytes, r->wav_ch); fclose(r->wav); }
             for (uint32_t m = 0; m < r->nmix; m++) free(r->mix[m].buf);
             free(r->voice), free(r->chres), free(r->chst), free(r->mix), free(r->fx), free(r->vt);  // (reverb delay lines leak)
             free(r);

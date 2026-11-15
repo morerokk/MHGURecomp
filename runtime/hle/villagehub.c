@@ -29,8 +29,12 @@
 // loose files. Simplified and Traditional Chinese came with a title update and have no loose text: theirs is only in
 // the area's quest bundles (loc\arc\quest\vq for the villages, gq and gq2 for the Hub and the Pub; 0x35339c picks them
 // by area type), and without it the game shows English. So in those two languages, while a Hub or Pub counter shows
-// Village quests, vq is held loaded as it is in a village (the other languages' text is the same in both places).
+// Village quests, vq is held loaded as it is in a village (the other languages' text is the same in both places),
+// and let go when the hunter leaves (villagehub_tick: never through a quest).
 //   MHGU_VQ_TRACE=1   log the filter's verdicts (once per counter type and quest group), and the supply box
+//   MHGU_VQ_ANY=1     (test) every Village quest counts as unlocked; MHGU_VQ_ACCEPT=<n>: a Village quest accepted at
+//                     the Hub / Pub is quest n instead (the "Advanced:" ones aren't in the menus without the save's
+//                     progress); MHGU_LANGUAGE=<n>: the game's language from the next area load (8 Simplified Chinese)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -191,11 +195,33 @@ static void village_text(Cpu *c, bool want) {
 // not being ready), so it is made again the first time the counter's menu is up (ui_update).
 static bool g_reloading, g_list_stale;
 static void list_load(Cpu *c) {
+    // (debug) MHGU_LANGUAGE=<n>: the game's language from this area load on (sGameControl +0xa5: 1 English, 7
+    // Traditional Chinese, 8 Simplified Chinese); travel to another area for it to load its text. Saved with the game.
+    const char *lang = ENV("MHGU_LANGUAGE");
+    uint32_t gc = LD32(G_GAMECONTROL);
+    if (lang && *lang && gc && LD8(gc + GC_LANGUAGE) != (uint8_t)atoi(lang)) {
+        LOG("[vqhub] MHGU_LANGUAGE: language %u -> %d\n", LD8(gc + GC_LANGUAGE), atoi(lang));
+        ST8(gc + GC_LANGUAGE, (uint8_t)atoi(lang));
+    }
     uint32_t a = area_addr();
     bool village = g_village && a && hub_area(LD8(a));
     village_text(c, village);
     if (!g_reloading) g_list_stale = village;
     fnhook_call_original(c, FN_LIST_LOAD);
+}
+
+// The bundle is let go as soon as the area type leaves the Hub / Pub (0xff from the start of a departure, before the
+// quest's files load), not at the next town's list job: a quest must load without vq, as from a village (the game
+// drops a village's bundles before its quests too). Held through a quest started from the Hub or the Pub, it broke
+// the hunt: Palicos drawn white and see-through at the start, terrain black later, then a crash freeing an area
+// bundle at a zone change (0x352d84 -> pc 0 from 0xd0ba68), only in Chinese (report 2026-11-13, quest 1044; English
+// fine). (Holding it through a quest started from a village didn't show it: why only the Hub's quests is not known.)
+void villagehub_tick(Cpu *c) {
+    if (!g_vq_arc) return;
+    uint32_t a = area_addr();
+    if (a && hub_area(LD8(a))) return;
+    village_text(c, false);
+    LOG("[vqhub] Village quest text bundle let go: left the Hub / Pub (area type %u)\n", a ? LD8(a) : 0xffu);
 }
 
 static void quest_lookup(Cpu *c) {
@@ -229,6 +255,7 @@ static void quest_lookup(Cpu *c) {
     fnhook_call_original(c, FN_QUEST_LOOKUP);
 }
 
+static bool g_list_pending;  // the list job outlasted reload_list's wait: categories again once it is done
 static void reload_list(Cpu *c) {
     uint32_t sel = LD32(G_SELECTOR);
     if (!sel) return;
@@ -241,8 +268,11 @@ static void reload_list(Cpu *c) {
         plat_sleep_until_ns(plat_now_ns() + 1000000);
     // the categories (quest numbers per star...) are built anew too, as when a stage starts, for the new mode
     call1(c, FN_CATEGORIES, sel);
-    LOG("[vqhub] quest counter: %s quests, %u listed (loaded in %.0f ms)\n", g_village ? "Village" : "Hub",
-        LD32(sel + SEL_COUNT), (plat_now_ns() - t0) / 1e6);
+    // (a job still running after the wait has listed only part: the last stars' rows would stay missing, so the
+    // categories are built again when it finishes, see ui_update)
+    g_list_pending = !call1(c, FN_LIST_DONE, sel);
+    LOG("[vqhub] quest counter: %s quests, %u listed (loaded in %.0f ms)%s\n", g_village ? "Village" : "Hub",
+        LD32(sel + SEL_COUNT), (plat_now_ns() - t0) / 1e6, g_list_pending ? ", still loading" : "");
 }
 
 static void ui_update(Cpu *c) {
@@ -258,9 +288,15 @@ static void ui_update(Cpu *c) {
     if (a && hub_area(LD8(a)) && (st == UI_RANK_MENU || st == UI_STAR_MENU)) {
         bool swap = on ? (pressed & ((1ull << BTN_L) | (1ull << BTN_R))) != 0 : g_village;  // (off: back to the Hub's quests)
         if (swap) g_village = !g_village;
+        uint32_t sel = LD32(G_SELECTOR);
         if (swap || g_list_stale) {
             reload_list(c);
             ST8(ui + UI_STATE, 0);  // (lays the menu out again)
+        } else if (g_list_pending && sel && call1(c, FN_LIST_DONE, sel)) {
+            g_list_pending = false;
+            call1(c, FN_CATEGORIES, sel);
+            ST8(ui + UI_STATE, 0);
+            LOG("[vqhub] quest counter: the list finished loading, %u listed\n", LD32(sel + SEL_COUNT));
         }
     }
     as_village_menu(c, FN_UI_UPDATE);
@@ -351,7 +387,38 @@ static void spawn_update(Cpu *c) {
     fnhook_call_original(c, FN_SPAWN_UPDATE);
 }
 
+// (debug) MHGU_VQ_ANY=1: every Village quest (and village training / Prowler quest) counts as unlocked, at every
+// counter and in the Hub's / Pub's Village list, to test quests a save hasn't reached. The save isn't changed.
+static void quest_unlocked(Cpu *c) {
+    uint32_t q = c->r[0], group = q / 10000 % 100;
+    fnhook_call_original(c, FN_QUEST_UNLOCKED);
+    if (q <= 999999 && (group == 0 || group == 3 || group == 10)) c->r[0] = (c->r[0] & ~0xffu) | 1;
+}
+// (debug) MHGU_VQ_ACCEPT=<quest number>: accepting any Village quest at the Hub's / Pub's counter accepts that quest
+// instead (one the menus don't show: the "Advanced:" ones have conditions of their own). The counter's accept
+// 0x984e94(ui, quest number, mode) writes the number to sQuestSelector +0xd68; the quest's data is loaded on demand
+// (quest_lookup) like a posted one. Use with MHGU_VQ_ANY=1 if the save hasn't unlocked it.
+#define FN_COUNTER_ACCEPT 0x984e94u
+static uint32_t g_accept_as;
+static void counter_accept(Cpu *c) {
+    uint32_t q = c->r[1], a = area_addr();
+    if (q && q <= 9999 && a && hub_area(LD8(a))) {
+        LOG("[vqhub] MHGU_VQ_ACCEPT: quest %07u accepted as %07u\n", q, g_accept_as);
+        c->r[1] = g_accept_as;
+    }
+    fnhook_call_original(c, FN_COUNTER_ACCEPT);
+}
+
 void villagehub_init(void) {
+    const char *acc = getenv("MHGU_VQ_ACCEPT");
+    if (acc && (g_accept_as = (uint32_t)strtoul(acc, NULL, 10)) != 0) {
+        fnhook_set(FN_COUNTER_ACCEPT, hle_register("villagehub:counter_accept", counter_accept));
+        LOG("[vqhub] MHGU_VQ_ACCEPT: a Village quest accepted at the Hub / Pub is quest %07u\n", g_accept_as);
+    }
+    if (getenv("MHGU_VQ_ANY")) {
+        fnhook_set(FN_QUEST_UNLOCKED, hle_register("villagehub:quest_unlocked", quest_unlocked));
+        LOG("[vqhub] MHGU_VQ_ANY: every Village quest counts as unlocked\n");
+    }
     g_trace = getenv("MHGU_VQ_TRACE") != NULL;
     g_demo_test = getenv("MHGU_VQ_DEMO_TEST") != NULL;
     g_path = hle_alloc(64);

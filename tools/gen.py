@@ -90,6 +90,13 @@ PATCHES = {
     # (`mov r6, r4` at the start, `ldrh r1, [sb]` where all its paths have met)
     ('main', 0x47ca38): (0xE1A06004, '{ extern void combowin_begin(uint32_t); c->r[6] = c->r[4]; combowin_begin(c->r[4]); }'),
     ('main', 0x47cc58): (0xE1D910B0, '{ extern void combowin_end(uint32_t); combowin_end(c->r[4]); c->r[1] = LD16(c->r[9]); }'),
+    # ... the press that opens the window is kept in 12 bits (`and r0, r1, r0, lsl #13`: bits 13..24 of +0x1444): the
+    # Game actions' virtual WeaponR bit (0x8000, runtime/hle/input_view.c) is kept as the real R-role bit instead
+    ('main', 0x47d574): (0xE0010680, '{ extern uint32_t input_view_window_press(uint32_t); c->r[0] = c->r[1] & (input_view_window_press(c->r[0]) << 13); }'),
+    # ... and the R-role hold timer (f_47e774, +0x144c: the HBG's quick aim) picks R's or ZR's bit by comparing the
+    # getter's mask with 0x40, then reads the held word (`ldrh r1, [r6]`, twice): it reads WeaponR there with the weapon out
+    ('main', 0x47e7c8): (0xE1D610B0, '{ extern uint32_t input_view_weapon_held(uint32_t, uint32_t); c->r[1] = input_view_weapon_held(c->r[4], LD16(c->r[6])); }'),
+    ('main', 0x47e814): (0xE1D610B0, '{ extern uint32_t input_view_weapon_held(uint32_t, uint32_t); c->r[1] = input_view_weapon_held(c->r[4], LD16(c->r[6])); }'),
     # Town NPC fade (uLobbyNpc, 0x8c2d9c): `vldr s8, [r2]` loads the squared distance within which the NPC fades in
     # (table at 0x8c2ef0: 2500^2, or 1800^2 with flag 0x40 of +0x186a); config.c npc_fade_dist2 scales it ([Graphics]
     # DrawDistance)

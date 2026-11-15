@@ -375,6 +375,8 @@ $(O)/version.id: FORCE
 $(O)/rt/ui.o: extras/icon/mhgurecomp-128.png
 $(O)/rt/main.o: $(O)/version.id
 $(O)/rt/main.o: RTFLAGS += -DMHGU_VERSION='"$(VERSION)"'
+$(O)/rt/settings_panel.o: $(O)/version.id
+$(O)/rt/settings_panel.o: IMGUIFLAGS += -DMHGU_VERSION='"$(VERSION)"'
 
 # SHADER_ID / PIPELINE_ID: what the shader caches go with (runtime/nvn/vulkan/exec.c): cache/programs.bin and
 # warmed.bin with the translator, pipelines.bin with the pipeline code too. An update that leaves them alone keeps the

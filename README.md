@@ -312,7 +312,8 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   (default On: your hunter's name, HR and weapon type too)
 - `[Bonus Content]`: `BonusContent` (default On), see below
 - `[Audio]`: `Volume` (0 to 100: the whole game), `MuteInBackground` (On / Off, default Off: no sound while the
-  game's window is in the background)
+  game's window is in the background), `Output` (Stereo, the default / 5.1: the game mixes its sound in 5.1 as on the
+  Switch's surround output; 5.1 plays it on a surround system, Stereo folds it down to two channels; applies on Save)
 - `[Application]`: `ConfirmExit` (ask before the window closes), and the settings menu's `Language` (English /
   Spanish), `ButtonIcons` (Xbox / Switch / PlayStation), `Theme` (Hunter, the default / Gold / Blue: the settings menu's colours) and
   `MenuScale` (50 to 200 percent), and `Updates` (Ask / Auto / Off: what `mhgurecomp-updater` does, see "Staying up

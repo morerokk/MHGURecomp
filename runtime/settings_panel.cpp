@@ -239,8 +239,11 @@ int mod_index(const std::string &name) {
     return -1;
 }
 bool dirty();
+// The tab that shows the build's version (MHGU_VERSION, the Makefile's VERSION) in the bottom right corner
+constexpr int VERSION_PAGE = APP_PAGE;
 struct GuideLayout {
     ImVec2 offset[4];
+    ImVec2 version;  // where the build's version goes (VERSION_PAGE only)
     float height = 0;
 };
 GuideLayout guide_layout(float width) {
@@ -255,6 +258,12 @@ GuideLayout guide_layout(float width) {
         }
         layout.offset[i] = ImVec2(x, y);
         x += item_width + f;
+    }
+    if (s.page == VERSION_PAGE) {  // (at the right; on a line of its own when it doesn't fit after the guides)
+        float version_width = ImGui::CalcTextSize(MHGU_VERSION).x;
+        if (x + version_width > width)
+            y += f + ImGui::GetStyle().ItemSpacing.y;
+        layout.version = ImVec2(width - version_width, y);
     }
     layout.height = y + f;
     return layout;
@@ -315,6 +324,8 @@ void draw_guides(ImGuiWindow *window, const GuideLayout &layout, float top) {
         draw->AddText(ImVec2(pos.x + f * 1.4f, pos.y),
                       i == 3 && !dirty() ? theme().text_off : ImGui::GetColorU32(ImGuiCol_Text), tr(labels[i]));
     }
+    if (s.page == VERSION_PAGE)
+        draw->AddText(ImVec2(start.x + layout.version.x, start.y + layout.version.y), theme().text_dim, MHGU_VERSION);
 }
 bool confirmation() {
     return s.view == View::CloseChanges || s.view == View::Exit || s.view == View::Restart ||
@@ -383,6 +394,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(combo_window);
     SAME(volume);
     SAME(mute_in_background);
+    SAME(audio_output);
     SAME(button_icons);
     SAME(menu_theme);
     SAME(discord);
@@ -1668,6 +1680,7 @@ void reset_section() {
         c.fxaa_mode = f.fxaa_mode;
         c.volume = f.volume;
         c.mute_in_background = f.mute_in_background;
+        c.audio_output = f.audio_output;
         break;
     case 2:
         c.face_buttons = f.face_buttons;
@@ -1990,6 +2003,9 @@ std::vector<Row> main_rows() {
         header(r, "audio.header", tr("Audio"));
         number(r, "volume", "Volume (%)", &c.volume, (int)lo("Volume"), (int)hi("Volume"), 1, ini("Volume"));
         add_bool(r, "mutebg", "Mute in background", &c.mute_in_background, ini("MuteInBackground"));
+        add_choice(r, "audio.output", "Output", c.audio_output, {tr("Stereo"), tr("5.1 surround")},
+                   [](int v) { c.audio_output = v; }, ini("Output"));
+        r.back().help = tr("5.1 surround sends the game's own 5.1 mix (front, center, subwoofer, rear) to a surround system; Stereo folds it down to two speakers or headphones. With 5.1 on a stereo device, the system folds it down instead.");
         header(r, "graphics.header", tr("Graphics"));
         add_bool(r, "show.fps", "FPS counter", &c.show_fps, ini("ShowFPS"));
 #ifdef __ANDROID__
