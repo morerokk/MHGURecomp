@@ -338,6 +338,8 @@ $(O)/version.id: FORCE
 $(O)/rt/ui.o: extras/icon/mhgurecomp-128.png
 $(O)/rt/main.o: $(O)/version.id
 $(O)/rt/main.o: RTFLAGS += -DMHGU_VERSION='"$(VERSION)"'
+$(O)/rt/settings_panel.o: $(O)/version.id
+$(O)/rt/settings_panel.o: IMGUIFLAGS += -DMHGU_VERSION='"$(VERSION)"'
 
 $(O)/rt/%.o: runtime/%.c $(RT_HDRS)
 	@mkdir -p $(dir $@)
