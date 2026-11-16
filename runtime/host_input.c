@@ -657,6 +657,10 @@ static void control_poll(void) {
             } else if (!strcmp(cmd, "fps")) {
                 config_set_live_fps(strtof(arg, NULL));
                 LOG("[control] frame rate target %.0f\n", (double)config_live_fps());
+            } else if (!strcmp(cmd, "af")) {  // af <0|1|2|4|8|16>: [Graphics] AnisotropicFiltering for now (not saved;
+                                              // 0: none, not even the game's own)
+                config_set_live_aniso(atoi(arg));
+                LOG("[control] anisotropic filtering %dx\n", config_live_aniso());
             } else if (!strcmp(cmd, "dummy")) {
                 dummy_set(strtof(arg, NULL), strtof(arg2, NULL));
             } else {

@@ -261,6 +261,7 @@ static void create_device(void) {
     b->logicOp = h->logicOp;
     b->fillModeNonSolid = h->fillModeNonSolid;
     b->samplerAnisotropy = h->samplerAnisotropy;
+    g_vk.max_aniso = h->samplerAnisotropy ? fmaxf(1, g_vk.props.limits.maxSamplerAnisotropy) : 1;
     b->textureCompressionBC = g_vk.bc = h->textureCompressionBC && !(getenv("MHGU_NO_BC") && atoi(getenv("MHGU_NO_BC")));
     b->textureCompressionASTC_LDR = h->textureCompressionASTC_LDR;
     b->shaderInt64 = h->shaderInt64;

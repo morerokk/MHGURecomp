@@ -1366,6 +1366,19 @@ old way while on.
   speakers (the user's other PC, before release). Without speakers: the WAV dump, or Windows Sonic for Headphones
   (the device then reports 7.1 and SDL places the 5.1 on it).
 
+## Anisotropic filtering: [Graphics] AnisotropicFiltering (2026-11-16)
+
+- What GU does (MHGU_SAMPLER_LOG=1, title screen then quest 101): the game makes ~14 samplers; one (LINEAR_MIPMAP_LINEAR,
+  repeat) asks for 16x, every other one 1x (plain trilinear). The 16x one is the terrain's: the debug control "af 0"
+  (no anisotropy at all, not even the game's) blurs the ground in quest 101, so vanilla already has 16x on the ground.
+- AnisotropicFiltering = Off (the game's own), 2x, 4x, 8x, 16x (aliases Anisotropy, AF; env MHGU_AF): textures.c
+  sampler_aniso raises, never lowers, the game's value on mipmapped samplers with a linear min filter (3 / 5), not on
+  depth compares or point-sampled ones, within maxSamplerAnisotropy (1 without the samplerAnisotropy feature: the game's
+  16x was passed to Vulkan unchecked before). Live: vk_sampler keys VkSamplers by desc + anisotropy + FSR LOD bias, so a
+  change picks other samplers (created once, reused; never destroyed). Settings menu Graphics & Audio > Anisotropic filtering.
+- Checked here: control "af 16" turned the four 1x trilinear samplers in quest 101 into 16x, "af 1" took the cached ones
+  back; at 16x the camp view looked the same as Off (the ground was already 16x). Not measured: GPU cost on the R9.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,

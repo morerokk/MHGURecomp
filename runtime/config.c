@@ -57,7 +57,8 @@
     .fsr_animsurf = 1,                                                                              \
     /* [Graphics] */                                                                                \
     .draw_distance = 1.0f,                                                                          \
-    .smooth_gradients = 0,                                                                          \
+    .aniso = 1,                                                                                     \
+    .smooth_gradients = 0,                                                                         \
     .fix_kerning = 1,                                                                               \
     .bold_text = BOLD_TEXT_DEFAULT,                                                                 \
     /* [HDR] */                                                                                 \
@@ -225,6 +226,12 @@ static const char DEFAULT_INI[] =
     "; Between 0 and 10\n"
     "; Default: 1.0\n"
     "DrawDistance = 1.0\n"
+    "\n"
+    "; Anisotropic filtering: keeps textures seen at a slant (the ground, walls, roads) sharp into the distance.\n"
+    "; Off: as the game draws them\n"
+    "; Off, 2x, 4x, 8x, 16x\n"
+    "; Default: Off\n"
+    "AnisotropicFiltering = Off\n"
     "\n"
     "; Renders the picture with 16 bits per colour instead of 8, so dark skies and soft glows show no colour bands.\n"
     "; Costs GPU time: about 1 ms a frame at 1600x1000, more at higher resolutions\n"
@@ -742,7 +749,8 @@ static bool parse_aspect(const char *v, float *out) {
 #define F(x) offsetof(Config, x)
 #define ON_OFF(section, key, field, restart) {section, key, SET_BOOL, F(field), 0, 0, 0, NULL, NULL, restart, ERR_TOGGLE}
 #define KEYS(key, bind) {"Keybinds", key, SET_KEYS, F(binds[bind]), 0, 0, 0, NULL, NULL, false, ERR_KEYS}
-static const int anchor_values[] = {UI_CENTER, UI_21_9, UI_32_9, UI_EDGES}, msaa_values[] = {1, 2, 4, 8};
+static const int anchor_values[] = {UI_CENTER, UI_21_9, UI_32_9, UI_EDGES}, msaa_values[] = {1, 2, 4, 8},
+                 aniso_values[] = {1, 2, 4, 8, 16};
 const ConfigSetting g_settings[] = {
     {"Display", "Mode", SET_CHOICE, F(display_mode), 0, 0, 0,
      "Windowed|window,Fullscreen|exclusive|exclusivefullscreen,Borderless|borderless*", NULL, true, ERR_SIZE},
@@ -763,6 +771,8 @@ const ConfigSetting g_settings[] = {
     {"Upscaler", "Reactive", SET_FLOAT, F(fsr_reactive), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_FSR},
     ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
+    {"Graphics", "AnisotropicFiltering|Anisotropy|AF", SET_CHOICE, F(aniso), 0, 0, 0, "Off|none|0|1|1x,2x|2,4x|4,8x|8,16x|16",
+     aniso_values, false, ERR_MISC},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
     ON_OFF("Graphics", "FixKerning", fix_kerning, false),
     ON_OFF("Graphics", "BoldText", bold_text, false),
@@ -1276,6 +1286,7 @@ void config_load(void) {
     if (getenv("MHGU_HIDDEN")) g_config.display_mode = DISPLAY_WINDOWED;
     if ((e = getenv("MHGU_MSAA"))) g_config.msaa = atoi(e) >= 8 ? 8 : atoi(e) >= 4 ? 4 : atoi(e) >= 2 ? 2 : 1;
     if ((e = getenv("MHGU_FXAA"))) g_config.fxaa = atoi(e) != 0;
+    if ((e = getenv("MHGU_AF"))) g_config.aniso = atoi(e) >= 16 ? 16 : atoi(e) >= 8 ? 8 : atoi(e) >= 4 ? 4 : atoi(e) >= 2 ? 2 : 1;
     if ((e = getenv("MHGU_RT16"))) g_config.smooth_gradients = atoi(e) != 0;
     if ((e = getenv("MHGU_FIX_KERNING"))) g_config.fix_kerning = atoi(e) != 0;
     if ((e = getenv("MHGU_BOLD_TEXT"))) g_config.bold_text = atoi(e) != 0;
@@ -1414,11 +1425,11 @@ void config_load(void) {
     config_runtime_init(&g_config);
 
     static const char *const modes[] = {"windowed", "fullscreen", "borderless"};
-    LOG("[config] %s: %s %dx%d, 3D %dx%d (shape %.3f, FOV x%.2f, HUD %.3f wide), %d fps, vsync %s, MSAA %dx, FXAA %s, "
+    LOG("[config] %s: %s %dx%d, 3D %dx%d (shape %.3f, FOV x%.2f, HUD %.3f wide), %d fps, vsync %s, MSAA %dx, FXAA %s, AF %dx, "
         "face buttons by %s, controller %s in the background\n", path, modes[g_config.display_mode], g_config.width,
         g_config.height, g_config.render_w, g_config.render_h, g_render_aspect, g_fov_scale, g_ui_anchor_aspect,
         g_config.fps, g_config.vsync ? "on" : "off",
-        g_config.msaa, g_config.fxaa ? "on" : "off", g_config.face_buttons == FACE_LABEL ? "label" : "position",
+        g_config.msaa, g_config.fxaa ? "on" : "off", g_config.aniso, g_config.face_buttons == FACE_LABEL ? "label" : "position",
         g_config.background_input ? "on" : "off");
     const HpScale *hp = &g_config.hp;
     LOG("[config] monster HP in Hub quests: x%.2f / %.2f / %.2f / %.2f for 1-4 hunters, %d quest(s) set apart\n",

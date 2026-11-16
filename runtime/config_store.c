@@ -31,6 +31,7 @@ static SDL_AtomicInt live_fsr_reactive;
 // [Graphics]
 static SDL_AtomicInt live_draw = {0x3f800000};
 static SDL_AtomicInt live_smooth;
+static SDL_AtomicInt live_aniso = {1};
 static SDL_AtomicInt live_kerning;
 static SDL_AtomicInt live_bold;
 // [HDR]
@@ -115,6 +116,7 @@ static void publish_live(const Config *c, bool all) {
         SDL_SetAtomicInt(&live_chat_key, *c->chat_key ? (int)SDL_GetScancodeFromName(c->chat_key) : 0);
     if (all || c->fxaa_mode != saved.fxaa_mode) SDL_SetAtomicInt(&live_fxaa_mode, c->fxaa_mode);
     if (all || c->smooth_gradients != saved.smooth_gradients) SDL_SetAtomicInt(&live_smooth, c->smooth_gradients);
+    if (all || c->aniso != saved.aniso) SDL_SetAtomicInt(&live_aniso, c->aniso);
     if (all || c->fix_kerning != saved.fix_kerning) SDL_SetAtomicInt(&live_kerning, c->fix_kerning);
     if (all || c->bold_text != saved.bold_text) SDL_SetAtomicInt(&live_bold, c->bold_text);
     if (all || c->hdr != saved.hdr) SDL_SetAtomicInt(&live_hdr, c->hdr);
@@ -207,6 +209,10 @@ int config_live_combo_window(void) { return SDL_GetAtomicInt(&live_combo); }
 int config_live_chat_key(void) { return SDL_GetAtomicInt(&live_chat_key); }
 int config_live_fxaa_mode(void) { return SDL_GetAtomicInt(&live_fxaa_mode); }
 int config_live_smooth_gradients(void) { return SDL_GetAtomicInt(&live_smooth); }
+int config_live_aniso(void) { return SDL_GetAtomicInt(&live_aniso); }
+void config_set_live_aniso(int af) {
+    SDL_SetAtomicInt(&live_aniso, af >= 16 ? 16 : af >= 8 ? 8 : af >= 4 ? 4 : af >= 2 ? 2 : af >= 1 ? 1 : 0);
+}
 int config_live_fix_kerning(void) { return SDL_GetAtomicInt(&live_kerning); }
 int config_live_bold_text(void) { return SDL_GetAtomicInt(&live_bold); }
 int config_live_hdr(void) { return SDL_GetAtomicInt(&live_hdr); }

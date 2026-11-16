@@ -858,8 +858,55 @@ static VkCompareOp compare_op(uint32_t f) {
     }
 }
 
+// The anisotropy a sampler gets: the game's own, raised to [Graphics] AnisotropicFiltering on mipmapped textures with a
+// linear minifying filter (never lowered; shadow-map compares and point-sampled lookups stay as the game has them), within
+// what the GPU allows. (The game asks for it on very few samplers: in a quest one of about 14 has 16x, the rest 1x.)
+static float sampler_aniso(const NvnSamplerDesc *d) {
+    int af = config_live_aniso();
+    if (!af) return 1;  // (debug, the control file's "af 0": none at all, to compare)
+    float a = d->max_aniso > 1 ? d->max_aniso : 1;
+    if (af > a && (d->min_filter == 3 || d->min_filter == 5) && !d->compare_mode) a = (float)af;
+    return fminf(a, g_vk.max_aniso);
+}
+
+// Samplers by their settings: a desc's backend is its entry, and a desc whose anisotropy (the setting, live) or FSR LOD
+// bias changed takes another entry. VkSamplers are never destroyed (few kinds; a change of the setting reuses them).
+// Only the render thread (exec.c) calls vk_sampler.
+typedef struct {
+    NvnSamplerDesc key;  // (up to border: backend and the padding before it are not compared)
+    float aniso, bias;
+    VkSampler s;
+} SamplerEntry;
+#define SAMPLER_KEY_SIZE (offsetof(NvnSamplerDesc, border) + sizeof(((NvnSamplerDesc *)0)->border))
+static SamplerEntry **sampler_cache;
+static int sampler_count, sampler_cap;
+static VkSampler create_sampler(const NvnSamplerDesc *d, float aniso);
+
 VkSampler vk_sampler(NvnSamplerDesc *d) {
-    if (d->backend) return (VkSampler)d->backend;
+    float aniso = sampler_aniso(d);
+    SamplerEntry *e = d->backend;
+    if (e && e->aniso == aniso && e->bias == g_fsr_lod_bias) return e->s;
+    for (int i = 0; i < sampler_count; i++) {
+        e = sampler_cache[i];
+        if (e->aniso == aniso && e->bias == g_fsr_lod_bias && !memcmp(&e->key, d, SAMPLER_KEY_SIZE)) {
+            d->backend = e;
+            return e->s;
+        }
+    }
+    if (sampler_count == sampler_cap) {
+        sampler_cap = sampler_cap ? sampler_cap * 2 : 64;
+        sampler_cache = realloc(sampler_cache, sampler_cap * sizeof *sampler_cache);
+    }
+    e = calloc(1, sizeof *e);
+    memcpy(&e->key, d, SAMPLER_KEY_SIZE);
+    e->aniso = aniso, e->bias = g_fsr_lod_bias;
+    e->s = create_sampler(d, aniso);
+    sampler_cache[sampler_count++] = e;
+    d->backend = e;
+    return e->s;
+}
+
+static VkSampler create_sampler(const NvnSamplerDesc *d, float aniso) {
     VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
     si.magFilter = d->mag_filter == 1 ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
     uint32_t mf = d->min_filter;
@@ -886,7 +933,7 @@ VkSampler vk_sampler(NvnSamplerDesc *d) {
     if (mf > 1) si.mipLodBias += g_fsr_lod_bias;  // (FSR: textures as sharp as at the output size; config.c)
     const char *force = getenv("MHGU_TEX_LOD");  // (debug) mipmapped samplers: only this level (shows mip contents)
     if (force && mf > 1) { si.minLod = si.maxLod = (float)atof(force); si.mipLodBias = 0; }
-    if (d->max_aniso > 1) { si.anisotropyEnable = VK_TRUE; si.maxAnisotropy = fminf(d->max_aniso, 16); }
+    if (aniso > 1) { si.anisotropyEnable = VK_TRUE; si.maxAnisotropy = aniso; }
     if (d->compare_mode) { si.compareEnable = VK_TRUE; si.compareOp = compare_op(d->compare_func); }
     VkSamplerCustomBorderColorCreateInfoEXT cb = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT};
     if (border) {  // the standard colours; others need VK_EXT_custom_border_color (else the nearest standard one)
@@ -907,9 +954,8 @@ VkSampler vk_sampler(NvnSamplerDesc *d) {
     VkSampler s;
     VK_CHECK(vkCreateSampler(g_vk.dev, &si, NULL, &s));
     if (getenv("MHGU_SAMPLER_LOG"))
-        LOG("[sampler] min %u mag %u wrap %u,%u,%u lod %g..%g bias %g aniso %g compare %u\n", mf, d->mag_filter, d->wrap[0],
-            d->wrap[1], d->wrap[2], d->lod_min, d->lod_max, d->lod_bias, d->max_aniso, d->compare_mode);
-    d->backend = (void *)s;
+        LOG("[sampler] min %u mag %u wrap %u,%u,%u lod %g..%g bias %g aniso %g (used %g) compare %u\n", mf, d->mag_filter,
+            d->wrap[0], d->wrap[1], d->wrap[2], d->lod_min, d->lod_max, d->lod_bias, d->max_aniso, aniso, d->compare_mode);
     return s;
 }
 

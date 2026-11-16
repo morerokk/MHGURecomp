@@ -350,6 +350,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(vsync);
     SAME(shader_prewarm);
     SAME(draw_distance);
+    SAME(aniso);
     SAME(smooth_gradients);
     SAME(fix_kerning);
     SAME(bold_text);
@@ -1659,6 +1660,7 @@ void reset_section() {
         c.vsync = f.vsync;
         c.shader_prewarm = f.shader_prewarm;
         c.draw_distance = f.draw_distance;
+        c.aniso = f.aniso;
         c.smooth_gradients = f.smooth_gradients;
         c.fix_kerning = f.fix_kerning;
         c.bold_text = f.bold_text;
@@ -2073,6 +2075,13 @@ std::vector<Row> main_rows() {
                ini("DrawDistance"));
         if (c.draw_distance == 0)
             r.back().value = tr("No limit");
+        add_choice(r, "aniso", "Anisotropic filtering",
+                   c.aniso >= 16  ? 4
+                   : c.aniso >= 8 ? 3
+                   : c.aniso >= 4 ? 2
+                   : c.aniso >= 2 ? 1
+                                  : 0,
+                   {tr("Off"), "2x", "4x", "8x", "16x"}, [](int v) { c.aniso = 1 << v; }, ini("AnisotropicFiltering"));
         add_bool(r, "smooth", "Smooth gradients", &c.smooth_gradients, ini("SmoothGradients"));
         add_bool(r, "kerning", "Fix kerning", &c.fix_kerning, ini("FixKerning"));
         add_bool(r, "boldtext", "Bold text", &c.bold_text, ini("BoldText"));

@@ -227,7 +227,7 @@ int main() {
     selected("face");
     // The Keybinds submenu: a key chosen for B, then a mouse button as its second; the recomp's own keys refused
     press(ImGuiKey_Home);
-    down(9);  // (background, keyboard prompts, combo, mouse, vertical, invert, smoothing, capture, keybinds)
+    down(10);  // (background, keyboard prompts, combo, mouse, vertical, invert, smoothing, capture, mouse in menus, keybinds)
     selected("keybinds");
     confirm();
     selected("bind.0");  // (past the section's title)
@@ -280,7 +280,7 @@ int main() {
     assert(config_live_bind(BIND_B, 0) == SDL_SCANCODE_G && config_live_bind(BIND_B, 1) == KEY_MOUSE + SDL_BUTTON_MIDDLE);
     assert(config_live_bind(BIND_X, 0) == KEY_MOUSE + SDL_BUTTON_X1);
     press(ImGuiKey_Home);
-    down(9);
+    down(10);  // (keybinds)
     confirm();
     press(ImGuiKey_End);
     press(ImGuiKey_GamepadDpadUp);
@@ -325,7 +325,7 @@ int main() {
     tab();
     tab();
     selected("sync");  // (the Hub heading first)
-    down(4);  // (lag compensation, village quests, urgent quests, then the HP heading is passed)
+    down(5);  // (lag compensation, village quests, urgent quests, hold A, then the HP heading is passed)
     selected("hp.0");
     tab();
     selected("mod.Aaa");
@@ -614,7 +614,7 @@ int main() {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);  // (Cheats, Mods, Misc)
     selected("sync");  // (the Hub heading first)
-    down(4);  // (lag compensation, village quests, urgent quests, then the HP heading is passed)
+    down(5);  // (lag compensation, village quests, urgent quests, hold A, then the HP heading is passed)
     selected("hp.0");
     down(5);
     confirm();
@@ -651,7 +651,8 @@ int main() {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     selected("volume");
-    down(14);  // (mutebg, audio.output, show.fps, fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, smooth, kerning, boldtext, fsr)
+    down(15);  // (mutebg, audio.output, show.fps, fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, aniso, smooth, kerning,
+               // boldtext, fsr)
     selected("fsr");
     confirm();
     assert(settings_panel_dirty());
