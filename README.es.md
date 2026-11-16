@@ -304,7 +304,7 @@ Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
   también cuenta para ti al completarla, si la tienes desbloqueada)
 - `[Monster HP]`: factores de vida de los monstruos y de sus partes (retrocesos, roturas, cortes) para 1 a 4 cazadores en las misiones de la Sala, y excepciones por misión (por
   defecto: todos 1, como el juego original)
-- `[Village Quests]`: `VillageQuestsInHub` (On por defecto), `HubHP` (2.0 por defecto: las misiones de la Aldea
+- `[Village Quests]`: `VillageQuestsInHub` (On por defecto), `HubHP` (1.6 por defecto: las misiones de la Aldea
   publicadas en la Sala multiplican primero la vida de sus monstruos y de sus partes por este valor y luego por el factor de
   `[Monster HP]`)
 - `[Quest Rewards]`: `HoldASend` (On por defecto: al final de una misión, mantén A en la pantalla Enviar a la caja de objetos
