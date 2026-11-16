@@ -974,16 +974,7 @@ int act_rows_unset(const ActProfile *p, int dev, uint64_t *which) {
     return n;
 }
 
-int act_layout(const ActProfile *p) {
-    if (p->layout) return p->layout;
-    for (int d = 0; d < 2; d++) {
-        for (int i = 0; i < ACT_COUNT; i++)
-            if (p->dev[d].base[i].set) return ACT_LAYOUT_ADVANCED;
-        for (int w = 0; w < ACT_WEAPONS; w++)
-            if (p->dev[d].has_weapon[w]) return ACT_LAYOUT_ADVANCED;
-    }
-    return ACT_LAYOUT_SIMPLE;
-}
+int act_layout(const ActProfile *p) { return p->layout ? p->layout : ACT_LAYOUT_ADVANCED; }
 
 // ---- sampling
 static uint64_t inject_until[ACT_COUNT];

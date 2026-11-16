@@ -761,7 +761,7 @@ static void test_claim(void) {
 static void test_scheme_layout(void) {
     ActProfile p = parse("");
     CHECK(p.scheme == ACT_SCHEME_AUTO && p.layout == ACT_LAYOUT_AUTO, "no keys: auto");
-    CHECK(act_layout(&p) == ACT_LAYOUT_SIMPLE, "a fresh profile is Simple");
+    CHECK(act_layout(&p) == ACT_LAYOUT_ADVANCED, "a fresh profile is Advanced");
     p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nDodge = pad:north\n");
     CHECK(act_layout(&p) == ACT_LAYOUT_ADVANCED, "a profile with bindings stays Advanced");
     p = parse("[Actions]\nEnable=1\nLayout=Simple\n[Actions.Pad]\nDodge = pad:north\n");

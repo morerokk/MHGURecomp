@@ -435,7 +435,7 @@ static inline const char *settings_text(int language, const char *english) {
         {"Set", "Asignar"},
         {"Add another", "Añadir otra"},
         {"Reset game actions", "Restablecer las acciones del juego"},
-        {"Every action of both devices and all weapons back to Default.", "Todas las acciones de ambos dispositivos y de todas las armas vuelven a Predeterminado."},
+        {"Every action of both devices and all weapons back to Default, and the Advanced layout.", "Todas las acciones de ambos dispositivos y de todas las armas vuelven a Predeterminado, con la disposición Avanzada."},
         {"Ini name: %s. Default: the button it has without rebinding. An action with no binding of its own can follow another one (shown as \"same as\").", "Nombre en el ini: %s. Predeterminado: el botón que tiene sin reasignar. Una acción sin asignación propia puede seguir a otra (se muestra como \"igual que\")."},
         {"Press a controller button for: %s (Esc or wait: cancel)", "Pulsa un botón del mando para: %s (Esc o esperar: cancelar)"},
         {"Press a key or mouse button for: %s (Esc: cancel)", "Pulsa una tecla o botón del ratón para: %s (Esc: cancelar)"},

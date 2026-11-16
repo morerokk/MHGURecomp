@@ -12,6 +12,7 @@
 #include "overlay.h"
 #include "hle/chat.h"
 #include "mods.h"
+#include "kernel.h"
 #include "rt.h"
 
 void backend_quit(void);  // (runtime/nvn: vulkan/device.c, backend_null.c)
@@ -20,6 +21,8 @@ static void quit(void) {
     backend_quit();  // (before exit(): runtime/nvn/vulkan/device.c exit_handler says why)
     exit(0);
 }
+void ldn_log_state(void);  // (net/net.h)
+
 static int launch_argc;
 static char **launch_argv;
 static SDL_AtomicInt requested_action, action_failed;
@@ -382,6 +385,9 @@ int ui_run(void) {
         if (SDL_WaitEventTimeout(&e, 4)) {
             do {
                 if (e.type == SDL_EVENT_QUIT) {
+                    // A game that hung is closed this way: what its threads wait on, into the log for the report
+                    ldn_log_state();
+                    kernel_dump_threads("window closed", true);
                     if (!config_confirm_exit() && !overlay_settings_dirty()) quit();
                     overlay_request_close();
                     continue;

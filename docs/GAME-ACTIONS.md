@@ -247,9 +247,8 @@ The screen shows the bindings of **one control scheme** at a time, named in its 
 (ManageMenus), **Layout** (Simple / Advanced), **Control scheme** (Controller / Keyboard). Both are kept in the ini:
 `[Actions] Scheme=Controller|Keyboard`, `Layout=Simple|Advanced`, written only once the player picked them. Without a
 `Scheme` the screen opens on the device a button was last pressed on (`host_input_last_device`: the controller if the menu
-was opened with Plus + Minus, the keyboard after F1). Without a `Layout` a fresh profile is Simple and one that already has
-bindings is Advanced (`act_layout`); the layout shown is fixed when the screen opens, and Save writes it, so binding
-something in Simple does not turn it into Advanced next time.
+was opened with Plus + Minus, the keyboard after F1). Without a `Layout` the screen is Advanced (`act_layout`), and Reset game
+actions puts it back to Advanced along with the bindings; picking Simple writes `Layout=Simple`, so it stays Simple.
 
 **Advanced** is the screen as it was: Attack A also interacts, Split Dash from weapon R-action, For (All weapons / one
 class: then only the hunt's actions), then every action by context (Hunt / Town and Hub / Menus) with what it reads now:

@@ -65,6 +65,7 @@ static const int bind_buttons[BINDS] = {
     [BIND_RSTICK] = BTN_RSTICK, [BIND_ITEM_LEFT] = -2, [BIND_ITEM_RIGHT] = -2,
 };
 static uint32_t mouse_held;  // the mouse buttons held (bit: SDL_BUTTON_*), while captured
+static uint32_t mouse_clicked;  // a menu pointer's clicks for the bindings, held until the next sample (act_update)
 // A wheel notch on a keybind other than the item bar's is a short press of it (WHEEL_PRESS_NS: long enough for the
 // game to see at 30 updates a second; notches closer together than that are one press)
 #define WHEEL_PRESS_NS 70000000ull
@@ -855,6 +856,12 @@ static void menu_ptr_move(float mx, float my) {
 }
 static void menu_ptr_click(int btn, float mx, float my, int clicks) {
     menu_ptr_live = true;
+    if (btn != SDL_BUTTON_LEFT && act_enabled() && act_profile()->menus) {
+        // (the menus' bindings have the other buttons: right click is MenuCancel by default, or what it was bound to - the
+        // item box's sort on MenuX. Held as a captured mouse's are, and kept for one sample however short the click)
+        mouse_held |= 1u << btn, mouse_clicked |= 1u << btn;
+        return;
+    }
     if (btn == SDL_BUTTON_RIGHT) {
         host_input_press("B", 12);  // (Cancel: back, or the menu closed)
         return;
@@ -1148,7 +1155,7 @@ static int face_switch_button(int i) {
 static bool act_phys_held(void *user, int code) {
     (void)user;
     if (code > 0 && code < SDL_SCANCODE_COUNT) return keys[code];
-    if (code > KEY_MOUSE && code <= KEY_MOUSE + SDL_BUTTON_X2) return mouse_held >> (code - KEY_MOUSE) & 1;
+    if (code > KEY_MOUSE && code <= KEY_MOUSE + SDL_BUTTON_X2) return (mouse_held | mouse_clicked) >> (code - KEY_MOUSE) & 1;
     if (code == KEY_WHEEL_UP || code == KEY_WHEEL_DOWN) {
         uint64_t now = plat_now_ns();
         return now < wheel_until[code - KEY_WHEEL_UP] || now < act_wheel_until[code - KEY_WHEEL_UP];
@@ -1246,6 +1253,7 @@ static void act_update(uint64_t b, uint64_t script_b, bool suppress) {
     ActSnap s;
     memset(&s, 0, sizeof s);
     act_sample(&h, &s);
+    mouse_clicked = 0;
     if (act_profile()->menus && (s.pulse[0] >> ACT_MENU_CONFIRM & 1)) g_a_pressed_ns = plat_now_ns();  // (a cutscene's skip)
     if (test_ptr.valid) s.ptr_x = test_ptr.x, s.ptr_y = test_ptr.y, s.ptr_down = test_ptr.down, s.ptr_valid = true;
     input_act_stage(&s);
