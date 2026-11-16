@@ -18,7 +18,8 @@
 //    with a letter, and none with a digit (numbers keep their widths).
 // The measures come from the font the game reads (loc/arc/resident.arc, a mod's copy if one replaces it): the font
 // file and its first glyph page, read once when the first text is set. A glyph whose entry isn't the measured one (an
-// other font) keeps the game's placement.
+// other font) keeps the game's placement. An HD font mod's (the Korean patch's: a BC3 page, 48 px letters) gets the
+// margins at its scale (2 blank columns each side at 48 px: the same width on screen), and no kerning.
 #include <math.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -28,6 +29,8 @@
 
 #include "../config.h"
 #include "../hle.h"
+#include "../nvn/bcn.h"
+#include "../nvn/tegra.h"
 #include "../romfs.h"
 
 #define FN_PLACE_GLYPH 0xc45e64u  // (text, glyph node): moves the line's pen on past the glyph
@@ -88,33 +91,46 @@ static uint8_t *arc_entry(FILE *f, const char *want, uint32_t *size) {
 }
 
 typedef struct {
-    const uint8_t *data;
-    uint32_t w, h, bh, gobs_w;
-} Page;  // mip 0 of an RGBA8 block-linear (Tegra) texture
+    uint8_t *a;  // the page's alpha, w x h, linear
+    uint32_t w, h;
+    int fmt;     // the TEX format: 7 RGBA8, 0x17 BC3
+} Page;
 
+// Mip 0 of the page, block-linear (Tegra): RGBA8 (the game's: 1024 x 1024, 24 px letters) or BC3 (an HD font mod's,
+// e.g. the Korean patch's, with 48 px letters), its alpha (the ink) made linear
 static bool page_open(Page *p, const uint8_t *t, uint32_t size) {
-    if (size < 24 || memcmp(t, "TEX", 4) || t[4] != 0xa0 || t[13] != 7) return false;
+    p->fmt = size >= 24 && !memcmp(t, "TEX", 4) && t[4] == 0xa0 ? t[13] : -1;
+    if (p->fmt != 7 && p->fmt != 0x17) return false;
     uint32_t t1, off0;
     memcpy(&t1, t + 8, 4);
     uint32_t mips = t1 & 0x3f;
     p->w = (t1 >> 6) & 0x1fff, p->h = t1 >> 19;
     memcpy(&off0, t + 20, 4);
     uint64_t start = 20 + 4ull * mips + off0;
-    uint32_t bh = 1;
-    while (bh < (p->h + 7) / 8 && bh < 16) bh <<= 1;
-    p->bh = bh, p->gobs_w = (p->w * 4 + 63) / 64;
-    uint64_t need = (uint64_t)p->gobs_w * 64 * ((p->h + 8 * bh - 1) / (8 * bh)) * 8 * bh;
-    if (start + need > size) return false;
-    p->data = t + start;
-    return true;
+    bool bc3 = p->fmt == 0x17;
+    if (!p->w || !p->h || (bc3 && (p->w % 4 || p->h % 4))) return false;
+    static const FormatInfo rgba8 = {4, 1, 1, FMT_COLOR, "RGBA8"}, bc3f = {16, 4, 4, FMT_COMPRESSED, "BC3"};
+    TexLayout tl = {p->w, p->h, 1, 1, 1, bc3 ? &bc3f : &rgba8, 0, 0};
+    tegra_layout_init(&tl);
+    LevelLayout l0 = tegra_level(&tl, 0);
+    if (start + tegra_layer_size(&tl) > size) return false;
+    uint64_t n = (uint64_t)p->w * p->h;
+    uint8_t *lin = malloc((size_t)l0.wb * l0.hb * tl.fmt->bpb), *rgba = bc3 ? malloc((size_t)n * 4) : lin;
+    p->a = malloc((size_t)n);
+    if (lin && rgba && p->a) {
+        tegra_deswizzle(t + start, lin, l0.wb, l0.hb, 1, tl.fmt->bpb, l0.block_height_log2, 0);
+        if (bc3) bcn_decode(BCN_BC3, lin, p->w, p->h, rgba);
+        for (uint64_t i = 0; i < n; i++) p->a[i] = rgba[i * 4 + 3];
+    }
+    bool ok = lin && rgba && p->a;
+    if (rgba != lin) free(rgba);
+    free(lin);
+    if (!ok) free(p->a), p->a = NULL;
+    return ok;
 }
 
 static int alpha(const Page *p, uint32_t x, uint32_t y) {
-    if (x >= p->w || y >= p->h) return 0;
-    uint32_t bx = x * 4, bh = p->bh;
-    uint32_t off = (y / (8 * bh)) * p->gobs_w * bh * 512 + (bx / 64) * bh * 512 + ((y % (8 * bh)) / 8) * 512 +
-                   ((bx % 64) / 32) * 256 + ((y % 8) / 2) * 64 + ((bx % 32) / 16) * 32 + (y % 2) * 16 + bx % 16;
-    return p->data[off + 3];
+    return x < p->w && y < p->h ? p->a[(size_t)y * p->w + x] : 0;
 }
 
 static int column_max(const Page *p, int x, uint32_t y, uint32_t h) {
@@ -131,11 +147,13 @@ static bool is_letter(uint32_t c) {  // (Unicode category L, U+0000-024F)
            (c >= 0xc0 && c < LATIN_END && c != 0xd7 && c != 0xf7);
 }
 
-static void measure(const Page *p, uint32_t code, uint32_t a, uint32_t b, Glyph *g) {
+// m: the blank columns a cut cell keeps each side of its ink (1 at the game's 24 px; an HD font's more, the same width
+// on screen)
+static void measure(const Page *p, uint32_t code, uint32_t a, uint32_t b, int m, Glyph *g) {
     int x = (int)((a >> 8) & 0xfff), w = (int)(b & 0xfff);
     uint32_t y = a >> 20, h = (b >> 12) & 0xfff;
-    g->code = code, g->a = a, g->b = b, g->left = 0, g->width = (int8_t)w;
-    if (is_letter(code)) {  // the cut cell: 1 blank column each side of the strong ink, every inked column kept
+    g->code = code, g->a = a, g->b = b, g->left = 0, g->width = (int8_t)w;  // (w + 2 m < 128: load)
+    if (is_letter(code)) {  // the cut cell: m blank columns each side of the strong ink, every inked column kept
         int s0 = -1, s1 = -1, i0 = -1, i1 = -1;
         for (int cx = 0; cx < w; cx++) {
             int m = column_max(p, x + cx, y, h);
@@ -143,7 +161,7 @@ static void measure(const Page *p, uint32_t code, uint32_t a, uint32_t b, Glyph 
             if (m) { if (i0 < 0) i0 = cx; i1 = cx; }
         }
         if (s0 >= 0) {
-            int l = s0 - 1 < i0 ? s0 - 1 : i0, r = s1 + 1 > i1 ? s1 + 1 : i1;
+            int l = s0 - m < i0 ? s0 - m : i0, r = s1 + m > i1 ? s1 + m : i1;
             bool clear = true;  // columns taken in from outside the cell must be blank (another glyph's pixels)
             for (int cx = l; cx <= r && clear; cx++)
                 if ((cx < 0 || cx >= w) && column_max(p, x + cx, y, h)) clear = false;
@@ -196,28 +214,49 @@ static void load(void) {
         memcpy(&count, gfd + 0x1c, 4), memcpy(&name_len, gfd + 0x44, 4);
         base = 0x48 + name_len + 1;
     }
+    page.fmt = -1;
     if (!count || base + (uint64_t)count * 20 > gsize || !tex || !page_open(&page, tex, psize)) {
-        LOG("[text] %s: font %s unreadable: the game's spacing\n", ARC_PATH, FONT_NAME);
+        if (count && tex && page.fmt != -1)
+            LOG("[text] %s: font %s's page %s not read (format 0x%x: RGBA8 0x7 and BC3 0x17 are): the game's spacing\n",
+                ARC_PATH, FONT_NAME, PAGE_NAME, page.fmt);
+        else LOG("[text] %s: font %s unreadable: the game's spacing\n", ARC_PATH, FONT_NAME);
         free(gfd), free(tex);
         return;
     }
+    free(tex);
+    // The font's size: its tallest letter's cell on the first page (the game's 24 px; an HD font's 48). Bigger than the
+    // game's: margins at its scale, and no kerning (measured for the game's font only).
+    int tall = 24;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t e[3];
+        memcpy(e, gfd + base + 20 * i, 12);
+        int h = (int)((e[2] >> 12) & 0xfff);
+        if (e[0] < LATIN_END && is_letter(e[0]) && !(e[1] & 0xff) && h > tall && h <= 8 * 24) tall = h;
+    }
+    int m = (tall + 12) / 24;
+    bool kern = tall <= 24;
     g_glyph = calloc(LATIN_END, sizeof *g_glyph);
     for (uint32_t i = 0; i < count && g_glyph; i++) {
         uint32_t e[5];
         memcpy(e, gfd + base + 20 * i, 20);
         if (e[0] >= LATIN_END || (e[1] & 0xff) || g_index[e[0]] >= 0) continue;  // (Latin, on the first page)
-        measure(&page, e[0], e[1], e[2], &g_glyph[g_count]);
+        if ((int)(e[2] & 0xfff) + 2 * m > 127) continue;  // (its measures fit a byte)
+        measure(&page, e[0], e[1], e[2], m, &g_glyph[g_count]);
         g_index[e[0]] = (int16_t)g_count++;
     }
-    free(gfd), free(tex);
-    g_kern = g_glyph ? malloc((size_t)g_count * g_count) : NULL;
+    free(gfd), free(page.a);
+    g_kern =g_glyph ? calloc((size_t)g_count * g_count + 1, 1) : NULL;
     if (!g_kern) return;
     int pairs = 0;
-    for (int i = 0; i < g_count; i++)
+    for (int i = 0; i < g_count && kern; i++)
         for (int j = 0; j < g_count; j++) pairs += (g_kern[i * g_count + j] = (int8_t)kern_pair(&g_glyph[i], &g_glyph[j])) != 0;
     g_ready = 1;
-    LOG("[text] %s: %d Latin glyphs measured, %d kerning pairs (%.0f ms)\n", FONT_NAME, g_count, pairs,
-        (double)(plat_now_ns() - t0) / 1e6);
+    if (kern)
+        LOG("[text] %s: %d Latin glyphs measured, %d kerning pairs (%.0f ms)\n", FONT_NAME, g_count, pairs,
+            (double)(plat_now_ns() - t0) / 1e6);
+    else
+        LOG("[text] %s: %d Latin glyphs measured (%d px, %s: margins %d px each side, no kerning) (%.0f ms)\n", FONT_NAME,
+            g_count, tall, page.fmt == 0x17 ? "BC3" : "RGBA8", m, (double)(plat_now_ns() - t0) / 1e6);
 }
 
 // ------------------------------------------------------------------ setting a text
