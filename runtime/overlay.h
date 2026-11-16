@@ -13,7 +13,8 @@ extern "C" {
 
 // From runtime/forge.c once plugins are loaded: font (a .ttf; NULL: ImGui's own), its size in pixels at 720 lines
 // (scaled with the window), the key that opens the menu (SDL scancode = HID usage, as Forge's config has it).
-void overlay_init(const char *font_path, float font_size, int menu_key);
+// cjk_font: a second .ttf merged into the same atlas for its Chinese glyphs (NULL: none), so a translated menu shows.
+void overlay_init(const char *font_path, const char *cjk_font, float font_size, int menu_key);
 // Host main thread, before the renderer: ImGui with its own font, for the loading screen until overlay_init.
 void overlay_init_early(void);
 bool overlay_enabled(void);

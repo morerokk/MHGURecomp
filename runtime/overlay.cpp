@@ -403,7 +403,8 @@ static void forge_style(ImGuiStyle &style) {  // Forge's own (source/forge/graph
 
 // The context, ImGui's own font and Forge's style at 12 px: from the start (overlay_init_early), Forge's settings
 // once its config is read (overlay_init). (Under g_frame_lock: the loading screen may be drawing.)
-static void context_init(const char *font_path, float font_size) {
+// cjk_font, when it is a file: its Chinese glyphs are merged into the same atlas, for a translated menu.
+static void context_init(const char *font_path, const char *cjk_font, float font_size) {
     if (!ImGui::GetCurrentContext()) {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
@@ -420,6 +421,13 @@ static void context_init(const char *font_path, float font_size) {
     ImFont *font = font_path ? io.Fonts->AddFontFromFileTTF(font_path, g_font_size, &cfg) : nullptr;
     if (font) io.FontDefault = font;
     else if (io.Fonts->Fonts.Size == 0) io.Fonts->AddFontDefaultVector(&cfg);
+    if (cjk_font) {  // (the same size, so the menu's rows keep the height they have in English)
+        ImFontConfig cjk;
+        cjk.SizePixels = g_font_size;
+        cjk.MergeMode = true;
+        cjk.GlyphRanges = io.Fonts->GetGlyphRangesChineseSimplifiedCommon();
+        io.Fonts->AddFontFromFileTTF(cjk_font, g_font_size, &cjk);
+    }
     ImGuiStyle style;
     ImGui::StyleColorsDark(&style);
     forge_style(style);
@@ -431,22 +439,23 @@ static void context_init(const char *font_path, float font_size) {
 void overlay_init_early(void) {
 #ifndef MHGU_NULL_BACKEND
     std::lock_guard<std::mutex> l(g_frame_lock);
-    context_init(nullptr, 0);
+    context_init(nullptr, nullptr, 0);
     g_enabled = true;
 #endif
 }
 
-void overlay_init(const char *font_path, float font_size, int menu_key) {
+void overlay_init(const char *font_path, const char *cjk_font, float font_size, int menu_key) {
 #ifdef MHGU_NULL_BACKEND
     return;
 #endif
     std::lock_guard<std::mutex> l(g_frame_lock);
-    context_init(font_path, font_size);
+    context_init(font_path, cjk_font, font_size);
     bool font = font_path && ImGui::GetIO().FontDefault;
     g_menu_key = menu_key;
     g_enabled = true;
-    LOG("[forge] ImGui %s overlay: %s opens the menu (font %s, %.0f px)\n", IMGUI_VERSION,
-        SDL_GetScancodeName((SDL_Scancode)menu_key), font ? font_path : "ImGui's", g_font_size);
+    LOG("[forge] ImGui %s overlay: %s opens the menu (font %s, %.0f px; Chinese glyphs %s)\n", IMGUI_VERSION,
+        SDL_GetScancodeName((SDL_Scancode)menu_key), font ? font_path : "ImGui's", g_font_size,
+        cjk_font ? cjk_font : "none");
 }
 
 // ------------------------------------------------------------------ notices (any thread -> game thread)

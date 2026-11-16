@@ -506,6 +506,13 @@ $(B)/pipelines.list: extras/pipelines.list
 	@mkdir -p $(dir $@)
 	cp $< $@
 
+# The Chinese glyphs of the host menu's translation (runtime/settings_locale.h), which the overlay loads from beside the
+# program (runtime/forge.c): Noto Sans SC, SIL Open Font License 1.1 (THIRD_PARTY_NOTICES).
+CJK_FONT := extras/mhgurecomp-cjk.otf
+$(B)/mhgurecomp-cjk.otf: $(CJK_FONT)
+	@mkdir -p $(dir $@)
+	cp $< $@
+
 LICENSE_TXT = $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt) \
               $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt) \
               $(if $(ZSTD_DEPS),$(B)/licenses/zstd.txt)
@@ -556,7 +563,7 @@ PY := $(firstword $(wildcard tools/venv/Scripts/python.exe) $(wildcard tools/ven
 # (--with: MSYS2 packages linked into the executable or into a bundled DLL, whose licenses go along too: the static
 # GCC runtime, VulkanMemoryAllocator, and glslang / SPIRV-Tools inside shaderc's DLL)
 LICENSE_PKGS := libstdc++ libgcc libwinpthread vulkan-memory-allocator glslang spirv-tools zlib zstd
-bundle: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER)
+bundle: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) | $(B)/mhgurecomp-cjk.otf
 	@$(PY) tools/bundle_dlls.py "$$(cygpath -m "$$(dirname "$$(command -v $(CC))")")" $(B) $^ \
 	    --licenses $(B)/licenses --with $(LICENSE_PKGS)
 
