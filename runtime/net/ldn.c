@@ -863,6 +863,7 @@ static void *station_thread(void *arg) {
             emsync_aux_received(buf, (uint32_t)n);
             hpscale_aux_received(buf, (uint32_t)n);
             hitsync_aux_received(buf, (uint32_t)n);
+            partsync_aux_received(buf, (uint32_t)n);
             for (int i = 1; i < MAX_NODES; i++)
                 if (i != slot && L.nodes[i].alive) link_send(&L.nodes[i], F_AUX, buf, (uint32_t)n, NULL, 0);
         }
@@ -1535,6 +1536,7 @@ static void *uplink_thread(void *arg) {
             emsync_aux_received(buf, (uint32_t)n);
             hpscale_aux_received(buf, (uint32_t)n);
             hitsync_aux_received(buf, (uint32_t)n);
+            partsync_aux_received(buf, (uint32_t)n);
         }
     }
     L.uth_run = false;
