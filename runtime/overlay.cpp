@@ -579,7 +579,7 @@ static void draw_fps(uint64_t now) {
         ms = n ? (now - t0) / 1e6f / n : 0;
         t0 = now, f0 = frames;
     }
-#ifdef __ANDROID__  // (a phone's battery: the Android tab's setting)
+#if defined(__ANDROID__) || defined(__APPLE__)  // (a phone's or a Mac laptop's battery)
     int battery = config_show_battery();
 #else
     int battery = BATTERY_OFF;

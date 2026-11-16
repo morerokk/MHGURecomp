@@ -16,6 +16,11 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#if defined(__ANDROID__) || defined(__APPLE__)
+static const int BATTERY_ROW = 1;  // (show.battery, between show.fps and fps)
+#else
+static const int BATTERY_ROW = 0;
+#endif
 static int requested;
 extern "C" const char *g_game_dir = "obj/settings-test/game";  // (modorder.c compares archives with the game's)
 extern "C" volatile uint64_t g_present_count = 0;  // (runtime/ui.c's frame counter: config.c's model previews read it)
@@ -189,7 +194,7 @@ int main() {
     io.AddKeyEvent(ImGuiKey_GamepadR1, true);
     idle(35);
     selected("volume");  // (Audio first)
-    down(4);  // (mutebg, audio.output, show.fps, fps)
+    down(4 + BATTERY_ROW);  // (mutebg, audio.output, show.fps, [show.battery,] fps)
     selected("fps");
     io.AddKeyEvent(ImGuiKey_GamepadR1, false);
     idle();
@@ -206,7 +211,7 @@ int main() {
     confirm();
     assert(config_editable().fps == 91);
     press(ImGuiKey_Home);
-    down(4);
+    down(4 + BATTERY_ROW);
     selected("fps");
     confirm();
     selected("choice.2");  // (91 is none of them: the one below)
@@ -217,7 +222,7 @@ int main() {
     confirm();
     assert(config_editable().fps == 60);
     press(ImGuiKey_Home);
-    down(4);
+    down(4 + BATTERY_ROW);
     confirm();
     selected("choice.1");
     back();  // (Back closes the dropdown, nothing changed)
@@ -651,7 +656,7 @@ int main() {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     selected("volume");
-    down(14);  // (mutebg, audio.output, show.fps, fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, smooth, kerning, boldtext, fsr)
+    down(14 + BATTERY_ROW);  // (mutebg, audio.output, show.fps, [show.battery,] fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, smooth, kerning, boldtext, fsr)
     selected("fsr");
     confirm();
     assert(settings_panel_dirty());

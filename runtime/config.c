@@ -302,17 +302,23 @@ static const char DEFAULT_INI[] =
     "Bloom = 100\n"
     "\n"
     "; Everything the game renders (the 3D scene, depth of field, bloom) is 16-bit float, not only the post-processing,\n"
+#ifdef __APPLE__
+    "; so the sun, fire and sparks keep their brightness and glow. Turn it off if anything looks wrong with HDR. In the\n"
+    "; Settings window, not the F1 menu\n"
+#else
     "; so the sun, fire and sparks keep their brightness and glow. Turn it off if anything looks wrong with HDR. Not in\n"
     "; the settings menu\n"
+#endif
     "; Default: On\n"
     "UnclampedScene = On\n"
     "\n"
 #ifdef __APPLE__
     "; The HDR signal: Auto (scRGB on the Mac), HDR10 (10-bit PQ) or scRGB (16-bit linear).\n"
+    "; In the Settings window, not the F1 menu\n"
 #else
     "; The HDR signal: Auto (HDR10 where the display offers it, else scRGB), HDR10 (10-bit PQ) or scRGB (16-bit linear).\n"
-#endif
     "; Not in the settings menu\n"
+#endif
     "; Default: Auto\n"
     "HDRFormat = Auto\n"
     "\n"
@@ -326,7 +332,12 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "ShowFPS = Off\n"
     "\n"
+#ifdef __APPLE__
+    "; Mac laptops and Android: show the battery's charge (in percent) in the same box as the frame rate, or in a box of\n"
+    "; its own. Nothing shows on a Mac without a battery\n"
+#else
     "; Android only: show the battery's charge (in percent) in the same box as the frame rate, or in a box of its own\n"
+#endif
     "; Off, WithFPS, ByItself\n"
     "; Default: Off\n"
     "ShowBattery = Off\n"
@@ -638,9 +649,8 @@ static const char DEFAULT_INI[] =
     "GameFolder =\n";
 
 // The macOS Settings window's and menu's rows (config.h SettingRow): every setting of the file but the per-quest
-// Quest<number> entries, in file order. Values are written into the file as given here. Left out: ShowBattery and
-// [Android] (Android only), Updates (there is no mhgurecomp-updater on the Mac) and [HDR] UnclampedScene and HDRFormat
-// (ini only, as in the F1 menu).
+// Quest<number> entries, in file order. Values are written into the file as given here. Left out: [Android] (Android
+// only) and Updates (there is no mhgurecomp-updater on the Mac).
 #define ONOFF "On|Off"
 #define KEYBIND(key, title) {"Keybinds", "Keybinds", key, title, SETTING_TEXT, NULL, NULL, true, false}
 const SettingRow g_setting_rows[] = {
@@ -689,8 +699,13 @@ const SettingRow g_setting_rows[] = {
     {"HDR", "HDR", "HighlightSaturation", "Highlight Saturation", SETTING_VALUE, "0|25|50|82|100", NULL, true, false},
     {"HDR", "HDR", "Flare", "Flare", SETTING_VALUE, "0|5|10|25|50", NULL, true, false},
     {"HDR", "HDR", "Bloom", "Bloom", SETTING_VALUE, "0|25|50|75|100", NULL, true, false},
+    {"HDR", "HDR", "UnclampedScene", "Unclamped Scene (16-bit)", SETTING_CHOICE, ONOFF, NULL, true, false},
+    {"HDR", "HDR", "HDRFormat", "HDR Signal", SETTING_CHOICE, "Auto|HDR10|scRGB",
+     "Auto (scRGB)|HDR10 (10-bit PQ)|scRGB (16-bit linear)", true, false},
     {"HDR", "HDR", "Analysis", "HDR Analysis", SETTING_CHOICE, ONOFF, NULL, true, false},
     {"Graphics", "Performance", "ShowFPS", "Show FPS", SETTING_CHOICE, ONOFF, NULL, true, true},
+    {"Graphics", "Performance", "ShowBattery", "Battery Charge (Mac Laptops)", SETTING_CHOICE, "Off|WithFPS|ByItself",
+     "Off|With the FPS Counter|By Itself", true, false},
     {"Graphics", "Performance", "FPS", "Frame Rate Cap", SETTING_VALUE, "30|60|90|120|144|240", NULL, true, true},
     {"Graphics", "Performance", "VSync", "VSync", SETTING_CHOICE, ONOFF, NULL, true, true},
     {"Graphics", "Performance", "ShaderPrewarm", "Shader Prewarm", SETTING_CHOICE, ONOFF, NULL, false, true},
