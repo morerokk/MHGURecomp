@@ -55,6 +55,7 @@
     .fsr_objmotion = 1,                                                                             \
     .fsr_reactive = 0.9f,                                                                           \
     .fsr_animsurf = 1,                                                                              \
+    .fsr_metalfx = 0,                                                                               \
     /* [Graphics] */                                                                                \
     .draw_distance = 1.0f,                                                                          \
     .smooth_gradients = 0,                                                                          \
@@ -218,6 +219,12 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "AnimSurf = On\n"
     "\n"
+#ifdef __APPLE__
+    "; macOS only. Upscale with Apple's MetalFX instead of FSR 3.1 (same quality levels, inputs and sharpness)\n"
+    "; Default: Off\n"
+    "MetalFX = Off\n"
+    "\n"
+#endif
     "[Graphics]\n"
     "; How far away people in the villages and the Hubs are still drawn: 1 is the game's distance, 2 twice as far,\n"
     "; 0.5 half as far, 0 no limit\n"
@@ -658,6 +665,9 @@ const SettingRow g_setting_rows[] = {
     {"Graphics", "Upscaler", "ObjectMotion", "FSR Object Motion", SETTING_CHOICE, ONOFF, NULL, false, false},
     {"Graphics", "Upscaler", "Reactive", "FSR Reactive Mask", SETTING_VALUE, "0|0.5|0.7|0.9|1.0", NULL, false, false},
     {"Graphics", "Upscaler", "AnimSurf", "FSR Animated Surfaces", SETTING_CHOICE, ONOFF, NULL, false, false},
+#ifdef __APPLE__
+    {"Graphics", "Upscaler", "MetalFX", "MetalFX Upscaler (instead of FSR)", SETTING_CHOICE, ONOFF, NULL, false, true},
+#endif
     {"Graphics", "Graphics", "DrawDistance", "Draw Distance (People in Towns)", SETTING_VALUE, "0|0.5|1.0|1.5|2.0|3.0", NULL,
      true, true},
     {"Graphics", "Graphics", "SmoothGradients", "Smooth Gradients", SETTING_CHOICE, ONOFF, NULL, true, true},
@@ -911,6 +921,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Upscaler", "ObjectMotion", fsr_objmotion, true),
     {"Upscaler", "Reactive", SET_FLOAT, F(fsr_reactive), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_FSR},
     ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
+    ON_OFF("Upscaler", "MetalFX", fsr_metalfx, true),
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
     ON_OFF("Graphics", "FixKerning", fix_kerning, false),
@@ -1451,6 +1462,7 @@ void config_load(void) {
     if ((e = getenv("MHGU_FSR_QUALITY"))) config_parse(config_setting("FSRQuality"), e, &g_config);
     if ((e = getenv("MHGU_FSR_OBJMOTION"))) g_config.fsr_objmotion = atoi(e) != 0;
     if ((e = getenv("MHGU_FSR_ANIMSURF"))) g_config.fsr_animsurf = atoi(e) != 0;
+    if ((e = getenv("MHGU_METALFX"))) g_config.fsr_metalfx = atoi(e) != 0;
     if ((e = getenv("MHGU_FSR_SHARPNESS")) && strtof(e, NULL) >= 0.0f && strtof(e, NULL) <= 1.0f) g_config.fsr_sharpness = strtof(e, NULL);
     if ((e = getenv("MHGU_FSR_REACTIVE")) && strtof(e, NULL) >= 0.0f && strtof(e, NULL) <= 1.0f) g_config.fsr_reactive = strtof(e, NULL);
     if (g_config.hdr && g_config.fsr) {  // (FSR's input stays 8-bit: the picture would be SDR-bright, nvn/vulkan/hdr.c)
@@ -1490,6 +1502,12 @@ void config_load(void) {
         g_fsr_output[0] = (uint32_t)w, g_fsr_output[1] = (uint32_t)h;
         float r = ratio[g_config.fsr_quality];
         fit_aspect((int)(w / r + 0.5f), (int)(h / r + 0.5f), aspect, &w, &h);
+        // (MetalFX, macOS: it scales by at most 3 on each axis, exactly; Ultra Performance's rounding can make it 3.005
+        // (2560 / 852), which it refuses: a slightly larger picture then)
+        for (float r2 = r; g_config.fsr_metalfx && (w * 3 < (int)g_fsr_output[0] || h * 3 < (int)g_fsr_output[1]) && r2 > 2.5f;) {
+            r2 -= 0.005f;
+            fit_aspect((int)(g_fsr_output[0] / r2 + 0.5f), (int)(g_fsr_output[1] / r2 + 0.5f), aspect, &w, &h);
+        }
         if (g_config.msaa > 1) LOG("[config] FSR is on: MSAA off (FSR does the anti-aliasing)\n");
         if (g_config.fxaa) LOG("[config] FSR is on: FXAA off (FSR does the anti-aliasing)\n");
         g_config.msaa = 1, g_config.fxaa = 0;

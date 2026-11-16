@@ -184,9 +184,10 @@ GENFLAGS += -fPIC $(MINFLAG)
 ZSTD_FLAGS += $(MINFLAG)
 # (the rpath: build/mhgurecomp runs from there; make_app replaces it with the app's Frameworks folder)
 LDFLAGS  := -L$(DEPS)/lib -Wl,-rpath,$(abspath $(DEPS)/lib) $(MINFLAG) -rdynamic -lSDL3 $(AV_LIBS) \
-            -lvulkan -lshaderc_shared $(ZSTD_LIBS) -lz -lpthread -lm -framework Cocoa
-# (the Settings menu and window; building the game code on a player's Mac)
-RT_OBJC  := runtime/platform/darwin_menu.m runtime/platform/darwin_settings.m runtime/platform/darwin_gamecode.m
+            -lvulkan -lshaderc_shared $(ZSTD_LIBS) -lz -lpthread -lm -framework Cocoa -framework Metal -framework MetalFX
+# (the Settings menu and window; building the game code on a player's Mac; MetalFX upscaling)
+RT_OBJC  := runtime/platform/darwin_menu.m runtime/platform/darwin_settings.m runtime/platform/darwin_gamecode.m \
+            runtime/nvn/vulkan/metalfx.m
 GAMELIB  := $(B)/mhgugame.dylib
 # (a Mach-O bundle: the game code's imports of runtime functions resolve against the executable at link time)
 GAMELIB_LDFLAGS := -bundle -bundle_loader $(EXE) $(MINFLAG)
@@ -292,6 +293,7 @@ RTFLAGS  += -I$(FSR)/include
 ifeq ($(NULL_GPU),1)
 RTFLAGS  += -DMHGU_NULL_BACKEND
 RT_SRC   := $(filter-out runtime/nvn/vulkan/%,$(RT_SRC))
+RT_OBJC  := $(filter-out runtime/nvn/vulkan/%,$(RT_OBJC))
 RT_CXX   :=
 else
 RT_CXX   := $(O)/rt/nvn/vulkan/vma.o $(FSR_OBJ)

@@ -347,6 +347,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(fsr_objmotion);
     SAME(fsr_reactive);
     SAME(fsr_animsurf);
+    SAME(fsr_metalfx);
     SAME(vsync);
     SAME(shader_prewarm);
     SAME(draw_distance);
@@ -1652,6 +1653,7 @@ void reset_section() {
         c.fsr_objmotion = f.fsr_objmotion;
         c.fsr_reactive = f.fsr_reactive;
         c.fsr_animsurf = f.fsr_animsurf;
+        c.fsr_metalfx = f.fsr_metalfx;
         c.show_fps = f.show_fps;
         c.show_battery = f.show_battery;
         c.fps = f.fps;
@@ -2088,6 +2090,9 @@ std::vector<Row> main_rows() {
             add_bool(r, "fsr.motion", "Object motion", &c.fsr_objmotion, ini("ObjectMotion"));
             number(r, "fsr.reactive", tr("Reactive mask"), &c.fsr_reactive, lo("Reactive"), hi("Reactive"), .05f, ini("Reactive"));
             add_bool(r, "fsr.surfaces", "Animated surfaces", &c.fsr_animsurf, ini("AnimSurf"));
+#ifdef __APPLE__
+            add_bool(r, "fsr.metalfx", "MetalFX upscaler", &c.fsr_metalfx, ini("MetalFX"));
+#endif
         }
         header(r, "hdr.header", "HDR");
         add_bool(r, "hdr", "HDR", &c.hdr, ini("HDR"));

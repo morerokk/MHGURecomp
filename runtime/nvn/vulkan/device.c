@@ -22,6 +22,9 @@
 #include "fsr.h"
 #include "hdr.h"
 #include "vk.h"
+#ifdef __APPLE__
+#include <vulkan/vulkan_metal.h>  // (VK_EXT_metal_objects: MetalFX, metalfx.m)
+#endif
 
 VkG g_vk;
 static VkDebugUtilsMessengerEXT messenger;
@@ -222,6 +225,11 @@ static void create_device(void) {
     }
     if (bias_ctl) ext[n_ext++] = VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME;
 #endif
+#ifdef __APPLE__
+    // MetalFX ([Upscaler] MetalFX, metalfx.m): the Metal objects behind images, the device and the timeline semaphore
+    g_vk.metal_objects = g_vk.portability && g_config.fsr && g_config.fsr_metalfx && has_ext(ep, ne, VK_EXT_METAL_OBJECTS_EXTENSION_NAME);
+    if (g_vk.metal_objects) ext[n_ext++] = VK_EXT_METAL_OBJECTS_EXTENSION_NAME;
+#endif
     bool hdr_meta = has_ext(ep, ne, VK_EXT_HDR_METADATA_EXTENSION_NAME);  // (HDR: hdr.c)
     if (hdr_meta) ext[n_ext++] = VK_EXT_HDR_METADATA_EXTENSION_NAME;
     if (g_vk.api11) {  // (Vulkan 1.2 has it as the feature samplerMirrorClampToEdge)
@@ -342,6 +350,12 @@ static void create_device(void) {
     VkSemaphoreTypeCreateInfo st = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
                                     .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = 0};
     VkSemaphoreCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &st};
+#ifdef __APPLE__
+    // (MetalFX's Metal queue waits for a submission on the timeline's MTLSharedEvent: metalfx.m)
+    VkExportMetalObjectCreateInfoEXT mex = {.sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
+                                            .exportObjectType = VK_EXPORT_METAL_OBJECT_TYPE_METAL_SHARED_EVENT_BIT_EXT};
+    if (g_vk.metal_objects) st.pNext = &mex;
+#endif
     if (!g_vk.fences) VK_CHECK(vkCreateSemaphore(g_vk.dev, &si, NULL, &g_vk.timeline));
     VkCommandPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                                   .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = g_vk.qfam};

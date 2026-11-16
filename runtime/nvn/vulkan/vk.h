@@ -62,6 +62,7 @@ typedef struct {
     uint32_t msaa_counts;      // the sample counts MSAA can use (bits 2, 4, 8)
     bool fsr_fp16, fsr_storage_wo_format;  // FSR (fsr.c): shaderFloat16 / shaderStorageImageWriteWithoutFormat enabled
     bool portability;          // a VK_KHR_portability_subset driver: MoltenVK (Vulkan on Metal, macOS)
+    bool metal_objects;        // VK_EXT_metal_objects enabled (MetalFX: metalfx.m), the timeline's MTLSharedEvent exportable
     // window
     VkSurfaceKHR surface;
     VkSwapchainKHR swapchain;
@@ -108,6 +109,9 @@ void vk_end_pass(void);
      VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT |                       \
      VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_INPUT_ATTACHMENT_READ_BIT)
 void vk_submit_extra(VkSemaphore wait, VkSemaphore signal);  // submit (with binary semaphores for presentation)
+// The next submission waits (on the GPU) until the timeline semaphore sem reaches value: work done outside Vulkan in
+// between (MetalFX on its own Metal queue, metalfx.m). Needs timeline semaphores (not g_vk.fences).
+void vk_wait_next_submit(VkSemaphore sem, uint64_t value);
 
 // Transient GPU-visible memory that lives until the submission it was allocated for completes.
 typedef struct { VkBuffer buf; uint64_t off; void *ptr; } VkSpan;

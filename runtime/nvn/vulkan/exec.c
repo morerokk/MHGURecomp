@@ -204,6 +204,14 @@ void vk_full_barrier(VkCommandBuffer cb) {
 
 static void guest_copy_new_submission(void);
 
+static VkSemaphore next_wait_sem;  // vk_wait_next_submit: a timeline wait for the next submission
+static uint64_t next_wait_val;
+
+void vk_wait_next_submit(VkSemaphore sem, uint64_t value) {
+    if (g_vk.fences) return;
+    next_wait_sem = sem, next_wait_val = value;
+}
+
 // Submit the pending work (if any). wait / signal: binary semaphores for presentation (may be null).
 void vk_submit_extra(VkSemaphore wait, VkSemaphore signal) {
     vk_end_pass();
@@ -221,13 +229,25 @@ void vk_submit_extra(VkSemaphore wait, VkSemaphore signal) {
     cbs[n++] = s->main;
     VkSemaphore sig[2] = {g_vk.timeline, signal};
     uint64_t sig_val[2] = {submit_seq + 1, 0};
-    uint64_t wait_val = 0;
-    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
+    // waits: the binary one (presentation), then a timeline one (vk_wait_next_submit: MetalFX)
+    VkSemaphore waits[2];
+    uint64_t wait_vals[2];
+    VkPipelineStageFlags wait_stages[2];
+    uint32_t nwait = 0;
+    if (wait) {
+        waits[nwait] = wait, wait_vals[nwait] = 0;
+        wait_stages[nwait++] = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
+    }
+    if (next_wait_sem && !g_vk.fences) {
+        waits[nwait] = next_wait_sem, wait_vals[nwait] = next_wait_val;
+        wait_stages[nwait++] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    }
+    next_wait_sem = VK_NULL_HANDLE;
     VkTimelineSemaphoreSubmitInfo ts = {.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
-                                        .waitSemaphoreValueCount = wait ? 1 : 0, .pWaitSemaphoreValues = &wait_val,
+                                        .waitSemaphoreValueCount = nwait, .pWaitSemaphoreValues = wait_vals,
                                         .signalSemaphoreValueCount = signal ? 2 : 1, .pSignalSemaphoreValues = sig_val};
-    VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .pNext = &ts, .waitSemaphoreCount = wait ? 1 : 0,
-                       .pWaitSemaphores = &wait, .pWaitDstStageMask = &wait_stage, .commandBufferCount = n,
+    VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .pNext = &ts, .waitSemaphoreCount = nwait,
+                       .pWaitSemaphores = waits, .pWaitDstStageMask = wait_stages, .commandBufferCount = n,
                        .pCommandBuffers = cbs, .signalSemaphoreCount = signal ? 2 : 1, .pSignalSemaphores = sig};
     VkFence fence = VK_NULL_HANDLE;
     if (g_vk.fences) {
