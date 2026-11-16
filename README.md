@@ -43,10 +43,11 @@ graphics API are reimplemented on Windows, Linux and Android, with Vulkan for re
 | **Graphics** | Resolution, render resolution (supersampling), MSAA, FXAA, FSR 3.1 upscaling, HDR output, VSync, longer draw distance |
 | **Screens** | Any widescreen aspect ratio (16:10, 16:9 or anything wider), with HUD adjustment options for ultrawide |
 | **Frame rate** | Framerates anywhere between 30-240 fps, with fixes for bugs that GU normally has on emulators at high frame rates |
-| **Controls** | Almost any controller is supported (SDL), as well as keyboard+mouse |
+| **Controls** | Almost any controller is supported (SDL), as well as native keyboard+mouse support. |
 | **Multiplayer** | Online play through the "Local Wireless" feature. Comes preloaded with an online server, but you can also host your own or directly connect to friends by forwarding port 39500. |
 | **Multiplayer options** | Small monsters are synced between players, monster HP optionally scaled by player count, Village quests playable in Multiplayer Hubs, Urgent Quest credit for everyone |
 | **Quality of life** | Fast-forward unskippable cutscenes with A, an in-game PC settings menu (F1 or `Plus`+`Minus`), Discord Rich Presence |
+| **Lag compensation** | Networking fixes and improved netcode, similar to newer-gen Monster Hunter games. |
 | **Mods** | Almost all mods that work on emulators also work here. Natively supports Forge plugins ([Mods](#mods)), too! |
 | **Cheat codes** | Almost all emulator cheat codes work here, too. See ([Cheats](#cheats)). |
 
