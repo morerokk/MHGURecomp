@@ -318,7 +318,9 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   game's window is in the background), `Output` (Stereo, the default / 5.1: the game mixes its sound in 5.1 as on the
   Switch's surround output; 5.1 plays it on a surround system, Stereo folds it down to two channels; applies on Save)
 - `[Application]`: `ConfirmExit` (ask before the window closes), and the settings menu's `Language` (English /
-  Spanish), `ButtonIcons` (Xbox / Switch / PlayStation), `Theme` (Hunter, the default / Gold / Blue: the settings menu's colours) and
+  Spanish / 中文, Simplified Chinese: its glyphs come from `mhgurecomp-cjk.otf` beside the program, shipped since this
+  translation; a mod can bring its own as romfs `nativeNX/forge/fonts/MHGU-CJK.ttf`), `ButtonIcons` (Xbox / Switch /
+  PlayStation), `Theme` (Hunter, the default / Gold / Blue: the settings menu's colours) and
   `MenuScale` (50 to 200 percent), and `Updates` (Ask / Auto / Off: what `mhgurecomp-updater` does, see "Staying up
   to date"). With the mouse, drag the top of the settings menu (its tabs) to move it, and the grip at its bottom right
   corner to size it; Menu Options > Attach menu puts it back in place.

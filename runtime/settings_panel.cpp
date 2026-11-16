@@ -2233,7 +2233,7 @@ std::vector<Row> main_rows() {
         break;
     case APP_PAGE:
         header(r, "look.header", tr("Appearance"));
-        add_choice(r, "language", "Language", c.language, {"English", "Español"},
+        add_choice(r, "language", "Language", c.language, {"English", "Español", "中文"},
                    [](int v) { c.language = v; }, ini("Language"));
         add_choice(r, "theme", "Menu theme", c.menu_theme, {tr("Gold"), tr("Blue"), tr("Hunter")},
                    [](int v) { c.menu_theme = v; }, ini("Theme"));
@@ -2539,7 +2539,11 @@ std::string help_text(const Row &r) {
         if (j == std::string::npos)
             j = at->second.size();
         line = at->second.substr(i, j - i);
-        out += (out.empty() ? "" : "\n") + std::string(tr(line.c_str()));
+        // "Default: x" is made by config_help, not a line of the ini: its words go through settings_locale.h on their own
+        if (!line.compare(0, 9, "Default: "))
+            out += (out.empty() ? "" : "\n") + std::string(tr("Default")) + ": " + tr(line.c_str() + 9);
+        else
+            out += (out.empty() ? "" : "\n") + std::string(tr(line.c_str()));
     }
     return out;
 }
