@@ -388,6 +388,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(mouse_invert_y);
     SAME(mouse_smoothing);
     SAME(mouse_capture);
+    SAME(menu_mouse);
     SAME(aspect_ratio);
     SAME(fov);
     SAME(ui_anchor);
@@ -1696,6 +1697,7 @@ void reset_section() {
         c.mouse_invert_y = f.mouse_invert_y;
         c.mouse_smoothing = f.mouse_smoothing;
         c.mouse_capture = f.mouse_capture;
+        c.menu_mouse = f.menu_mouse;
         SDL_strlcpy(c.chat_key, f.chat_key, sizeof c.chat_key);
         memcpy(c.binds, f.binds, sizeof c.binds);
         break;
@@ -2127,6 +2129,7 @@ std::vector<Row> main_rows() {
         number(r, "mouse.smooth", tr("Mouse smoothing"), &c.mouse_smoothing, lo("MouseSmoothing"), hi("MouseSmoothing"), .05f, ini("MouseSmoothing"));
         add_choice(r, "mouse.capture", "Mouse capture", c.mouse_capture, {tr("Click"), tr("Hunt")},
                    [](int v) { c.mouse_capture = v; }, ini("MouseCapture"));
+        add_bool(r, "mouse.menus", "Mouse in menus", &c.menu_mouse, ini("MenuMouse"));
         action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
         r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons, for moving and for the item bar, and the chat key.");
         action(r, "actions", tr("Game actions"), []() { push(View::Actions, "act.enable"); });

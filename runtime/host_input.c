@@ -1009,7 +1009,8 @@ static void mouse_update(int *rx, int *ry) {
     static bool menu_tree;
     if (menuptr_open()) menu_tree = true;
     else if (!input_view_hunt_menu_open()) menu_tree = false;
-    bool menu = menu_tree && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
+    // ([Mouse] MenuMouse = Off: never - the mouse stays the camera / right stick and its clicks the keybinds' buttons)
+    bool menu = menu_tree && config_live_menu_mouse() && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
     // (a mouse captured with a controller in use - MouseCapture = Hunt, or a click long ago - is not the one in use)
     if (menu && !menu_ptr) menu_ptr_idle(), menu_ptr_live = menu_ptr_warp = mouse_captured && host_input_last_device() == 1;
     if (!menu) menu_ptr_idle(), menu_ptr_warp = false;

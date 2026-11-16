@@ -99,6 +99,7 @@
     .mouse_invert_y = 0,                                                                            \
     .mouse_smoothing = 0.0f,                                                                        \
     .mouse_capture = MOUSE_CAPTURE_CLICK,                                                           \
+    .menu_mouse = 1,                                                                                \
     /* [Keybinds] */                                                                                \
     .binds = DEFAULT_BINDS,                                                                         \
     /* [Multiplayer] */                                                                             \
@@ -396,6 +397,12 @@ static const char DEFAULT_INI[] =
     "; hunt camera is yours, and free in menus and cutscenes\n"
     "; Default: Click\n"
     "MouseCapture = Click\n"
+    "\n"
+    "; The mouse in the game's menus: the pointer shows, the option under it is selected, a left click picks it and a\n"
+    "; right click backs out (in towns too: left click talks). Off: as before version 0.17, the mouse only turns the\n"
+    "; camera, no pointer shows up by itself, and the mouse buttons do what the Keybinds give them everywhere\n"
+    "; Default: On\n"
+    "MenuMouse = On\n"
     "\n"
     "[Keybinds]\n"
     "; The keys or mouse buttons for each Switch button, for moving (the left stick) and for turning the item bar\n"
@@ -795,6 +802,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Mouse", "MouseInvertY", mouse_invert_y, false),
     {"Mouse", "MouseSmoothing", SET_FLOAT, F(mouse_smoothing), 0, 0.0f, 0.9f, NULL, NULL, false, ERR_MOUSE},
     {"Mouse", "MouseCapture", SET_CHOICE, F(mouse_capture), 0, 0, 0, "Click,Hunt", NULL, false, ERR_MISC},
+    ON_OFF("Mouse", "MenuMouse", menu_mouse, false),
     KEYS("MoveUp", BIND_MOVE_UP), KEYS("MoveDown", BIND_MOVE_DOWN), KEYS("MoveLeft", BIND_MOVE_LEFT),
     KEYS("MoveRight", BIND_MOVE_RIGHT), KEYS("Walk", BIND_WALK), KEYS("A", BIND_A), KEYS("B", BIND_B), KEYS("X", BIND_X),
     KEYS("Y", BIND_Y), KEYS("L", BIND_L), KEYS("R", BIND_R), KEYS("ZL", BIND_ZL), KEYS("ZR", BIND_ZR),

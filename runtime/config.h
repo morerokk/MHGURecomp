@@ -64,6 +64,9 @@ typedef struct {
     int mouse_invert_y;       // [Mouse] MouseInvertY: up / down turned round, on top of the game's own invert option
     float mouse_smoothing;    // [Mouse] MouseSmoothing: 0 none, towards 1 the turn trails the mouse (hunt camera only)
     int mouse_capture;        // [Mouse] MouseCapture: MOUSE_CAPTURE_*
+    int menu_mouse;           // [Mouse] MenuMouse: the mouse points at the game's menus (hle/menuptr.c) and its buttons
+                              // confirm / back out in menus and towns (actions.c act_default_binding); 0: as before 0.17,
+                              // the mouse is the camera / right stick only and its buttons are the [Keybinds]
     float aspect_ratio;       // the picture's shape (width / height), 0: the window's; never below 16:10 (config.c)
     float fov;                // 3D camera field of view factor (1: the game's)
     int ui_anchor;            // where the HUD goes on a picture wider than 16:9: UI_*
@@ -222,6 +225,7 @@ float config_live_mouse_sensitivity_y(void);
 int config_live_mouse_invert_y(void);
 float config_live_mouse_smoothing(void);
 int config_live_mouse_capture(void);
+int config_live_menu_mouse(void);  // [Mouse] MenuMouse (any thread)
 enum { MOUSE_CAPTURE_CLICK, MOUSE_CAPTURE_HUNT };  // a click in the window captures the mouse; or a hunt does as well
 float config_live_draw_distance(void);
 int config_live_fxaa(void);
