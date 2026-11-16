@@ -319,7 +319,9 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   Switch's surround output; 5.1 plays it on a surround system, Stereo folds it down to two channels; applies on Save)
 - `[Application]`: `ConfirmExit` (ask before the window closes), and the settings menu's `Language` (English /
   Spanish / 中文, Simplified Chinese: its glyphs come from `mhgurecomp-cjk.otf` beside the program, shipped since this
-  translation; a mod can bring its own as romfs `nativeNX/forge/fonts/MHGU-CJK.ttf`), `ButtonIcons` (Xbox / Switch /
+  translation; a mod can bring its own as romfs `nativeNX/forge/fonts/MHGU-CJK.ttf` / 한국어, Korean: its glyphs
+  come from the system's Korean font, Malgun Gothic on Windows, Noto Sans CJK or Nanum Gothic on Linux and Android, or
+  from `mhgurecomp-kr.otf` / `.ttf` put beside the program), `ButtonIcons` (Xbox / Switch /
   PlayStation), `Theme` (Hunter, the default / Gold / Blue: the settings menu's colours) and
   `MenuScale` (50 to 200 percent), and `Updates` (Ask / Auto / Off: what `mhgurecomp-updater` does, see "Staying up
   to date"). With the mouse, drag the top of the settings menu (its tabs) to move it, and the grip at its bottom right

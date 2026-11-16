@@ -70,7 +70,7 @@ typedef struct {
     int background_input;     // the controller keeps working while the window is in the background (runtime/ui.c)
     int volume;               // host master volume, 0..100; independent of the game's music / SFX settings
     int button_icons;         // 0: Xbox, 1: Switch, 2: PlayStation (visual guides only)
-    int language;             // 0: English, 1: Spanish (host menu only)
+    int language;             // 0: English, 1: Spanish, 2: Simplified Chinese, 3: Korean (host menu only)
     int menu_scale;           // host UI text/layout scale, 50..200 percent
     int menu_confirm;         // independent confirmation policy for the host settings menu
     int confirm_exit;         // ask before closing the application

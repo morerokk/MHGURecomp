@@ -47,11 +47,26 @@ class SettingsLocaleTest(unittest.TestCase):
         self.assertEqual(zh_translations["Default"], "默认")
         self.assertEqual(zh_translations["Reset this tab"], "重置本页")
 
+        # Korean (settings_text_ko): the same, and its format strings take the same arguments as the English ones
+        ko = catalog_table(catalog, 'settings_text_ko')
+        ko_keys = [en for en, _ in ko]
+        self.assertTrue(ko)
+        self.assertFalse([key for key, count in Counter(ko_keys).items() if count > 1])
+        self.assertTrue(all(en.strip() and text.strip() for en, text in ko))
+        self.assertFalse(set(keys) - set(ko_keys), f"No Korean for: {sorted(set(keys) - set(ko_keys))}")
+        spec = re.compile(r'%[-+ #0]*\d*(?:\.\d+)?[a-zA-Z%]')
+        for table in (zh, ko):
+            self.assertFalse([en for en, text in table if spec.findall(en) != spec.findall(text)])
+        ko_translations = dict(ko)
+        self.assertEqual(ko_translations["Misc"], "기타")
+        self.assertEqual(ko_translations["Default"], "기본값")
+        self.assertEqual(ko_translations["Hub"], "집회소")
+
         source = (ROOT / "runtime/settings_panel.cpp").read_text(encoding="utf-8")
         source = re.sub(r'//[^\n]*|/\*.*?\*/', '', source, flags=re.S)
         # INI keys looked up in the settings table (ini("Mode"), lo("FPS")...) are not shown
         source = re.sub(r'\b(?:ini|cold|lo|hi)\(' + LITERAL + r'\)', '', source)
-        unchanged = {"English", "Español", "中文", "Xbox", "Switch", "PlayStation",
+        unchanged = {"English", "Español", "中文", "한국어", "Xbox", "Switch", "PlayStation",
                      "FSR", "MSAA", "FXAA", "Discord", "Settings##main", "Settings##dropdown", "Settings##bind",
                      "A", "B", "X", "Y", "L", "R", "ZL", "ZR",
                      "Default: "}  # (a language's own name, the Switch buttons' keybinds, a help line's prefix)

@@ -2233,7 +2233,7 @@ std::vector<Row> main_rows() {
         break;
     case APP_PAGE:
         header(r, "look.header", tr("Appearance"));
-        add_choice(r, "language", "Language", c.language, {"English", "Español", "中文"},
+        add_choice(r, "language", "Language", c.language, {"English", "Español", "中文", "한국어"},
                    [](int v) { c.language = v; }, ini("Language"));
         add_choice(r, "theme", "Menu theme", c.menu_theme, {tr("Gold"), tr("Blue"), tr("Hunter")},
                    [](int v) { c.menu_theme = v; }, ini("Theme"));
@@ -2903,6 +2903,7 @@ bool settings_panel_take_forge() {
 }
 bool settings_panel_dirty() { return is_dirty.load(); }
 int settings_panel_theme() { return s.editing ? s.draft.menu_theme : config_editable().menu_theme; }
+int settings_panel_language() { return s.editing ? s.draft.language : config_editable().language; }
 bool settings_panel_confirming() { return is_confirming.load() || request_exit.load(); }
 bool settings_panel_key(int scancode) {
     if (!is_capturing.load())
