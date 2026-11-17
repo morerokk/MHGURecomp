@@ -146,11 +146,12 @@ const int *act_fallbacks(int id) { return defs[id].fb; }
 // Keyboard and mouse defaults that are not Tier 0's button: in the menus (dialogs too) and in a town or the Hub the mouse
 // works as the menu pointer does, left click confirms / talks and right click backs out, and Space is X (the World Map,
 // a menu's X action). Tier 0 alone would give right click (A), Space (B) and left click (X) there; the hunt keeps them.
+// [Mouse] MenuMouse = Off drops them: Tier 0's everywhere, as before 0.17.
 static const ActBinding kbm_left = {true, 1, {{1, {KEY_MOUSE + SDL_BUTTON_LEFT}}}};
 static const ActBinding kbm_right = {true, 1, {{1, {KEY_MOUSE + SDL_BUTTON_RIGHT}}}};
 static const ActBinding kbm_space = {true, 1, {{1, {SDL_SCANCODE_SPACE}}}};
 const ActBinding *act_default_binding(int id, int dev) {
-    if (dev != 1) return NULL;
+    if (dev != 1 || !config_live_menu_mouse()) return NULL;
     switch (id) {
     case ACT_TOWN_INTERACT: case ACT_MENU_CONFIRM: return &kbm_left;
     case ACT_TOWN_CANCEL: case ACT_MENU_CANCEL: return &kbm_right;

@@ -64,13 +64,16 @@ typedef struct {
     int mouse_invert_y;       // [Mouse] MouseInvertY: up / down turned round, on top of the game's own invert option
     float mouse_smoothing;    // [Mouse] MouseSmoothing: 0 none, towards 1 the turn trails the mouse (hunt camera only)
     int mouse_capture;        // [Mouse] MouseCapture: MOUSE_CAPTURE_*
+    int menu_mouse;           // [Mouse] MenuMouse: the mouse points at the game's menus (hle/menuptr.c) and its buttons
+                              // confirm / back out in menus and towns (actions.c act_default_binding); 0: as before 0.17,
+                              // the mouse is the camera / right stick only and its buttons are the [Keybinds]
     float aspect_ratio;       // the picture's shape (width / height), 0: the window's; never below 16:10 (config.c)
     float fov;                // 3D camera field of view factor (1: the game's)
     int ui_anchor;            // where the HUD goes on a picture wider than 16:9: UI_*
     int background_input;     // the controller keeps working while the window is in the background (runtime/ui.c)
     int volume;               // host master volume, 0..100; independent of the game's music / SFX settings
     int button_icons;         // 0: Xbox, 1: Switch, 2: PlayStation (visual guides only)
-    int language;             // 0: English, 1: Spanish (host menu only)
+    int language;             // 0: English, 1: Spanish, 2: Simplified Chinese, 3: Korean (host menu only)
     int menu_scale;           // host UI text/layout scale, 50..200 percent
     int menu_confirm;         // independent confirmation policy for the host settings menu
     int confirm_exit;         // ask before closing the application
@@ -96,6 +99,8 @@ typedef struct {
     char chat_key[32];        // [Controls] ChatKey: the key that opens a line of chat (runtime/hle/chat.c), by SDL's
                               // name for it ("/", "Y"...); "" none
     int fxaa_mode;            // [Anti-aliasing] FXAAMode: FXAA_*, which FXAA draws while FXAA is on
+    int aniso;                // [Graphics] AnisotropicFiltering: 1 (off: the game's own), 2, 4, 8, 16: at least that much on
+                              // the game's mipmapped textures (nvn/vulkan/textures.c vk_sampler)
     int smooth_gradients;     // [Graphics] SmoothGradients: the game's RGBA8 render targets as RGBA16 (nvn/vulkan/textures.c)
     int fix_kerning;          // [Graphics] FixKerning: UI text at exact places, even margins, kerning (hle/textlayout.c)
     int bold_text;            // [Graphics] BoldText: UI letters stretched by the texture inset, as the game draws them
@@ -224,6 +229,7 @@ float config_live_mouse_sensitivity_y(void);
 int config_live_mouse_invert_y(void);
 float config_live_mouse_smoothing(void);
 int config_live_mouse_capture(void);
+int config_live_menu_mouse(void);  // [Mouse] MenuMouse (any thread)
 enum { MOUSE_CAPTURE_CLICK, MOUSE_CAPTURE_HUNT };  // a click in the window captures the mouse; or a hunt does as well
 float config_live_draw_distance(void);
 int config_live_fxaa(void);
@@ -243,6 +249,9 @@ bool config_mod_bound(int bind);  // a mod has the row for now: config_live_bind
 int config_player_bind(int bind, int slot);  // the settings' own (what config_live_bind has with no mod's)
 int config_live_fxaa_mode(void);
 int config_live_smooth_gradients(void);
+int config_live_aniso(void);        // [Graphics] AnisotropicFiltering, read as samplers are bound (the GPU thread)
+void config_set_live_aniso(int af); // (debug: the control file's "af"; 1, 2, 4, 8, 16, or 0: none, not even the
+                                    // game's own; not saved)
 int config_live_fix_kerning(void);  // [Graphics] FixKerning, read as each text is set (game threads)
 int config_live_bold_text(void);    // [Graphics] BoldText, read as each glyph is drawn (game threads)
 int config_live_hdr(void);                // [HDR] HDR (nvn/vulkan/device.c: the window image is made again when it changes)

@@ -49,6 +49,7 @@ typedef struct {
     bool no_mirror_clamp;      // api11 without VK_KHR_sampler_mirror_clamp_to_edge: textures.c mirrors and repeats
     VkCommandPool pool;        // render thread only
     bool divisor, demote, custom_border, depth_clamp, stencil_export, sample_shading;
+    float max_aniso;           // samplers' anisotropy limit: 1 without the samplerAnisotropy feature (textures.c vk_sampler)
     // VK_EXT_depth_bias_control (exec.c): a DEPTH24_STENCIL8 the GPU makes as D32_SFLOAT_S8_UINT (AMD) gets the game's
     // polygon offsets in D24 steps, as on the Switch; without it the float format's steps can be smaller and decals flicker
     // (a Vulkan header older than 1.3.268 has no such extension: never set then)

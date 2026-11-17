@@ -113,7 +113,7 @@ int main(int argc, char **argv) {
     bad.menu_scale=201;assert(!config_save(&bad,error,sizeof error));
     bad = c; bad.button_icons = 3;
     assert(!config_save(&bad, error, sizeof error));
-    bad = c; bad.language = 2;
+    bad = c; bad.language = 4;  // (0-3: English, Spanish, Chinese, Korean)
     assert(!config_save(&bad, error, sizeof error));
     bad = c; bad.fov = NAN;
     assert(!config_save(&bad, error, sizeof error));
@@ -179,6 +179,19 @@ int main(int argc, char **argv) {
     assert(config_defaults().shader_prewarm==1);
     assert(config_defaults().loading_indicator==1);
     assert(config_defaults().draw_distance==1.0f);
+    {  // [Graphics] AnisotropicFiltering: Off..16x, other spellings, nothing in between; live, no restart
+        assert(config_defaults().aniso==1);
+        const ConfigSetting *af=config_setting("AnisotropicFiltering");
+        Config t=config_defaults(); char v[32];
+        assert(af && config_setting("AF")==af && !af->restart);
+        assert(config_parse(af,"8x",&t) && t.aniso==8 && config_parse(af,"16",&t) && t.aniso==16);
+        config_format(af,&t,v,sizeof v); assert(!strcmp(v,"16x"));
+        assert(config_parse(af,"Off",&t) && t.aniso==1); config_format(af,&t,v,sizeof v); assert(!strcmp(v,"Off"));
+        assert(!config_parse(af,"3x",&t) && !config_parse(af,"32x",&t));
+        Config live=config_editable(); live.aniso=4; assert(config_save(&live,error,sizeof error) && config_live_aniso()==4);
+        assert(!config_restart_required(&live));
+        live.aniso=1; assert(config_save(&live,error,sizeof error) && config_live_aniso()==1);
+    }
     assert(config_defaults().mute_in_background==0);
     assert(config_defaults().combo_window==COMBO_LENIENT);
     assert(config_defaults().fxaa_mode==FXAA_ORIGINAL);

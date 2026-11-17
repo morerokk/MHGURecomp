@@ -24,7 +24,8 @@
 // Which input: the button's action in the context on screen (the menus, a town, a hunt; actions.c), its binding for
 // the keyboard and mouse (its own, the one it follows, or the device's default: actions.c act_default_binding), else
 // what the settings' keybinds give that button (Tier 0). A key's name is drawn with the game's festa font (its first
-// glyph page, the letters measured from their ink), short: "SPC", "ENT", "F5", arrows as arrows.
+// glyph page, the letters measured from their ink; an HD font mod's, BC3 with 48 px letters, scaled to the game's 24 px),
+// short: "SPC", "ENT", "F5", arrows as arrows.
 //
 // Render thread (prompts_frame, at present; prompts_texture_seen from the texture upload).
 #include <math.h>
@@ -270,41 +271,84 @@ static void region_encode(int sw, int sh, const uint8_t *rgba, uint8_t *data, in
 }
 
 // ------------------------------------------------------------------ the festa font's letters
-// (mip 0 of an RGBA8 block-linear page: textlayout.c's reading)
-static int page_alpha(const uint8_t *data, uint32_t w, uint32_t h, uint32_t x, uint32_t y) {
-    if (x >= w || y >= h) return 0;
-    uint32_t bh = 1;
-    while (bh < (h + 7) / 8 && bh < 16) bh <<= 1;
-    uint32_t gobs_w = (w * 4 + 63) / 64, bx = x * 4;
+// The first glyph page's mip 0, block-linear: RGBA8 (tex format 7: the game's, 1024 x 1024 with 24 px letters) or BC3
+// (0x17: an HD font mod's, e.g. the Korean patch's, with 48 px letters). The ink is the alpha.
+typedef struct { const uint8_t *data; uint32_t w, h, bh; bool bc3; } Page;
+static int g_font_px, g_font_fmt;  // (the font read: its letters' size and its page's format, for the log)
+static bool page_open(Page *p, const uint8_t *t, uint32_t size) {
+    int fmt = -1;
+    const uint8_t *d = tex_data(t, size, &p->w, &p->h, &fmt);
+    g_font_fmt = fmt;
+    if (!d || !p->w || !p->h || (fmt != 7 && fmt != 0x17) || (fmt == 0x17 && (p->w % 4 || p->h % 4))) return false;
+    p->data = d, p->bc3 = fmt == 0x17;
+    // (mip 0's bytes in its layout: rows of 64-byte GOBs, whole blocks of them high)
+    uint64_t row, rows, gob_rows;
+    if (p->bc3) row = ((uint64_t)p->w / 4 * 16 + 63) / 64 * 64, rows = p->h / 4, gob_rows = 8u << bh_log2((int)p->h);
+    else {
+        p->bh = 1;
+        while (p->bh < (p->h + 7) / 8 && p->bh < 16) p->bh <<= 1;
+        row = ((uint64_t)p->w * 4 + 63) / 64 * 64, rows = p->h, gob_rows = 8ull * p->bh;
+    }
+    return (uint64_t)(d - t) + row * ((rows + gob_rows - 1) / gob_rows * gob_rows) <= size;
+}
+static int page_alpha(const Page *p, uint32_t x, uint32_t y) {
+    if (x >= p->w || y >= p->h) return 0;
+    if (p->bc3) {
+        uint8_t px[16][4];
+        bc3_decode_block(p->data + block_off((int)p->w, (int)p->h, (int)(x / 4), (int)(y / 4)), px);
+        return px[(y % 4) * 4 + x % 4][3];
+    }
+    uint32_t bh = p->bh, gobs_w = (p->w * 4 + 63) / 64, bx = x * 4;  // (textlayout.c's reading)
     uint32_t off = (y / (8 * bh)) * gobs_w * bh * 512 + (bx / 64) * bh * 512 + ((y % (8 * bh)) / 8) * 512 +
                    ((bx % 64) / 32) * 256 + ((y % 8) / 2) * 64 + ((bx % 32) / 16) * 32 + (y % 2) * 16 + bx % 16;
-    return data[off + 3];
+    return p->data[off + 3];
 }
 static bool wanted_letter(uint32_t c) {
     return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || (c >= 0x2190 && c <= 0x2193) || strchr("[];,./-=`'\\#", (int)c);
 }
+// The letters wanted, from the first page. A font bigger than the game's (its tallest wanted cell over 24 px) is
+// scaled down to 24 px by area, so the drawing below works at the game's size for any font.
 static void load_font(FILE *f) {
     uint32_t gsize = 0, psize = 0;
     uint8_t *gfd = arc_entry(f, FONT_NAME, &gsize), *tex = arc_entry(f, PAGE_NAME, &psize);
-    uint32_t pw, ph;
-    int pfmt;
-    const uint8_t *page = tex ? tex_data(tex, psize, &pw, &ph, &pfmt) : NULL;
-    if (gfd && gsize >= 0x48 && !memcmp(gfd, "GFD", 4) && page && pfmt == 7) {
+    Page page;
+    bool gfd_ok = gfd && gsize >= 0x48 && !memcmp(gfd, "GFD", 4), page_ok = gfd_ok && tex && page_open(&page, tex, psize);
+    if (page_ok) {
         uint32_t count, name_len;
         memcpy(&count, gfd + 0x1c, 4), memcpy(&name_len, gfd + 0x44, 4);
-        uint32_t base = 0x48 + name_len + 1;
+        uint64_t base = 0x48 + (uint64_t)name_len + 1;
+        int tall = FONT_H;
+        for (uint32_t i = 0; i < count && base + 20ull * (i + 1) <= gsize; i++) {
+            uint32_t e[3];
+            memcpy(e, gfd + base + 20ull * i, 12);
+            int h = (int)((e[2] >> 12) & 0xfff);
+            if (wanted_letter(e[0]) && !(e[1] & 0xff) && h > tall && h <= 8 * FONT_H) tall = h;  // (first page only)
+        }
+        float k = (float)tall / FONT_H;  // (font texels a letter texel)
+        g_font_px = tall;
         for (uint32_t i = 0; i < count && base + 20ull * (i + 1) <= gsize && g_nletters < 160; i++) {
             uint32_t e[3];
-            memcpy(e, gfd + base + 20 * i, 12);
-            if (!wanted_letter(e[0]) || (e[1] & 0xff)) continue;  // (first page only)
+            memcpy(e, gfd + base + 20ull * i, 12);
+            if (!wanted_letter(e[0]) || (e[1] & 0xff)) continue;
             int x = (int)((e[1] >> 8) & 0xfff), y = (int)(e[1] >> 20), w = (int)(e[2] & 0xfff), h = (int)((e[2] >> 12) & 0xfff);
-            if (w > 32 || h > FONT_H) continue;
+            int lw = (int)ceilf((float)w / k - 0.001f), lh = (int)ceilf((float)h / k - 0.001f);
+            if (lw > 32 || lh > FONT_H) continue;
             Letter *l = &g_letters[g_nletters++];
-            l->code = e[0], l->w = w;
+            l->code = e[0], l->w = lw;
             memset(l->a, 0, sizeof l->a);
-            for (int r = 0; r < h; r++)
-                for (int cx = 0; cx < w; cx++) l->a[r * 32 + cx] = (uint8_t)page_alpha(page, pw, ph, (uint32_t)(x + cx), (uint32_t)(y + r));
+            for (int r = 0; r < lh; r++)
+                for (int cx = 0; cx < lw; cx++) {  // (the cell's texels this one covers, averaged; outside the cell: blank)
+                    float sx0 = (float)cx * k, sx1 = sx0 + k, sy0 = (float)r * k, sy1 = sy0 + k, acc = 0;
+                    for (int sy = (int)sy0; sy < (int)ceilf(sy1) && sy < h; sy++)
+                        for (int sx = (int)sx0; sx < (int)ceilf(sx1) && sx < w; sx++) {
+                            float wx = fminf((float)sx + 1, sx1) - fmaxf((float)sx, sx0), wy = fminf((float)sy + 1, sy1) - fmaxf((float)sy, sy0);
+                            if (wx > 0 && wy > 0) acc += (float)page_alpha(&page, (uint32_t)(x + sx), (uint32_t)(y + sy)) * wx * wy;
+                        }
+                    l->a[r * 32 + cx] = (uint8_t)fminf(acc / (k * k) + 0.5f, 255.0f);
+                }
         }
+    } else if (gfd_ok && tex) {
+        LOG("[prompts] festa font: glyph page %s not read (format 0x%x: RGBA8 0x7 and BC3 0x17 are)\n", PAGE_NAME, g_font_fmt);
     }
     free(gfd), free(tex);
 }
@@ -397,8 +441,8 @@ static void load_sheets(void) {
     FILE *f = path ? fopen(path, "rb") : NULL;
     if (f) load_font(f), fclose(f);
     g_ready = found ? 1 : -1;
-    LOG("[prompts] %d button glyph pictures read (sheets' versions: languages, arcs), %d letters of the festa font for keys' names\n",
-        found, g_nletters);
+    LOG("[prompts] %d button glyph pictures read (sheets' versions: languages, arcs), %d letters of the festa font for keys' names"
+        " (%d px, %s)\n", found, g_nletters, g_font_px, g_font_fmt == 0x17 ? "BC3" : g_font_fmt == 7 ? "RGBA8" : "not read");
 }
 static pthread_once_t g_once = PTHREAD_ONCE_INIT;
 

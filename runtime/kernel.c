@@ -303,7 +303,10 @@ static uint32_t block_current(int64_t timeout_ns) {
     while (t->wait_kind != WAIT_NONE) {
         if (g_rt_unwind) { t->wait_kind = WAIT_NONE; t->wait_result = R_CANCELLED; break; }
         if (t->cancel) { t->cancel = false; t->wait_kind = WAIT_NONE; t->wait_result = R_CANCELLED; break; }
-        if (!kwait(timeout_ns, &ts)) { t->wait_kind = WAIT_NONE; t->wait_result = R_TIMEOUT; break; }
+        // A wake that lands as the deadline passes can still report a timeout: if a waker already ended the wait (a
+        // signalled condvar handing over its mutex, a mutex handoff), keep its result. Reporting a timeout there made
+        // nn::os re-take a mutex the thread had just been given: it waited on its own handle forever (hub hangs).
+        if (!kwait(timeout_ns, &ts) && t->wait_kind != WAIT_NONE) { t->wait_kind = WAIT_NONE; t->wait_result = R_TIMEOUT; break; }
     }
     waitlist_remove(t);
     return t->wait_result;

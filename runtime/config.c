@@ -58,7 +58,8 @@
     .fsr_metalfx = 0,                                                                               \
     /* [Graphics] */                                                                                \
     .draw_distance = 1.0f,                                                                          \
-    .smooth_gradients = 0,                                                                          \
+    .aniso = 1,                                                                                     \
+    .smooth_gradients = 0,                                                                         \
     .fix_kerning = 1,                                                                               \
     .bold_text = BOLD_TEXT_DEFAULT,                                                                 \
     /* [HDR] */                                                                                 \
@@ -100,6 +101,7 @@
     .mouse_invert_y = 0,                                                                            \
     .mouse_smoothing = 0.0f,                                                                        \
     .mouse_capture = MOUSE_CAPTURE_CLICK,                                                           \
+    .menu_mouse = 1,                                                                                \
     /* [Keybinds] */                                                                                \
     .binds = DEFAULT_BINDS,                                                                         \
     /* [Multiplayer] */                                                                             \
@@ -112,7 +114,7 @@
     .lag_compensation = 1,                                                                          \
     .share_urgent = 1,                                                                              \
     /* [Monster HP, Village Quests] */                                                              \
-    .hp = {{1, 1, 1, 1}, 2},                                                                        \
+    .hp = {{1, 1, 1, 1}, 1.6f},                                                                     \
     .village_in_hub = 1,                                                                            \
     /* [Quest Rewards] */                                                                           \
     .quest_hold_send = 1,                                                                           \
@@ -231,6 +233,12 @@ static const char DEFAULT_INI[] =
     "; Between 0 and 10\n"
     "; Default: 1.0\n"
     "DrawDistance = 1.0\n"
+    "\n"
+    "; Anisotropic filtering: keeps textures seen at a slant (the ground, walls, roads) sharp into the distance.\n"
+    "; Off: as the game draws them\n"
+    "; Off, 2x, 4x, 8x, 16x\n"
+    "; Default: Off\n"
+    "AnisotropicFiltering = Off\n"
     "\n"
     "; Renders the picture with 16 bits per colour instead of 8, so dark skies and soft glows show no colour bands.\n"
     "; Costs GPU time: about 1 ms a frame at 1600x1000, more at higher resolutions\n"
@@ -422,6 +430,12 @@ static const char DEFAULT_INI[] =
     "; Default: Click\n"
     "MouseCapture = Click\n"
     "\n"
+    "; The mouse in the game's menus: the pointer shows, the option under it is selected, a left click picks it and a\n"
+    "; right click backs out (in towns too: left click talks). Off: as before version 0.17, the mouse only turns the\n"
+    "; camera, no pointer shows up by itself, and the mouse buttons do what the Keybinds give them everywhere\n"
+    "; Default: On\n"
+    "MenuMouse = On\n"
+    "\n"
     "[Keybinds]\n"
     "; The keys or mouse buttons for each Switch button, for moving (the left stick) and for turning the item bar\n"
     "; (ItemLeft / ItemRight: one item per press, in a hunt, without holding L).\n"
@@ -553,8 +567,8 @@ static const char DEFAULT_INI[] =
     "\n"
     "; When playing a Village Quest from the Hub, first multiply the monster HP by this amount.\n"
     "; This amount is then scaled again by the [Monster HP] settings.\n"
-    "; Default: 2.0\n"
-    "HubHP = 2.0\n"
+    "; Default: 1.6\n"
+    "HubHP = 1.6\n"
     "\n"
     "[Quest Rewards]\n"
     "; At the end of a quest, press and hold A on the Reward Box (Send to the Item Box option) to rapidly send items one-by-one, similar to World/Rise/Wilds.\n"
@@ -916,7 +930,8 @@ static bool parse_aspect(const char *v, float *out) {
 #define F(x) offsetof(Config, x)
 #define ON_OFF(section, key, field, restart) {section, key, SET_BOOL, F(field), 0, 0, 0, NULL, NULL, restart, ERR_TOGGLE}
 #define KEYS(key, bind) {"Keybinds", key, SET_KEYS, F(binds[bind]), 0, 0, 0, NULL, NULL, false, ERR_KEYS}
-static const int anchor_values[] = {UI_CENTER, UI_21_9, UI_32_9, UI_EDGES}, msaa_values[] = {1, 2, 4, 8};
+static const int anchor_values[] = {UI_CENTER, UI_21_9, UI_32_9, UI_EDGES}, msaa_values[] = {1, 2, 4, 8},
+                 aniso_values[] = {1, 2, 4, 8, 16};
 const ConfigSetting g_settings[] = {
     {"Display", "Mode", SET_CHOICE, F(display_mode), 0, 0, 0,
      "Windowed|window,Fullscreen|exclusive|exclusivefullscreen,Borderless|borderless*", NULL, true, ERR_SIZE},
@@ -938,6 +953,8 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Upscaler", "AnimSurf", fsr_animsurf, true),
     ON_OFF("Upscaler", "MetalFX", fsr_metalfx, true),
     {"Graphics", "DrawDistance", SET_FLOAT, F(draw_distance), 0, 0.0f, 10.0f, NULL, NULL, false, ERR_DRAW},
+    {"Graphics", "AnisotropicFiltering|Anisotropy|AF", SET_CHOICE, F(aniso), 0, 0, 0, "Off|none|0|1|1x,2x|2,4x|4,8x|8,16x|16",
+     aniso_values, false, ERR_MISC},
     ON_OFF("Graphics", "SmoothGradients", smooth_gradients, false),
     ON_OFF("Graphics", "FixKerning", fix_kerning, false),
     ON_OFF("Graphics", "BoldText", bold_text, false),
@@ -977,6 +994,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Mouse", "MouseInvertY", mouse_invert_y, false),
     {"Mouse", "MouseSmoothing", SET_FLOAT, F(mouse_smoothing), 0, 0.0f, 0.9f, NULL, NULL, false, ERR_MOUSE},
     {"Mouse", "MouseCapture", SET_CHOICE, F(mouse_capture), 0, 0, 0, "Click,Hunt", NULL, false, ERR_MISC},
+    ON_OFF("Mouse", "MenuMouse", menu_mouse, false),
     KEYS("MoveUp", BIND_MOVE_UP), KEYS("MoveDown", BIND_MOVE_DOWN), KEYS("MoveLeft", BIND_MOVE_LEFT),
     KEYS("MoveRight", BIND_MOVE_RIGHT), KEYS("Walk", BIND_WALK), KEYS("A", BIND_A), KEYS("B", BIND_B), KEYS("X", BIND_X),
     KEYS("Y", BIND_Y), KEYS("L", BIND_L), KEYS("R", BIND_R), KEYS("ZL", BIND_ZL), KEYS("ZR", BIND_ZR),
@@ -1018,7 +1036,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Audio", "MuteInBackground", mute_in_background, false),
     {"Audio", "Output", SET_CHOICE, F(audio_output), 0, 0, 0, "Stereo|2.0,5.1|surround|5.1surround", NULL, false, ERR_MISC},
     ON_OFF("Application", "ConfirmExit", confirm_exit, false),
-    {"Application", "Language", SET_CHOICE, F(language), 0, 0, 0, "English|en,Spanish|es", NULL, false, ERR_LANGUAGE},
+    {"Application", "Language", SET_CHOICE, F(language), 0, 0, 0, "English|en,Spanish|es,中文|zh|chinese,한국어|ko|korean", NULL, false, ERR_LANGUAGE},
     {"Application", "ButtonIcons", SET_CHOICE, F(button_icons), 0, 0, 0, "Xbox,Switch,PlayStation", NULL, false, ERR_ICONS},
     {"Application", "Theme", SET_CHOICE, F(menu_theme), 0, 0, 0, "Gold,Blue,Hunter", NULL, false, ERR_MISC},
     {"Application", "MenuScale", SET_INT, F(menu_scale), 0, 50, 200, NULL, NULL, false, ERR_SCALE},
@@ -1452,6 +1470,7 @@ void config_load(void) {
     if (getenv("MHGU_HIDDEN")) g_config.display_mode = DISPLAY_WINDOWED;
     if ((e = getenv("MHGU_MSAA"))) g_config.msaa = atoi(e) >= 8 ? 8 : atoi(e) >= 4 ? 4 : atoi(e) >= 2 ? 2 : 1;
     if ((e = getenv("MHGU_FXAA"))) g_config.fxaa = atoi(e) != 0;
+    if ((e = getenv("MHGU_AF"))) g_config.aniso = atoi(e) >= 16 ? 16 : atoi(e) >= 8 ? 8 : atoi(e) >= 4 ? 4 : atoi(e) >= 2 ? 2 : 1;
     if ((e = getenv("MHGU_RT16"))) g_config.smooth_gradients = atoi(e) != 0;
     if ((e = getenv("MHGU_FIX_KERNING"))) g_config.fix_kerning = atoi(e) != 0;
     if ((e = getenv("MHGU_BOLD_TEXT"))) g_config.bold_text = atoi(e) != 0;
@@ -1597,11 +1616,11 @@ void config_load(void) {
     config_runtime_init(&g_config);
 
     static const char *const modes[] = {"windowed", "fullscreen", "borderless"};
-    LOG("[config] %s: %s %dx%d, 3D %dx%d (shape %.3f, FOV x%.2f, HUD %.3f wide), %d fps, vsync %s, MSAA %dx, FXAA %s, "
+    LOG("[config] %s: %s %dx%d, 3D %dx%d (shape %.3f, FOV x%.2f, HUD %.3f wide), %d fps, vsync %s, MSAA %dx, FXAA %s, AF %dx, "
         "face buttons by %s, controller %s in the background\n", path, modes[g_config.display_mode], g_config.width,
         g_config.height, g_config.render_w, g_config.render_h, g_render_aspect, g_fov_scale, g_ui_anchor_aspect,
         g_config.fps, g_config.vsync ? "on" : "off",
-        g_config.msaa, g_config.fxaa ? "on" : "off", g_config.face_buttons == FACE_LABEL ? "label" : "position",
+        g_config.msaa, g_config.fxaa ? "on" : "off", g_config.aniso, g_config.face_buttons == FACE_LABEL ? "label" : "position",
         g_config.background_input ? "on" : "off");
     const HpScale *hp = &g_config.hp;
     LOG("[config] monster HP in Hub quests: x%.2f / %.2f / %.2f / %.2f for 1-4 hunters, %d quest(s) set apart\n",

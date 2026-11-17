@@ -561,7 +561,8 @@ game's own glyphs back at its next button press.
 * **The pictures.** `extras/prompts/mouse_icons.png` (a 4 x 2 grid; used: left, right, middle, wheel up, wheel down)
   and `keycap.png`, made into 24 x 24 cells by `tools/prompt_icons.py` (cut to their ink, area-averaged; the mouse to
   22 px) as `runtime/hle/prompt_icons.h`. A key's name is drawn on the cap in the game's festa font (its first glyph
-  page, RGBA8, from `resident.arc`), near black, scaled into the cap's face: one letter or digit, F1..F12, N0..N9 for
+  page, from `resident.arc`: the game's RGBA8 with 24 px letters, or an HD font mod's BC3 with 48 px letters, as the
+  Korean patch's, area-averaged to 24 px), near black, scaled into the cap's face: one letter or digit, F1..F12, N0..N9 for
   the keypad, arrows as arrows, SPC ENT TAB BS ESC SHF CTL ALT CAP DEL INS HOM END PGU PGD, else the SDL name's first 3
   letters; M4 / M5 for the side buttons. Two D-pad directions on one glyph (KEY_UD, KEY_RL) take both keys' symbols,
   stacked when that draws them bigger (the left / right arrows).
@@ -618,6 +619,7 @@ New `[Mouse]` settings (settings menu: Controls tab, Spanish strings; live, no r
 | `MouseInvertY` | Off | up / down turned round, on top of the game's own invert options |
 | `MouseSmoothing` | 0.0 | 0 .. 0.9: each update takes (1 - s) of the counts waiting, the rest trails (hunt camera only; the same total turn: measured 101 + 164 + 196 ... decaying 5, 3, 1 against 240 a step unsmoothed) |
 | `MouseCapture` | Click | Click: a click in the window captures the mouse. Hunt: also captured by itself while the hunt camera is the mouse's (its handler ran in the last 200 ms), free again in menus, cutscenes and villages; Esc or losing focus stops it until a click or the hunt is over |
+| `MenuMouse` | On | Off: the menu pointer (hle/menuptr.c) never takes the mouse (no pointer by itself, no hover / click selection, the mouse stays captured in menus) and the keyboard and mouse defaults of `act_default_binding` (left click confirm / talk, right click back, Space X) are dropped: the `[Keybinds]` everywhere, as before 0.17 |
 
 Measured with `MouseSensitivityY=2 MouseInvertY=On MouseSmoothing=0.6`: the pitch per update went from +125 to -240 (twice,
 reversed), the yaw ramped up and trailed off. The mouse buttons bound to actions (`[Actions.Kbm]`) work while captured

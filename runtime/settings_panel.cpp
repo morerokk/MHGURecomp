@@ -351,6 +351,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(vsync);
     SAME(shader_prewarm);
     SAME(draw_distance);
+    SAME(aniso);
     SAME(smooth_gradients);
     SAME(fix_kerning);
     SAME(bold_text);
@@ -389,6 +390,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(mouse_invert_y);
     SAME(mouse_smoothing);
     SAME(mouse_capture);
+    SAME(menu_mouse);
     SAME(aspect_ratio);
     SAME(fov);
     SAME(ui_anchor);
@@ -1660,6 +1662,7 @@ void reset_section() {
         c.vsync = f.vsync;
         c.shader_prewarm = f.shader_prewarm;
         c.draw_distance = f.draw_distance;
+        c.aniso = f.aniso;
         c.smooth_gradients = f.smooth_gradients;
         c.fix_kerning = f.fix_kerning;
         c.bold_text = f.bold_text;
@@ -1698,6 +1701,7 @@ void reset_section() {
         c.mouse_invert_y = f.mouse_invert_y;
         c.mouse_smoothing = f.mouse_smoothing;
         c.mouse_capture = f.mouse_capture;
+        c.menu_mouse = f.menu_mouse;
         SDL_strlcpy(c.chat_key, f.chat_key, sizeof c.chat_key);
         memcpy(c.binds, f.binds, sizeof c.binds);
         break;
@@ -2073,6 +2077,13 @@ std::vector<Row> main_rows() {
                ini("DrawDistance"));
         if (c.draw_distance == 0)
             r.back().value = tr("No limit");
+        add_choice(r, "aniso", "Anisotropic filtering",
+                   c.aniso >= 16  ? 4
+                   : c.aniso >= 8 ? 3
+                   : c.aniso >= 4 ? 2
+                   : c.aniso >= 2 ? 1
+                                  : 0,
+                   {tr("Off"), "2x", "4x", "8x", "16x"}, [](int v) { c.aniso = 1 << v; }, ini("AnisotropicFiltering"));
         add_bool(r, "smooth", "Smooth gradients", &c.smooth_gradients, ini("SmoothGradients"));
         add_bool(r, "kerning", "Fix kerning", &c.fix_kerning, ini("FixKerning"));
         add_bool(r, "boldtext", "Bold text", &c.bold_text, ini("BoldText"));
@@ -2132,6 +2143,7 @@ std::vector<Row> main_rows() {
         number(r, "mouse.smooth", tr("Mouse smoothing"), &c.mouse_smoothing, lo("MouseSmoothing"), hi("MouseSmoothing"), .05f, ini("MouseSmoothing"));
         add_choice(r, "mouse.capture", "Mouse capture", c.mouse_capture, {tr("Click"), tr("Hunt")},
                    [](int v) { c.mouse_capture = v; }, ini("MouseCapture"));
+        add_bool(r, "mouse.menus", "Mouse in menus", &c.menu_mouse, ini("MenuMouse"));
         action(r, "keybinds", tr("Keybinds"), []() { push(View::Keybinds, "bind.0"); });
         r.back().help = tr("The keys and mouse buttons for the Switch controller's buttons, for moving and for the item bar, and the chat key.");
         action(r, "actions", tr("Game actions"), []() { push(View::Actions, "act.enable"); });
@@ -2238,7 +2250,7 @@ std::vector<Row> main_rows() {
         break;
     case APP_PAGE:
         header(r, "look.header", tr("Appearance"));
-        add_choice(r, "language", "Language", c.language, {"English", "Español"},
+        add_choice(r, "language", "Language", c.language, {"English", "Español", "中文", "한국어"},
                    [](int v) { c.language = v; }, ini("Language"));
         add_choice(r, "theme", "Menu theme", c.menu_theme, {tr("Gold"), tr("Blue"), tr("Hunter")},
                    [](int v) { c.menu_theme = v; }, ini("Theme"));
@@ -2544,7 +2556,11 @@ std::string help_text(const Row &r) {
         if (j == std::string::npos)
             j = at->second.size();
         line = at->second.substr(i, j - i);
-        out += (out.empty() ? "" : "\n") + std::string(tr(line.c_str()));
+        // "Default: x" is made by config_help, not a line of the ini: its words go through settings_locale.h on their own
+        if (!line.compare(0, 9, "Default: "))
+            out += (out.empty() ? "" : "\n") + std::string(tr("Default")) + ": " + tr(line.c_str() + 9);
+        else
+            out += (out.empty() ? "" : "\n") + std::string(tr(line.c_str()));
     }
     return out;
 }
@@ -2904,6 +2920,7 @@ bool settings_panel_take_forge() {
 }
 bool settings_panel_dirty() { return is_dirty.load(); }
 int settings_panel_theme() { return s.editing ? s.draft.menu_theme : config_editable().menu_theme; }
+int settings_panel_language() { return s.editing ? s.draft.language : config_editable().language; }
 bool settings_panel_confirming() { return is_confirming.load() || request_exit.load(); }
 bool settings_panel_key(int scancode) {
     if (!is_capturing.load())
