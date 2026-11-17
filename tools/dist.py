@@ -46,9 +46,10 @@ def files(build, platform):
         for n in sorted(names):
             p = os.path.join(d, n)
             out.append(('licenses/' + os.path.relpath(p, lic).replace(os.sep, '/'), p, False))
-    font = os.path.join(build, 'mhgurecomp-cjk.otf')  # (the host menu's Chinese glyphs: runtime/forge.c, Makefile)
-    if os.path.isfile(font):
-        out.append(('mhgurecomp-cjk.otf', font, False))
+    font = os.path.join(build, 'mhgurecomp-cjk.otf')  # (the host menu's Chinese glyphs: runtime/overlay.cpp, Makefile)
+    if not os.path.isfile(font):
+        sys.exit(f'dist: {font} is missing (make first)')
+    out.append(('mhgurecomp-cjk.otf', font, False))
     return out
 
 

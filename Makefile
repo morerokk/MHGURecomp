@@ -257,7 +257,7 @@ RT_CXX   := $(O)/rt/nvn/vulkan/vma.o $(FSR_OBJ)
 endif
 
 all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) \
-     $(if $(ANDROID),apk,data licenses pipelist)
+     $(if $(ANDROID),apk,data licenses pipelist cjkfont)
 
 # Host-only INI/settings regression test: no game dump or generated code required.
 .PHONY: test-settings
@@ -507,11 +507,13 @@ $(B)/pipelines.list: extras/pipelines.list
 	cp $< $@
 
 # The Chinese glyphs of the host menu's translation (runtime/settings_locale.h), which the overlay loads from beside the
-# program (runtime/forge.c): Noto Sans SC, SIL Open Font License 1.1 (THIRD_PARTY_NOTICES).
+# program (runtime/overlay.cpp): a subset of Noto Sans SC (tools/subset_cjk_font.py), SIL Open Font License 1.1
+# (THIRD_PARTY_NOTICES). Windows and Linux; Android uses the system's Noto Sans CJK.
 CJK_FONT := extras/mhgurecomp-cjk.otf
 $(B)/mhgurecomp-cjk.otf: $(CJK_FONT)
 	@mkdir -p $(dir $@)
 	cp $< $@
+cjkfont: $(B)/mhgurecomp-cjk.otf
 
 LICENSE_TXT = $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt) \
               $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt) \
@@ -563,7 +565,7 @@ PY := $(firstword $(wildcard tools/venv/Scripts/python.exe) $(wildcard tools/ven
 # (--with: MSYS2 packages linked into the executable or into a bundled DLL, whose licenses go along too: the static
 # GCC runtime, VulkanMemoryAllocator, and glslang / SPIRV-Tools inside shaderc's DLL)
 LICENSE_PKGS := libstdc++ libgcc libwinpthread vulkan-memory-allocator glslang spirv-tools zlib zstd
-bundle: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) | $(B)/mhgurecomp-cjk.otf
+bundle: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER)
 	@$(PY) tools/bundle_dlls.py "$$(cygpath -m "$$(dirname "$$(command -v $(CC))")")" $(B) $^ \
 	    --licenses $(B)/licenses --with $(LICENSE_PKGS)
 
@@ -613,7 +615,7 @@ dist: all
 	$(if $(ANDROID_DIST),$(MAKE) PLATFORM=android ABI=arm64-v8a dist $(if $(BONUS),BONUS="$(abspath $(BONUS))"),@echo "dist: no Android SDK: no APK")
 endif
 
-.PHONY: all gen test-lift runtime-objs clean bundle data licenses pipelist dist FORCE
+.PHONY: all gen test-lift runtime-objs clean bundle data licenses pipelist cjkfont dist FORCE
 
 ifeq ($(PLATFORM),android)
 include android/apk.mk

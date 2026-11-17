@@ -588,7 +588,7 @@ static const char DEFAULT_INI[] =
     "ConfirmExit = On\n"
     "\n"
     "; Language of the settings menu (F1, or Minus + Plus on a controller)\n"
-    "; English, Spanish\n"
+    "; English, Spanish, Chinese, Korean\n"
     "; Default: English\n"
     "Language = English\n"
     "\n"

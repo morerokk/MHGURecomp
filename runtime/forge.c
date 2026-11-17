@@ -1459,15 +1459,6 @@ static bool env_level;  // MHGU_FORGE_LOG names a level
 // forge_log_trace: shown whatever the level (labelled debug)
 static void trace(const char *msg) { LOG("[forge] [DEBUG] %s\n", msg); }
 
-// The Chinese glyphs of the host menu's translation (runtime/settings_locale.h), shipped beside the executable: the
-// game runs from the folder it is in (main.c finds data/ and writes log.txt there too).
-#define CJK_FONT_FILE "mhgurecomp-cjk.otf"
-static bool can_read(const char *path) {
-    FILE *f = fopen(path, "rb");
-    if (f) fclose(f);
-    return f != NULL;
-}
-
 // The ImGui overlay and the log, with Forge's settings (its config.ini: [menu] key / font_size, [log] level) and font
 // where a mod has them (Forge's own files: romfs nativeNX/forge/; the topmost layer that has the file wins), else
 // Forge's defaults (info, 12 px; the menu key Insert) and ImGui's font. A level that is not a name is the lowest one
@@ -1476,11 +1467,10 @@ static void overlay_start(const char **layers, int nl) {
     char path[1400], font[1400] = "", file[1400] = "", cjk[1400] = "";
     for (int l = 0; l < nl; l++) {
         if (ci_path(layers[l], "nativeNX/forge/fonts/Roboto-Medium.ttf", path, sizeof path)) snprintf(font, sizeof font, "%s", path);
-        // Chinese glyphs: a mod may bring its own (romfs nativeNX/forge/fonts/); else the release's, beside the program
+        // Chinese glyphs: a mod may bring its own (romfs nativeNX/forge/fonts/); else the release's (runtime/overlay.cpp)
         if (ci_path(layers[l], "nativeNX/forge/fonts/MHGU-CJK.ttf", path, sizeof path)) snprintf(cjk, sizeof cjk, "%s", path);
         if (ci_path(layers[l], "nativeNX/forge/config.ini", path, sizeof path)) snprintf(file, sizeof file, "%s", path);
     }
-    if (!cjk[0] && can_read(CJK_FONT_FILE)) snprintf(cjk, sizeof cjk, "%s", CJK_FONT_FILE);
     ForgeConfig cfg;
     forge_config_defaults(&cfg);  // (no file: the defaults; a file that fails to load leaves them too)
     if (!file[0] || !forge_config_load(file, &cfg)) trace("Failed to load config, using defaults");

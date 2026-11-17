@@ -51,6 +51,7 @@ void vk_unlock(void);
 SDL_Window *ui_window(void);
 bool shader_prewarm_progress(uint64_t *done, uint64_t *total);  // (runtime/nvn/vulkan/exec.c)
 bool romfs_mods_progress(int *done, int *total);                // (runtime/romfs.c)
+bool plat_exe_path(char *buf, size_t size);                     // (runtime/platform.h)
 }
 
 static std::atomic<bool> g_enabled, g_ready, g_open, g_wants_text;
@@ -404,7 +405,9 @@ static void forge_style(ImGuiStyle &style) {  // Forge's own (source/forge/graph
 
 // The font the menus draw with (ImGui's default), which the glyphs of a translation are merged into
 static ImFont *g_ui_font;
-static bool g_hangul_tried;  // the Korean glyphs were merged into g_ui_font, or no font for them was found
+static std::string g_ui_cjk;  // the Chinese font merged into g_ui_font ("": none)
+static bool g_han_tried;      // the system's Chinese glyphs were merged into g_ui_font, or no font for them was found
+static bool g_hangul_tried;   // the Korean glyphs were merged into g_ui_font, or no font for them was found
 
 static bool can_read(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -412,57 +415,133 @@ static bool can_read(const char *path) {
     return f != NULL;
 }
 
+// A file beside the program (the release's fonts): the game's folder is not always the program's (MHGU_HOME, a game
+// folder given on the command line), so not a path relative to the current one.
+static std::string beside_program(const char *name) {
+    char exe[1024];
+    if (!plat_exe_path(exe, sizeof exe)) return name;
+    char *s = strrchr(exe, '/'), *s2 = strrchr(exe, '\\');
+    if (s2 > s) s = s2;
+    if (!s) return name;
+    *s = 0;
+    return std::string(exe) + "/" + name;
+}
+
+// The release's Chinese glyphs (runtime/settings_locale.h, language 2): mhgurecomp-cjk.otf beside the program, a
+// subset of Noto Sans SC (tools/subset_cjk_font.py, 0.7 MB). Merged from the start, the loading box included, so the
+// Language list's 中文 shows in every language.
+static const std::string &release_cjk_font(void) {
+    static const std::string path = [] {
+        std::string p = beside_program("mhgurecomp-cjk.otf");
+        return can_read(p.c_str()) ? p : std::string();
+    }();
+    return path;
+}
+
+// Merges a font's glyphs into the menus' font (font_no: the face in a .ttc)
+static bool font_merge(ImFont *into, const char *path, int font_no = 0) {
+    ImFontConfig cfg;
+    cfg.MergeMode = true;
+    cfg.DstFont = into;
+    cfg.FontNo = font_no;
+    cfg.SizePixels = g_font_size;  // (the same size, so the menu's rows keep the height they have in English)
+    return ImGui::GetIO().Fonts->AddFontFromFileTTF(path, g_font_size, &cfg) != nullptr;
+}
+
+struct FontFile {
+    std::string path;
+    int font_no;  // (Noto Sans CJK's .ttc: 0 Japanese, 1 Korean, 2 Simplified Chinese)
+};
+
+// A font the system has, the first of these that can be read
+static FontFile system_font(const std::vector<FontFile> &files) {
+    for (const FontFile &f : files)
+        if (can_read(f.path.c_str())) return f;
+    return {};
+}
+
+#ifdef _WIN32
+static std::string windows_font(const char *name) {
+    const char *windir = getenv("WINDIR");
+    return std::string(windir ? windir : "C:\\Windows") + "\\Fonts\\" + name;
+}
+#endif
+
+// The Chinese menu's glyphs when the release's font is not there (a build folder made without it, Android): the
+// system's own Chinese font (Microsoft YaHei on Windows, Noto Sans CJK on Android and most Linux desktops).
+static FontFile han_font_find(void) {
+    return system_font({
+#ifdef _WIN32
+        {windows_font("msyh.ttc"), 0}, {windows_font("msyh.ttf"), 0}, {windows_font("simsun.ttc"), 0},
+#elif defined(__ANDROID__)
+        {"/system/fonts/NotoSansCJK-Regular.ttc", 2}, {"/system/fonts/NotoSansSC-Regular.otf", 0},
+        {"/system/fonts/DroidSansFallback.ttf", 0},
+#else
+        {"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 2},  // (Debian, Ubuntu)
+        {"/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", 2},       // (Arch)
+        {"/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc", 2},
+        {"/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc", 0},
+        {"/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", 0},
+#endif
+    });
+}
+
 // The Korean menu's glyphs (runtime/settings_locale.h, language 3), which the Chinese font (mhgurecomp-cjk.otf, Noto
 // Sans SC) has not: mhgurecomp-kr.otf / .ttf beside the program when someone puts one there, else the system's own
 // Korean font (Malgun Gothic on Windows, Noto Sans CJK on Android and most Linux desktops, else Nanum Gothic).
-static const char *hangul_font_find(void) {
+static FontFile hangul_font_find(void) {
+    return system_font({
+        {beside_program("mhgurecomp-kr.otf"), 0}, {beside_program("mhgurecomp-kr.ttf"), 0},
 #ifdef _WIN32
-    static char windows[512];
-    const char *windir = getenv("WINDIR");
-    snprintf(windows, sizeof windows, "%s\\Fonts\\malgun.ttf", windir ? windir : "C:\\Windows");
-#endif
-    const char *const files[] = {
-        "mhgurecomp-kr.otf", "mhgurecomp-kr.ttf",
-#ifdef _WIN32
-        windows,
+        {windows_font("malgun.ttf"), 0},
 #elif defined(__ANDROID__)
-        "/system/fonts/NotoSansCJK-Regular.ttc", "/system/fonts/NotoSansKR-Regular.otf",
-        "/system/fonts/NanumGothic.ttf",
+        {"/system/fonts/NotoSansCJK-Regular.ttc", 1}, {"/system/fonts/NotoSansKR-Regular.otf", 0},
+        {"/system/fonts/NanumGothic.ttf", 0},
 #else
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  // (Debian, Ubuntu)
-        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",       // (Arch)
-        "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf", "/usr/share/fonts/nanum/NanumGothic.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSansKR-Regular.ttf",
+        {"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 1},  // (Debian, Ubuntu)
+        {"/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", 1},       // (Arch)
+        {"/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc", 1},
+        {"/usr/share/fonts/truetype/nanum/NanumGothic.ttf", 0}, {"/usr/share/fonts/nanum/NanumGothic.ttf", 0},
+        {"/usr/share/fonts/truetype/noto/NotoSansKR-Regular.ttf", 0},
 #endif
-    };
-    for (const char *f : files)
-        if (can_read(f)) return f;
-    return nullptr;
+    });
 }
 
-// Merged the first time the menu is in Korean (before a NewFrame, under g_frame_lock), not at the start: the system's
-// font is large (Malgun Gothic is 13 MB in memory), and ImGui loads only the glyphs that are drawn.
-static void hangul_font_merge(int language) {
-    if (language != 3 || g_hangul_tried || !g_ui_font) return;
-    g_hangul_tried = true;  // (once: a font that does not load is not read again every frame)
-    if (g_ui_font->IsGlyphInFont(0xD55C)) return;  // (한: a font merged already has Hangul, a mod's MHGU-CJK.ttf say)
-    const char *path = hangul_font_find();
-    if (!path) {
-        LOG("[overlay] No Korean font found (mhgurecomp-kr.otf beside the program, or the system's): Korean shows as boxes\n");
-        return;
+// A system font for a translation, merged the first time the menu is in that language (before a NewFrame, under
+// g_frame_lock), not at the start: a system's font is large (Malgun Gothic is 13 MB in memory), and ImGui loads only
+// the glyphs that are drawn. Not when the menus' font has the glyphs already (the release's, a mod's MHGU-CJK.ttf).
+static void language_font_merge(int language) {
+    if (!g_ui_font) return;
+    struct Script {
+        int language;
+        bool *tried;
+        ImWchar probe;
+        const char *name;
+        FontFile (*find)(void);
+    };
+    static const Script scripts[] = {
+        {2, &g_han_tried, 0x8BBE, "Chinese", han_font_find},       // (设)
+        {3, &g_hangul_tried, 0xD55C, "Korean", hangul_font_find},  // (한)
+    };
+    for (const Script &s : scripts) {
+        if (language != s.language || *s.tried) continue;
+        *s.tried = true;  // (once: a font that does not load is not read again every frame)
+        if (g_ui_font->IsGlyphInFont(s.probe)) return;
+        FontFile f = s.find();
+        if (f.path.empty()) {
+            LOG("[overlay] No %s font found (beside the program, or the system's): %s shows as boxes\n", s.name, s.name);
+            return;
+        }
+        bool ok = font_merge(g_ui_font, f.path.c_str(), f.font_no);
+        LOG("[overlay] %s glyphs from %s%s\n", s.name, f.path.c_str(), ok ? "" : ": the file did not load");
     }
-    ImFontConfig cfg;
-    cfg.MergeMode = true;
-    cfg.DstFont = g_ui_font;
-    ImFont *font = ImGui::GetIO().Fonts->AddFontFromFileTTF(path, g_font_size, &cfg);
-    LOG("[overlay] Korean glyphs from %s%s\n", path, font ? "" : ": the file did not load");
 }
 
 // The context, ImGui's own font and Forge's style at 12 px: from the start (overlay_init_early), Forge's settings
 // once its config is read (overlay_init). (Under g_frame_lock: the loading screen may be drawing.)
-// cjk_font, when it is a file: its Chinese glyphs are merged into the same atlas, for a translated menu.
-static void context_init(const char *font_path, const char *cjk_font, float font_size) {
+// cjk_font: a mod's Chinese font (NULL: the release's), merged into the menus' font for a translated menu. Returns
+// whether font_path loaded.
+static bool context_init(const char *font_path, const char *cjk_font, float font_size) {
     if (!ImGui::GetCurrentContext()) {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
@@ -476,25 +555,30 @@ static void context_init(const char *font_path, const char *cjk_font, float font
     g_font_size = font_size > 0 ? font_size : 12.0f;
     ImFontConfig cfg;
     cfg.SizePixels = g_font_size;
+    std::string cjk = cjk_font ? cjk_font : release_cjk_font();
     ImFont *font = font_path ? io.Fonts->AddFontFromFileTTF(font_path, g_font_size, &cfg) : nullptr;
     if (font) io.FontDefault = font;
-    else if (io.Fonts->Fonts.Size == 0) io.Fonts->AddFontDefaultVector(&cfg);
-    if (cjk_font) {  // (the same size, so the menu's rows keep the height they have in English)
-        ImFontConfig cjk;
-        cjk.SizePixels = g_font_size;
-        cjk.MergeMode = true;
-        cjk.GlyphRanges = io.Fonts->GetGlyphRangesChineseSimplifiedCommon();
-        io.Fonts->AddFontFromFileTTF(cjk_font, g_font_size, &cjk);
-    }
+    // (ImGui's own; again when a mod's Chinese font comes after the release's was merged: the first source that has a
+    // glyph is the one drawn, so the mod's goes into a font of its own)
+    else if (io.Fonts->Fonts.Size == 0 || (!g_ui_cjk.empty() && g_ui_cjk != cjk))
+        io.FontDefault = io.Fonts->AddFontDefaultVector(&cfg);
     ImFont *ui = io.FontDefault ? io.FontDefault : io.Fonts->Fonts[0];
-    if (ui != g_ui_font) g_hangul_tried = false;  // (a new font for the menus: Korean merges into it again, if picked)
+    if (ui != g_ui_font) {  // (a new font for the menus: the translations' glyphs merge into it again)
+        g_ui_cjk.clear();
+        g_han_tried = g_hangul_tried = false;
+    }
     g_ui_font = ui;
+    if (!cjk.empty() && g_ui_cjk.empty()) {
+        if (font_merge(ui, cjk.c_str())) g_ui_cjk = cjk;
+        else LOG("[overlay] Chinese glyphs: %s did not load\n", cjk.c_str());
+    }
     ImGuiStyle style;
     ImGui::StyleColorsDark(&style);
     forge_style(style);
     style.FontSizeBase = g_font_size;
     ImGui::GetStyle() = g_base_style = style;
     g_scale = 0;  // (frame_setup scales it again)
+    return font != nullptr;
 }
 
 void overlay_init_early(void) {
@@ -510,13 +594,12 @@ void overlay_init(const char *font_path, const char *cjk_font, float font_size, 
     return;
 #endif
     std::lock_guard<std::mutex> l(g_frame_lock);
-    context_init(font_path, cjk_font, font_size);
-    bool font = font_path && ImGui::GetIO().FontDefault;
+    bool font = context_init(font_path, cjk_font, font_size);
     g_menu_key = menu_key;
     g_enabled = true;
     LOG("[forge] ImGui %s overlay: %s opens the menu (font %s, %.0f px; Chinese glyphs %s)\n", IMGUI_VERSION,
         SDL_GetScancodeName((SDL_Scancode)menu_key), font ? font_path : "ImGui's", g_font_size,
-        cjk_font ? cjk_font : "none");
+        g_ui_cjk.empty() ? "none" : g_ui_cjk.c_str());
 }
 
 // ------------------------------------------------------------------ notices (any thread -> game thread)
@@ -880,7 +963,7 @@ void overlay_frame(void *cpu) {
     }
     uint32_t w = g_disp_w, h = g_disp_h;
     if (!w || !h) return;
-    hangul_font_merge(settings_panel_language());  // (the menu's language as picked, before Save too)
+    language_font_merge(settings_panel_language());  // (the menu's language as picked, before Save too)
     float scale = frame_setup(io, w, h, now);
     apply_input(io);
 
@@ -1028,7 +1111,7 @@ static bool backend_ready(const OverlayTarget *t) {
 // A frame of its own with only the loading indicator, drawn at once (holding the Vulkan lock and g_frame_lock)
 static void loading_frame(VkCommandBuffer cb, const OverlayTarget *t) {
     uint64_t now = SDL_GetTicksNS();
-    hangul_font_merge(config_language());
+    language_font_merge(config_language());
     float scale = frame_setup(ImGui::GetIO(), t->width, t->height, now);
     ImGui_ImplVulkan_NewFrame();
     ImGui::NewFrame();
