@@ -124,7 +124,7 @@ std::atomic<int> captured_key{-1};
 bool forge_requested;  // the Mods tab's "Open the Forge menu" (game thread, as the rest of the panel)
 const char *tr(const char *text) { return settings_text(s.draft.language, text); }
 // A language's own name in the Language list, or its English one while the menus' font has no glyph for it (no
-// Chinese font found; the Korean one is merged once Korean is picked: runtime/overlay.cpp)
+// release font beside the program: the system's is merged once the language is picked, runtime/overlay.cpp)
 std::string language_name(const char *own, const char *english, ImWchar probe) {
     ImFont *font = ImGui::GetCurrentContext() ? ImGui::GetIO().FontDefault : nullptr;
     if (!font && ImGui::GetCurrentContext() && ImGui::GetIO().Fonts->Fonts.Size) font = ImGui::GetIO().Fonts->Fonts[0];

@@ -1236,13 +1236,43 @@ static void append_missing_sections(const char *path, const char *seen) {
     if (o) fclose(o);
 }
 
+// The settings menu's language for a new player (no mhgurecomp.ini yet): the first of the system's preferred languages
+// the menu has (Chinese for every zh locale: the translation is Simplified Chinese, closer to Traditional than English
+// is), else English. A saved Language always stays. MHGU_LOCALE=<language[-country]> (debug) stands for the system's.
+static int system_language(void) {
+    static const char *const codes[] = {"en", "es", "zh", "ko"};  // (the indices of [Application] Language)
+    const char *env = getenv("MHGU_LOCALE");
+    int count = 0, language = 0;
+    SDL_Locale **locales = env ? NULL : SDL_GetPreferredLocales(&count);
+    for (int i = 0; env ? i < 1 : i < count; i++) {
+        const char *code = env ? env : locales[i]->language;
+        int found = -1;
+        for (int l = 0; l < 4; l++)
+            if (!strncasecmp(code, codes[l], 2) && !isalpha((unsigned char)code[2])) found = l;
+        if (found >= 0) { language = found; break; }
+    }
+    SDL_free(locales);
+    return language;
+}
+
 void config_load(void) {
     char path[1100];
     config_path(path, sizeof path);
     FILE *f = fopen(path, "r");
     if (!f) {
+        // (DEFAULT_INI, with the system's language in place of English when the menu has it)
+        static const char *const names[] = {"English", "Spanish", "中文", "한국어"}, line[] = "\nLanguage = English\n";
+        g_config.language = system_language();
+        const char *at = strstr(DEFAULT_INI, line);
         FILE *o = fopen(path, "w");
-        if (o) { fputs(DEFAULT_INI, o); fclose(o); LOG("[config] wrote the default settings to %s\n", path); }
+        if (o && at) {
+            fprintf(o, "%.*s\nLanguage = %s\n%s", (int)(at - DEFAULT_INI), DEFAULT_INI, names[g_config.language],
+                    at + strlen(line));
+        } else if (o) {
+            fputs(DEFAULT_INI, o);
+            g_config.language = 0;  // (what the file says)
+        }
+        if (o) { fclose(o); LOG("[config] wrote the default settings to %s (menu language %s)\n", path, names[g_config.language]); }
         else LOG("[config] %s is missing and could not be written; using the defaults\n", path);
     } else {
         char buf[512], seen[512] = "|";

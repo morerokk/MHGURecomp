@@ -506,14 +506,14 @@ $(B)/pipelines.list: extras/pipelines.list
 	@mkdir -p $(dir $@)
 	cp $< $@
 
-# The Chinese glyphs of the host menu's translation (runtime/settings_locale.h), which the overlay loads from beside the
-# program (runtime/overlay.cpp): a subset of Noto Sans SC (tools/subset_cjk_font.py), SIL Open Font License 1.1
-# (THIRD_PARTY_NOTICES). Windows and Linux; Android uses the system's Noto Sans CJK.
-CJK_FONT := extras/mhgurecomp-cjk.otf
-$(B)/mhgurecomp-cjk.otf: $(CJK_FONT)
+# The Chinese and Korean glyphs of the host menu's translations (runtime/settings_locale.h), which the overlay loads
+# from beside the program (runtime/overlay.cpp): subsets of Noto Sans SC and KR (tools/subset_cjk_font.py), SIL Open
+# Font License 1.1 (THIRD_PARTY_NOTICES). Windows and Linux; Android uses the system's Noto Sans CJK.
+CJK_FONTS := mhgurecomp-cjk.otf mhgurecomp-kr.otf
+$(B)/mhgurecomp-%.otf: extras/mhgurecomp-%.otf
 	@mkdir -p $(dir $@)
 	cp $< $@
-cjkfont: $(B)/mhgurecomp-cjk.otf
+cjkfont: $(addprefix $(B)/,$(CJK_FONTS))
 
 LICENSE_TXT = $(B)/licenses/LICENSE.txt $(B)/licenses/THIRD_PARTY_NOTICES.txt $(if $(AV_DEPS),$(B)/licenses/FFmpeg.txt) \
               $(if $(SDL_DEPS),$(B)/licenses/SDL3.txt) $(if $(SHADERC_DEPS),$(B)/licenses/shaderc.txt) \
