@@ -9,10 +9,11 @@
 // is down, staggered or trapped (one long action) shows on the other games only once it stands up again.
 //
 // Here the game that runs the monster (+0x7420) looks at the break counts after each update of the monster's hits
-// (0x297ddc, every game calls it for every large monster) and, when one went up, sends the same packed values at once
-// (F_AUX). The others hand them to the same vtable slot, as a later netEmAction would; that netEmAction then finds the
-// counts already there and breaks nothing twice. Resending netEmAction itself would not do: its receive (0x2cc154) ends by
-// setting the action again (0x276154), which would restart the monster's knockdown.
+// (0x297ddc) and, when one went up, sends the same packed values at once (F_AUX). The others hand them to the same
+// vtable slot, as a later netEmAction would; that netEmAction then finds the counts already there and breaks nothing
+// twice. They do it from the collision update (0x36b15c), not 0x297ddc: a game reaches 0x297ddc only for the monsters it
+// runs (the first version waited there, and its packs never went in). Resending netEmAction itself would not do: its
+// receive (0x2cc154) ends by setting the action again (0x276154), which would restart the monster's knockdown.
 //
 // Mixed versions: no change to the link protocol; a game without this drops the message (unknown magic) and shows breaks
 // as the original did. Off in crossplay, like the other port-only features (F_AUX doesn't travel there).
@@ -27,6 +28,8 @@
 
 // Game data (main, v1.4.0; runtime addresses)
 #define FN_EN_APPLY   0x297ddcu   // (monster): this update's hits into its HP, parts, KO, on the game that runs it
+#define FN_COLLISION  0x36b15cu   // the collision manager's update: every game, every update
+#define G_SENEMY      0x1a51fe0u  // sEnemy *: +0x1c: the 10 live enemies of the loaded zone
 #define G_MEMBER      0x1a8ca48u  // +0x30: the local player's slot
 #define EN_INFO       0x1428u     // monster: status block pointer
 #define EN_RUNS       0x7420u     // monster: u8, this game runs it
@@ -125,7 +128,11 @@ static void take_pack(Cpu *c, uint32_t en, uint32_t info, uint16_t id) {
     int left = 0;
     for (int i = 0; i < PENDING; i++) {
         if (!g_in[i].used) continue;
-        if (now - g_in[i].at > STALE_NS) { g_in[i].used = false; continue; }  // (its monster never came)
+        if (now - g_in[i].at > STALE_NS) {  // (its monster never came)
+            g_in[i].used = false;
+            if (g_log) LOG("[partsync] %u from slot %u dropped: monster %u not in this zone\n", g_in[i].m.seq, g_in[i].m.slot, g_in[i].m.id);
+            continue;
+        }
         if (g_in[i].m.id == id) { m = g_in[i].m, got = true, g_in[i].used = false; continue; }
         left++;
     }
@@ -139,9 +146,15 @@ static void take_pack(Cpu *c, uint32_t en, uint32_t info, uint16_t id) {
     }
     bool more = false;
     for (int p = 0; p < N_PARTS; p++) more |= (m.pack[p] >> 12) > LD8(rec(info, p));
-    if (!more) return;  // (a netEmAction brought them first)
-    uint32_t vt = LD32(en), fn = sane(vt) ? LD32(vt + VT_PARTS) : 0;
-    if (!fn) return;
+    if (!more) {  // (a netEmAction brought them first)
+        if (g_log) LOG("[partsync] %u from slot %u: monster %u already has these breaks\n", m.seq, m.slot, id);
+        return;
+    }
+    uint32_t vt = LD32(en), fn = vt >= 0x200000u && !(vt & 3) ? LD32(vt + VT_PARTS) : 0;  // (vtables are in main, not heap)
+    if (!fn) {
+        if (g_log) LOG("[partsync] %u from slot %u dropped: monster %u has no vtable (%08x)\n", m.seq, m.slot, id, vt);
+        return;
+    }
     memcpy(G2H(g_buf), m.pack, sizeof m.pack);
     uint32_t saved[16];
     memcpy(saved, c->r, sizeof saved);
@@ -158,13 +171,29 @@ static void take_pack(Cpu *c, uint32_t en, uint32_t info, uint16_t id) {
     }
 }
 
+// The game that runs a monster: after its update's hits, a new break goes out.
 static void en_apply(Cpu *c) {
     uint32_t en = c->r[0], info = sane(en) ? LD32(en + EN_INFO) : 0;
     uint16_t id = sane(info) ? LD16(info + INFO_ID) : 0xffff;
-    bool large = id < ZAKO_FIRST, on = large && active();
-    if (on && __atomic_load_n(&g_nin, __ATOMIC_ACQUIRE) && !LD8(en + EN_RUNS)) take_pack(c, en, info, id);
+    bool on = id < ZAKO_FIRST && active();
     fnhook_call_next(c, FN_EN_APPLY);
     if (on) check_breaks(en, info, id);
+}
+
+// The other games: 0x297ddc is only reached for a monster this game runs, so waiting packs go in from the collision
+// update (every game, every update, on the game thread), each to the zone's large monster with its id.
+static void collision(Cpu *c) {
+    if (__atomic_load_n(&g_nin, __ATOMIC_ACQUIRE) && active()) {
+        uint32_t sen = LD32(G_SENEMY);
+        for (int k = 0; sane(sen) && k < 10 && __atomic_load_n(&g_nin, __ATOMIC_ACQUIRE); k++) {
+            uint32_t en = LD32(sen + 0x1c + 4u * (uint32_t)k), info = sane(en) ? LD32(en + EN_INFO) : 0;
+            if (!sane(info) || LD8(en + EN_RUNS)) continue;
+            uint16_t id = LD16(info + INFO_ID);
+            if (id < ZAKO_FIRST) take_pack(c, en, info, id);
+        }
+        if (__atomic_load_n(&g_nin, __ATOMIC_ACQUIRE)) take_pack(c, 0, 0, 0xffff);  // (only drops the stale ones)
+    }
+    fnhook_call_next(c, FN_COLLISION);
 }
 
 void partsync_aux_received(const void *data, uint32_t len) {
@@ -187,6 +216,7 @@ void partsync_aux_received(const void *data, uint32_t len) {
     for (int i = 0; i < PENDING; i++) n += g_in[i].used;
     __atomic_store_n(&g_nin, n, __ATOMIC_RELEASE);
     pthread_mutex_unlock(&g_lock);
+    if (g_log) LOG("[partsync] %u from slot %u received: monster %u\n", m.seq, m.slot, m.id);
 }
 
 void partsync_init(void) {
@@ -197,4 +227,5 @@ void partsync_init(void) {
     if (g_off) { LOG("[partsync] off (MHGU_NO_PARTSYNC)\n"); return; }
     g_buf = hle_alloc(32);
     fnhook_set_outer(FN_EN_APPLY, hle_register("partsync:apply", en_apply));
+    fnhook_set_outer(FN_COLLISION, hle_register("partsync:collision", collision));
 }
