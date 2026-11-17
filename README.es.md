@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/images/logo.webp" alt="GU Recomp" width="481"></p>
 
-<p align="center"><a href="README.md">English</a> · <b>Español</b></p>
+<p align="center"><a href="README.md">English</a> · <b>Español</b> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ko.md">한국어</a></p>
 
 <p align="center">
   <a href="https://github.com/morerokk/MHGURecomp/releases/latest"><img src="https://img.shields.io/github/v/release/morerokk/MHGURecomp?style=flat-square&label=versi%C3%B3n&labelColor=1d1e22&color=c58a2e" alt="Última versión"></a>
@@ -30,7 +30,7 @@
 Un port nativo para PC de **Monster Hunter Generations Ultimate** (Nintendo Switch, versión 1.4.0), hecho
 recompilando de forma estática el código ARM de 32 bits del juego a C y ejecutándolo sobre un runtime propio. Los
 servicios del sistema de la Switch y la API gráfica NVN están reimplementados en Windows, Linux y Android, con Vulkan
-para el renderizado. No es un emulador.
+para el renderizado.
 
 > **No se incluyen archivos del juego.** Necesitas tu propia copia del juego, volcada desde tu propia Switch. Este
 > proyecto no explica cómo volcarlo y no proporciona archivos del juego, claves ni enlaces a ellos.
@@ -45,13 +45,17 @@ para el renderizado. No es un emulador.
 | Área | Qué obtienes |
 | --- | --- |
 | **Gráficos** | Resolución, resolución de render (supermuestreo), MSAA, FXAA, escalado FSR 3.1, salida HDR, VSync, mayor distancia de dibujado |
-| **Pantallas** | Cualquier relación de aspecto panorámica (16:10, 16:9 y más ancha), con el HUD centrado o extendido hasta los bordes |
-| **Tasa de fotogramas** | Un límite entre 30 y 240 fps, con correcciones para los fallos de velocidad que tienen los emuladores a fps altos |
-| **Controles** | Casi cualquier mando (a través de SDL), y teclado y ratón con teclas reasignables |
-| **Multijugador** | Salas en línea a través de un servidor alojado, públicas o con una clave de emparejamiento para amigos (menú "Local Wireless"); también LAN e IP directa |
-| **Opciones multijugador** | Monstruos pequeños sincronizados entre jugadores, vida de los monstruos según el número de jugadores, misiones de la Aldea en la Sala, misiones Urgentes completadas para todos |
+| **Pantallas** | Cualquier relación de aspecto panorámica (16:10, 16:9 o más ancha), con opciones para ajustar el HUD en ultrapanorámico |
+| **Tasa de fotogramas** | Cualquier tasa entre 30 y 240 fps, con correcciones para los fallos que GU suele tener en los emuladores a fps altos |
+| **Controles** | Casi cualquier mando funciona (a través de SDL), y también hay soporte nativo para teclado y ratón |
+| **Multijugador** | Juego en línea a través de la función "Local Wireless". Viene con un servidor en línea ya configurado, pero también puedes alojar el tuyo o conectarte directamente con amigos abriendo el puerto 39500 |
+| **Opciones multijugador** | Monstruos pequeños sincronizados entre jugadores, vida de los monstruos ajustable según el número de jugadores, misiones de la Aldea jugables en las Salas multijugador, misiones Urgentes completadas para todos |
 | **Comodidades** | Avanzar rápido las escenas que no se pueden saltar con A, un menú de ajustes de PC dentro del juego (F1 o `Plus`+`Minus`), Discord Rich Presence |
-| **Mods y trucos** | Carpeta `mods` en la que basta con soltarlos, con orden de carga y detección de conflictos, plugins de Forge incluidos ([Mods](#mods)); archivos de trucos de Ryujinx / Atmosphère ([Trucos](#trucos)) |
+| **Compensación de latencia** | Correcciones de red y un netcode mejorado, parecido al de los Monster Hunter más recientes |
+| **Mods** | Casi todos los mods que funcionan en emuladores también funcionan aquí. ¡Y admite plugins de Forge de forma nativa ([Mods](#mods))! |
+| **Códigos de trucos** | Casi todos los códigos de trucos de emulador también funcionan aquí. Ver ([Trucos](#trucos)). |
+
+**Para usar AMD FSR 4, usa este módulo: https://github.com/Huss3A/mhgurecomp-fsr4-module**
 
 ## Requisitos
 
@@ -69,13 +73,15 @@ para el renderizado. No es un emulador.
 - Los archivos del juego de Monster Hunter Generations Ultimate, versión 1.4.0. Puedes extraerlos de tu Switch o de Ryujinx con los parches ya aplicados.
     - (Title ID `0100770008DD8000`; el build ID del ejecutable `main` empieza por `FB08F1D20FD1204F`)
 
+**Para macOS, echa un vistazo al fork de mhvuze: https://github.com/mhvuze/MHGURecomp/releases**
+
 ## Instalación
 
 [Descarga la última versión compilada desde la página de Releases. Asegúrate de descargar el ZIP correcto para tu plataforma.](https://github.com/morerokk/MHGURecomp/releases)
 
-Necesitas las carpetas `exefs` y `romfs` de Monster Hunter Generations Ultimate 1.4.0. Si vienes de Ryujinx, haz clic derecho en el juego (con la actualización 1.4.0 aplicada) y extrae los archivos del juego con los parches ya aplicados.
+Necesitas las carpetas `exefs` y `romfs` de Monster Hunter Generations Ultimate 1.4.0. Si vienes de Ryujinx, haz clic derecho en el juego (con la actualización 1.4.0 aplicada) y extrae los archivos del juego con los parches ya aplicados. Yuzu tiene una función parecida, o puedes usar otras herramientas para extraer los archivos del juego.
 
-Puede que puedas extraerlos con otra herramienta; solo asegúrate de extraer tanto los archivos del juego base como la actualización 1.4.0. Los archivos `exefs` y `romfs` de la actualización se copian encima de los del juego base. Comprueba que la primera subcarpeta se llama `nativeNX` (no `NativeNX`) y que los nombres conservan sus mayúsculas.
+Puede que puedas extraerlos con otra herramienta; solo asegúrate de extraer tanto los archivos del juego base como la actualización 1.4.0. Los archivos `exefs` y `romfs` de la actualización se copian encima de los del juego base.
 
 1. Extrae el zip de la versión donde quieras, por ejemplo en `C:\Games\MHGURecomp\`.
 2. Pon las carpetas `exefs` y `romfs` del juego en la subcarpeta `data`. Debería quedar así:
@@ -184,6 +190,18 @@ Todo está en esa carpeta `files`. Su contenido es el mismo que la carpeta del j
 El menú de ajustes tiene una pestaña **Android** (la última) para lo que los gestores de archivos del dispositivo no
 pueden hacer en `Android/data`:
 
+- **Carpeta de archivos:** guarda los archivos de la app (ajustes, partida, mods, trucos, capturas, `log.txt`,
+  `env.txt`) en una carpeta que elijas en lugar de `Android/data`, para que los gestores de archivos del propio
+  dispositivo puedan abrirlos. La app copia ahí sus archivos (se copian los que faltan; si los de ahí son más antiguos
+  que los de la app, por ejemplo la partida después de jugar en otro sitio, pregunta si reemplazarlos y conserva los
+  reemplazados como `.bak`; no los archivos del juego, que se usan entonces donde están, ni la caché de shaders, que se
+  vuelve a crear) y se cierra; vuelve a iniciarla. Android te pide que permitas el "Acceso a todos los archivos".
+  **Usar la carpeta de la aplicación** los vuelve a copiar a la app, con un diálogo de progreso en ambos casos. La app
+  también lo pregunta una vez en el primer inicio (y después de reinstalarla, que olvida la carpeta: vuelve a elegirla
+  y se usa lo que haya en ella; los archivos del juego que quedaran en la carpeta propia de la app se borran al
+  desinstalar y hay que volver a importarlos). Si la carpeta elegida no se puede usar al iniciar ("Acceso a todos los
+  archivos" desactivado, la carpeta movida o borrada, su unidad desconectada), la app lo dice y ofrece elegirla de
+  nuevo o usar su propia carpeta esa vez; **Usar la carpeta de la aplicación** la olvida entonces para siempre.
 - **Importar partida guardada:** elige los archivos `system` y `system_backup` desde cualquier lugar del dispositivo.
   La app los copia, guarda tu partida actual en `save/save_0.before-import-<fecha>` y se cierra; vuelve a iniciarla
   para jugar. (Por USB también puedes poner tú mismo los dos archivos en `save/save_0/`.)
@@ -217,7 +235,7 @@ nuevo. Desde la versión de PC, copia el contenido de `%APPDATA%\MHGURecomp\save
 cuando, copia `save/save_0/` a tu PC como copia de seguridad.
 
 Las salas públicas por internet en Android se comparten solo con otros jugadores de Android. Para jugar con amigos en
-PC, poned todos la misma clave de emparejamiento (menú de ajustes, En línea).
+PC, poned todos la misma clave de emparejamiento (menú de ajustes, pestaña Red).
 
 Para actualizar, instala el APK nuevo encima del antiguo: tus archivos del juego, partidas y ajustes se conservan.
 **No lo desinstales antes.** Desinstalar borra toda la carpeta `files`, incluidos los archivos del juego y las
@@ -264,7 +282,7 @@ Otras teclas útiles:
 ## Ajustes
 
 El menú de ajustes se abre con F1 en el teclado, o con `Plus`+`Minus` (`Start`+`Select`) en el mando. El menú
-también está en español: Opciones del menú > Idioma.
+también está en español: Opciones del menú > Idioma (los jugadores nuevos con el sistema en español ya lo tienen así).
 
 Todos los ajustes están también en `mhgurecomp.ini`, con un comentario encima de cada uno que lo explica (en inglés).
 Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
@@ -282,6 +300,11 @@ Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
   UltraPerformance), `Sharpness`. FSR sustituye a MSAA y FXAA mientras está activado. Detalles: `docs/FSR-PORT.md`
 - `[Graphics]`: `DrawDistance` (hasta qué distancia se dibuja a la gente en las aldeas y las Salas: 1 = la del juego,
   2 = el doble, 0.5 = la mitad, 0 = sin límite; hasta 10)
+- `[HDR]`: `HDR` (Off / On, Off por defecto: salida HDR10 o scRGB nativa en una pantalla HDR, un port del mod HDR de
+  RenoDX para este juego; activa antes el HDR en los ajustes de pantalla del sistema), `PeakBrightness`,
+  `GameBrightness`, `UIBrightness` (nits), `ToneMapper` (Vanilla / None / RenoDRT), `GammaCorrection` (Off / 2.2 /
+  BT.1886), `Exposure`, `Highlights`, `Shadows`, `Contrast`, `Saturation`, `HighlightSaturation`, `Flare`, `Bloom`,
+  `UnclampedScene`, `HDRFormat` (solo en el ini). Úsalo con FSR desactivado. Detalles: [docs/HDR.md](docs/HDR.md)
 - `[Performance]`: `FPS` (de 30 a 240), `VSync` (On / Off; por encima de la frecuencia de tu monitor, desactiva
   VSync), `ShaderPrewarm` (On / Off: traduce todos los shaders del juego en segundo plano al iniciar, para que menos
   cosas se vean negras la primera vez que aparecen; el primer inicio tarda unos 20 s en ello, durante los logos, y la
@@ -318,7 +341,10 @@ Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
   5.1, como en la salida envolvente de la Switch; 5.1 lo reproduce en un equipo envolvente, Stereo lo reduce a dos
   canales; se aplica al guardar)
 - `[Application]`: `ConfirmExit` (preguntar antes de cerrar la ventana), y para el menú de ajustes `Language`
-  (English / Spanish), `ButtonIcons` (Xbox / Switch / PlayStation), `Theme` (Hunter, el predeterminado / Gold / Blue:
+  (English / Spanish / 中文, chino simplificado / 한국어, coreano; un jugador nuevo recibe el idioma del sistema si es
+  uno de estos, si no, inglés, y un Language guardado siempre se mantiene. Los caracteres chinos y coreanos salen de
+  `mhgurecomp-cjk.otf` y `mhgurecomp-kr.otf`, junto al programa, o si no de las fuentes del sistema (Android: Noto Sans
+  CJK); un mod puede traer la suya como romfs `nativeNX/forge/fonts/MHGU-CJK.ttf`), `ButtonIcons` (Xbox / Switch / PlayStation), `Theme` (Hunter, el predeterminado / Gold / Blue:
   los colores del menú de ajustes) y `MenuScale` (del 50 al 200 por ciento), y `Updates` (Ask / Auto / Off: qué hace
   `mhgurecomp-updater`, ver "Mantenerlo actualizado"). Con el ratón, arrastra la parte de arriba del menú de ajustes
   (sus pestañas) para moverlo, y el agarre de la esquina inferior derecha para cambiar su tamaño; Opciones del menú >
@@ -424,6 +450,9 @@ juego al iniciarlo.
   ..., which an earlier mod changed too"). Los mods se cargan en orden alfabético. Para elegir el orden, crea
   `mods\load_order.txt` con el nombre de una carpeta de mod por línea: entonces solo se cargan los mods de la lista,
   en ese orden. Los archivos combinados se guardan en `cache\arcmerge\`.
+- Se admiten archivos `.arc` parciales (así que también funcionan los `.arc` que solo contienen una entrada que
+  reemplazar). Las entradas se emparejan con las del juego por su nombre interno y su tipo, y la versión del archivo
+  tiene que ser la del juego (17). Un archivo que no contiene ninguna entrada del juego lo sigue reemplazando entero.
 - La pestaña **Mods** del menú de ajustes hace esto sin editar archivos: lista las carpetas de mods, activa o
   desactiva cada una, las sube o las baja, y escribe `mods\load_order.txt` al pulsar Guardar (reinicia para
   aplicarlo; los mods que añadas después también se cargan, detrás de los de la lista, hasta que los desactives; un
@@ -443,6 +472,14 @@ juego al iniciarlo.
   Con mando, el botón que cancela en los menús del juego (cuando no queda nada que cancelar en la ventana de Forge) o
   Start + Back lo cierra. Mientras está abierto, el juego no recibe la entrada del mando. Las posiciones de las ventanas se
   guardan en `forge_imgui.ini`.
+- Para quienes hacen mods: además de la API de Forge, el port da a los mods el ratón: `forge_input_getMouse` (el
+  puntero en la pantalla de 1280x720 y los botones), `forge_input_getMouseMove` (el movimiento, también mientras lo
+  tiene la cámara de la cacería) y `forge_input_setMouseFree` (sin capturarlo mientras el menú propio de un mod está
+  abierto), y las asignaciones de teclas: `forge_input_setKeybind` (otras teclas para una fila de `[Keybinds]` durante
+  un tiempo, sin cambiar los ajustes del jugador), `forge_input_getKeybind`, `forge_input_getModKeybind` (lo que un mod
+  ha puesto para una fila, si lo hay) y `forge_input_getKeyPressed` (la tecla que se acaba de pulsar, por su nombre,
+  para el menú de asignación de teclas propio de un mod). El menú de ajustes muestra qué filas tiene un mod. Ver
+  `runtime/forge.c`.
 - No necesitas mods de resolución, de límite de FPS ni de conexión. Este port ya incluye esas funciones.
 
 **Dónde conseguir mods:**
@@ -476,7 +513,8 @@ su nombre entre corchetes:
 04000000 000DFAB4 E1A00080
 ```
 
-- Activa o desactiva cada truco en el menú de ajustes (F1), en la pestaña Trucos. Se aplica en cuanto pulsas Guardar.
+- Activa o desactiva cada truco en el menú de ajustes (F1), en la pestaña Trucos. Se aplica en cuanto pulsas Guardar. Los
+  archivos de trucos añadidos, editados o borrados cuentan la próxima vez que se abre el menú de ajustes.
 - Para desactivar un archivo sin borrarlo, haz que su nombre empiece por `_`.
 - Los trucos que cambian el código del juego también funcionan, pero por cada uno que uses puede que notes una
   pérdida de rendimiento *muy* pequeña. Para la gran mayoría de códigos no importará.

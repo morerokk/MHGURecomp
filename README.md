@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/images/logo.webp" alt="GU Recomp" width="481"></p>
 
-<p align="center"><b>English</b> · <a href="README.es.md">Español</a></p>
+<p align="center"><b>English</b> · <a href="README.es.md">Español</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ko.md">한국어</a></p>
 
 <p align="center">
   <a href="https://github.com/morerokk/MHGURecomp/releases/latest"><img src="https://img.shields.io/github/v/release/morerokk/MHGURecomp?style=flat-square&label=release&labelColor=1d1e22&color=c58a2e" alt="Latest release"></a>
@@ -221,7 +221,7 @@ contents of `%APPDATA%\MHGURecomp\save\save_0\` (Linux: `~/.local/share/MHGUReco
 use the same files you'd use on PC. Copy `save/save_0/` back to your PC now and then as a backup.
 
 Public internet hubs on Android are shared with other Android players only. To play with friends on PC, all enter the
-same matchmaking key (settings menu, Multiplayer).
+same matchmaking key (settings menu, Network tab).
 
 To update, install the newer APK over the old one: your game files, saves and settings stay. **Don't uninstall it
 first.** Uninstalling deletes the whole `files` folder, game files and saves included. Android may offer to keep the
