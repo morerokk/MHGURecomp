@@ -1378,6 +1378,12 @@ old way while on.
   change picks other samplers (created once, reused; never destroyed). Settings menu Graphics & Audio > Anisotropic filtering.
 - Checked here: control "af 16" turned the four 1x trilinear samplers in quest 101 into 16x, "af 1" took the cached ones
   back; at 16x the camp view looked the same as Off (the ground was already 16x). Not measured: GPU cost on the R9.
+- Only on depth-tested draws (2026-11-17): the loading screen's backdrop showed light vertical seams where its tiles
+  meet, flickering as they scroll (reported at the tile line about a quarter in from the left). The tiles come from one
+  1024x1024 mipmapped atlas through the game's trilinear repeat sampler, slightly minified, and the setting made it 16x.
+  exec.c draw_aniso: a draw without a depth test (HUD, menus, loading screen) keeps the game's own anisotropy; the same
+  sampler still gets the setting on 3D draws (MHGU_SAMPLER_LOG: "used 1" in the loading screen, "used 16" in town).
+  Checked with frames shot every 0.12 s at 16x: before, 3 of 5 loading frames had a seam; after, 0 of 16.
 
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game

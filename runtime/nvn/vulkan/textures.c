@@ -861,11 +861,14 @@ static VkCompareOp compare_op(uint32_t f) {
 // The anisotropy a sampler gets: the game's own, raised to [Graphics] AnisotropicFiltering on mipmapped textures with a
 // linear minifying filter (never lowered; shadow-map compares and point-sampled lookups stay as the game has them), within
 // what the GPU allows. (The game asks for it on very few samplers: in a quest one of about 14 has 16x, the rest 1x.)
-static float sampler_aniso(const NvnSamplerDesc *d) {
+// Not raised for a flat draw (raise false: no depth test, the HUD, menus, the loading screen): a screen-facing picture
+// gains nothing from it, and the loading backdrop's tiles (one 1024x1024 mipmapped atlas through the game's trilinear
+// repeat sampler, slightly minified) showed light seams where they meet with it, flickering as they scroll.
+static float sampler_aniso(const NvnSamplerDesc *d, bool raise) {
     int af = config_live_aniso();
     if (!af) return 1;  // (debug, the control file's "af 0": none at all, to compare)
     float a = d->max_aniso > 1 ? d->max_aniso : 1;
-    if (af > a && (d->min_filter == 3 || d->min_filter == 5) && !d->compare_mode) a = (float)af;
+    if (raise && af > a && (d->min_filter == 3 || d->min_filter == 5) && !d->compare_mode) a = (float)af;
     return fminf(a, g_vk.max_aniso);
 }
 
@@ -882,8 +885,8 @@ static SamplerEntry **sampler_cache;
 static int sampler_count, sampler_cap;
 static VkSampler create_sampler(const NvnSamplerDesc *d, float aniso);
 
-VkSampler vk_sampler(NvnSamplerDesc *d) {
-    float aniso = sampler_aniso(d);
+VkSampler vk_sampler(NvnSamplerDesc *d, bool raise_aniso) {
+    float aniso = sampler_aniso(d, raise_aniso);
     SamplerEntry *e = d->backend;
     if (e && e->aniso == aniso && e->bias == g_fsr_lod_bias) return e->s;
     for (int i = 0; i < sampler_count; i++) {

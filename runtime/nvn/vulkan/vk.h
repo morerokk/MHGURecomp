@@ -184,7 +184,7 @@ VkImageView vk_dummy_view(int textype);
 TexBackend *vk_tex_ms(TexBackend *b, uint32_t samples);  // b's multisampled companion (created on first use)
 TexBackend *vk_tex_ms_readable(TexBackend *m);  // a sampled copy for its resolve
 void vk_ms_resolve(TexBackend *b);  // (exec.c) b up to date with its multisampled companion before b is read
-VkSampler vk_sampler(NvnSamplerDesc *d);
+VkSampler vk_sampler(NvnSamplerDesc *d, bool raise_aniso);  // raise_aniso: [Graphics] AnisotropicFiltering applies (3D draws)
 VkSampler vk_default_sampler(bool linear);
 void vk_image_init_layout(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect);
 // Destruction once every submission that may use the object has completed.
