@@ -526,7 +526,7 @@ static bool notice_due(uint64_t now);
 
 void overlay_tick(void) {
     if (g_forge_frames || (!g_enabled && !notice_due(SDL_GetTicksNS()))) return;
-    if (!g_enabled) overlay_init(nullptr, 0, 0);  // (ImGui's own font; no menu)
+    if (!g_enabled) overlay_init(nullptr, nullptr, 0, 0);  // (ImGui's own font; no menu)
     overlay_frame(nullptr);
 }
 
