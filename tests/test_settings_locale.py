@@ -111,7 +111,8 @@ class SettingsLocaleTest(unittest.TestCase):
         unchanged = {"English", "Español", "中文", "한국어", "Chinese", "Korean", "Xbox", "Switch", "PlayStation",
                      "FSR", "MSAA", "FXAA", "Discord", "Settings##main", "Settings##dropdown", "Settings##bind",
                      "A", "B", "X", "Y", "L", "R", "ZL", "ZR",
-                     "Default: "}  # (a language's own name, the Switch buttons' keybinds, a help line's prefix)
+                     "Default: ",
+                     "MHGU Player"}  # (a language's own name, the Switch buttons' keybinds, a help line's prefix, the room name others see)
         visible = {text for text in literals(source) if text and
                    (text[0].isupper() or " " in text) and any(c.isalpha() for c in text)}
         self.assertFalse(visible - set(keys) - unchanged,

@@ -387,6 +387,11 @@ bool equal(const Config &a, const Config &b) {
     SAME(sync_small_monsters);
     SAME(lag_compensation);
     SAME(ldn_direct);
+    SAME(ldn_ryu_serve);
+    SAME(ldn_ryu_serve_port);
+    SAME(ldn_room_serve);
+    SAME(ldn_room_serve_port);
+    SAME(ldn_room_host);
     SAME(bonus_content);
     SAME(village_in_hub);
     SAME(quest_hold_send);
@@ -424,6 +429,10 @@ bool equal(const Config &a, const Config &b) {
         return false;
     if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key) ||
         strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.save_location, b.save_location) || strcmp(a.game_dir, b.game_dir))
+        return false;
+    if (strcmp(a.ldn_ryu_servers, b.ldn_ryu_servers) || strcmp(a.ldn_ryu_host, b.ldn_ryu_host) ||
+        strcmp(a.ldn_ryu_pass, b.ldn_ryu_pass) || strcmp(a.ldn_room_server, b.ldn_room_server) ||
+        strcmp(a.ldn_room_pass, b.ldn_room_pass) || strcmp(a.ldn_room_nick, b.ldn_room_nick))
         return false;
     for (int n = 0; n < 4; ++n)
         if (a.hp.scale[n] != b.hp.scale[n])
@@ -1716,6 +1725,17 @@ void reset_section() {
         SDL_strlcpy(c.ldn_server, f.ldn_server, sizeof c.ldn_server);
         SDL_strlcpy(c.ldn_key, f.ldn_key, sizeof c.ldn_key);
         c.ldn_direct = f.ldn_direct;
+        c.ldn_ryu_serve = f.ldn_ryu_serve;
+        c.ldn_ryu_serve_port = f.ldn_ryu_serve_port;
+        c.ldn_room_serve = f.ldn_room_serve;
+        c.ldn_room_serve_port = f.ldn_room_serve_port;
+        c.ldn_room_host = f.ldn_room_host;
+        SDL_strlcpy(c.ldn_ryu_servers, f.ldn_ryu_servers, sizeof c.ldn_ryu_servers);
+        SDL_strlcpy(c.ldn_ryu_host, f.ldn_ryu_host, sizeof c.ldn_ryu_host);
+        SDL_strlcpy(c.ldn_ryu_pass, f.ldn_ryu_pass, sizeof c.ldn_ryu_pass);
+        SDL_strlcpy(c.ldn_room_server, f.ldn_room_server, sizeof c.ldn_room_server);
+        SDL_strlcpy(c.ldn_room_pass, f.ldn_room_pass, sizeof c.ldn_room_pass);
+        SDL_strlcpy(c.ldn_room_nick, f.ldn_room_nick, sizeof c.ldn_room_nick);
         break;
     case 4:
         c.sync_small_monsters = f.sync_small_monsters;
@@ -2168,6 +2188,43 @@ std::vector<Row> main_rows() {
         hub_check(r);
         add_bool(r, "direct", "Direct connections", &c.ldn_direct, ini("Direct"));
         r.back().help = tr("In an internet hub, your game and the host's send their packets straight to each other when both routers let them, for a lower ping; else through the hub server. The other player's game then sees your IP address. Off: always through the hub server.");
+        // (all of them take effect at the next start: config.c marks them restart)
+        header(r, "crossplay.header", tr("Emulator Crossplay"));
+        add_bool(r, "ryu.serve", "Host for Ryujinx players", &c.ldn_ryu_serve, ini("RyuServe"));
+        r.back().help = tr("While local play is open, this game runs a Ryujinx LDN server itself. Ryujinx and Ryubing players set their LDN server to this PC's address and the port below, then search for hubs in Local Play. Hubs you create are made on it. For the internet, forward the port (TCP) or use a VPN such as Radmin.");
+        if (c.ldn_ryu_serve) {
+            number(r, "ryu.serve.port", "Ryujinx server port (TCP)", &c.ldn_ryu_serve_port, 1, (int)hi("RyuServePort"), 1,
+                   ini("RyuServePort"));
+            r.back().help = tr("The port Ryujinx players connect to. Default: 30456, the one Ryujinx's own LDN server uses.");
+        }
+        add_bool(r, "room.serve", "Host for suyu / Eden / Citron players", &c.ldn_room_serve, ini("RoomServe"));
+        r.back().help = tr("While local play is open, this game runs a multiplayer room itself. suyu, yuzu, Eden and Citron players join a room at this PC's address and the port below, with the room password if there is one. Hubs you create are shared with the room, and with Ryujinx players too when both are on. For the internet, forward the port (UDP) or use a VPN.");
+        if (c.ldn_room_serve) {
+            number(r, "room.serve.port", "Room port (UDP)", &c.ldn_room_serve_port, 1, (int)hi("RoomServePort"), 1,
+                   ini("RoomServePort"));
+            r.back().help = tr("The port room players connect to. Default: 24872, the multiplayer rooms' usual port.");
+        }
+        text(r, "room.pass", "Room password", c.ldn_room_pass, sizeof c.ldn_room_pass,
+             *c.ldn_room_pass ? std::string(strlen(c.ldn_room_pass), '*') : std::string(tr("None")), ini("RoomPassword"));
+        r.back().help = tr("The password of the room this game hosts, or of the room server below that it joins. Empty: no password.");
+        text(r, "ryu.pass", "Ryujinx passphrase", c.ldn_ryu_pass, sizeof c.ldn_ryu_pass,
+             *c.ldn_ryu_pass ? c.ldn_ryu_pass : tr("Public"), ini("RyuPassphrase"));
+        r.back().help = tr("For a private group with Ryujinx players: Ryujinx- followed by exactly 8 hex digits (for example Ryujinx-1a2b3c4d), the same one the Ryujinx players enter. Anything else, a typo too, counts as none: your lobbies are public.");
+        text(r, "ryu.servers", "Ryujinx servers to search", c.ldn_ryu_servers, sizeof c.ldn_ryu_servers,
+             *c.ldn_ryu_servers ? c.ldn_ryu_servers : tr("None"), ini("RyuServers"));
+        r.back().help = tr("Ryujinx LDN servers whose hubs show up in Search Hubs, as host or host:port (default port 30456), separated by commas. To join a player on this port who hosts with Ryujinx players, enter their address. Please don't use Ryujinx's own public server.");
+        text(r, "ryu.host", "Ryujinx server for your hubs", c.ldn_ryu_host, sizeof c.ldn_ryu_host,
+             *c.ldn_ryu_host ? std::string(c.ldn_ryu_host) : std::string(tr(c.ldn_ryu_serve ? "This PC" : "None")),
+             ini("RyuHost"));
+        r.back().help = tr("A Ryujinx LDN server that hubs you create are made on, so Ryujinx players on it can join them. Not needed when this game hosts for Ryujinx players itself.");
+        text(r, "room.server", "Room server", c.ldn_room_server, sizeof c.ldn_room_server,
+             *c.ldn_room_server ? c.ldn_room_server : tr("None"), ini("RoomServer"));
+        r.back().help = tr("A suyu-style multiplayer room (host or host:port, default port 24872) this game joins while local play is open: the emulator players' hubs show up in Search Hubs.");
+        add_bool(r, "room.host", "Host hubs in the room", &c.ldn_room_host, ini("RoomHost"));
+        r.back().help = tr("Hubs you create live in the room server above, so its players can search and join them. Not needed when this game hosts the room itself.");
+        text(r, "room.name", "Name in the room", c.ldn_room_nick, sizeof c.ldn_room_nick,
+             *c.ldn_room_nick ? c.ldn_room_nick : "MHGU Player", ini("RoomName"));
+        r.back().help = tr("Your name in the room server above.");
         header(r, "discord.header", "Discord");
         add_bool(r, "discord", "Discord Rich Presence", &c.discord, ini("RichPresence"));
         add_bool(r, "discord.hunter", "Show hunter name and HR", &c.discord_hunter, ini("ShowHunter"));

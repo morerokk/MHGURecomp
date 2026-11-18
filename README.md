@@ -348,7 +348,7 @@ Choose the "Local Wireless" multiplayer options, as this port pretends to be a l
 You can also play with people on Ryujinx / Ryubing, and on suyu, yuzu, Eden, Citron and the other forks that kept their multiplayer rooms. This is still experimental: it has been tested against the emulators' server software, but not yet in real hunts with real emulator players. Please [open an issue](https://github.com/morerokk/MHGURecomp/issues/new/choose) with your `log.txt` if something goes wrong.
 
 Some things to know first:
-- Crossplay is set up in `mhgurecomp.ini`, under `[Multiplayer]`, not in the F1 menu. If your .ini is from an older version and doesn't have the settings below yet, just add them.
+- Crossplay is set up in the F1 menu, on the Network page under Emulator Crossplay, or in `mhgurecomp.ini` under `[Multiplayer]` (the settings below). Changes take effect after a restart.
 - Everyone needs game version 1.4.0, the emulator players too.
 - This port's extras (small monster sync, HP scaling) are off in a hub with emulator players: only players on this port understand them.
 

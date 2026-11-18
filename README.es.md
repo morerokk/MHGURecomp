@@ -382,8 +382,8 @@ no en cacerías reales con jugadores reales de emuladores. Si algo falla, [abre 
 issue](https://github.com/morerokk/MHGURecomp/issues/new/choose) con tu `log.txt`.
 
 Antes de nada:
-- El juego cruzado se configura en `mhgurecomp.ini`, en `[Multiplayer]`, no en el menú F1. Si tu .ini es de una versión
-  anterior y aún no tiene los ajustes de abajo, añádelos tú.
+- El juego cruzado se configura en el menú F1, en la página Red, bajo Juego cruzado con emuladores, o en `mhgurecomp.ini`,
+  en `[Multiplayer]` (los ajustes de abajo). Los cambios se aplican tras reiniciar.
 - Todos necesitan la versión 1.4.0 del juego, también los jugadores de emuladores.
 - Los extras de este port (sincronizar monstruos pequeños, escalar la vida) se desactivan en una sala con jugadores de
   emuladores: solo los jugadores de este port los entienden.
