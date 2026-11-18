@@ -62,7 +62,7 @@ const (
 	errNotFound = 1 // no such hub (or not for this key / version)
 	errNoAnswer = 2 // the host did not take the player
 	errBusy     = 3 // a limit was reached
-	errVersion  = 4 // server protocol mismatch, or a link protocol older than Config.MinProto
+	errVersion  = 4 // server protocol mismatch, or a link protocol older than Config.MinProto or newer than Config.MaxProto
 	errBadReq   = 5
 
 	udpMagic  = "MHGR"
@@ -111,6 +111,9 @@ type Config struct {
 	PingEvery     time.Duration
 	// The two settings that can change while the server runs (Server.Apply): their values at the start.
 	MinProto uint16 // the oldest link protocol (PROTO_VERSION) served; older games get errVersion (0: any)
+	// the newest link protocol served; newer ones get errVersion (0: any). Other ports that borrow this server under
+	// a link protocol of their own (MH Rise's sends 0x5201) are above it, as long as MHGURecomp's stays below it.
+	MaxProto uint16
 	// Android's public hubs (the game sends the key "public-phone" when it has none) in a room of their own, as the
 	// game asks; false: that room is the public room, so phones and PCs without a key see each other's hubs
 	SeparatePhones bool
@@ -121,7 +124,7 @@ func DefaultConfig() Config {
 	return Config{
 		Addr: ":39510", MaxConns: 4000, MaxConnsPerIP: 24, MaxHubs: 2000, MaxHubsPerIP: 4, ListMax: 18, ListSearchMax: 6,
 		ReqRate: 2, ReqBurst: 15, Bandwidth: 1 << 20, HandshakeTime: 10 * time.Second, PingEvery: 15 * time.Second,
-		SeparatePhones: true,
+		MaxProto: 100, SeparatePhones: true,
 	}
 }
 
@@ -170,8 +173,9 @@ type Server struct {
 	conns   int
 	ln      *net.TCPListener
 	udp     *net.UDPConn
-	// the live settings (Apply): cfg.MinProto and cfg.SeparatePhones are only their first values
+	// the live settings (Apply): cfg.MinProto, cfg.MaxProto and cfg.SeparatePhones are only their first values
 	minProto atomic.Uint32
+	maxProto atomic.Uint32
 	separate atomic.Bool
 }
 
@@ -179,6 +183,7 @@ func NewServer(cfg Config) *Server {
 	s := &Server{cfg: cfg, hubs: map[uint64]*hub{}, pending: map[uint64]*pending{}, pairs: map[uint32]*pair{},
 		ips: map[string]*ipState{}}
 	s.minProto.Store(uint32(cfg.MinProto))
+	s.maxProto.Store(uint32(cfg.MaxProto))
 	s.separate.Store(cfg.SeparatePhones)
 	return s
 }
@@ -186,26 +191,33 @@ func NewServer(cfg Config) *Server {
 // Settings: what can change while the server runs.
 type Settings struct {
 	MinProto       uint16
+	MaxProto       uint16 // 0: no newest
 	SeparatePhones bool
 }
 
-func (s *Server) Settings() Settings {
-	return Settings{uint16(s.minProto.Load()), s.separate.Load()}
+// serves: whether games of this link protocol are served (MinProto up to MaxProto).
+func (st Settings) serves(proto uint16) bool {
+	return proto >= st.MinProto && (st.MaxProto == 0 || proto <= st.MaxProto)
 }
 
-// Apply changes the settings without a restart; open connections stay. A higher MinProto refuses older games from the
-// next request on and takes their hubs off the list: their hosts' connections here are closed (the game tries again
-// and is told the server runs another version), while players already in such a hub play on through the relay until
-// they leave. SeparatePhones applies to every search and join from now on, to the hubs already listed too (no host
-// has to reconnect). Returns how many hubs were taken off.
+func (s *Server) Settings() Settings {
+	return Settings{uint16(s.minProto.Load()), uint16(s.maxProto.Load()), s.separate.Load()}
+}
+
+// Apply changes the settings without a restart; open connections stay. A higher MinProto or a lower MaxProto refuses
+// the games left out from the next request on and takes their hubs off the list: their hosts' connections here are
+// closed (the game tries again and is told the server runs another version), while players already in such a hub
+// play on through the relay until they leave. SeparatePhones applies to every search and join from now on, to the hubs
+// already listed too (no host has to reconnect). Returns how many hubs were taken off.
 func (s *Server) Apply(n Settings) int {
 	old := s.Settings()
 	s.minProto.Store(uint32(n.MinProto))
+	s.maxProto.Store(uint32(n.MaxProto))
 	s.separate.Store(n.SeparatePhones)
 	var gone []*net.TCPConn
 	s.mu.Lock()
 	for _, h := range s.hubs {
-		if h.proto < n.MinProto {
+		if !n.serves(h.proto) {
 			gone = append(gone, h.conn)
 		}
 	}
@@ -214,8 +226,9 @@ func (s *Server) Apply(n Settings) int {
 		c.Close()
 	}
 	if old != n {
-		log.Printf("settings: min-proto %d -> %d, separate-phones %v -> %v (%d hub(s) of older games taken off)",
-			old.MinProto, n.MinProto, old.SeparatePhones, n.SeparatePhones, len(gone))
+		log.Printf("settings: min-proto %d -> %d, max-proto %d -> %d, separate-phones %v -> %v (%d hub(s) of games no "+
+			"longer served taken off)", old.MinProto, n.MinProto, old.MaxProto, n.MaxProto, old.SeparatePhones,
+			n.SeparatePhones, len(gone))
 	}
 	return len(gone)
 }
@@ -425,7 +438,7 @@ func (s *Server) handle(c *net.TCPConn) {
 	proto := binary.LittleEndian.Uint16(p[6:])
 	var room [16]byte
 	copy(room[:], p[8:24])
-	if uint32(proto) < s.minProto.Load() { // (the game: "the hub server runs another version", LAN / Join hubs only)
+	if !s.Settings().serves(proto) { // (the game: "the hub server runs another version", LAN / Join hubs only)
 		if t == tHost {
 			s.vlog("hub refused (protocol %d, %s)", proto, roomName(room))
 		}
@@ -557,7 +570,7 @@ func (s *Server) host(c *net.TCPConn, ip string, proto uint16, room [16]byte, in
 		done: make(chan struct{})}
 	copy(h.info[:], info)
 	s.mu.Lock()
-	if uint32(proto) < s.minProto.Load() { // (Apply raised it since handle checked: Apply's sweep may have run already)
+	if !s.Settings().serves(proto) { // (Apply changed them since handle checked: Apply's sweep may have run already)
 		s.mu.Unlock()
 		sendError(c, errVersion)
 		return

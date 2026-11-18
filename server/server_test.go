@@ -142,6 +142,48 @@ func TestMinProto(t *testing.T) {
 	}
 }
 
+// MaxProto: by default (100) a nonsensical protocol is refused for every request, MHGURecomp's
+// protocols up to 100 are served, and 0 serves any. Lowering it while the server runs takes the newer hubs off.
+func TestMaxProto(t *testing.T) {
+	const rise = 0x5201
+	s := start(t, nil)
+	for _, r := range []struct {
+		typ  byte
+		body []byte
+	}{{tList, nil}, {tHost, testInfo(1)}, {tJoin, u64(1)}, {tAttach, u64(1)}} {
+		c := dial(t, s)
+		send(t, c, r.typ, header(rise, 0), r.body)
+		if code := binary.LittleEndian.Uint32(expect(t, c, tError)); code != errVersion {
+			t.Fatalf("request %d: error %d", r.typ, code)
+		}
+	}
+	for _, p := range []uint16{3, 100} {
+		c := dial(t, s)
+		send(t, c, tHost, header(p, 0), testInfo(1))
+		id := binary.LittleEndian.Uint64(expect(t, c, tHosted))
+		if l := list(t, s, p, 0); len(l) != 1 || l[id] == nil {
+			t.Fatalf("protocol %d list %v", p, l)
+		}
+	}
+
+	open := start(t, func(c *Config) { c.MaxProto = 0 })
+	c := dial(t, open)
+	send(t, c, tHost, header(rise, 0), testInfo(1))
+	expect(t, c, tHosted)
+
+	if n := s.Apply(Settings{MinProto: 0, MaxProto: 50, SeparatePhones: true}); n != 1 {
+		t.Fatalf("max-proto 50 took off %d hub(s)", n)
+	}
+	if l := list(t, s, 3, 0); len(l) != 1 {
+		t.Fatalf("protocol 3 hub gone too: %v", l)
+	}
+	c = dial(t, s)
+	send(t, c, tList, header(100, 0))
+	if code := binary.LittleEndian.Uint32(expect(t, c, tError)); code != errVersion {
+		t.Fatalf("protocol 100 search after max-proto 50: error %d", code)
+	}
+}
+
 // SeparatePhones: Android's public room (key "public-phone") is a room of its own by default; turned off, it is the
 // public room for hosting, searching and joining alike, and keyed rooms stay apart.
 func TestSeparatePhones(t *testing.T) {
@@ -265,7 +307,7 @@ func TestApply(t *testing.T) {
 	if l := listIn(3, phoneRoom); len(l) != 1 || !l[phone3] {
 		t.Fatalf("apart again: phones see %v", l)
 	}
-	if got := s.Settings(); got != (Settings{3, true}) {
+	if got := s.Settings(); got != (Settings{3, 0, true}) {
 		t.Fatalf("Settings() = %+v", got)
 	}
 }
@@ -281,13 +323,20 @@ func TestReadSettings(t *testing.T) {
 	}
 	flags := Settings{MinProto: 2, SeparatePhones: true}
 	st, err := readSettings(write("# comment\n\nmin-proto = 3   # from Sunday\r\nSeparate-Phones=Off\n"), flags)
-	if err != nil || st != (Settings{3, false}) {
+	if err != nil || st != (Settings{3, 0, false}) {
 		t.Fatalf("%+v, %v", st, err)
 	}
-	if st, err = readSettings(write("separate-phones = on\n"), Settings{4, false}); err != nil || st != (Settings{4, true}) {
+	if st, err = readSettings(write("separate-phones = on\n"), Settings{4, 100, false}); err != nil || st != (Settings{4, 100, true}) {
 		t.Fatalf("a key left out keeps the flag's value: %+v, %v", st, err)
 	}
-	for _, bad := range []string{"min-proto = three\n", "min-proto = 70000\n", "separate-phones = maybe\n", "min-proto\n", "port = 1\n"} {
+	if st, err = readSettings(write("max-proto = 50\nmin-proto = 3\n"), Settings{0, 100, true}); err != nil || st != (Settings{3, 50, true}) {
+		t.Fatalf("max-proto: %+v, %v", st, err)
+	}
+	if st, err = readSettings(write("max-proto = 0\n"), Settings{3, 100, true}); err != nil || st != (Settings{3, 0, true}) {
+		t.Fatalf("max-proto 0: %+v, %v", st, err)
+	}
+	for _, bad := range []string{"min-proto = three\n", "min-proto = 70000\n", "separate-phones = maybe\n", "min-proto\n", "port = 1\n",
+		"max-proto = -1\n", "max-proto = 70000\n", "max-proto = 1\n" /* below the flags' min-proto 2 */, "min-proto = 5\nmax-proto = 4\n"} {
 		if st, err := readSettings(write(bad), flags); err == nil || st != flags {
 			t.Errorf("%q: %+v, %v (want an error and the flags' values)", bad, st, err)
 		}

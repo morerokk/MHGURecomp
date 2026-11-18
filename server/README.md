@@ -47,28 +47,32 @@ Open the port for **TCP and UDP** in the firewall (and forward it, if the server
 | `-list-search-max` | 6 | Hunter Search networks in one search answer, after the hubs. With Hunter Search on, the game hosts a 2-player network for ~10 s between its searches, over and over; the server tells them from hubs (0xFF at advertise byte 0x1C, where hubs have 1, 2-player hubs too) and gives them places of their own, so they never take a hub's place in Join Hub. The game scans for 24: 18 hubs, and 6 for its Hunter Search list. Picked and sorted like the hubs |
 | `-bandwidth` | 1048576 | bytes a second per player link and direction (a hub uses far less) |
 | `-min-proto` | 0 | the oldest link protocol (the game's `PROTO_VERSION`, runtime/net/ldn.c) served: older games are refused, and they say "The hub server runs another version" and show only LAN / Join hubs. `-min-proto 3` refuses 0.14.2 and older. 0: any version. Can change while the server runs (`-settings`) |
+| `-max-proto` | 100 | the newest link protocol served: newer ones are refused the same way. 0: no newest. Can change while the server runs (`-settings`) |
 | `-separate-phones` | on | Android players without a matchmaking key get public hubs of their own: the game sends the key `public-phone` then, and this server keeps that room apart, so phones and PCs don't see each other's public hubs. `-separate-phones=false` makes it the public room: everyone without a key sees everyone's hubs. Keyed rooms are not affected either way. Can change while the server runs (`-settings`) |
-| `-settings` | none | a settings file for the two above, read at the start and again on SIGHUP: see below. Its values win over the flags'; a setting it leaves out keeps the flag's |
-| `-v` | off | log hubs and joins (never IP addresses): each hub with its link protocol and room, and hubs refused by `-min-proto` |
+| `-settings` | none | a settings file for the three above, read at the start and again on SIGHUP: see below. Its values win over the flags'; a setting it leaves out keeps the flag's |
+| `-v` | off | log hubs and joins (never IP addresses): each hub with its link protocol and room, and hubs refused by `-min-proto` or `-max-proto` |
 
 ### Changing settings while the server runs
 
-`-min-proto` and `-separate-phones` can change without a restart, so no hub or game is dropped. Put them in a file:
+`-min-proto`, `-max-proto` and `-separate-phones` can change without a restart, so no hub or game is dropped. Put
+them in a file:
 
 ```
 # /etc/mhgurecomp-hubserver.conf
 min-proto = 3          # a number; 0: any version
+max-proto = 100        # a number; 0: no newest
 separate-phones = on   # on / off
 ```
 
 start the server with `-settings /etc/mhgurecomp-hubserver.conf`, and after editing the file send it SIGHUP
 (`systemctl reload mhgurecomp-hubserver` with the unit below, or `kill -HUP <pid>`). The log says what changed. A
-file that can't be read or has a mistake (an unknown key, a bad value) changes nothing and the log says why; at the
+file that can't be read or has a mistake (an unknown key, a bad value, a `max-proto` below `min-proto`) changes nothing and the log says why; at the
 start it stops the server instead. Windows has no SIGHUP: there the file is only read at the start.
 
 - A higher `min-proto` refuses older games from the next request on and takes their hubs off the list: the server
   closes those hosts' connections, and their games try again and say the server runs another version. Players already
   in such a hub play on through the relay until they leave it. A lower one lets those games back in at once.
+  `max-proto` works the same way from the other end: a lower one takes newer protocols' hubs off.
 - `separate-phones` applies to every search and join from then on, to the hubs already listed too: nobody reconnects.
 
 With Docker: `docker build -t mhgurecomp-hubserver server` and

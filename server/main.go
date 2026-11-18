@@ -23,21 +23,28 @@ func main() {
 	flag.IntVar(&cfg.ListSearchMax, "list-search-max", cfg.ListSearchMax, "Hunter Search networks in one search answer, after the hubs (a random choice when there are more)")
 	flag.Float64Var(&cfg.Bandwidth, "bandwidth", cfg.Bandwidth, "bytes a second per player link and direction")
 	minProto := flag.Uint("min-proto", uint(cfg.MinProto), "oldest link protocol (the game's PROTO_VERSION) served; older games are refused (0: any)")
+	maxProto := flag.Uint("max-proto", uint(cfg.MaxProto), "newest link protocol served; newer ones are refused (0: any)")
 	flag.BoolVar(&cfg.SeparatePhones, "separate-phones", cfg.SeparatePhones, "public hubs of Android players among Android players only, as the game asks (-separate-phones=false: one public room for all)")
-	settings := flag.String("settings", "", "file with min-proto and separate-phones, read at the start and again on SIGHUP (systemctl reload): they change without a restart; the file wins over the flags")
+	settings := flag.String("settings", "", "file with min-proto, max-proto and separate-phones, read at the start and again on SIGHUP (systemctl reload): they change without a restart; the file wins over the flags")
 	flag.BoolVar(&cfg.Verbose, "v", false, "log hubs and joins (never IP addresses)")
 	flag.Parse()
 	if *minProto > 0xFFFF {
 		log.Fatalf("-min-proto %d: at most 65535", *minProto)
 	}
-	cfg.MinProto = uint16(*minProto)
-	flags := Settings{cfg.MinProto, cfg.SeparatePhones}
+	if *maxProto > 0xFFFF {
+		log.Fatalf("-max-proto %d: at most 65535", *maxProto)
+	}
+	cfg.MinProto, cfg.MaxProto = uint16(*minProto), uint16(*maxProto)
+	flags := Settings{cfg.MinProto, cfg.MaxProto, cfg.SeparatePhones}
 	if *settings != "" {
 		st, err := readSettings(*settings, flags)
 		if err != nil {
 			log.Fatal(err)
 		}
-		cfg.MinProto, cfg.SeparatePhones = st.MinProto, st.SeparatePhones
+		cfg.MinProto, cfg.MaxProto, cfg.SeparatePhones = st.MinProto, st.MaxProto, st.SeparatePhones
+	}
+	if err := checkProtos(Settings{cfg.MinProto, cfg.MaxProto, cfg.SeparatePhones}); err != nil {
+		log.Fatal(err)
 	}
 	s := NewServer(cfg)
 	if err := s.Listen(); err != nil {
@@ -46,6 +53,9 @@ func main() {
 	log.Printf("MHGURecomp hub server on %s (TCP and UDP)", s.Addr())
 	if cfg.MinProto > 0 {
 		log.Printf("refusing games older than link protocol %d", cfg.MinProto)
+	}
+	if cfg.MaxProto > 0 {
+		log.Printf("refusing link protocols newer than %d", cfg.MaxProto)
 	}
 	if !cfg.SeparatePhones {
 		log.Printf("one public room: Android players' public hubs are listed with everyone's")
@@ -67,16 +77,25 @@ func reloadOnHangup(s *Server, path string, flags Settings) {
 		case err != nil:
 			log.Printf("settings unchanged: %v", err)
 		case st == s.Settings():
-			log.Printf("settings unchanged: %s has the same ones (min-proto %d, separate-phones %v)", path, st.MinProto,
-				st.SeparatePhones)
+			log.Printf("settings unchanged: %s has the same ones (min-proto %d, max-proto %d, separate-phones %v)", path,
+				st.MinProto, st.MaxProto, st.SeparatePhones)
 		default:
 			s.Apply(st)
 		}
 	}
 }
 
-// readSettings reads "key = value" lines ('#' starts a comment): min-proto (a number, 0: any) and separate-phones
-// (on / off). A key the file leaves out keeps the flag's value (flags). An unknown key or a bad value is an error.
+// checkProtos: a max-proto below min-proto would refuse every game.
+func checkProtos(st Settings) error {
+	if st.MaxProto != 0 && st.MaxProto < st.MinProto {
+		return fmt.Errorf("max-proto %d is below min-proto %d: every game would be refused", st.MaxProto, st.MinProto)
+	}
+	return nil
+}
+
+// readSettings reads "key = value" lines ('#' starts a comment): min-proto and max-proto (numbers, 0: any) and
+// separate-phones (on / off). A key the file leaves out keeps the flag's value (flags). An unknown key, a bad value or
+// a max-proto below min-proto is an error.
 func readSettings(path string, flags Settings) (Settings, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -92,15 +111,19 @@ func readSettings(path string, flags Settings) (Settings, error) {
 		if !ok && k == "" {
 			continue
 		}
-		bad := fmt.Errorf("%s line %d: %q (min-proto = <number> or separate-phones = on / off)", path, n,
-			strings.TrimSpace(line))
+		bad := fmt.Errorf("%s line %d: %q (min-proto = <number>, max-proto = <number> or separate-phones = on / off)",
+			path, n, strings.TrimSpace(line))
 		switch k {
-		case "min-proto":
+		case "min-proto", "max-proto":
 			p, err := strconv.ParseUint(v, 10, 16)
 			if !ok || err != nil {
 				return flags, bad
 			}
-			st.MinProto = uint16(p)
+			if k == "min-proto" {
+				st.MinProto = uint16(p)
+			} else {
+				st.MaxProto = uint16(p)
+			}
 		case "separate-phones":
 			switch v {
 			case "on", "true", "yes", "1":
@@ -116,6 +139,9 @@ func readSettings(path string, flags Settings) (Settings, error) {
 	}
 	if err := sc.Err(); err != nil {
 		return flags, err
+	}
+	if err := checkProtos(st); err != nil {
+		return flags, fmt.Errorf("%s: %v", path, err)
 	}
 	return st, nil
 }
