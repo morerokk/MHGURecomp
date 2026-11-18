@@ -70,6 +70,7 @@ bool shader_prewarm_progress(uint64_t *done, uint64_t *total);  // (runtime/nvn/
 bool shader_warmup_progress(uint64_t *done, uint64_t *total);   // (the same: MoltenVK's Metal warm-up)
 bool romfs_mods_progress(int *done, int *total);                // (runtime/romfs.c)
 bool plat_exe_path(char *buf, size_t size);                     // (runtime/platform.h)
+bool plat_in_app_bundle(void);                                  // (the same)
 }
 
 static std::atomic<bool> g_enabled, g_ready, g_open, g_wants_text;
@@ -446,6 +447,11 @@ static std::string beside_program(const char *name) {
     if (s2 > s) s = s2;
     if (!s) return name;
     *s = 0;
+#ifdef __APPLE__
+    // (a macOS app carries its data files in Contents/Resources, beside Contents/MacOS: tools/make_app.py; codesign
+    // takes no others in MacOS)
+    if (plat_in_app_bundle()) return std::string(exe) + "/../Resources/" + name;
+#endif
     return std::string(exe) + "/" + name;
 }
 #endif
