@@ -319,8 +319,7 @@ Escape, Insert, F1, F7~F12는 리컴프가 사용하므로 지정할 수 없습�
   5.1은 서라운드 시스템으로 재생하고, Stereo는 2채널로 다운믹스합니다. 저장하면 적용)
 - `[Application]`: `ConfirmExit`(창을 닫기 전에 확인), 설정 메뉴의 `Language` (English /
   Spanish / 中文(중국어 간체) / 한국어. 처음 실행하는 플레이어는 시스템 언어가 이 중 하나면 그 언어로,
-  아니면 English로 설정되며, 저장된 Language는 항상 유지됩니다. 중국어와 한국어 글리프는 프로그램 옆의 `mhgurecomp-cjk.otf`와
-  `mhgurecomp-kr.otf`에서, 없으면 시스템 글꼴(Android: Noto Sans CJK)에서 가져옵니다. 모드가 romfs
+  아니면 English로 설정되며, 저장된 Language는 항상 유지됩니다. 중국어와 한국어 글리프는 프로그램 옆의 `mhgurecomp-cjk.otf`에서, 없으면 시스템 글꼴(Android: Noto Sans CJK)에서 가져옵니다. 모드가 romfs
   `nativeNX/forge/fonts/MHGU-CJK.ttf`로 자체 글꼴을 넣을 수도 있습니다), `ButtonIcons` (Xbox / Switch /
   PlayStation), `Theme` (Hunter(기본값) / Gold / Blue: 설정 메뉴의 색상),
   `MenuScale` (50~200%), `Updates` (Ask / Auto / Off: `mhgurecomp-updater`의 동작. "최신 버전

@@ -343,7 +343,7 @@ Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
 - `[Application]`: `ConfirmExit` (preguntar antes de cerrar la ventana), y para el menú de ajustes `Language`
   (English / Spanish / 中文, chino simplificado / 한국어, coreano; un jugador nuevo recibe el idioma del sistema si es
   uno de estos, si no, inglés, y un Language guardado siempre se mantiene. Los caracteres chinos y coreanos salen de
-  `mhgurecomp-cjk.otf` y `mhgurecomp-kr.otf`, junto al programa, o si no de las fuentes del sistema (Android: Noto Sans
+  `mhgurecomp-cjk.otf`, junto al programa, o si no de las fuentes del sistema (Android: Noto Sans
   CJK); un mod puede traer la suya como romfs `nativeNX/forge/fonts/MHGU-CJK.ttf`), `ButtonIcons` (Xbox / Switch / PlayStation), `Theme` (Hunter, el predeterminado / Gold / Blue:
   los colores del menú de ajustes) y `MenuScale` (del 50 al 200 por ciento), y `Updates` (Ask / Auto / Off: qué hace
   `mhgurecomp-updater`, ver "Mantenerlo actualizado"). Con el ratón, arrastra la parte de arriba del menú de ajustes

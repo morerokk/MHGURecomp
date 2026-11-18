@@ -422,8 +422,8 @@ static void forge_style(ImGuiStyle &style) {  // Forge's own (source/forge/graph
 
 // The font the menus draw with (ImGui's default), which the glyphs of a translation are merged into
 static ImFont *g_ui_font;
-static std::string g_ui_cjk;  // the Chinese font merged into g_ui_font ("": none)
-static bool g_ui_kr;          // the release's Korean font was merged into g_ui_font
+static std::string g_ui_cjk;  // a mod's MHGU-CJK.ttf merged into g_ui_font ("": none)
+static bool g_ui_release;     // the release's mhgurecomp-cjk.otf was merged into g_ui_font
 static bool g_han_tried;      // the system's Chinese glyphs were merged into g_ui_font, or no font for them was found
 static bool g_hangul_tried;   // the Korean glyphs were merged into g_ui_font, or no font for them was found
 
@@ -448,11 +448,11 @@ static std::string beside_program(const char *name) {
 }
 #endif
 
-// The release's glyphs for the translations (runtime/settings_locale.h), beside the program: mhgurecomp-cjk.otf
-// (Chinese, language 2: a subset of Noto Sans SC, 0.7 MB) and mhgurecomp-kr.otf (Korean, language 3: Noto Sans KR,
-// 0.4 MB), made by tools/subset_cjk_font.py. Merged from the start, the loading box included, so the Language list's
-// 中文 and 한국어 show in every language. On Android they are in the APK's assets (android/apk.mk): the name alone,
-// which font_file finds there. ("": not there)
+// The release's glyphs beyond ImGui's font, beside the program: mhgurecomp-cjk.otf, a subset of Noto Sans CJK SC
+// (1.7 MB, made by tools/subset_cjk_font.py) with the translations' Chinese and Korean (runtime/settings_locale.h),
+// kana, and the arrows and shapes cheats and mods name buttons with. Merged from the start, the loading box included,
+// so the Language list's 中文 and 한국어 show in every language. On Android it is in the APK's assets (android/apk.mk):
+// the name alone, which font_file finds there. ("": not there)
 static std::string release_font(const char *name) {
 #ifdef __ANDROID__
     SDL_IOStream *io = SDL_IOFromFile(name, "rb");  // (a relative path: the APK's assets)
@@ -605,8 +605,8 @@ static void language_font_merge(int language) {
 
 // The context, ImGui's own font and Forge's style at 12 px: from the start (overlay_init_early), Forge's settings
 // once its config is read (overlay_init). (Under g_frame_lock: the loading screen may be drawing.)
-// cjk_font: a mod's Chinese font (NULL: the release's), merged into the menus' font for a translated menu. Returns
-// whether font_path loaded.
+// cjk_font: a mod's Chinese font (NULL: none), merged into the menus' font ahead of the release's, which still gives
+// what the mod's has not (Hangul, symbols). Returns whether font_path loaded.
 static bool context_init(const char *font_path, const char *cjk_font, float font_size) {
     if (!ImGui::GetCurrentContext()) {
         IMGUI_CHECKVERSION();
@@ -621,28 +621,27 @@ static bool context_init(const char *font_path, const char *cjk_font, float font
     g_font_size = font_size > 0 ? font_size : 12.0f;
     ImFontConfig cfg;
     cfg.SizePixels = g_font_size;
-    std::string cjk = cjk_font ? cjk_font : release_font("mhgurecomp-cjk.otf");
+    std::string mod = cjk_font ? cjk_font : "";
     ImFont *font = font_path ? io.Fonts->AddFontFromFileTTF(font_path, g_font_size, &cfg) : nullptr;
     if (font) io.FontDefault = font;
-    // (ImGui's own; again when a mod's Chinese font comes after the release's was merged: the first source that has a
-    // glyph is the one drawn, so the mod's goes into a font of its own)
-    else if (io.Fonts->Fonts.Size == 0 || (!g_ui_cjk.empty() && g_ui_cjk != cjk))
+    // (ImGui's own; again when a mod's Chinese font comes after another was merged: the first source that has a glyph
+    // is the one drawn, so the mod's goes into a font of its own, ahead of the release's)
+    else if (io.Fonts->Fonts.Size == 0 || (!mod.empty() && g_ui_cjk != mod && (g_ui_release || !g_ui_cjk.empty())))
         io.FontDefault = io.Fonts->AddFontDefaultVector(&cfg);
     ImFont *ui = io.FontDefault ? io.FontDefault : io.Fonts->Fonts[0];
     if (ui != g_ui_font) {  // (a new font for the menus: the translations' glyphs merge into it again)
         g_ui_cjk.clear();
-        g_ui_kr = g_han_tried = g_hangul_tried = false;
+        g_ui_release = g_han_tried = g_hangul_tried = false;
     }
     g_ui_font = ui;
-    if (!cjk.empty() && g_ui_cjk.empty()) {
-        if (font_merge(ui, cjk.c_str())) g_ui_cjk = cjk;
-        else LOG("[overlay] Chinese glyphs: %s did not load\n", cjk.c_str());
+    if (!mod.empty() && g_ui_cjk.empty()) {
+        if (font_merge(ui, mod.c_str())) g_ui_cjk = mod;
+        else LOG("[overlay] Chinese glyphs: %s did not load\n", mod.c_str());
     }
-    // (after the Chinese one: a mod's MHGU-CJK.ttf with Hangul wins over it too)
-    std::string kr = g_ui_kr ? std::string() : release_font("mhgurecomp-kr.otf");
-    if (!kr.empty()) {
-        if (font_merge(ui, kr.c_str())) g_ui_kr = true;
-        else LOG("[overlay] Korean glyphs: %s did not load\n", kr.c_str());
+    std::string release = g_ui_release ? std::string() : release_font("mhgurecomp-cjk.otf");
+    if (!release.empty()) {
+        if (font_merge(ui, release.c_str())) g_ui_release = true;
+        else LOG("[overlay] CJK glyphs: %s did not load\n", release.c_str());
     }
     ImGuiStyle style;
     ImGui::StyleColorsDark(&style);
@@ -669,9 +668,9 @@ void overlay_init(const char *font_path, const char *cjk_font, float font_size, 
     bool font = context_init(font_path, cjk_font, font_size);
     g_menu_key = menu_key;
     g_enabled = true;
-    LOG("[forge] ImGui %s overlay: %s opens the menu (font %s, %.0f px; Chinese glyphs %s; Korean glyphs %s)\n",
+    LOG("[forge] ImGui %s overlay: %s opens the menu (font %s, %.0f px; mod's Chinese glyphs %s; CJK glyphs %s)\n",
         IMGUI_VERSION, SDL_GetScancodeName((SDL_Scancode)menu_key), font ? font_path : "ImGui's", g_font_size,
-        g_ui_cjk.empty() ? "none" : g_ui_cjk.c_str(), g_ui_kr ? "the release's" : "none yet");
+        g_ui_cjk.empty() ? "none" : g_ui_cjk.c_str(), g_ui_release ? "the release's" : "none");
 }
 
 // ------------------------------------------------------------------ notices (any thread -> game thread)

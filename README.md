@@ -319,8 +319,8 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   Switch's surround output; 5.1 plays it on a surround system, Stereo folds it down to two channels; applies on Save)
 - `[Application]`: `ConfirmExit` (ask before the window closes), and the settings menu's `Language` (English /
   Spanish / 中文, Simplified Chinese / 한국어, Korean; a new player gets the system's language when it is one of these,
-  else English, and a saved Language always stays. The Chinese and Korean glyphs come from `mhgurecomp-cjk.otf` and
-  `mhgurecomp-kr.otf` beside the program, else from the system's fonts (Android: Noto Sans CJK); a mod can bring its
+  else English, and a saved Language always stays. The Chinese and Korean glyphs come from `mhgurecomp-cjk.otf`
+  beside the program, else from the system's fonts (Android: Noto Sans CJK); a mod can bring its
   own as romfs `nativeNX/forge/fonts/MHGU-CJK.ttf`), `ButtonIcons` (Xbox / Switch /
   PlayStation), `Theme` (Hunter, the default / Gold / Blue: the settings menu's colours) and
   `MenuScale` (50 to 200 percent), and `Updates` (Ask / Auto / Off: what `mhgurecomp-updater` does, see "Staying up

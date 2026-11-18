@@ -51,16 +51,18 @@ def font_chars(path):
 
 class SettingsLocaleTest(unittest.TestCase):
     def test_fonts_have_the_tables(self):
-        """The release's Chinese and Korean fonts (subsets: tools/subset_cjk_font.py) have every character their lines
-        use, and the Language list's own names."""
+        """The release's CJK font (a subset: tools/subset_cjk_font.py) has every character the Chinese and Korean lines
+        use, the Language list's own names, and the symbols cheats and mods name buttons with."""
         catalog = (ROOT / "runtime/settings_locale.h").read_text(encoding="utf-8")
-        for table, name, file in (("settings_text_zh", "中文", "mhgurecomp-cjk.otf"),
-                                  ("settings_text_ko", "한국어", "mhgurecomp-kr.otf")):
+        font = font_chars(ROOT / "extras/mhgurecomp-cjk.otf")
+        for table, name in (("settings_text_zh", "中文"), ("settings_text_ko", "한국어")):
             used = {c for _, text in catalog_table(catalog, table) for c in text if ord(c) > 0x7F} | set(name)
-            font = font_chars(ROOT / "extras" / file)
             missing = {c for c in used if ord(c) not in font}
             self.assertGreater(len(used), 400)
-            self.assertFalse(missing, f"Not in extras/{file} (run tools/subset_cjk_font.py): {''.join(sorted(missing))}")
+            self.assertFalse(missing, f"Not in extras/mhgurecomp-cjk.otf (run tools/subset_cjk_font.py): "
+                                      f"{''.join(sorted(missing))}")
+        symbols = "↑↓←→↖↗↘↙△○□▲▼◀▶●■◆①②③★☆♪「」ぁあアカ"
+        self.assertFalse([c for c in symbols if ord(c) not in font])
 
     def test_catalog_and_visible_labels(self):
         catalog = (ROOT / "runtime/settings_locale.h").read_text(encoding="utf-8")
