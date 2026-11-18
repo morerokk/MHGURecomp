@@ -119,6 +119,13 @@ The NSP files have to be normal ones (not NSZ/XCI), the update must be version 1
 (a "personalized" ticket) can't be read: dump the NSP as standard crypto. Nothing is checked against Nintendo's
 signatures, and nothing leaves your computer.
 
+#### Without building anything: the extractor program
+
+`mhgu-nsp-extract.exe` (built by the repository's GitHub Actions: Actions > "NSP extractor" > latest run > Artifacts) is a
+small program that only extracts the game. Download the normal release zip, put `mhgu-nsp-extract.exe` in the same folder
+as `mhgurecomp.exe` and drag the base game's NSP and the update's NSP onto it (or put both next to it and open it). It
+writes `data\exefs` and `data\romfs` there; then start `mhgurecomp.exe`. Same keys, same limits as above.
+
 ### Staying up to date
 
 Releases may come out pretty often. To update automatically, start `mhgurecomp-updater.exe` (`mhgurecomp-updater` on Linux). The updater has controller support, so you can safely use it as your main shortcut or add it as a non-Steam game.

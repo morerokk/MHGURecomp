@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <dirent.h>
 #ifdef _WIN32
 #include <direct.h>
 #define MKDIR(p) _mkdir(p)
@@ -402,6 +403,23 @@ static bool join_path(char *dst, size_t size, const char *a, const char *b) {
     int n = snprintf(dst, size, "%s/%s", a, b);
     if (n < 0 || (size_t)n >= size) return fail("The path %s/%s is too long: use a shorter folder for the game files.", a, b);
     return true;
+}
+
+// path and everything in it, deleted (the half-written import-tmp of an import that stopped)
+static void remove_tree(const char *path) {
+    DIR *d = opendir(path);
+    if (d) {
+        for (struct dirent *e; (e = readdir(d));) {
+            if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+            char sub[1500];
+            if (snprintf(sub, sizeof sub, "%s/%s", path, e->d_name) >= (int)sizeof sub) continue;
+            struct stat st;
+            if (stat(sub, &st) == 0 && S_ISDIR(st.st_mode)) remove_tree(sub);
+            else remove(sub);
+        }
+        closedir(d);
+    }
+    rmdir(path);
 }
 
 static bool exists(const char *path) {
@@ -1000,10 +1018,13 @@ bool nsp_import(const NspImport *job, char *err, size_t err_size) {
     if (ok && !(upd->prog.sec[1].present && upd->prog.sec[1].partition == 0 && upd->prog.sec[1].crypt == 4))
         ok = fail("The update's NSP has no patch RomFS section (is it the base game's NSP twice?).");
 
-    char tmp[1400], tex[1400], tro[1400];
+    char tmp[1400] = "", tex[1400], tro[1400];
     if (ok) ok = join_path(tmp, sizeof tmp, job->out_dir, "import-tmp") && join_path(tex, sizeof tex, tmp, "exefs") &&
                  join_path(tro, sizeof tro, tmp, "romfs");
-    if (ok) ok = mkdir_p(tmp);
+    if (ok) {
+        remove_tree(tmp);  // (a stopped import's leftovers)
+        ok = mkdir_p(tmp);
+    }
 
     // the ExeFS first (small): a wrong version stops here, not after 12 GB
     if (ok) {
@@ -1036,7 +1057,10 @@ bool nsp_import(const NspImport *job, char *err, size_t err_size) {
     }
     for (int i = 0; i < n; i++) nspfile_close(&nsp[i]);
     free(keys);
-    if (!ok) snprintf(err, err_size, "%s", g_err[0] ? g_err : "The import failed.");
+    if (!ok) {
+        snprintf(err, err_size, "%s", g_err[0] ? g_err : "The import failed.");
+        if (tmp[0]) remove_tree(tmp);  // (nothing half-written stays behind; the game folder's own files were not touched)
+    }
     return ok;
 }
 

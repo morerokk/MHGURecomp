@@ -1,0 +1,45 @@
+# Builds the NSP extractor (tools/nspextract.c) for Windows and Linux and runs the importer's test. Needs no game files and no
+# keys. The Windows .exe is a normal download from the run's page (Actions > this run > Artifacts), or from a release made from
+# a tag starting with nsp-extract-.
+name: NSP extractor
+on:
+  workflow_dispatch:
+  push:
+    branches: [nsp-import]
+    tags: ['nsp-extract-*']
+    paths: ['tools/nspextract.c', 'runtime/nspimport.*', 'tests/**', '.github/workflows/nspextract.yml']
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (static, no DLLs to ship)
+        shell: bash
+        run: |
+          gcc -std=gnu17 -O2 -Wall -Wextra -Wno-unused-parameter -static -o mhgu-nsp-extract.exe tools/nspextract.c runtime/nspimport.c
+          ./mhgu-nsp-extract.exe --bogus || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mhgu-nsp-extract-windows
+          path: mhgu-nsp-extract.exe
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/nsp-extract-')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mhgu-nsp-extract.exe
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: gcc -std=gnu17 -O2 -Wall -Wextra -Wno-unused-parameter -o mhgu-nsp-extract tools/nspextract.c runtime/nspimport.c
+      - name: Importer test (made-up NSP files and keys)
+        run: |
+          pip install cryptography
+          CC=gcc tests/run_nsp_test.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mhgu-nsp-extract-linux
+          path: mhgu-nsp-extract
