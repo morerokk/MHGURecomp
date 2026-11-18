@@ -974,6 +974,46 @@ static void test_crouch_attack_a(void) {
     #undef VIEW
 }
 
+// The Hunter Arts on keys of their own: each Control Type's buttons for each Art (found in a hunt, 2026-11-18), the
+// switch in the ini, the keyboard's defaults, and an Art's input never shared in Simple
+static void test_hunter_arts(void) {
+    enum { A = 0x2000, B = 0x4000, X = 0x1000, L = 0x100, R = 0x200, ZL = 0x400, ZR = 0x800 };
+    const uint32_t up = 0x10, right = 0x20, down = 0x40, rs_up = 0x100000, rs_right = 0x200000, rs_down = 0x400000;
+    struct { int type; bool swap, alt; uint32_t want[3]; } cases[] = {
+        {0, false, false, {up, right, down}},          {0, true, false, {up, right, down}},
+        {0, false, true, {rs_up, rs_right, rs_down}},  {3, false, false, {rs_up, rs_right, rs_down}},
+        {3, false, true, {up, right, down}},           {1, false, false, {R | A | B, ZL, ZR}},
+        {1, true, false, {ZR | A | B, L, R}},          {2, false, false, {ZL | X, ZL | A, ZL | B}},
+        {2, true, false, {L | X, L | A, L | B}},
+    };
+    for (unsigned i = 0; i < sizeof cases / sizeof *cases; i++)
+        for (int n = 0; n < 3; n++) {
+            uint32_t got = act_art_bits(n, cases[i].type, cases[i].swap, cases[i].alt);
+            CHECK(got == cases[i].want[n], "type %d swap %d alt %d Art %d: %x, want %x", cases[i].type, cases[i].swap,
+                  cases[i].alt, n + 1, got, cases[i].want[n]);
+        }
+    CHECK(act_art_bits(0, 7, false, false) == 0 && act_art_bits(3, 2, false, false) == 0, "an unknown type or Art: nothing");
+    CHECK(act_find("HunterArt2") == ACT_ART2 && act_view_of(ACT_ART1) == ACT_VIEW_MB1, "registered, in the hunt");
+    CHECK(act_ew_bits(ACT_ART1, false) == 0, "no button of its own");
+    ActProfile p = parse("[Actions]\nEnable=1\n");
+    act_use_profile(&p);
+    CHECK(!p.art_keys && !act_art_keys(), "off unless asked for");
+    p = parse("[Actions]\nEnable=1\nHunterArtKeys=1\n");
+    act_use_profile(&p);
+    CHECK(p.art_keys && act_art_keys(), "HunterArtKeys=1");
+    char buf[4096];
+    act_format(&p, buf, sizeof buf);
+    CHECK(strstr(buf, "HunterArtKeys=1"), "written back: %s", buf);
+    const ActBinding *k = act_default_binding(ACT_ART3, 1);
+    CHECK(k && k->n == 1 && k->alt[0].code[0] == SDL_SCANCODE_3, "keyboard default: 3");
+    CHECK(!act_default_binding(ACT_ART1, 0), "no controller default");
+    int art1 = row_named("HunterArt1"), dodge = row_named("Dodge"), interact = row_named("Interact");
+    CHECK(art1 >= 0, "a Simple row");
+    p = parse("[Actions]\nEnable=1\nHunterArtKeys=1\n[Actions.Kbm]\nHunterArt1 = key:f\nDodge = key:f\nInteract = key:f\n");
+    CHECK(act_rows_clash(&p, 1, art1, dodge) && act_rows_clash(&p, 1, art1, interact), "an Art's input is its own");
+    act_set_log(quiet);
+}
+
 int main(void) {
     act_set_log(quiet);
     test_registry();
@@ -994,6 +1034,7 @@ int main(void) {
     test_menu_confirm_policy();
     test_crouch_not_moving();
     test_crouch_attack_a();
+    test_hunter_arts();
     test_rows();
     test_claim();
     test_scheme_layout();

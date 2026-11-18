@@ -1276,6 +1276,9 @@ void action_rows(std::vector<Row> &r) {
         add_choice(r, "act.tab", "Show", a.tab, names, [](int v) { acts().tab = v; });
         r.back().help = tr("What the list and the drawing show: one part of the game at a time. L1 / R1 on a controller go through them. Keys: the keys that are not actions (movement, the item bar, chat).");
     }
+    if (kind == TAB_HUNT)
+        toggle("act.arts", "Hunter Art keys", &p.art_keys,
+               "On: each Hunter Art has an input of its own (keyboard: 1, 2 and 3 unless rebound below), whatever buttons the game's Control Type gives them; those keep working too. With a Control Type that puts the Arts on the D-pad, the HUD shows these keys for them on keyboard and mouse.");
     if (kind == TAB_KEYS)
         key_rows(r);
     else if (!simple) {

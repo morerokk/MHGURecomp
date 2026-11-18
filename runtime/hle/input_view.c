@@ -43,6 +43,9 @@
 #define G_SPAD         0x1a3cbfcu // GOT entry: **sPad
 #define G_OPTIONS      0x1a97f78u // options object *
 #define OPT_DASH_ROLE  0x446eu    // byte: 0 R is the dash button, else ZR
+#define OPT_CONTROL_TYPE 0x446cu  // byte: the Control Type, 0..3 (where the Hunter Arts are: actions.c act_art_bits)
+#define OPT_ROLE_SWAP  OPT_DASH_ROLE
+#define OPT_STICK_SWAP 0x446fu    // byte: D-pad and right stick swapped (the Hunter Arts of types 0 and 3)
 #define MB1_OFF        0x6b98u    // button objects inside sPad
 #define MB2_OFF        0x6bf0u
 #define PAD_STRIDE     0xb50u
@@ -228,6 +231,15 @@ static void tr_view(Cpu *c, int view, int slot, uint32_t fn) {
         }
     }
     uint32_t out = act_view(view, in, active, g_dash_zr);
+    int base = view & ~ACT_VIEW_BAR;
+    if (base != ACT_VIEW_MB2 && base != ACT_VIEW_TOWN && (active >> ACT_ART1 & 7) && act_art_keys()) {
+        // (a Hunter Art's own input: the buttons the game's Control Type takes for that Art, as if pressed together)
+        uint32_t opt = LD32(G_OPTIONS);
+        if (opt)
+            for (int n = 0; n < 3; n++)
+                if (active >> (ACT_ART1 + n) & 1)
+                    out |= act_art_bits(n, LD8(opt + OPT_CONTROL_TYPE), LD8(opt + OPT_ROLE_SWAP) != 0, LD8(opt + OPT_STICK_SWAP) != 0);
+    }
     g_in[slot] = in, g_out[slot] = out;
     c->r[1] = out;
     fnhook_call_next(c, fn);

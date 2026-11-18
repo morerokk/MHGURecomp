@@ -42,6 +42,9 @@ typedef enum {
     // a town or the Hub (the gameplay view while the town avatar plays)
     ACT_TOWN_INTERACT, ACT_TOWN_CANCEL, ACT_TOWN_X, ACT_TOWN_Y, ACT_TOWN_L, ACT_TOWN_RUN, ACT_TOWN_ZL, ACT_TOWN_ZR,
     ACT_TOWN_UP, ACT_TOWN_DOWN, ACT_TOWN_LEFT, ACT_TOWN_RIGHT, ACT_TOWN_L3, ACT_TOWN_R3, ACT_TOWN_PLUS, ACT_TOWN_MINUS,
+    // a hunt: the three Hunter Arts, each on an input of its own (HunterArtKeys): what the game's Control Type wants for
+    // that Art (act_art_bits) is delivered
+    ACT_ART1, ACT_ART2, ACT_ART3,
     ACT_COUNT
 } ActId;
 // The contexts. An action belongs to one of the first three. For act_view a hunt is one of three: ACT_VIEW_MB1 with
@@ -79,6 +82,13 @@ bool act_split_in(const struct ActProfile *p);
 bool act_crouch_split(void);
 bool act_crouch_split_in(const struct ActProfile *p);
 uint32_t act_virtual_bits(uint64_t active);  // the virtual bits the gameplay word gets (any thread): 0 unless split
+// The Hunter Arts on inputs of their own (HunterArtKeys on, the layer on)
+bool act_art_keys(void);
+// The engine-word bits the game's Control Type takes for Hunter Art n (0..2): type = options +0x446c (0..3), swap =
+// +0x446e (R and ZR's roles swapped), alt = +0x446f (D-pad and right stick swapped). 0: a type not known.
+//   type 0: D-pad (right stick with alt) up / right / down     type 3: right stick (D-pad with alt) up / right / down
+//   type 1: R+A+B / ZL / ZR (swap: ZR+A+B / L / R)              type 2: ZL+X / ZL+A / ZL+B (swap: L+...)
+uint32_t act_art_bits(int n, int type, bool swap, bool alt);
 int act_default_switch(int id);           // the Switch button (input.h BTN_*, ACT_KCR, ACT_KCZR) Tier 0 gives it; -1: none
 int act_default_button(int id, bool dash_zr);  // the same, the dash role turned into R or ZR: a Switch button (input.h BTN_*); -1: none
 const char *act_shared_with(int id);      // "" or the actions that are the same game input (documented, not an error)
@@ -119,6 +129,7 @@ typedef struct ActProfile {
     bool pointer;   // Pointer: feed the engine's pointer block
     bool split;     // SplitDashWeaponR: Dash and the weapon R-action are two inputs (also when WeaponR has a binding)
     bool sheathed_attack;  // SheathedAttackA: AttackA presses A with the weapon put away too (default: only Interact does)
+    bool art_keys;  // HunterArtKeys: HunterArt1-3 are read (keyboard default 1, 2, 3) and the HUD shows their inputs
     int shared_frames;     // SharedInteractFrames: how long Interact is tried first on an input other hunt actions share (0: 1)
     bool log;       // Log: one line per frame
     int scheme;     // Scheme: which control scheme the settings screen shows (ACT_SCHEME_*; 0: the device last used)

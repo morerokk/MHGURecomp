@@ -104,12 +104,16 @@ static const ActDef defs[ACT_COUNT] = {
     [ACT_TOWN_R3] = {"TownR3", ACT_VIEW_TOWN, S_RSTICK, 0, S_RSTICK, NOFB, "Right stick click in town (R3)", ""},
     [ACT_TOWN_PLUS] = {"TownPlus", ACT_VIEW_TOWN, S_PLUS, 0, S_PLUS, NOFB, "Start menu in town (+)", ""},
     [ACT_TOWN_MINUS] = {"TownMinus", ACT_VIEW_TOWN, S_MINUS, 0, S_MINUS, NOFB, "Minus button in town (-)", ""},
+    // the Hunter Arts: no button of their own, what the Control Type wants is added by the hunt's view (act_art_bits)
+    [ACT_ART1] = {"HunterArt1", ACT_VIEW_MB1, ROLE_VIRTUAL, 0, -1, NOFB, "Hunter Art 1", ""},
+    [ACT_ART2] = {"HunterArt2", ACT_VIEW_MB1, ROLE_VIRTUAL, 0, -1, NOFB, "Hunter Art 2", ""},
+    [ACT_ART3] = {"HunterArt3", ACT_VIEW_MB1, ROLE_VIRTUAL, 0, -1, NOFB, "Hunter Art 3", ""},
 };
 // The order a controls screen lists them in
 static const int order[] = {
     ACT_ATTACK_X, ACT_ATTACK_A, ACT_CHORD_XA, ACT_DODGE, ACT_CROUCH, ACT_ITEM_USE, ACT_INTERACT, ACT_DASH, ACT_WEAPON_R, ACT_FIELD_ZR, ACT_FIELD_L,
     ACT_ITEMBAR_RIGHT, ACT_ITEMBAR_LEFT, ACT_FIELD_ZL, ACT_CROSS_UP, ACT_CROSS_DOWN, ACT_CROSS_LEFT, ACT_CROSS_RIGHT, ACT_FIELD_L3, ACT_FIELD_R3, ACT_PAUSE,
-    ACT_MAP,
+    ACT_MAP, ACT_ART1, ACT_ART2, ACT_ART3,
     ACT_MENU_CONFIRM, ACT_MENU_CANCEL, ACT_MENU_X, ACT_MENU_Y, ACT_MENU_UP, ACT_MENU_DOWN, ACT_MENU_LEFT, ACT_MENU_RIGHT,
     ACT_MENU_TAB_L, ACT_MENU_TAB_R, ACT_MENU_PAGE_L, ACT_MENU_PAGE_R, ACT_MENU_PLUS, ACT_MENU_MINUS, ACT_MENU_L3, ACT_MENU_R3,
     ACT_TOWN_INTERACT, ACT_TOWN_CANCEL, ACT_TOWN_X, ACT_TOWN_Y, ACT_TOWN_RUN, ACT_TOWN_ZR, ACT_TOWN_L, ACT_TOWN_ZL,
@@ -150,7 +154,10 @@ const int *act_fallbacks(int id) { return defs[id].fb; }
 static const ActBinding kbm_left = {true, 1, {{1, {KEY_MOUSE + SDL_BUTTON_LEFT}}}};
 static const ActBinding kbm_right = {true, 1, {{1, {KEY_MOUSE + SDL_BUTTON_RIGHT}}}};
 static const ActBinding kbm_space = {true, 1, {{1, {SDL_SCANCODE_SPACE}}}};
+// The Hunter Arts on 1, 2 and 3 (HunterArtKeys; the controller has no default: its own Control Type is there)
+static const ActBinding kbm_art[3] = {{true, 1, {{1, {SDL_SCANCODE_1}}}}, {true, 1, {{1, {SDL_SCANCODE_2}}}}, {true, 1, {{1, {SDL_SCANCODE_3}}}}};
 const ActBinding *act_default_binding(int id, int dev) {
+    if (dev == 1 && id >= ACT_ART1 && id <= ACT_ART3) return &kbm_art[id - ACT_ART1];
     if (dev != 1 || !config_live_menu_mouse()) return NULL;
     switch (id) {
     case ACT_TOWN_INTERACT: case ACT_MENU_CONFIRM: return &kbm_left;
@@ -422,6 +429,7 @@ void act_parse(const char *text, ActProfile *p) {
             else if (same_name(key, "Pointer")) p->pointer = parse_bool(val);
             else if (same_name(key, "SplitDashWeaponR")) p->split = parse_bool(val);
             else if (same_name(key, "SheathedAttackA")) p->sheathed_attack = parse_bool(val);
+            else if (same_name(key, "HunterArtKeys")) p->art_keys = parse_bool(val);
             else if (same_name(key, "SharedInteractFrames")) p->shared_frames = atoi(val) < 0 ? 0 : atoi(val) > 30 ? 30 : atoi(val);
             else if (same_name(key, "Log")) p->log = parse_bool(val);
             else if (same_name(key, "Scheme"))
@@ -472,6 +480,7 @@ size_t act_format(const ActProfile *p, char *buf, size_t size) {
     if (p->pointer) PUT("Pointer=1\n");
     if (p->split) PUT("SplitDashWeaponR=1\n");
     if (p->sheathed_attack) PUT("SheathedAttackA=1\n");
+    if (p->art_keys) PUT("HunterArtKeys=1\n");
     if (p->shared_frames) PUT("SharedInteractFrames=%d\n", p->shared_frames);
     if (p->log) PUT("Log=1\n");
     if (p->scheme) PUT("Scheme=%s\n", p->scheme == ACT_SCHEME_PAD ? "Controller" : "Keyboard");
@@ -712,6 +721,26 @@ bool act_crouch_split(void) { return prof_on && atomic_load(&crouch_split_on); }
 uint32_t act_virtual_bits(uint64_t active) {
     return act_split() && (active >> ACT_WEAPON_R & 1) ? ACT_VBIT_WEAPON_R : 0;
 }
+bool act_art_keys(void) { return prof_on && prof.art_keys; }
+// (engine-word bits, as ew_of_btn; the right stick's directions past half way are 0xf00000 as the left one's 0xf0000:
+// up, right, down, left. Found in a hunt by pressing each type's inputs, 2026-11-18)
+uint32_t act_art_bits(int n, int type, bool swap, bool alt) {
+    enum { A = 0x2000, B = 0x4000, X = 0x1000, L = 0x100, R = 0x200, ZL = 0x400, ZR = 0x800 };
+    static const uint32_t dpad[3] = {0x10, 0x20, 0x40}, rstick[3] = {0x100000, 0x200000, 0x400000};
+    if (n < 0 || n > 2) return 0;
+    switch (type) {
+    case 0: case 3: return (type == 3) != alt ? rstick[n] : dpad[n];
+    case 1: {
+        const uint32_t t1[3] = {(swap ? ZR : R) | A | B, swap ? L : ZL, swap ? R : ZR};
+        return t1[n];
+    }
+    case 2: {
+        static const uint32_t face[3] = {X, A, B};
+        return (swap ? L : ZL) | face[n];
+    }
+    default: return 0;
+    }
+}
 void act_get_profile(ActProfile *out) {
     lock();
     *out = prof;
@@ -841,6 +870,9 @@ static const ActRow rows[] = {
     {"CrossRight", "D-pad right", 0, ACT_CROSS_RIGHT, {ACT_TOWN_RIGHT, -1, -1}},
     {"FieldL3", "Left stick click (L3)", 0, ACT_FIELD_L3, {ACT_TOWN_L3, ACT_MENU_L3, -1}},
     {"FieldR3", "Right stick click (R3)", 0, ACT_FIELD_R3, {ACT_TOWN_R3, ACT_MENU_R3, -1}},
+    {"HunterArt1", "Hunter Art 1", 0, ACT_ART1, {-1, -1, -1}},
+    {"HunterArt2", "Hunter Art 2", 0, ACT_ART2, {-1, -1, -1}},
+    {"HunterArt3", "Hunter Art 3", 0, ACT_ART3, {-1, -1, -1}},
     // menus and talking
     {"MenuConfirm", "Confirm / talk / examine (A)", 1, ACT_MENU_CONFIRM, {ACT_TOWN_INTERACT, -1, -1}},
     {"MenuCancel", "Cancel / back (B)", 1, ACT_MENU_CANCEL, {ACT_TOWN_CANCEL, -1, -1}},
@@ -925,6 +957,7 @@ static bool rows_overlap(int a, int b, bool sheathed_attack) {
     if ((ha == ACT_CROUCH && hb == ACT_ATTACK_A) || (ha == ACT_ATTACK_A && hb == ACT_CROUCH))
         return sheathed_attack;  // (Crouch with the weapon away, AttackA with it out - unless AttackA also presses A with it away)
     if ((ha == ACT_CROUCH && hb == ACT_INTERACT) || (ha == ACT_INTERACT && hb == ACT_CROUCH)) return true;  // (never share)
+    if ((ha >= ACT_ART1 && ha <= ACT_ART3) || (hb >= ACT_ART1 && hb <= ACT_ART3)) return true;  // (an Art's input is its own)
     if (ha == ACT_ITEMBAR_RIGHT || ha == ACT_ITEMBAR_LEFT || hb == ACT_ITEMBAR_RIGHT || hb == ACT_ITEMBAR_LEFT)
         return (ha == ACT_ITEMBAR_RIGHT && hb == ACT_ITEMBAR_LEFT) || (ha == ACT_ITEMBAR_LEFT && hb == ACT_ITEMBAR_RIGHT);  // (a state of its own: only the bar's two clash)
     if (ha == ACT_INTERACT || hb == ACT_INTERACT) return false;  // (shares by design: the gate, or Dodge once Crouch is split)
