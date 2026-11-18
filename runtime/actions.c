@@ -769,6 +769,8 @@ int act_validate(const ActProfile *p) {
                     if ((fi != i || fj != j) && defs[fi].view == defs[fj].view) continue;
                     // (A with the weapon out and A with it away are never read together)
                     if (!p->sheathed_attack && ((i == ACT_ATTACK_A && j == ACT_INTERACT) || (i == ACT_INTERACT && j == ACT_ATTACK_A))) continue;
+                    // (nor A with the weapon out and Crouch, which is weapon away only)
+                    if (!p->sheathed_attack && ((i == ACT_ATTACK_A && j == ACT_CROUCH) || (i == ACT_CROUCH && j == ACT_ATTACK_A))) continue;
                     for (int a = 0; a < bi->n; a++)
                         for (int e = 0; e < bj->n; e++) {
                             const ActChord *x = &bi->alt[a], *y = &bj->alt[e];
@@ -916,10 +918,12 @@ static bool shares_input(const ActBinding *a, const ActBinding *b) {
     return false;
 }
 // Rows a and b are read in a common context, and Simple should keep them apart
-static bool rows_overlap(int a, int b) {
+static bool rows_overlap(int a, int b, bool sheathed_attack) {
     if (a == b || !(act_row_views(a) & act_row_views(b))) return false;
     int ha = rows[a].head, hb = rows[b].head;
     if ((ha == ACT_CROUCH && hb == ACT_DODGE) || (ha == ACT_DODGE && hb == ACT_CROUCH)) return false;  // (the game's own B: roll moving, crouch standing)
+    if ((ha == ACT_CROUCH && hb == ACT_ATTACK_A) || (ha == ACT_ATTACK_A && hb == ACT_CROUCH))
+        return sheathed_attack;  // (Crouch with the weapon away, AttackA with it out - unless AttackA also presses A with it away)
     if ((ha == ACT_CROUCH && hb == ACT_INTERACT) || (ha == ACT_INTERACT && hb == ACT_CROUCH)) return true;  // (never share)
     if (ha == ACT_ITEMBAR_RIGHT || ha == ACT_ITEMBAR_LEFT || hb == ACT_ITEMBAR_RIGHT || hb == ACT_ITEMBAR_LEFT)
         return (ha == ACT_ITEMBAR_RIGHT && hb == ACT_ITEMBAR_LEFT) || (ha == ACT_ITEMBAR_LEFT && hb == ACT_ITEMBAR_RIGHT);  // (a state of its own: only the bar's two clash)
@@ -927,7 +931,7 @@ static bool rows_overlap(int a, int b) {
     return true;
 }
 bool act_rows_clash(const ActProfile *p, int dev, int a, int b) {
-    if (!rows_overlap(a, b)) return false;
+    if (!rows_overlap(a, b, p->sheathed_attack)) return false;
     int fa = rows[a].head, fb2 = rows[b].head;
     const ActBinding *x = binding_in(p, dev, rows[a].head, 0, &fa), *y = binding_in(p, dev, rows[b].head, 0, &fb2);
     if (!x || !y || fa != rows[a].head || fb2 != rows[b].head) return false;  // (a default, or one that follows another)
@@ -938,7 +942,7 @@ uint64_t act_row_claim(ActProfile *p, int dev, int row, int code, int (*sw_sourc
                        void *user, bool dash_zr) {
     uint64_t changed = 0;
     for (int o = 0; o < act_row_count(); o++) {
-        if (!rows_overlap(row, o)) continue;
+        if (!rows_overlap(row, o, p->sheathed_attack)) continue;
         int from = rows[o].head;
         const ActBinding *b = binding_in(p, dev, rows[o].head, 0, &from);
         if (from != rows[o].head) continue;  // (it follows another row: that one is the owner)
@@ -1121,7 +1125,7 @@ uint32_t act_view_managed(int view, bool dash_zr) {
 // With the weapon away and Crouch split from Dodge (act_crouch_split): B comes from Crouch while the left stick is
 // not pushed (the crouch) and from Dodge while it is (the roll). Where Interact and Crouch are on one input, Interact
 // wins: that press is only A. With the weapon out Dodge still delivers B standing (weapon B-actions need it), and Crouch
-// delivers it standing but never while the stick is pushed.
+// on an input of its own delivers nothing (the hunter can't crouch then).
 static uint32_t state_of(int view, uint32_t ew, bool bar) {
     uint32_t st = 0;
     if (view == ACT_VIEW_MB1 || view == ACT_VIEW_HUNT_ANY) st |= ST_OUT;
@@ -1135,18 +1139,20 @@ static uint32_t state_of(int view, uint32_t ew, bool bar) {
 // state also tells them apart by the stick, and Interact wins an input it has with Crouch
 static uint32_t scoped_bits(int i, uint32_t bits, uint32_t st, uint64_t active) {
     ActScope s = scopes[i];
-    uint32_t forbid = s.forbid;
+    uint32_t forbid = s.forbid, req = s.req;
     if (act_crouch_split()) {
         if (i == ACT_DODGE) forbid |= ST_AWAY_STILL;
         if (i == ACT_CROUCH) {
             forbid |= ST_AWAY_MOVING;
-            // (only when Crouch has a binding of its own: then with the stick pushed it never fires, weapon out or
-            // away, and Dodge is the roll. Crouch following Dodge's input is not touched: that would stop the roll)
-            if (atomic_load(&crouch_own_on)) forbid |= ST_MOVING;
+            // (only when Crouch has a binding of its own: then with the stick pushed it never fires, and Dodge is the
+            // roll; nor with the weapon out, where the hunter can't crouch and B is a dodge - Crouch's input would be a
+            // second Dodge there, so it may share one with AttackA. Crouch following Dodge's input is not touched: that
+            // would stop the roll)
+            if (atomic_load(&crouch_own_on)) forbid |= ST_MOVING, req |= ST_AWAY;
             if ((st & ST_AWAY_STILL) && (active >> ACT_INTERACT & 1) && atomic_load(&crouch_clash)) forbid |= ST_AWAY_STILL;
         }
     }
-    bool ok = (st & s.req) == s.req && !(st & forbid);
+    bool ok = (st & req) == req && !(st & forbid);
     return ok ? bits : bits & ~(s.bits ? s.bits : bits);
 }
 

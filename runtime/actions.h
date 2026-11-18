@@ -74,6 +74,7 @@ bool act_split_in(const struct ActProfile *p);
 // to an input of its own (any device or weapon class), or with Dodge and Interact on one input, the two are told apart: with the weapon away Crouch delivers B
 // only while the stick is not pushed and Dodge only while it is, so an input shared by Interact and Dodge is a pure
 // interaction standing still (nothing crouches, nothing waits) and a roll while moving. Crouch never shares with Interact.
+// Crouch delivers B only with the weapon away (the hunter can't crouch with it out), so it may share with AttackA.
 #define ACT_STICK_L_DIRS 0xf0000u  // the left stick pushed past half way, in the engine word (INPUTS-MASTER B.1)
 bool act_crouch_split(void);
 bool act_crouch_split_in(const struct ActProfile *p);
