@@ -116,15 +116,67 @@ static void summon_once(void) {
     LOG("[dummy] summoned the large monster %.0f cm in front of the hunter, zone %u\n", (double)g_summon, LD8(pl + OBJ_ZONE));
 }
 
+// MHGU_SUMMON_KEEPHP=1 (with MHGU_SUMMON): the large monster's HP goes back to its maximum whenever it falls under half (on
+// the game that runs it), so a long run doesn't end in a kill and the monster never reaches its low-HP behaviour; and
+// every 2 s its HP and its attention scores for the 4 hunters (status +0x254) are logged.
+static bool g_keephp;
+static float g_stick;
+
+static void keep_hp(void) {
+    uint32_t sen = LD32(G_SENEMY);
+    if (!sen) return;
+    for (int k = 0; k < MAX_EN; k++) {
+        uint32_t e = LD32(sen + 0x1c + 4u * (uint32_t)k), info = e ? LD32(e + EN_INFO) : 0;
+        if (!info || LD16(info + 0x1b6) >= 10000) continue;
+        int hp = (int)LD32(info + 0x370), max = (int)LD32(info + 0x374);
+        if (LD8(e + 0x7420) && max > 0 && hp > 0 && hp < max / 2) {
+            ST32(info + 0x370, (uint32_t)max);
+            LOG("[dummy] keephp: monster HP %d -> %d\n", hp, max);
+        }
+        static uint64_t last;
+        uint64_t now = plat_now_ns();
+        if (now - last >= 2000000000ull) {
+            last = now;
+            LOG("[dummy] keephp: HP %d/%d, runs it %u, hate %d %d %d %d\n", hp, max, LD8(e + 0x7420), (int)LD32(info + 0x254),
+                (int)LD32(info + 0x258), (int)LD32(info + 0x25c), (int)LD32(info + 0x260));
+        }
+        return;
+    }
+}
+
 static void collision(Cpu *c) {
     if (g_summon > 0) {
         uint32_t pl = local_player();
         if (pl) ST16(pl + 0x13d6, 5000), ST16(pl + 0x13da, 5000);  // (the hunter's HP and its red part, above any one hit: it lasts as long as the test)
+        if (g_keephp) keep_hp();
         summon_once();
         // The hunter stays where the first summon found it: knocked out of the area it would be put back in the camp.
+        // MHGU_SUMMON_STICK=<cm>, on a game that doesn't run the monster: the hunter instead stays that far behind the
+        // monster along its own heading, so it faces the monster and its swings land (multiplayer: a joiner that hits all the time).
         static uint32_t pin_pl;
         static float pin[3];
-        if (pl && g_summoned) {
+        uint32_t sen = LD32(G_SENEMY), en = 0;
+        for (int k = 0; g_stick > 0 && sen && k < MAX_EN && !en; k++) {
+            uint32_t e = LD32(sen + 0x1c + 4u * (uint32_t)k), info = e ? LD32(e + EN_INFO) : 0;
+            if (info && LD16(info + 0x1b6) < 10000) en = e;
+        }
+        if (pl && en && !LD8(en + 0x7420) && LD8(en + OBJ_ZONE) == LD8(pl + OBJ_ZONE)) {
+            float qx = LDF(pl + OBJ_ROT), qy = LDF(pl + OBJ_ROT + 4), qz = LDF(pl + OBJ_ROT + 8), qw = LDF(pl + OBJ_ROT + 12);
+            float fx = 2 * (qx * qz + qw * qy), fz = 1 - 2 * (qx * qx + qy * qy), n = sqrtf(fx * fx + fz * fz);
+            if (pin_pl != pl) pin_pl = pl, pin[0] = LDF(pl + OBJ_POS), pin[1] = LDF(pl + OBJ_POS + 4), pin[2] = LDF(pl + OBJ_POS + 8);
+            if (n > 0.01f) {
+                // (no further than 1000 cm from where the hunter first stood in the monster's area: following the monster
+                // anywhere can put the hunter over an area's exit, back to the camp)
+                uint32_t pos = LD32(en + EN_INFO) + 0x40;
+                float x = LDF(pos) - fx / n * g_stick, z = LDF(pos + 8) - fz / n * g_stick;
+                float dx = x - pin[0], dz = z - pin[2], d = sqrtf(dx * dx + dz * dz);
+                bool far = d > 1000.0f;
+                if (far) x = pin[0] + dx * 1000.0f / d, z = pin[2] + dz * 1000.0f / d;
+                STF(pl + OBJ_POS, x);
+                STF(pl + OBJ_POS + 4, far ? pin[1] : LDF(pos + 4));
+                STF(pl + OBJ_POS + 8, z);
+            }
+        } else if (pl && g_summoned) {
             if (pin_pl != pl) pin_pl = pl, pin[0] = LDF(pl + OBJ_POS), pin[1] = LDF(pl + OBJ_POS + 4), pin[2] = LDF(pl + OBJ_POS + 8);
             STF(pl + OBJ_POS, pin[0]), STF(pl + OBJ_POS + 4, pin[1]), STF(pl + OBJ_POS + 8, pin[2]);
         }
@@ -153,6 +205,10 @@ void dummy_init(void) {
     const char *e = getenv("MHGU_SUMMON");
     if (e && *e && atoi(e) > 0) {
         g_summon = (float)atoi(e);
+        e = getenv("MHGU_SUMMON_KEEPHP");
+        g_keephp = e && *e && atoi(e);
+        e = getenv("MHGU_SUMMON_STICK");
+        g_stick = e && *e ? (float)atoi(e) : 0;
         fnhook_set(FN_COLLISION, hle_register("dummy:collision", collision));
         return;
     }
