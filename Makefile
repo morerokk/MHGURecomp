@@ -508,7 +508,8 @@ $(B)/pipelines.list: extras/pipelines.list
 
 # The Chinese and Korean glyphs of the host menu's translations (runtime/settings_locale.h), which the overlay loads
 # from beside the program (runtime/overlay.cpp): subsets of Noto Sans SC and KR (tools/subset_cjk_font.py), SIL Open
-# Font License 1.1 (THIRD_PARTY_NOTICES). Windows and Linux; Android uses the system's Noto Sans CJK.
+# Font License 1.1 (THIRD_PARTY_NOTICES). Android has them in the APK's assets (android/apk.mk): its own Noto Sans CJK
+# is a variable font from Android 13 on, which ImGui can't read.
 CJK_FONTS := mhgurecomp-cjk.otf mhgurecomp-kr.otf
 $(B)/mhgurecomp-%.otf: extras/mhgurecomp-%.otf
 	@mkdir -p $(dir $@)

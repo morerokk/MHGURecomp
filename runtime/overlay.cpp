@@ -24,6 +24,23 @@
 
 #include "imgui.h"
 #include "imgui_internal.h"  // (the Forge window's Cancel: ImGui's active item, popups and nav window)
+// stb_truetype's own copy (ImGui's is static to imgui_draw.cpp): a font file is checked with it before ImGui gets it,
+// since ImGui stops the program on one it can't read (font_merge)
+namespace font_check {
+#define STBTT_STATIC
+#define STB_TRUETYPE_IMPLEMENTATION
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
+#endif
+#include "imstb_truetype.h"
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+#undef STB_TRUETYPE_IMPLEMENTATION
+#undef STBTT_STATIC
+}  // namespace font_check
 #ifndef MHGU_NULL_BACKEND
 #include "backends/imgui_impl_vulkan.h"
 #else  // (no renderer: no overlay)
@@ -410,14 +427,16 @@ static bool g_ui_kr;          // the release's Korean font was merged into g_ui_
 static bool g_han_tried;      // the system's Chinese glyphs were merged into g_ui_font, or no font for them was found
 static bool g_hangul_tried;   // the Korean glyphs were merged into g_ui_font, or no font for them was found
 
-static bool can_read(const char *path) {
-    FILE *f = fopen(path, "rb");
-    if (f) fclose(f);
-    return f != NULL;
+static bool can_read(const char *path) {  // (an absolute path; SDL: UTF-8 on Windows too)
+    SDL_IOStream *io = SDL_IOFromFile(path, "rb");
+    if (io) SDL_CloseIO(io);
+    return io != NULL;
 }
 
 // A file beside the program (the release's fonts): the game's folder is not always the program's (MHGU_HOME, a game
-// folder given on the command line), so not a path relative to the current one.
+// folder given on the command line), so not a path relative to the current one. (Not on Android: the program there is
+// the system's app_process.)
+#ifndef __ANDROID__
 static std::string beside_program(const char *name) {
     char exe[1024];
     if (!plat_exe_path(exe, sizeof exe)) return name;
@@ -427,24 +446,73 @@ static std::string beside_program(const char *name) {
     *s = 0;
     return std::string(exe) + "/" + name;
 }
+#endif
 
 // The release's glyphs for the translations (runtime/settings_locale.h), beside the program: mhgurecomp-cjk.otf
 // (Chinese, language 2: a subset of Noto Sans SC, 0.7 MB) and mhgurecomp-kr.otf (Korean, language 3: Noto Sans KR,
 // 0.4 MB), made by tools/subset_cjk_font.py. Merged from the start, the loading box included, so the Language list's
-// 中文 and 한국어 show in every language. ("": not there)
+// 中文 and 한국어 show in every language. On Android they are in the APK's assets (android/apk.mk): the name alone,
+// which font_file finds there. ("": not there)
 static std::string release_font(const char *name) {
+#ifdef __ANDROID__
+    SDL_IOStream *io = SDL_IOFromFile(name, "rb");  // (a relative path: the APK's assets)
+    if (io) SDL_CloseIO(io);
+    return io ? std::string(name) : std::string();
+#else
     std::string p = beside_program(name);
     return can_read(p.c_str()) ? p : std::string();
+#endif
 }
 
-// Merges a font's glyphs into the menus' font (font_no: the face in a .ttc)
+// A font file's bytes (SDL_free them), or NULL. (SDL_LoadFile: a UTF-8 path on Windows too.) On Android a path that
+// is not a file is looked for in the APK's assets (the release's fonts); SDL would look there first for a relative
+// path, and a mod's font path may be relative to the app's folder, so stdio comes first.
+static void *font_file(const char *path, size_t *n) {
+#ifndef __ANDROID__
+    return SDL_LoadFile(path, n);
+#else
+    void *data = nullptr;
+    if (FILE *f = fopen(path, "rb")) {
+        long size = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
+        if (size > 0 && fseek(f, 0, SEEK_SET) == 0 && (data = SDL_malloc((size_t)size)) &&
+            fread(data, 1, (size_t)size, f) != (size_t)size) {
+            SDL_free(data);
+            data = nullptr;
+        }
+        if (data) *n = (size_t)size;
+        fclose(f);
+    }
+    if (!data) data = SDL_LoadFile(path, n);
+    return data;
+#endif
+}
+
+// Merges a font's glyphs into the menus' font (font_no: the face in a .ttc). Read here rather than by ImGui (which
+// reads only files, not the APK's assets), and checked with stb_truetype first: ImGui stops the program on a font it
+// can't read (an assert, not an error), and some can't be: Android 13 and later have Noto Sans CJK as a variable font
+// (CFF2), which stb_truetype does not read, and a mod's MHGU-CJK.ttf may be anything.
 static bool font_merge(ImFont *into, const char *path, int font_no = 0) {
+    size_t n = 0;
+    void *file = font_file(path, &n);
+    if (!file) return false;
+    const unsigned char *data = (const unsigned char *)file;
+    int offset = n >= 12 ? font_check::stbtt_GetFontOffsetForIndex(data, font_no) : -1;
+    font_check::stbtt_fontinfo info;
+    bool readable = offset >= 0 && (size_t)offset < n && font_check::stbtt_InitFont(&info, data, offset);
+    if (!readable) {
+        LOG("[overlay] %s (face %d): not a font ImGui can read (a variable / CFF2 one?)\n", path, font_no);
+        SDL_free(file);
+        return false;
+    }
+    void *owned = IM_ALLOC(n);  // (the atlas keeps the file for the glyphs it loads later, and frees it with IM_FREE)
+    memcpy(owned, file, n);
+    SDL_free(file);
     ImFontConfig cfg;
     cfg.MergeMode = true;
     cfg.DstFont = into;
     cfg.FontNo = font_no;
     cfg.SizePixels = g_font_size;  // (the same size, so the menu's rows keep the height they have in English)
-    return ImGui::GetIO().Fonts->AddFontFromFileTTF(path, g_font_size, &cfg) != nullptr;
+    return ImGui::GetIO().Fonts->AddFontFromMemoryTTF(owned, (int)n, g_font_size, &cfg) != nullptr;
 }
 
 struct FontFile {
@@ -466,8 +534,9 @@ static std::string windows_font(const char *name) {
 }
 #endif
 
-// The Chinese menu's glyphs when the release's font is not there (a build folder made without it, Android): the
-// system's own Chinese font (Microsoft YaHei on Windows, Noto Sans CJK on Android and most Linux desktops).
+// The Chinese menu's glyphs when the release's font is not there (a build folder made without it): the system's own
+// Chinese font (Microsoft YaHei on Windows, Noto Sans CJK on Android and most Linux desktops; Android 13's and later
+// is a variable font ImGui can't read, which font_merge leaves out).
 static FontFile han_font_find(void) {
     return system_font({
 #ifdef _WIN32
