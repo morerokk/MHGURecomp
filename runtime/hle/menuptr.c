@@ -386,10 +386,19 @@ static atomic_ullong g_nudge_ns;   // when the host last nudged (pressed Down fo
 #define ASK_NS 400000000ull
 static int g_probe = -1;
 
+// A list widget's second cursor (its quest details' pages, L / R: list_widget below) has its list's id with this bit set
+#define WIDGET_SECOND  0x80000000u
+
 // (g_cur_lock held) the open cursor that last moved or appeared, of those whose cells are known (for the pointer: open,
 // or its highlight seen; RECENT: seen lately at all, for the renderer to look for) or of those with more than one cell
 // (for learning: a section bar's one row never moves)
 enum { PICK_POINTER, PICK_LEARN, PICK_RECENT };
+static void log_front(uint32_t behind, uint32_t front) {  // (g_cur_lock held) the pointer's menu taken by a screen in front
+    static uint32_t last_behind, last_front;
+    if (behind == last_behind && front == last_front) return;
+    last_behind = behind, last_front = front;
+    if (front) LOG("[menuptr] pointer off menu %08x: %08x, not known, came on screen after it (in front)\n", behind, front);
+}
 static Cursor *pick(int how) {
     uint64_t now = plat_now_ns(), best_t = 0;
     Cursor *best = NULL;
@@ -398,10 +407,13 @@ static Cursor *pick(int how) {
     // the screen now - the item box's grid on Equipment Sets -, lost to the prompt there whose cursor never runs)
     bool any_running = false;
     for (int i = 0; i < MAX_CURSORS && how == PICK_POINTER; i++)
-        any_running |= g_cursors[i].lr && g_cursors[i].known && now - g_cursors[i].seen_ns < OPEN_NS;
+        any_running |= g_cursors[i].lr && !(g_cursors[i].lr & WIDGET_SECOND) && g_cursors[i].known && now - g_cursors[i].seen_ns < OPEN_NS;
     for (int i = 0; i < MAX_CURSORS; i++) {
         Cursor *c = &g_cursors[i];
-        if (!c->lr) continue;
+        // (a list widget's details pages are no menu of their own: their cursor runs a moment after the list's, every
+        // frame the list doesn't move, so it was newer than the list - learned, it took the pointer until an arrow moved
+        // the list)
+        if (!c->lr || (c->lr & WIDGET_SECOND)) continue;
         bool open = how == PICK_POINTER ? now - c->seen_ns < OPEN_NS || now - c->bar_ns < OPEN_NS
                     : how == PICK_LEARN ? now - c->seen_ns < LEARN_NS
                                         : now - c->seen_ns < RECENT_NS;
@@ -417,13 +429,20 @@ static Cursor *pick(int how) {
     // A screen in front that isn't known - a running cursor of several cells that appeared well after the known one (a
     // prompt over a menu) - takes the mouse back to what it was: the pointer would only miss it, and its click is no
     // button (a right click would be Cancel, while the default keyboard and mouse have Confirm on the right button).
-    // (Cursors that appear together - a list and the read-only list beside it - are not in front of each other.)
-    if (best && how == PICK_POINTER)
+    // (Cursors that appear together - a list and the read-only list beside it - are not in front of each other; nor is a
+    // list widget's details cursor, which runs only once the details are loaded and comes back after each reload: it
+    // took the pointer from the Quest Counter's list, and from a prompt over the Hub's Quest Board.)
+    if (best && how == PICK_POINTER) {
         for (int i = 0; i < MAX_CURSORS; i++) {
             const Cursor *c = &g_cursors[i];
-            if (c->lr && !c->known && c->cells >= 2 && now - c->seen_ns < OPEN_NS && c->appeared_ns > best->appeared_ns + 100000000ull)
+            if (c->lr && !(c->lr & WIDGET_SECOND) && !c->known && c->cells >= 2 && now - c->seen_ns < OPEN_NS &&
+                c->appeared_ns > best->appeared_ns + 100000000ull) {
+                log_front(best->lr, c->lr);
                 return NULL;
+            }
         }
+        log_front(best->lr, 0);
+    }
     return best;
 }
 
@@ -605,7 +624,6 @@ static void probe(Cpu *c, uint32_t cur, uint32_t bits, uint32_t lr, int row0, in
 #define FN_LIST_WIDGET 0x74c130u
 #define CALL_WIDGET_A  0x74c4ecu
 #define CALL_WIDGET_B  0x74c514u
-#define WIDGET_SECOND  0x80000000u
 static uint32_t g_widget_lr;  // (game thread: the caller of the widget running now)
 static void list_widget(Cpu *c) {
     uint32_t saved = g_widget_lr;
