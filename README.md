@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/images/logo.webp" alt="GU Recomp" width="481"></p>
 
-<p align="center"><b>English</b> · <a href="README.es.md">Español</a></p>
+<p align="center"><b>English</b> · <a href="README.es.md">Español</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ko.md">한국어</a></p>
 
 <p align="center">
   <a href="https://github.com/morerokk/MHGURecomp/releases/latest"><img src="https://img.shields.io/github/v/release/morerokk/MHGURecomp?style=flat-square&label=release&labelColor=1d1e22&color=c58a2e" alt="Latest release"></a>
@@ -221,7 +221,7 @@ contents of `%APPDATA%\MHGURecomp\save\save_0\` (Linux: `~/.local/share/MHGUReco
 use the same files you'd use on PC. Copy `save/save_0/` back to your PC now and then as a backup.
 
 Public internet hubs on Android are shared with other Android players only. To play with friends on PC, all enter the
-same matchmaking key (settings menu, Multiplayer).
+same matchmaking key (settings menu, Network tab).
 
 To update, install the newer APK over the old one: your game files, saves and settings stay. **Don't uninstall it
 first.** Uninstalling deletes the whole `files` folder, game files and saves included. Android may offer to keep the
@@ -318,10 +318,10 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   game's window is in the background), `Output` (Stereo, the default / 5.1: the game mixes its sound in 5.1 as on the
   Switch's surround output; 5.1 plays it on a surround system, Stereo folds it down to two channels; applies on Save)
 - `[Application]`: `ConfirmExit` (ask before the window closes), and the settings menu's `Language` (English /
-  Spanish / 中文, Simplified Chinese: its glyphs come from `mhgurecomp-cjk.otf` beside the program, shipped since this
-  translation; a mod can bring its own as romfs `nativeNX/forge/fonts/MHGU-CJK.ttf` / 한국어, Korean: its glyphs
-  come from the system's Korean font, Malgun Gothic on Windows, Noto Sans CJK or Nanum Gothic on Linux and Android, or
-  from `mhgurecomp-kr.otf` / `.ttf` put beside the program), `ButtonIcons` (Xbox / Switch /
+  Spanish / 中文, Simplified Chinese / 한국어, Korean; a new player gets the system's language when it is one of these,
+  else English, and a saved Language always stays. The Chinese and Korean glyphs come from `mhgurecomp-cjk.otf` and
+  `mhgurecomp-kr.otf` beside the program, else from the system's fonts (Android: Noto Sans CJK); a mod can bring its
+  own as romfs `nativeNX/forge/fonts/MHGU-CJK.ttf`), `ButtonIcons` (Xbox / Switch /
   PlayStation), `Theme` (Hunter, the default / Gold / Blue: the settings menu's colours) and
   `MenuScale` (50 to 200 percent), and `Updates` (Ask / Auto / Off: what `mhgurecomp-updater` does, see "Staying up
   to date"). With the mouse, drag the top of the settings menu (its tabs) to move it, and the grip at its bottom right

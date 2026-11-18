@@ -3973,6 +3973,9 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
 }
 
 static int32_t fsr_cap_base;  // (FSR capture draw: its FSR_CAP_BASE_BINDING value, stage_set)
+// The draw being set up tests depth: its samplers get [Graphics] AnisotropicFiltering. Flat draws (no depth test: the
+// HUD, menus, the loading backdrop) keep the game's own; the backdrop's tiles showed seams with it (textures.c).
+static bool draw_aniso = true;
 
 static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo *out) {
     ShaderTexture *stx = &si->tex[i];
@@ -3990,7 +3993,7 @@ static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo
                     view = stx->type == TEXTYPE_2D ? feedback_view[k] : vk_dummy_view(TEXTYPE_2D_ARRAY);
         }
     }
-    if (h && st.spool && tsc < (uint32_t)st.spool->count) smp = vk_sampler(&((NvnSamplerDesc *)st.spool->entries)[tsc]);
+    if (h && st.spool && tsc < (uint32_t)st.spool->count) smp = vk_sampler(&((NvnSamplerDesc *)st.spool->entries)[tsc], draw_aniso);
     if (!view) view = vk_dummy_view(stx->type);
     if (!smp) smp = vk_default_sampler(true);
     *out = (VkDescriptorImageInfo){smp, view, VK_IMAGE_LAYOUT_GENERAL};
@@ -4137,6 +4140,7 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
     VkCommandBuffer cb = vk_cmd();
     vk_full_barrier(cb);
     nfeedback = 0;
+    draw_aniso = true;  // (compute: no derivatives, so anisotropy changes nothing; the sampler the game's other uses get)
     VkDescriptorSet ds = stage_set(cp->p.nbinds, cp->p.binds, cp->p.set_layout[0], 0, 5, cp->si, gx, gy, gz);
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, cp->pipe);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, cp->p.layout, 0, 1, &ds, 0, NULL);
@@ -4610,6 +4614,7 @@ static void draw(CmdRec *r, bool indexed) {
     apply_scissor(cb);
 
     // ---- descriptor sets
+    draw_aniso = k.depth_test;
     VkDescriptorSet sets[2] = {stage_set(pr->nbinds, pr->binds, pr->set_layout[0], 0, 0, pr->vi, 0, 0, 0),
                                stage_set(pr->nbinds, pr->binds, pr->set_layout[1], 1, 1, pr->fi, 0, 0, 0)};
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pr->layout, 0, 2, sets, 0, NULL);
