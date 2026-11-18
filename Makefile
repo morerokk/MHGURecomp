@@ -315,6 +315,11 @@ test-cheats: $(LIB_STAMPS)
 	$(CC) $(RTFLAGS) tests/test_cheats.c runtime/cheats.c -lpthread -o $(O)/settings-test/test-cheats$(if $(filter windows,$(PLATFORM)),.exe)
 	cd $(O)/settings-test && ./test-cheats$(if $(filter windows,$(PLATFORM)),.exe)
 
+# Host-only test of the NSP import (runtime/nspimport.c) on made-up NSP files: no game dump or keys required.
+.PHONY: test-nsp
+test-nsp:
+	CC=$(CC) tests/run_nsp_test.sh
+
 $(O)/gen/%.o: $(GEN)/%.c runtime/cpu.h runtime/vfp.h runtime/neon_rt.h
 	@mkdir -p $(dir $@)
 	@$(CC) $(GENFLAGS) -c $< -o $@

@@ -107,6 +107,22 @@ Puede que puedas extraerlos con otra herramienta; solo asegúrate de extraer tan
    de la actualización combinados encima. Deberías tener unos 35 500 archivos, 12,3 GB.
 3. Inicia `mhgurecomp.exe`.
 
+### Lo más fácil: que el port extraiga el juego de tus archivos NSP
+
+Si tienes el juego en archivos NSP (el del juego base y el de la actualización 1.4.0, dos archivos separados), no
+tienes que extraer nada tú:
+
+1. Arrastra **los dos** NSP sobre `mhgurecomp.exe` (en Linux: `./mhgurecomp base.nsp update.nsp`). O pon los dos en
+   una carpeta `import` junto a él y abre el juego como siempre: si aún no hay archivos del juego, los extrae de ahí.
+2. Necesita el `prod.keys` de tu propia Switch (Lockpick_RCM lo genera). Lo busca junto a `mhgurecomp.exe` (también en
+   una carpeta `keys`), en `~/.switch` y en las carpetas de Ryujinx y yuzu. `MHGU_KEYS` puede indicar el archivo.
+3. Espera: escribe `data\exefs` y `data\romfs` (unos 13 GB, unos minutos) y luego inicia el juego. El progreso se ve en
+   la ventana de consola. Los archivos del juego que ya hubiera en `data` no se borran, pasan a `data\previous-1` etc.
+
+Los NSP deben ser normales (no NSZ/XCI), la actualización debe ser la 1.4.0, y un ticket atado a una sola consola
+(ticket "personalizado") no se puede leer: vuelca el NSP con cripto estándar. No se comprueban las firmas de Nintendo
+y nada sale de tu computadora.
+
 ### Mantenerlo actualizado
 
 Las versiones nuevas pueden salir bastante a menudo. Para actualizar automáticamente, inicia `mhgurecomp-updater.exe` (`mhgurecomp-updater` en Linux). El actualizador funciona con mando, así que puedes usarlo como acceso directo principal o añadirlo como juego que no es de Steam.

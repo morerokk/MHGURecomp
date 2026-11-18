@@ -17,6 +17,9 @@
 #include "engine_module.h"
 #include "app_actions.h"
 #include "net/discord.h"
+#ifndef __ANDROID__
+#include "nspimport.h"
+#endif
 #ifdef __ANDROID__
 #include <SDL3/SDL_main.h>  // (main becomes SDL_main, which SDL's Java activity calls in libmain.so)
 #endif
@@ -162,7 +165,12 @@ static bool game_files_problem(const char *data, char *msg, size_t size) {
     FILE *f = fopen(main_path, "rb");
     if (!f) {
         snprintf(msg, size, "The game files were not found. Put your own dump's exefs and romfs folders in "
-                 DATA_FOLDER " (" DATA_SUB("exefs") ", " DATA_SUB("romfs") ").");
+                 DATA_FOLDER " (" DATA_SUB("exefs") ", " DATA_SUB("romfs") ")"
+#ifndef __ANDROID__
+                 ", or drag the base game's NSP and the 1.4.0 update's NSP onto mhgurecomp (or put both in the import folder "
+                 "next to it) and they are extracted for you (needs your prod.keys)"
+#endif
+                 ".");
         return true;
     }
     // the recompiled code is v1.4.0's: another version's files don't fit it (NSO header +0x40: build id)
@@ -207,6 +215,64 @@ static bool game_files_problem(const char *data, char *msg, size_t size) {
     return false;
 }
 
+
+#ifndef __ANDROID__
+// ------------------------------------------------------------------ game files from NSP files (runtime/nspimport.c)
+static bool is_nsp(const char *path) {
+    size_t n = strlen(path);
+    return n > 4 && !strcasecmp(path + n - 4, ".nsp");
+}
+
+// the update's exefs/main must be v1.4.0's (the same build id game_files_problem wants): checked before the long RomFS
+static bool nsp_verify_exefs(const char *exefs_dir, char *err, size_t size) {
+    char path[1200];
+    snprintf(path, sizeof path, "%s/main", exefs_dir);
+    static const uint8_t want[8] = {0xfb, 0x08, 0xf1, 0xd2, 0x0f, 0xd1, 0x20, 0x4f};
+    uint8_t hdr[0x48] = {0};
+    FILE *f = fopen(path, "rb");
+    bool ok = f && fread(hdr, 1, sizeof hdr, f) == sizeof hdr && !memcmp(hdr, "NSO0", 4) && !memcmp(hdr + 0x40, want, 8);
+    if (f) fclose(f);
+    if (!ok) snprintf(err, size, "The update's NSP is not version 1.4.0 of Monster Hunter Generations Ultimate "
+                      "(exefs/main build id FB08F1D20FD1204F). Use the 1.4.0 update's NSP, together with the base game's.");
+    return ok;
+}
+
+static void nsp_progress(void *user, const char *what, uint64_t done, uint64_t total) {
+    (void)user;
+    if (!total) { fprintf(stderr, "[import] %s...\n", what); return; }
+    fprintf(stderr, "\r[import] %s: %llu / %llu MB   ", what, (unsigned long long)(done >> 20), (unsigned long long)(total >> 20));
+    if (done >= total) fprintf(stderr, "\n");
+}
+
+// The .nsp files in folder (up to max, full paths into list). Returns how many.
+static int find_nsps(const char *folder, char list[][1100], int max) {
+    DIR *d = opendir(folder);
+    if (!d) return 0;
+    int n = 0;
+    for (struct dirent *e; (e = readdir(d)) && n < max;)
+        if (is_nsp(e->d_name)) snprintf(list[n++], 1100, "%s/%s", folder, e->d_name);
+    closedir(d);
+    return n;
+}
+
+// Imports the NSP files into data (both the base game's and the update's). false: it said why (a message box too).
+static bool import_nsps(const char *data, char *const *paths, int count) {
+    NspImport job = {.nsp_paths = (const char *const *)paths, .nsp_count = count, .out_dir = data,
+                     .progress = nsp_progress, .verify_exefs = nsp_verify_exefs};
+    fprintf(stderr, "[import] Extracting the game from %d NSP files into %s (this takes a few minutes, and about 13 GB)\n", count, data);
+    char err[1000];
+    if (nsp_import(&job, err, sizeof err)) {
+        fprintf(stderr, "[import] Done: the game files are in %s\n", data);
+        return true;
+    }
+    char msg[1100];
+    snprintf(msg, sizeof msg, "Importing the NSP files failed:\n\n%s", err);
+    fprintf(stderr, "%s\n", msg);
+    plat_error_box(msg);
+    return false;
+}
+#endif
+
 #ifdef __ANDROID__
 bool android_offer_import(const char *msg, char *data, size_t size);  // (runtime/platform/android.c)
 void android_game_folder(char *out, size_t size);
@@ -223,8 +289,19 @@ int main(int argc, char **argv) {
     plat_init();
     setvbuf(stderr, NULL, _IONBF, 0);
     bool given = false;
-    for (int i = 1; i < argc; i++)
+#ifndef __ANDROID__
+    char *nsp_args[8];  // (NSP files dropped on the program, or on its shortcut: argv has their paths)
+    int n_nsp_args = 0;
+#endif
+    for (int i = 1; i < argc; i++) {
+#ifndef __ANDROID__
+        if (argv[i][0] != '-' && is_nsp(argv[i])) {
+            if (n_nsp_args < 8) nsp_args[n_nsp_args++] = argv[i];
+            continue;
+        }
+#endif
         if (argv[i][0] != '-') g_game_dir = argv[i], given = true;
+    }
     if (getenv("MHGU_GAME_DIR")) g_game_dir = getenv("MHGU_GAME_DIR"), given = true;
     if (!given) {  // standalone (the build folder): data\ holds the game files; caches, mods and log.txt beside, saves
         plat_standalone();  // in the player's folder (%APPDATA%\MHGURecomp\save)
@@ -253,6 +330,21 @@ int main(int argc, char **argv) {
         } else {
             fprintf(stderr, "[main] no user data folder: saves go to save\\ beside the executable\n");
         }
+#ifndef __ANDROID__
+        if (n_nsp_args) {  // NSP files given: they are the game files (the ones in data move to data/previous-N)
+            if (!import_nsps(data, nsp_args, n_nsp_args)) return 1;
+        } else {
+            char first[900];
+            static char found[4][1100];
+            char *list[4];
+            int n_found = 0;
+            if (game_files_problem(data, first, sizeof first)) {  // (no game files yet: the NSP files in import\ will do)
+                n_found = find_nsps("import", found, 4);
+                for (int i = 0; i < n_found; i++) list[i] = found[i];
+                if (n_found >= 2 && !import_nsps(data, list, n_found)) return 1;
+            }
+        }
+#endif
         for (char msg[900]; game_files_problem(data, msg, sizeof msg);) {
             fprintf(stderr, "%s\n", msg);
 #ifdef __ANDROID__
