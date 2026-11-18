@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "../hle.h"
+#include "../platform.h"
 #include "../romfs.h"
 
 #define MOVIE_EOS 4u
@@ -237,7 +238,9 @@ static void ex_open(Cpu *c, Extractor *e, const char *path) {
     const char *rel = path && strstr(path, ":/") ? strstr(path, ":/") + 2 : path ? path : "";
     const char *host = romfs_host_path(rel);
     LOG("[movie] open %s -> %s\n", path ? path : "(null)", host ? host : "(not found)");
-    if (!host || avformat_open_input(&e->fmt, host, NULL, NULL) < 0 || avformat_find_stream_info(e->fmt, NULL) < 0) {
+    char utf8[1400];  // (FFmpeg takes UTF-8 paths on Windows; the RomFS's are in the ANSI code page there)
+    if (!host || avformat_open_input(&e->fmt, plat_utf8_path(host, utf8, sizeof utf8), NULL, NULL) < 0 ||
+        avformat_find_stream_info(e->fmt, NULL) < 0) {
         LOG("[movie] cannot open %s\n", path ? path : "(null)");
         if (e->fmt) avformat_close_input(&e->fmt);
         RET(MOVIE_ERR);

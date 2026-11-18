@@ -69,6 +69,14 @@ SDL_Window *ui_window(void);
 bool shader_prewarm_progress(uint64_t *done, uint64_t *total);  // (runtime/nvn/vulkan/exec.c)
 bool romfs_mods_progress(int *done, int *total);                // (runtime/romfs.c)
 bool plat_exe_path(char *buf, size_t size);                     // (runtime/platform.h)
+const char *plat_utf8_path(const char *path, char *buf, size_t size);
+}
+
+// The fonts' paths here are the runtime's (a mod's folder, the program's, WINDIR): in the ANSI code page on Windows,
+// where SDL and ImGui open files by UTF-8 ones (a mod folder named in Chinese would not open)
+static std::string utf8_path(const char *path) {
+    char buf[1400];
+    return plat_utf8_path(path, buf, sizeof buf);
 }
 
 static std::atomic<bool> g_enabled, g_ready, g_open, g_wants_text;
@@ -428,7 +436,7 @@ static bool g_han_tried;      // the system's Chinese glyphs were merged into g_
 static bool g_hangul_tried;   // the Korean glyphs were merged into g_ui_font, or no font for them was found
 
 static bool can_read(const char *path) {  // (an absolute path; SDL: UTF-8 on Windows too)
-    SDL_IOStream *io = SDL_IOFromFile(path, "rb");
+    SDL_IOStream *io = SDL_IOFromFile(utf8_path(path).c_str(), "rb");
     if (io) SDL_CloseIO(io);
     return io != NULL;
 }
@@ -469,7 +477,7 @@ static std::string release_font(const char *name) {
 // path, and a mod's font path may be relative to the app's folder, so stdio comes first.
 static void *font_file(const char *path, size_t *n) {
 #ifndef __ANDROID__
-    return SDL_LoadFile(path, n);
+    return SDL_LoadFile(utf8_path(path).c_str(), n);
 #else
     void *data = nullptr;
     if (FILE *f = fopen(path, "rb")) {
@@ -622,7 +630,7 @@ static bool context_init(const char *font_path, const char *cjk_font, float font
     ImFontConfig cfg;
     cfg.SizePixels = g_font_size;
     std::string mod = cjk_font ? cjk_font : "";
-    ImFont *font = font_path ? io.Fonts->AddFontFromFileTTF(font_path, g_font_size, &cfg) : nullptr;
+    ImFont *font = font_path ? io.Fonts->AddFontFromFileTTF(utf8_path(font_path).c_str(), g_font_size, &cfg) : nullptr;
     if (font) io.FontDefault = font;
     // (ImGui's own; again when a mod's Chinese font comes after another was merged: the first source that has a glyph
     // is the one drawn, so the mod's goes into a font of its own, ahead of the release's)

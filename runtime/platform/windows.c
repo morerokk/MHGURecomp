@@ -210,6 +210,13 @@ bool plat_use_folder(const char *utf8, char *buf, size_t size) {
     return len > 0 && !lossy;
 }
 
+const char *plat_utf8_path(const char *path, char *buf, size_t size) {
+    wchar_t w[1024];
+    int n = MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, path, -1, w, 1024);
+    if (!n || !WideCharToMultiByte(CP_UTF8, 0, w, -1, buf, (int)size, NULL, NULL)) snprintf(buf, size, "%s", path);
+    return buf;
+}
+
 static int count_files(const char *dir, int depth) {
     char pat[MAX_PATH * 2];
     if (depth > 32 || snprintf(pat, sizeof pat, "%s\\*", dir) >= (int)sizeof pat) return 0;

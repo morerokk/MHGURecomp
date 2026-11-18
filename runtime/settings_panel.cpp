@@ -33,6 +33,8 @@
 #include <thread>
 #include <vector>
 
+extern "C" const char *plat_utf8_path(const char *path, char *buf, size_t size);  // (runtime/platform.h)
+
 namespace {
 enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, Actions };
 enum class Command { None, Save };
@@ -244,6 +246,13 @@ int mod_index(const std::string &name) {
         if (name == mods.draft[i].name)
             return i;
     return -1;
+}
+// A mod's name as the menu shows it. The name is its folder's, as readdir gives it - in the ANSI code page on Windows
+// (GBK on a Chinese one), where ImGui reads UTF-8 (a name in Chinese was ???) - and also the folder the mod loads from,
+// so ModEntry keeps it as it is.
+std::string mod_title(const std::string &name) {
+    char buf[512];
+    return plat_utf8_path(name.c_str(), buf, sizeof buf);
 }
 bool dirty();
 // The tab that shows the build's version (MHGU_VERSION, the Makefile's VERSION) in the bottom right corner
@@ -1829,17 +1838,18 @@ void conflict_rows(std::vector<Row> &r) {
             continue;
         if (ia > ib)
             std::swap(ia, ib);
-        const char *first = mods.draft[ia].name, *second = mods.draft[ib].name;
-        std::string text = fmt("%s and %s both change %d file(s); %s is used", first, second, c.replaced, second);
-        std::string a = first, b = second;
+        std::string a = mods.draft[ia].name, b = mods.draft[ib].name;
+        std::string first = mod_title(a), second = mod_title(b);
+        std::string text = fmt("%s and %s both change %d file(s); %s is used", first.c_str(), second.c_str(), c.replaced,
+                               second.c_str());
         action(r, "mods.conflict." + std::to_string(k), text, []() {});
         {  // select it to choose which of the two is used: that one moves below the other
             Row &row = r.back();
             Row copy = row;
             copy.title = tr("Which mod is used?");
             row.menu = true;
-            row.activate = [copy, a, b]() {
-                choices(copy, {fmt("Use %s", a.c_str()), fmt("Use %s", b.c_str())}, 1, [a, b](int v) {
+            row.activate = [copy, a, b, first, second]() {
+                choices(copy, {fmt("Use %s", first.c_str()), fmt("Use %s", second.c_str())}, 1, [a, b](int v) {
                     int ia = mod_index(a), ib = mod_index(b), win = v ? ib : ia, lose = v ? ia : ib;
                     if (ia < 0 || ib < 0 || win > lose)
                         return;
@@ -1916,7 +1926,7 @@ void mods_rows(std::vector<Row> &r) {
             }
         Row row;
         row.id = "mod." + name;
-        row.title = name;
+        row.title = mod_title(name);
         row.value = std::string(tr(on ? "On" : "Off")) + (clash ? " !" : "");
         row.cold = true;
         auto set_on = [name](bool v) {
