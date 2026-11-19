@@ -314,22 +314,24 @@ static void apply_input(ImGuiIO &io) {
     }
     // the controller (as Forge maps it: A activates, B cancels, the left stick and the d-pad move)
     if (!g_open) pad = {};
-    // Apply only to settings. Forge retains its existing semantic A/B mapping.
+    // Confirm and Cancel where the host menus have them (menu_confirm.h: the game's MenuConfirm binding, else
+    // [Controls] MenuConfirm), in the settings and in Forge's menu alike, so that one button confirms in both (#417).
+    // Only Forge's menu: what plugins read (forge_input_*) stays the game's own A and B.
     bool settings = g_settings_open && !g_forge_over;  // (the settings have the controller)
-    if (settings) {
+    int owner = settings ? 1 : g_forge_open ? 2 : 0;
+    int policy = owner ? menu_confirm_policy_now() : MENU_CONFIRM_ORIGINAL;
+    if (owner) {
         int a = overlay_face_position(0), b = overlay_face_position(1);
         int confirm, cancel;
-        menu_confirm_buttons(menu_confirm_policy_now(), a, b, pad.a, pad.b, &confirm, &cancel);
+        menu_confirm_buttons(policy, a, b, pad.a, pad.b, &confirm, &cancel);
         pad.a = confirm; pad.b = cancel;
     }
     // A or B held from the menu that had the controller (the settings' row that opened Forge's menu, Cancel that
     // closed it) does nothing in the next one until let go: as the host reads the controller, not as the clear left it
     static int last_policy = -1, was_owner;
     static bool wait_release;
-    int owner = settings ? 1 : g_forge_open ? 2 : 0;
     if (owner && owner != was_owner) wait_release = true;
     was_owner = owner;
-    int policy = settings ? menu_confirm_policy_now() : MENU_CONFIRM_ORIGINAL;
     if (last_policy >= 0 && policy != last_policy) wait_release = true;
     last_policy = policy;
     if (wait_release) {
