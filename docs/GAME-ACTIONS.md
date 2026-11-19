@@ -153,6 +153,52 @@ This replaced the "Interact first" delay for Dodge: it was tried first for `Shar
 went through, and at a chest 1 update was not enough (the hunter crouched). The gate (`act_gate`, `SharedInteractFrames`) is
 kept only for Interact sharing an input with other hunt actions that have no state to tell them apart (`AttackX` ...).
 
+## The open/talk key (`OpenTalk`, `ConfirmTargets`)
+
+One button of the game is many things: with the weapon away A gathers, carves, opens a box, talks, lies in a bed and
+starts a climb. The layer had one `Interact` action for all of them, so a player who wants A to be the roll (as in the
+later games) cannot also have A open a box: A and B together are the game's roll.
+
+Everything here is in terms of the layer's *actions*, not of the pad's letters: which action a button has is the
+player's binding (`[Actions.Pad]`), and a profile that puts Dodge on the bottom button and AttackA on the right one is
+as much a case as the game's own.
+
+What the hunter stands by is readable: `player+0x32B4` (u32) is the category of the interactable in range, 0 when there
+is none. Found by diffing player memory snapshots (`MHGU_PLSNAP`) taken by a supply box, beds, an NPC and gather points:
+every gather point gives 1, the supply boxes 5 and 9, a bed 8, an NPC 13, and nothing in range 0. Different objects of
+one kind give the same value, so it is a category, not an object id.
+
+`[Actions] ConfirmTargets` lists the categories that are "open / talk"; the ones measured so far are the default, so
+an ini only needs the line to change them (an empty value turns `OpenTalk` off). They split the one A button in two: at
+such a target (with the weapon away) `OpenTalk` presses A and `Interact` is silent; anywhere else `Interact` presses A
+(gather, carve, climb, the wall jump) and `OpenTalk` is silent. Both default to the game's A button, so with no
+rebinding the split changes nothing. A category that is not listed keeps the interact key - the list is a set of
+exceptions, not a complete map of the game's interactables.
+
+`OpenTalkAlsoInteract=1` is the other way round: at an open/talk target both keys press A, so a player can keep one
+interact key working everywhere and only *add* a key for the roll. Off by default: then the two keys are two halves of
+one button, which is what makes "A confirms, B gathers" possible.
+
+`OpenTalk` on an input of its own shares that input with the roll: at an open/talk target `Dodge` and `Crouch` step
+aside *when `OpenTalk` is held as well* (the two on one input, the target deciding what the press is), and elsewhere the
+roll keeps it. On a separate input the roll is untouched everywhere.
+
+Empty `ConfirmTargets` (the default) changes nothing at all: no category is an open/talk one, `OpenTalk` never delivers
+a bit, and `Interact` keeps every input it had.
+
+```ini
+[Actions]
+; ConfirmTargets: only needed to change the default 5,8,9,13 (empty: OpenTalk off)
+; OpenTalkAlsoInteract=1: the interact key presses A at an open/talk target too
+[Actions.Pad]
+OpenTalk = pad:south   ; A: the box, the bed, the NPC
+Dodge    = pad:south   ; A: the roll and the crouch everywhere else
+Interact = pad:north   ; B: gather, carve, climb, the wall jump
+```
+
+A climbable wall has no category (0), so A there is the roll and `Interact` climbs. The wall's own buttons (B: the slide
+and the fast climb; A: the wall jump) are the game's and are not touched.
+
 ## Consumer map (hunt and town; what is separable now)
 
 Bits are the engine / hunter-copy ones (INPUTS-MASTER B.1). "Separable now": the layer has an action or state for it. "Gate
@@ -204,6 +250,7 @@ low; (6) mash / struggle and the raw-word readers, not worth it.
 Enable=1                  ; 1 is the default (no section at all too); 0: nothing hooked, bit-for-bit the game's own input
 ManageMenus=1             ; the menu view too
 SheathedAttackA=0         ; 1: AttackA presses A with the weapon away too (only matters once Interact is bound)
+ConfirmTargets=           ; OpenTalk's targets (the interactable's category, see below): e.g. 5,8,9,13; empty: off
 Pointer=0                 ; feed the engine's (dormant) pointer block: experiment, see P1 below
 Log=0                     ; one line per frame (env MHGU_ACTION_LOG=1); env MHGU_ACTIONS=0|1 overrides Enable
 
