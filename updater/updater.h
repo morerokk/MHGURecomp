@@ -49,3 +49,4 @@ typedef struct {
     Asset assets[16];
 } Release;
 bool json_release(const char *text, size_t size, Release *r);
+char *json_body(const char *text, size_t size);  // the release's notes (malloc'd; NULL: none)

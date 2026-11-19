@@ -991,6 +991,22 @@ itself has no networking for this and never changes: `mhgurecomp` always just st
     code comes back. A second check got a 304 from GitHub.
 - Not covered: a release that drops a file leaves the old copy behind, and a new `bonus/system` is never installed,
   since bonus/ belongs to the player.
+- Release notes (2026-11-19): after an install the updater writes `update/changelog.txt` from the release JSON it
+  installed (`body`, updater/json.c json_body; save_changelog in updater.c). Line 1 is the tag; the rest is the
+  notes up to the `## Installation` line, as plain text: the `# ` title, the `**This is a pre-release` line, `**`,
+  `*` and backticks are dropped, `## ` headings keep their words, `* ` bullets become `- `, CRLF becomes LF. No
+  extra request: it's the JSON the update check already fetched. The game's settings menu (Menu Options, General)
+  shows "What's new in <version>" only when line 1 equals MHGU_VERSION (runtime/settings_panel.cpp changelog(),
+  read once from the working folder, i.e. the game folder or MHGU_HOME). It opens View::Changelog: the notes in a box
+  that fits the window and scrolls (wheel, up / down, Page Up / Down), `- ` lines drawn as bullets indented by their
+  leading spaces, and Back. A release installed by hand, a pre-release, a development build or Android has no
+  matching file, so no row.
+  - Tested 2026-11-19: a fake release (0.99.0, the 0.17.9 notes with CRLF) served locally to a copy of the updater
+    with its error box turned off: installed, notes saved as intended. In the game with a matching file: the row,
+    the dialog, Back, and scrolling notes 4x as long at 1280x720. Not tested: Korean / Chinese / Spanish menus.
+  - Seen while testing: started from the Claude app's tools, `make`-built updaters (this change's and HEAD's alike)
+    and sometimes a hand-built one stop at "mhgurecomp.exe is not here" and create no update/ folder, though the
+    file is there; a hand-built copy succeeded in other runs. Not seen from Explorer so far; cause not found.
 
 ## Fixed (2026-10-28): Linux sleeps were busy loops
 
