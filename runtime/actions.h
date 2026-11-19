@@ -45,6 +45,10 @@ typedef enum {
     // a hunt: the three Hunter Arts, each on an input of its own (HunterArtKeys): what the game's Control Type wants for
     // that Art (act_art_bits) is delivered
     ACT_ART1, ACT_ART2, ACT_ART3,
+    // a hunt: the confirm key (ConfirmTargets), apart from Interact: A while the hunter stands by a box, a bed or an NPC.
+    // What the hunter stands by is the interactable's category (player+0x32B4, act_set_target); Interact itself is the
+    // function key and works everywhere.
+    ACT_OPEN_TALK,
     ACT_COUNT
 } ActId;
 // The contexts. An action belongs to one of the first three. For act_view a hunt is one of three: ACT_VIEW_MB1 with
@@ -89,6 +93,19 @@ bool act_art_keys(void);
 //   type 0: D-pad (right stick with alt) up / right / down     type 3: right stick (D-pad with alt) up / right / down
 //   type 1: R+A+B / ZL / ZR (swap: ZR+A+B / L / R)              type 2: ZL+X / ZL+A / ZL+B (swap: L+...)
 uint32_t act_art_bits(int n, int type, bool swap, bool alt);
+// The category of the interactable the hunter stands by (player+0x32B4, hle/input_view.c), 0: none. The game thread
+// sets it every player update and the view reads it (ST_CONFIRM): with a category in ConfirmTargets, OpenTalk
+// delivers A and Dodge / Crouch are silent; elsewhere OpenTalk is silent, so A stays the roll.
+// The categories ConfirmTargets defaults to: the supply box (5), a bed (8), the delivery box (9), an NPC (13) and the
+// carrier (17), the ones measured in a hunt (docs/GAME-ACTIONS.md). An ini's ConfirmTargets replaces them; an empty one
+// turns OpenTalk off.
+#define ACT_CONFIRM_TARGETS ((1ull << 5) | (1ull << 8) | (1ull << 9) | (1ull << 13) | (1ull << 17))
+// TargetLog: the interactable's category as it changes, for filling ConfirmTargets in
+bool act_target_log(void);
+// The ConfirmTargets line as the settings screen shows and edits it ("5,8,9,13"; empty: none)
+void act_format_targets(uint64_t mask, char *buf, size_t size);
+bool act_parse_targets(const char *text, uint64_t *mask);
+void act_set_target(uint32_t category);
 int act_default_switch(int id);           // the Switch button (input.h BTN_*, ACT_KCR, ACT_KCZR) Tier 0 gives it; -1: none
 int act_default_button(int id, bool dash_zr);  // the same, the dash role turned into R or ZR: a Switch button (input.h BTN_*); -1: none
 const char *act_shared_with(int id);      // "" or the actions that are the same game input (documented, not an error)
@@ -130,6 +147,15 @@ typedef struct ActProfile {
     bool split;     // SplitDashWeaponR: Dash and the weapon R-action are two inputs (also when WeaponR has a binding)
     bool sheathed_attack;  // SheathedAttackA: AttackA presses A with the weapon put away too (default: only Interact does)
     bool art_keys;  // HunterArtKeys: HunterArt1-3 are read (keyboard default 1, 2, 3) and the HUD shows their inputs
+    // ConfirmTargets: the interactable categories (1..63) OpenTalk is for. 0 (no target) is never one of them, and
+    // an empty mask turns OpenTalk off: Interact then presses A everywhere it did before.
+    uint64_t confirm_mask;
+    // OpenTalkAlsoInteract: at an open/talk target the interact key presses A too (by default it gives the press up to
+    // OpenTalk, so that the two are one key's halves rather than one key doing both)
+    bool open_talk_union;
+    // TargetLog: one line per change of the interactable's category ("[target] category N"), the way ConfirmTargets is
+    // filled in: walk up to each kind of interactable once and the log has its number (docs/GAME-ACTIONS.md)
+    bool target_log;
     int shared_frames;     // SharedInteractFrames: how long Interact is tried first on an input other hunt actions share (0: 1)
     bool log;       // Log: one line per frame
     int scheme;     // Scheme: which control scheme the settings screen shows (ACT_SCHEME_*; 0: the device last used)
