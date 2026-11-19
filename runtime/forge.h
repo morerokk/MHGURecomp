@@ -26,6 +26,8 @@ void forge_test_hook(uint32_t target);  // (debug) a plugin-style hook on target
 void forge_nvn_device(uint32_t device);
 void forge_nvn_window_textures(uint32_t textures, int n);
 void forge_nvn_present(struct Cpu *c, uint32_t queue, uint32_t window, int index);
+// runtime/hle/abort.c: the Forge file call this thread is in, with its plugin and file (NULL: none)
+const char *forge_abort_context(void);
 
 // forge_imgui.c, for the overlay (on the game's thread, cpu: its Cpu)
 void forge_imgui_init(void *cpu);  // (after the ImGui context exists: plugins get it)

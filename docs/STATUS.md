@@ -1618,7 +1618,11 @@ start (1.x ones still do). Files: forge_fs_openFile(path, mode, u32 *handle) / g
 size) / closeFile are the game's own nn::fs OpenFile / GetFileSize / ReadFile / CloseFile (any mount the game has: "app:/"
 is the RomFS with the mods' files over it, "savedata:/" while forge_fs_mountSaveData holds it), false on a failed Result,
 the handle nn::fs's. As on the console, a Result nn::fs doesn't let the caller handle aborts the game (reading past the
-end: 2002-3005); a missing file is just false. Rendering (runtime/nvn/objects.c tells forge.c what the game made):
+end: 2002-3005, wholly past it or partly); a missing file is just false. The abort's own lines name no file or plugin, so
+readFile first checks the read against GetFileSize and logs "FATAL: Tried to read past the end of a file! Plugin <file>
+(<its name>) read N bytes at offset X of <path>, which is M bytes long ..." (and a Forge [ERROR] line), and the abort
+handler (hle/abort.c) adds "[abort] inside a Forge mod's file call: <call, path, plugin>" for any abort inside
+openFile / readFile / closeFile (forge_abort_context; the paths by handle, from openFile; the plugin from lr). Rendering (runtime/nvn/objects.c tells forge.c what the game made):
 forge_onNvnInit(getProcAddress, device, queue) and forge_onNvnReady() at the first present after the plugins started
 (Forge: at its first present, with forge_onImGuiInit between them; here forge_onImGuiInit comes with the overlay's first
 frame on the game's thread), forge_onNvnRender(window, index) at every nvnQueuePresentTexture before the picture goes out,

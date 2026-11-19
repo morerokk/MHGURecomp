@@ -897,6 +897,39 @@ HLE_FUNC("forge_fs_fileExists", f_file_exists) {
 #define SYM_FS_SIZE  "_ZN2nn2fs11GetFileSizeEPxNS0_10FileHandleE"
 #define SYM_FS_READ  "_ZN2nn2fs8ReadFileENS0_10FileHandleExPvj"
 
+// A Result nn::fs leaves to no one aborts the game (as on the console): the abort's own log line names no file and no
+// plugin, so these say which. The paths of the files plugins opened, by handle, and the call running on each thread
+// (forge_abort_context, printed by runtime/hle/abort.c when the game aborts inside it).
+#define MAX_OPEN_FILES 64
+static struct { uint32_t handle; char path[200]; } open_files[MAX_OPEN_FILES];
+static _Thread_local char fs_call[512];
+
+static const char *open_file_path(uint32_t handle, char *buf, size_t n) {
+    snprintf(buf, n, "a file not opened with forge_fs_openFile (handle %08x)", handle);
+    pthread_mutex_lock(&forge_lock);
+    for (int i = 0; i < MAX_OPEN_FILES; i++)
+        if (open_files[i].path[0] && open_files[i].handle == handle) { snprintf(buf, n, "%s", open_files[i].path); break; }
+    pthread_mutex_unlock(&forge_lock);
+    return buf;
+}
+
+// The plugin whose code called (lr): "file.nro (its name)"
+static const char *caller_plugin(Cpu *c, char *buf, size_t n) {
+    uint32_t lr = c->r[14] & ~1u;
+    for (int i = 0; i < nplugins; i++) {
+        const Module *m = plugins[i].m;
+        if (lr < m->base || lr >= m->base + m->size) continue;
+        const char *own = plugins[i].param ? gstr(plugins[i].param + 6) : "";
+        if (*own) snprintf(buf, n, "%s (%s)", plugins[i].name, own);
+        else snprintf(buf, n, "%s", plugins[i].name);
+        return buf;
+    }
+    snprintf(buf, n, "a plugin (called from %08x)", lr);
+    return buf;
+}
+
+const char *forge_abort_context(void) { return fs_call[0] ? fs_call : NULL; }
+
 HLE_FUNC("forge_fs_openFile", f_open_file) {  // (const char *path, ForgeOpenMode mode, u32 *outHandle)
     uint32_t path = ARG(0), mode = ARG(1), out = ARG(2), sp = c->r[13], fn = gsym(SYM_FS_OPEN);
     if (!fn || !kernel_mapped(out, 4)) {
@@ -904,11 +937,25 @@ HLE_FUNC("forge_fs_openFile", f_open_file) {  // (const char *path, ForgeOpenMod
         RET(0);
         return;
     }
+    char name[200], who[200];
+    gstr_copy(path, name, sizeof name);
+    snprintf(fs_call, sizeof fs_call, "forge_fs_openFile(\"%s\", mode %u) from plugin %s", name, mode,
+             caller_plugin(c, who, sizeof who));
     c->r[13] = (sp - 16) & ~7u;
     uint32_t handle = c->r[13];
     uint32_t r = gcall(c, fn, handle, path, mode, 0);
     c->r[13] = sp;
-    if (!r) ST32(out, LD32(handle));
+    fs_call[0] = 0;
+    if (!r) {
+        uint32_t h = LD32(handle);
+        ST32(out, h);
+        pthread_mutex_lock(&forge_lock);
+        int free_at = -1;
+        for (int i = 0; i < MAX_OPEN_FILES; i++)
+            if (!open_files[i].path[0] || open_files[i].handle == h) { free_at = i; if (open_files[i].handle == h) break; }
+        if (free_at >= 0) open_files[free_at].handle = h, snprintf(open_files[free_at].path, sizeof open_files[free_at].path, "%s", name);
+        pthread_mutex_unlock(&forge_lock);
+    }
     RET(r == 0);
 }
 HLE_FUNC("forge_fs_getFileSize", f_file_size) {  // (u32 handle, s64 *outSize): nn::fs::GetFileSize(outSize, handle)
@@ -918,11 +965,43 @@ HLE_FUNC("forge_fs_readFile", f_read_file) {  // (u32 handle, s64 offset, void *
     // nn::fs::ReadFile(FileHandle, s64, void *, size_t) takes its arguments where these are: r0, r2:r3, the stack
     uint32_t fn = gsym(SYM_FS_READ);
     if (!fn) { RET(0); return; }
+    uint32_t handle = ARG(0), size = STK(1), sp = c->r[13], args[4];
+    int64_t off = (int64_t)ARG64(2);
+    char path[200], who[200];
+    open_file_path(handle, path, sizeof path);
+    caller_plugin(c, who, sizeof who);
+    // A read past the end aborts the game in nn::fs: said first, plainly (the file's size from nn::fs too)
+    memcpy(args, c->r, sizeof args);
+    c->r[13] = (sp - 16) & ~7u;
+    uint32_t at = c->r[13];
+    uint32_t sr = gsym(SYM_FS_SIZE) ? gcall(c, gsym(SYM_FS_SIZE), at, handle, 0, 0) : 1;
+    int64_t fsize = sr ? -1 : (int64_t)LD64(at);
+    c->r[13] = sp;
+    memcpy(c->r, args, sizeof args);
+    if (fsize >= 0 && (off < 0 || off + (int64_t)size > fsize)) {
+        LOG("FATAL: Tried to read past the end of a file! Plugin %s read %u bytes at offset %lld of %s, which is %lld "
+            "bytes long (forge_fs_readFile). nn::fs ends the game here, as it does on the console: the plugin must "
+            "read only what forge_fs_getFileSize says is there.\n", who, size, (long long)off, path, (long long)fsize);
+        flog(3, "Plugin %s read past the end of %s (%u bytes at offset %lld, the file is %lld bytes)", who, path, size,
+             (long long)off, (long long)fsize);
+    }
+    snprintf(fs_call, sizeof fs_call, "forge_fs_readFile(%s, offset %lld, %u bytes) from plugin %s", path, (long long)off,
+             size, who);
     guest_call(c, fn);
+    fs_call[0] = 0;
     RET(c->r[0] == 0);
 }
 HLE_FUNC("forge_fs_closeFile", f_close_file) {  // (u32 handle)
-    gcall(c, gsym(SYM_FS_CLOSE), ARG(0), 0, 0, 0);
+    uint32_t h = ARG(0);
+    char path[200], who[200];
+    snprintf(fs_call, sizeof fs_call, "forge_fs_closeFile(%s) from plugin %s", open_file_path(h, path, sizeof path),
+             caller_plugin(c, who, sizeof who));
+    gcall(c, gsym(SYM_FS_CLOSE), h, 0, 0, 0);
+    fs_call[0] = 0;
+    pthread_mutex_lock(&forge_lock);
+    for (int i = 0; i < MAX_OPEN_FILES; i++)
+        if (open_files[i].path[0] && open_files[i].handle == h) open_files[i].path[0] = 0;
+    pthread_mutex_unlock(&forge_lock);
 }
 
 // ------------------------------------------------------------------ nn::os wrappers (same arguments as the SDK's)

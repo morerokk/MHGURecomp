@@ -5,6 +5,7 @@
 // SDK's own calls alike.
 #include <stdlib.h>
 
+#include "../forge.h"
 #include "../hle.h"
 #include "../kernel.h"
 
@@ -27,6 +28,8 @@ HLE_SDK("_ZN2nn4diag6detail10VAbortImplEPKcS3_S3_iPKNS_6ResultEPKNS_2os17UserExc
         guest_str(ARG(1), fn, sizeof fn), guest_str(ARG(2), file, sizeof file), (int)ARG(3));
     if (STK(0)) LOG("[abort] result %08x (%04u-%04u)\n", result, 2000 + (result & 0x1ff), (result >> 9) & 0x1fff);
     if (STK(2)) LOG("[abort] message: %s\n", guest_str(STK(2), fmt, sizeof fmt));
+    const char *forge = forge_abort_context();
+    if (forge) LOG("[abort] inside a Forge mod's file call: %s\n", forge);
     kernel_log_guest_stack("[abort] the game", c);
     exit(1);
 }
