@@ -456,6 +456,7 @@ void act_parse(const char *text, ActProfile *p) {
             else if (same_name(key, "HunterArtKeys")) p->art_keys = parse_bool(val);
             else if (same_name(key, "ConfirmTargets")) p->confirm_mask = parse_categories(val);
             else if (same_name(key, "OpenTalkAlsoInteract")) p->open_talk_union = parse_bool(val);
+            else if (same_name(key, "TargetLog")) p->target_log = parse_bool(val);
             else if (same_name(key, "SharedInteractFrames")) p->shared_frames = atoi(val) < 0 ? 0 : atoi(val) > 30 ? 30 : atoi(val);
             else if (same_name(key, "Log")) p->log = parse_bool(val);
             else if (same_name(key, "Scheme"))
@@ -508,11 +509,14 @@ size_t act_format(const ActProfile *p, char *buf, size_t size) {
     if (p->sheathed_attack) PUT("SheathedAttackA=1\n");
     if (p->art_keys) PUT("HunterArtKeys=1\n");
     if (p->open_talk_union) PUT("OpenTalkAlsoInteract=1\n");
+    if (p->target_log) PUT("TargetLog=1\n");
     // (a comment, not a setting: the default categories are built in, so an ini that changes nothing stays short; the
     //  OpenTalk action is off with an empty ConfirmTargets)
-    PUT("; ConfirmTargets: the interactable categories OpenTalk opens or talks to, e.g. 5,8,9,13\n");
-    PUT(";   5 the supply box, 8 a bed, 9 the delivery box, 13 an NPC (those are the default); empty: OpenTalk off\n");
+    PUT("; ConfirmTargets: the interactable categories OpenTalk opens or talks to, e.g. 5,8,9,13,17\n");
+    PUT(";   5 the supply box, 8 a bed, 9 the delivery box, 13 an NPC, 17 the carrier (those are the default);\n");
+    PUT(";   empty: OpenTalk off\n");
     PUT("; OpenTalkAlsoInteract=1: the interact key presses A at an open/talk target too (default: it gives it up)\n");
+    PUT("; TargetLog=1: log the interactable's category as it changes, for filling ConfirmTargets in\n");
     if (p->confirm_mask != ACT_CONFIRM_TARGETS) {
         PUT("ConfirmTargets=");
         bool first = true;
@@ -768,6 +772,19 @@ uint32_t act_virtual_bits(uint64_t active) {
     return act_split() && (active >> ACT_WEAPON_R & 1) ? ACT_VBIT_WEAPON_R : 0;
 }
 bool act_art_keys(void) { return prof_on && prof.art_keys; }
+bool act_target_log(void) { return prof_on && prof.target_log; }
+void act_format_targets(uint64_t mask, char *buf, size_t size) {
+    if (!size) return;
+    size_t n = 0;
+    buf[0] = 0;
+    for (int c = 1; c < 64; c++) {
+        if (!(mask >> c & 1)) continue;
+        int w = snprintf(buf + n, size - n, "%s%d", n ? "," : "", c);
+        if (w < 0 || (size_t)w >= size - n) break;
+        n += (size_t)w;
+    }
+}
+bool act_parse_targets(const char *text, uint64_t *mask) { *mask = parse_categories(text); return true; }
 // The confirm key's target: one category, 0 (nothing to interact with) is never a confirm target
 void act_set_target(uint32_t category) { atomic_store(&target_category, category && category < 64 ? (int)category : -1); }
 static bool target_is_confirm(void) {

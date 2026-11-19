@@ -1020,13 +1020,23 @@ static void test_hunter_arts(void) {
 // weapon out nothing changes.
 static void test_confirm_target(void) {
     int S = ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH, N = ACT_PAD + SDL_GAMEPAD_BUTTON_NORTH;
-    ActProfile p = parse("[Actions]\nEnable=1\nConfirmTargets=5,9\n[Actions.Pad]\nOpenTalk = pad:south\n"
+    ActProfile p = parse("[Actions]\nEnable=1\nConfirmTargets=5,9\nTargetLog=1\n[Actions.Pad]\nOpenTalk = pad:south\n"
                          "Dodge = pad:south\nInteract = pad:north\n");
     CHECK(p.confirm_mask == ((1ull << 5) | (1ull << 9)), "ConfirmTargets parsed: %llx", (unsigned long long)p.confirm_mask);
+    CHECK(p.target_log, "TargetLog parsed");
     char text[1024];
     act_format(&p, text, sizeof text);
     CHECK(strstr(text, "ConfirmTargets=5,9"), "ConfirmTargets written: %s", text);
+    CHECK(strstr(text, "TargetLog=1"), "TargetLog written: %s", text);
     act_use_profile(&p);
+    CHECK(act_target_log(), "TargetLog in use");
+    char targets[64];
+    uint64_t rt = 0;
+    act_format_targets(p.confirm_mask, targets, sizeof targets);
+    CHECK(!strcmp(targets, "5,9"), "act_format_targets: %s", targets);
+    CHECK(act_parse_targets("5, 9", &rt) && rt == p.confirm_mask, "act_parse_targets");
+    act_parse_targets("", &rt);
+    CHECK(rt == 0, "empty targets");
     // (a frame far past every act_inject the earlier tests left behind: those would be held here otherwise)
     ActHost h = host_for(0, false, 1000000);
     ActSnap s;

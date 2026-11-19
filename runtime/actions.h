@@ -96,9 +96,15 @@ uint32_t act_art_bits(int n, int type, bool swap, bool alt);
 // The category of the interactable the hunter stands by (player+0x32B4, hle/input_view.c), 0: none. The game thread
 // sets it every player update and the view reads it (ST_CONFIRM): with a category in ConfirmTargets, OpenTalk
 // delivers A and Dodge / Crouch are silent; elsewhere OpenTalk is silent, so A stays the roll.
-// The categories ConfirmTargets defaults to: the supply box (5), a bed (8), the delivery box (9) and an NPC (13), the
-// ones measured in a hunt (docs/GAME-ACTIONS.md). An ini's ConfirmTargets replaces them; an empty one turns OpenTalk off.
-#define ACT_CONFIRM_TARGETS ((1ull << 5) | (1ull << 8) | (1ull << 9) | (1ull << 13))
+// The categories ConfirmTargets defaults to: the supply box (5), a bed (8), the delivery box (9), an NPC (13) and the
+// carrier (17), the ones measured in a hunt (docs/GAME-ACTIONS.md). An ini's ConfirmTargets replaces them; an empty one
+// turns OpenTalk off.
+#define ACT_CONFIRM_TARGETS ((1ull << 5) | (1ull << 8) | (1ull << 9) | (1ull << 13) | (1ull << 17))
+// TargetLog: the interactable's category as it changes, for filling ConfirmTargets in
+bool act_target_log(void);
+// The ConfirmTargets line as the settings screen shows and edits it ("5,8,9,13"; empty: none)
+void act_format_targets(uint64_t mask, char *buf, size_t size);
+bool act_parse_targets(const char *text, uint64_t *mask);
 void act_set_target(uint32_t category);
 int act_default_switch(int id);           // the Switch button (input.h BTN_*, ACT_KCR, ACT_KCZR) Tier 0 gives it; -1: none
 int act_default_button(int id, bool dash_zr);  // the same, the dash role turned into R or ZR: a Switch button (input.h BTN_*); -1: none
@@ -147,6 +153,9 @@ typedef struct ActProfile {
     // OpenTalkAlsoInteract: at an open/talk target the interact key presses A too (by default it gives the press up to
     // OpenTalk, so that the two are one key's halves rather than one key doing both)
     bool open_talk_union;
+    // TargetLog: one line per change of the interactable's category ("[target] category N"), the way ConfirmTargets is
+    // filled in: walk up to each kind of interactable once and the log has its number (docs/GAME-ACTIONS.md)
+    bool target_log;
     int shared_frames;     // SharedInteractFrames: how long Interact is tried first on an input other hunt actions share (0: 1)
     bool log;       // Log: one line per frame
     int scheme;     // Scheme: which control scheme the settings screen shows (ACT_SCHEME_*; 0: the device last used)

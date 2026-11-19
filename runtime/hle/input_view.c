@@ -156,6 +156,10 @@ static void player_update(Cpu *c) {
         if (cls) g_target_class = cls, g_target_frame = g_frame;
         else if (!g_target_frame || g_frame - g_target_frame > 3) g_target_class = 0;
         act_set_target(g_target_class);
+        // (TargetLog=1: one line per change, the way ConfirmTargets is filled in: walk up to each kind of interactable
+        //  once and the log has its number)
+        static uint32_t logged;
+        if (act_target_log() && g_target_class != logged) LOG("[target] category %u\n", g_target_class), logged = g_target_class;
         uint32_t vt = LD32(pl), fn = vt ? LD32(vt + VF_BAR_OPEN) : 0;  // (vtables are in main's image, below the heap: not sane())
         g_bar_raw = fn ? call(c, fn, pl, 1, 0) : 0;
         g_bar = (g_bar_raw & 0xff) != 0;

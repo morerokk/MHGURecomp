@@ -165,7 +165,7 @@ as much a case as the game's own.
 
 What the hunter stands by is readable: `player+0x32B4` (u32) is the category of the interactable in range, 0 when there
 is none. Found by diffing player memory snapshots (`MHGU_PLSNAP`) taken by a supply box, beds, an NPC and gather points:
-every gather point gives 1, the supply boxes 5 and 9, a bed 8, an NPC 13, and nothing in range 0. Different objects of
+every gather point gives 1, the supply boxes 5 and 9, a bed 8, an NPC 13, the carrier 17, and nothing in range 0. Different objects of
 one kind give the same value, so it is a category, not an object id.
 
 `[Actions] ConfirmTargets` lists the categories that are "open / talk"; the ones measured so far are the default, so
@@ -179,6 +179,19 @@ exceptions, not a complete map of the game's interactables.
 interact key working everywhere and only *add* a key for the roll. Off by default: then the two keys are two halves of
 one button, which is what makes "A confirms, B gathers" possible.
 
+`TargetLog=1` is how `ConfirmTargets` is filled in: one line each time the category of the interactable in range changes,
+and nothing else (it does not need `Log=1`, which writes a line every frame).
+
+```
+[target] category 5
+```
+
+Walk up to each kind of interactable once and the log has its number; the ones that should open or talk go into
+`ConfirmTargets`.
+
+Both are in the settings screen too (Controls > Game actions, Show: a hunt): *Open / talk targets* (the list, typed on
+the keyboard) and *Target log* (the log line). Saving applies them at once, without a restart.
+
 `OpenTalk` on an input of its own shares that input with the roll: at an open/talk target `Dodge` and `Crouch` step
 aside *when `OpenTalk` is held as well* (the two on one input, the target deciding what the press is), and elsewhere the
 roll keeps it. On a separate input the roll is untouched everywhere.
@@ -188,8 +201,9 @@ a bit, and `Interact` keeps every input it had.
 
 ```ini
 [Actions]
-; ConfirmTargets: only needed to change the default 5,8,9,13 (empty: OpenTalk off)
+; ConfirmTargets: only needed to change the default 5,8,9,13,17 (empty: OpenTalk off)
 ; OpenTalkAlsoInteract=1: the interact key presses A at an open/talk target too
+; TargetLog=1: log the interactable's category as it changes, for filling ConfirmTargets in
 [Actions.Pad]
 OpenTalk = pad:south   ; A: the box, the bed, the NPC
 Dodge    = pad:south   ; A: the roll and the crouch everywhere else
@@ -250,7 +264,7 @@ low; (6) mash / struggle and the raw-word readers, not worth it.
 Enable=1                  ; 1 is the default (no section at all too); 0: nothing hooked, bit-for-bit the game's own input
 ManageMenus=1             ; the menu view too
 SheathedAttackA=0         ; 1: AttackA presses A with the weapon away too (only matters once Interact is bound)
-ConfirmTargets=           ; OpenTalk's targets (the interactable's category, see below): e.g. 5,8,9,13; empty: off
+ConfirmTargets=           ; OpenTalk's targets (the interactable's category, see below): e.g. 5,8,9,13,17; empty: off
 Pointer=0                 ; feed the engine's (dormant) pointer block: experiment, see P1 below
 Log=0                     ; one line per frame (env MHGU_ACTION_LOG=1); env MHGU_ACTIONS=0|1 overrides Enable
 

@@ -1288,6 +1288,28 @@ void action_rows(std::vector<Row> &r) {
     if (kind == TAB_HUNT)
         toggle("act.arts", "Hunter Art keys", &p.art_keys,
                "On: each Hunter Art has an input of its own (keyboard: 1, 2 and 3 unless rebound below), whatever buttons the game's Control Type gives them; those keep working too. With a Control Type that puts the Arts on the D-pad, the HUD shows these keys for them on keyboard and mouse.");
+    if (kind == TAB_HUNT) {
+        // the categories OpenTalk is for: a comma list, read off log.txt with Target log on
+        char list[160];
+        act_format_targets(p.confirm_mask, list, sizeof list);
+        Row row;
+        row.id = "act.targets";
+        row.title = tr("Open / talk targets");
+        row.value = list[0] ? list : tr("None");
+        row.help = tr("The interactable categories the Open / talk action opens or talks to, by number. With Target log on, walk up to each kind once and read its number in log.txt. Empty: Open / talk never presses anything.");
+        row.activate = [list = std::string(list)]() {
+            keyboard(tr("Open / talk targets"), list, 120, [](const std::string &typed, std::string &error) {
+                (void)error;
+                uint64_t mask = 0;
+                act_parse_targets(typed.c_str(), &mask);
+                acts().draft.confirm_mask = mask;
+                return true;
+            });
+        };
+        r.push_back(std::move(row));
+        toggle("act.targetlog", "Target log", &p.target_log,
+               "On: one line per change of the interactable's category in log.txt, for filling the list above in: walk up to each kind once. Off: nothing is written.");
+    }
     if (kind == TAB_KEYS)
         key_rows(r);
     else if (!simple) {
