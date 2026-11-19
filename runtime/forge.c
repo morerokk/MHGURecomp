@@ -9,6 +9,7 @@
 //   the frame update   forge_onUpdate(dt) after it, then the ImGui overlay's frame (runtime/overlay.cpp:
 //                      forge_onImGuiInit once, forge_onImGuiRender in Forge's window, forge_onImGuiFreeRender)
 //   cSystem ctor/dtor  the singletons (forge_singleton_*)
+//   NVN present        forge_onNvnInit / forge_onNvnReady once, forge_onNvnRender (runtime/nvn/objects.c; Forge 2.0.0)
 // Hooks run through FN_ENTER (cpu.h, dispatch.c); hooks in a plugin's own code are guest code the interpreter reads.
 // Patches over data apply as written; a patch over code can only redirect a function entry (Forge's own hook form,
 // `ldr pc, [pc, #-4]` + address, or a `b`): others are logged.
@@ -34,10 +35,10 @@
 #include "mods.h"
 #include "overlay.h"
 
-#define FORGE_MAJOR 1
-#define FORGE_MINOR 5
-#define FORGE_PATCH 1
-#define FORGE_VERSION_STRING "1.5.1"
+#define FORGE_MAJOR 2
+#define FORGE_MINOR 0
+#define FORGE_PATCH 0
+#define FORGE_VERSION_STRING "2.0.0"
 
 // Main module offsets (from its text) Forge uses, MHGU 1.4.0
 #define OFF_APP_RUN     0xB8692Cu  // sApp::run
@@ -53,11 +54,14 @@ typedef struct {
     Module *m;
     uint32_t on_load, on_init, on_update;
     uint32_t on_imgui[3];  // forge_onImGuiInit, forge_onImGuiRender, forge_onImGuiFreeRender (FORGE_IMGUI_*)
+    uint32_t on_nvn_init, on_nvn_ready, on_nvn_render;  // (Forge 2.0.0) forge_onNvnInit, forge_onNvnReady, forge_onNvnRender
+    bool nvn_started;  // forge_onNvnInit / forge_onNvnReady called (forge_nvn_present)
     uint32_t param;  // PluginInitParam: u16 major, minor, patch; char name[64]
     bool active;  // not rejected (a plugin without forge_onLoad is active too)
 } Plugin;
 static Plugin plugins[MAX_PLUGINS];
 static int nplugins;
+static volatile bool plugins_started;  // sApp::run has given every plugin forge_onLoad / forge_onInit
 static uint32_t main_text;
 static int log_level = 1;  // Forge LogLevel: 0 debug, 1 info, 2 warn, 3 error (MHGU_FORGE_LOG)
 
@@ -885,6 +889,42 @@ HLE_FUNC("forge_fs_fileExists", f_file_exists) {
     RET(r == 0);
 }
 
+// Forge 2.0.0's file calls (fs32.cpp): nn::fs's own, through the game's SDK, so every mount the game has works ("app:/"
+// the RomFS with the mods' files over it, "savedata:/" while forge_fs_mountSaveData holds it). A failed Result is false.
+// The handle is nn::fs's FileHandle (one word). ForgeOpenMode's bits are nn::fs::OpenMode's (1 read, 2 write, 4 append).
+#define SYM_FS_OPEN  "_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci"
+#define SYM_FS_CLOSE "_ZN2nn2fs9CloseFileENS0_10FileHandleE"
+#define SYM_FS_SIZE  "_ZN2nn2fs11GetFileSizeEPxNS0_10FileHandleE"
+#define SYM_FS_READ  "_ZN2nn2fs8ReadFileENS0_10FileHandleExPvj"
+
+HLE_FUNC("forge_fs_openFile", f_open_file) {  // (const char *path, ForgeOpenMode mode, u32 *outHandle)
+    uint32_t path = ARG(0), mode = ARG(1), out = ARG(2), sp = c->r[13], fn = gsym(SYM_FS_OPEN);
+    if (!fn || !kernel_mapped(out, 4)) {
+        if (fn) flog(2, "forge_fs_openFile: the handle pointer %08x is not writable", out);
+        RET(0);
+        return;
+    }
+    c->r[13] = (sp - 16) & ~7u;
+    uint32_t handle = c->r[13];
+    uint32_t r = gcall(c, fn, handle, path, mode, 0);
+    c->r[13] = sp;
+    if (!r) ST32(out, LD32(handle));
+    RET(r == 0);
+}
+HLE_FUNC("forge_fs_getFileSize", f_file_size) {  // (u32 handle, s64 *outSize): nn::fs::GetFileSize(outSize, handle)
+    RET(gsym(SYM_FS_SIZE) && gcall(c, gsym(SYM_FS_SIZE), ARG(1), ARG(0), 0, 0) == 0);
+}
+HLE_FUNC("forge_fs_readFile", f_read_file) {  // (u32 handle, s64 offset, void *buffer, size_t size)
+    // nn::fs::ReadFile(FileHandle, s64, void *, size_t) takes its arguments where these are: r0, r2:r3, the stack
+    uint32_t fn = gsym(SYM_FS_READ);
+    if (!fn) { RET(0); return; }
+    guest_call(c, fn);
+    RET(c->r[0] == 0);
+}
+HLE_FUNC("forge_fs_closeFile", f_close_file) {  // (u32 handle)
+    gcall(c, gsym(SYM_FS_CLOSE), ARG(0), 0, 0, 0);
+}
+
 // ------------------------------------------------------------------ nn::os wrappers (same arguments as the SDK's)
 #define FORWARD(name, sym, fn)                         \
     HLE_FUNC(name, fn) {                               \
@@ -1091,6 +1131,60 @@ HLE_FUNC("forge_input_isCtrlDown", f_ctrl) { RET(key(keys_now, SDL_SCANCODE_LCTR
 HLE_FUNC("forge_input_isAltDown", f_alt) { RET(key(keys_now, SDL_SCANCODE_LALT) || key(keys_now, SDL_SCANCODE_RALT)); }
 HLE_FUNC("forge_graphics_isMenuVisible", f_gfx_menu_visible) { RET(overlay_menu_open()); }
 
+// ------------------------------------------------------------------ rendering (Forge 2.0.0)
+// Forge hooks NVN's device, queue, window and present; the port has NVN itself (runtime/nvn/objects.c), which tells
+// these what the game made. forge_onNvnInit(getProcAddress, device, queue) and forge_onNvnReady() come at the first
+// present after the plugins are started (Forge: its first present, onImGuiInit between the two; here onImGuiInit
+// comes with the overlay's first frame, on the game's thread), forge_onNvnRender(window, index) at every present, on
+// the presenting thread before the picture goes out, as in Forge. getProcAddress is the game's nvnDeviceGetProcAddress:
+// what a plugin gets from it are the port's NVN functions, as the game's are.
+static uint32_t nvn_device, swap_textures;  // the game's NVNdevice; a guest copy of its window's NVNtexture * array
+static int swap_count;
+
+void forge_nvn_device(uint32_t device) { nvn_device = device; }
+
+void forge_nvn_window_textures(uint32_t textures, int n) {
+    if (!swap_textures) swap_textures = hle_alloc(8 * 4);
+    if (n < 0 || !kernel_mapped(textures, 4u * (uint32_t)n)) n = 0;
+    if (n > 8) n = 8;
+    for (int i = 0; i < n; i++) ST32(swap_textures + 4u * (uint32_t)i, LD32(textures + 4u * (uint32_t)i));
+    swap_count = n;
+}
+
+void forge_nvn_present(struct Cpu *c, uint32_t queue, uint32_t window, int index) {
+    if (!nplugins || !__atomic_load_n(&plugins_started, __ATOMIC_ACQUIRE)) return;
+    static uint32_t gpa;
+    if (!gpa) gpa = hle_register("nvnDeviceGetProcAddress", hle_lookup_impl("nvnDeviceGetProcAddress"));
+    bool fresh[MAX_PLUGINS] = {0};
+    for (int i = 0; i < nplugins; i++) {
+        Plugin *p = &plugins[i];
+        if (!p->active || p->nvn_started) continue;
+        p->nvn_started = fresh[i] = true;
+        if (p->on_nvn_init) gcall(c, p->on_nvn_init, gpa, nvn_device, queue, 0);
+    }
+    for (int i = 0; i < nplugins; i++)
+        if (fresh[i] && plugins[i].on_nvn_ready) gcall(c, plugins[i].on_nvn_ready, 0, 0, 0, 0);
+    for (int i = 0; i < nplugins; i++)
+        if (plugins[i].active && plugins[i].on_nvn_render) gcall(c, plugins[i].on_nvn_render, window, (uint32_t)index, 0, 0);
+}
+
+// (texture, view or NULL) -> ImTextureID (u64): see overlay.cpp overlay_user_texture_add
+HLE_FUNC("forge_graphics_registerTexture", f_gfx_register_texture) {
+    uint32_t tex = ARG(0), view = ARG(1);
+    if (view && !kernel_mapped(view, 0x28)) view = 0;
+    uint64_t id = tex && kernel_mapped(tex, 8) ? overlay_user_texture_add(tex, view ? G2H(view) : NULL) : 0;
+    if (!id) flog(3, "Insufficient number of texture descriptors to register texture");
+    RET64(id);
+}
+HLE_FUNC("forge_graphics_unregisterTexture", f_gfx_unregister_texture) {  // (ImTextureID, in r0:r1)
+    uint64_t id = ARG64(0);
+    if (!overlay_user_texture_remove(id)) flog(2, "Attempted to unregister unknown texture 0x%llX", (unsigned long long)id);
+}
+HLE_FUNC("forge_graphics_getSwapChainTextures", f_gfx_swapchain) {  // (size_t *outCount) -> const NVNtexture *const *
+    if (ARG(0) && kernel_mapped(ARG(0), 4)) ST32(ARG(0), (uint32_t)swap_count);
+    RET(swap_count ? swap_textures : 0);
+}
+
 // ------------------------------------------------------------------ sockets
 // forge_socket_*: Forge's thin wrappers of nn::socket (a Socket is {int fd}, returned in r0), on the port's own
 // nn::socket: the virtual network of runtime/net/vsock.c, which carries the game's local play and nothing else. Calls
@@ -1286,6 +1380,7 @@ static void app_run(Cpu *c) {
             gcall(c, p->on_init, 0, 0, 0, 0);
         }
     }
+    __atomic_store_n(&plugins_started, true, __ATOMIC_RELEASE);
     memcpy(c->r, args, sizeof args);
     fnhook_call_original(c, text_addr(OFF_APP_RUN));
 }
@@ -1556,6 +1651,9 @@ void forge_init(void) {
         p->on_imgui[FORGE_IMGUI_INIT] = loader_module_symbol(m, "forge_onImGuiInit");
         p->on_imgui[FORGE_IMGUI_RENDER] = loader_module_symbol(m, "forge_onImGuiRender");
         p->on_imgui[FORGE_IMGUI_FREE_RENDER] = loader_module_symbol(m, "forge_onImGuiFreeRender");
+        p->on_nvn_init = loader_module_symbol(m, "forge_onNvnInit");
+        p->on_nvn_ready = loader_module_symbol(m, "forge_onNvnReady");
+        p->on_nvn_render = loader_module_symbol(m, "forge_onNvnRender");
         interp_add_range(m->base + m->text_off, m->base + m->text_off + m->text_size);
         kernel_map_region(m->base + m->text_off, m->ro_off - m->text_off, 3, 5);
         kernel_map_region(m->base + m->ro_off, m->data_off - m->ro_off, 3, 1);

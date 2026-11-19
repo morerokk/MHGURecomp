@@ -1613,6 +1613,30 @@ Extras beyond Fexty's exported.txt, kept as harmless: forge_log_trace(format, ..
 the plugin's own messages as "[forge] [INFO] ..." (Forge's tags). Plugins are built -mfloat-abi=softfp, as
 Forge is: floats in core registers (forge_onUpdate's dt in r0; until 2026-10-23 it went in s0 only).
 
+Forge 2.0.0 (2026-11-19; was 1.5.1, the same API plus what 2.0.0 adds): the port reports 2.0.0, so plugins asking for 2.0
+start (1.x ones still do). Files: forge_fs_openFile(path, mode, u32 *handle) / getFileSize / readFile(handle, s64 offset, buf,
+size) / closeFile are the game's own nn::fs OpenFile / GetFileSize / ReadFile / CloseFile (any mount the game has: "app:/"
+is the RomFS with the mods' files over it, "savedata:/" while forge_fs_mountSaveData holds it), false on a failed Result,
+the handle nn::fs's. As on the console, a Result nn::fs doesn't let the caller handle aborts the game (reading past the
+end: 2002-3005); a missing file is just false. Rendering (runtime/nvn/objects.c tells forge.c what the game made):
+forge_onNvnInit(getProcAddress, device, queue) and forge_onNvnReady() at the first present after the plugins started
+(Forge: at its first present, with forge_onImGuiInit between them; here forge_onImGuiInit comes with the overlay's first
+frame on the game's thread), forge_onNvnRender(window, index) at every nvnQueuePresentTexture before the picture goes out,
+on the presenting thread. getProcAddress is the game's nvnDeviceGetProcAddress, so a plugin's NVN calls are the port's
+NVN layer, as the game's are. forge_graphics_getSwapChainTextures(&n) is a copy of the array nvnWindowBuilderSetTextures got
+(3 textures). forge_graphics_registerTexture(texture, view) returns a tag (0x7E57... | slot, 256 slots) for igImage /
+AddImage: each present, device.c makes the texture current outside the render pass (uploaded or MSAA-resolved) and looks up
+its sampled 2D view with the registered NVNtextureView (read at registration, as Forge's pool does); overlay_draw draws the
+tag as an ImGui Vulkan descriptor set for that view (made again when the view changes; old sets and those of unregistered
+textures are freed 10 presents later). A tag with no texture behind it (unregistered, or finalized first) draws nothing.
+Tested with a test plugin (C:\MHGURecompile\scratch-forge2, outside this repo; built like lagcomp-forge, softfp) with Key
+Quest Markers r20 beside it: fileExists / openFile / getFileSize / readFile of its own .nro in a mod's romfs ("NRO0" at
+0x10, MOD0 offset 0x1000, size 12288), a missing file false; onNvnInit with the device and queue, nvnDeviceGetInteger through
+its getProcAddress (API 53.207); 3 swap chain textures; the first one registered and drawn with igImage in a window of the
+plugin (the game's picture as a thumbnail, upright), unregistered after 14400 presents (the window then empty, the game
+going on), an unknown id's unregister a WARN line. Not tested: a plugin that makes its own NVN textures or draws into the
+swap chain texture from forge_onNvnRender (it would go through the same NVN layer as the game's own drawing).
+
 Forge's ImGui overlay (runtime/overlay.cpp, forge_imgui.c, tools/imgui_thunks.py; 2026-10-23): Forge's "forge"
 window (About, Loaded Plugins, Plugin UI = each plugin's forge_onImGuiRender) and forge_onImGuiFreeRender, on Dear
 ImGui 1.92.8 + cimgui (third_party/cimgui, Forge's versions; ImGui's Vulkan backend). The menu starts closed; Insert

@@ -20,6 +20,12 @@ void forge_plugins_imgui(struct Cpu *c, int which, uint32_t a0, uint32_t a1, uin
 bool forge_plugins_have(int which);                  // a started plugin has that entry point
 int forge_plugin_titles(const char **out, int max);  // the started plugins' names (their own, else the file's)
 void forge_test_hook(uint32_t target);  // (debug) a plugin-style hook on target (MHGU_FORGE_TESTHOOK, "testhook")
+// runtime/nvn/objects.c, for Forge 2.0.0's rendering callbacks (guest addresses): nvnDeviceInitialize's device,
+// nvnWindowBuilderSetTextures' array of n NVNtexture *, and nvnQueuePresentTexture before it presents (plugins'
+// forge_onNvnInit / forge_onNvnReady the first time, forge_onNvnRender every time; r0-r3 of c are used)
+void forge_nvn_device(uint32_t device);
+void forge_nvn_window_textures(uint32_t textures, int n);
+void forge_nvn_present(struct Cpu *c, uint32_t queue, uint32_t window, int index);
 
 // forge_imgui.c, for the overlay (on the game's thread, cpu: its Cpu)
 void forge_imgui_init(void *cpu);  // (after the ImGui context exists: plugins get it)

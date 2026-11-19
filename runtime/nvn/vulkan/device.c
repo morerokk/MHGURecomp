@@ -912,6 +912,16 @@ static bool shot_frame(uint64_t f) {
     return false;
 }
 
+// A Forge plugin's registered texture (overlay_user_texture_add) as ImGui samples it: current (uploaded, or resolved
+// from its multisampled image), a 2D view with the registered NVNtextureView. Outside a render pass.
+static VkImageView user_tex_view(uint32_t tex, const void *view) {
+    if (!tex || !kernel_mapped(tex, 8)) return VK_NULL_HANDLE;
+    NvnTexture *t = HOST(NvnTexture, tex);  // (0 once nvnTextureFinalize ran)
+    if (!t) return VK_NULL_HANDLE;
+    vk_ms_resolve(vk_tex(t, false));
+    return vk_view(t, (const NvnTextureView *)view, view != NULL, false, TEXTYPE_2D);
+}
+
 void backend_present(NvnTexture *t) {
     extern void vi_apply_framerate(void);
     vi_apply_framerate();
@@ -922,6 +932,7 @@ void backend_present(NvnTexture *t) {
     b->presented = true;
     vk_end_pass();
     vk_ms_resolve(b);
+    overlay_user_textures_prepare(user_tex_view);  // (Forge plugins' textures for ImGui, drawn by overlay_draw)
     if (g_hdr_out) vk_hdr_analyze(vk_cmd(), b);  // ([HDR] Analysis: measured before it is drawn, hdr.c)
     if (frame_begin()) {
         // the game's image, as large as fits with its aspect ratio, centred
