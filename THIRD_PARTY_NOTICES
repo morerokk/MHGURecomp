@@ -21,12 +21,11 @@ below.
   and links a small part of it (MP4, H.264, AAC) into the executable: LGPL 2.1 or later. The build puts the license,
   with where the source is, in build/licenses/FFmpeg.txt.
 
-- Noto Sans SC and Noto Sans KR (extras/mhgurecomp-cjk.otf and extras/mhgurecomp-kr.otf, shipped beside the
-  program): the Chinese and Korean glyphs of the host menu's translations (runtime/settings_locale.h). SIL Open
-  Font License 1.1, Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'; the
-  license is reproduced below. Modified: subsets of NotoSansSC-Regular.otf and NotoSansKR-Regular.otf 2.004 from
-  github.com/notofonts/noto-cjk (Sans/SubsetOTF), made by tools/subset_cjk_font.py; they keep the fonts' own names,
-  which do not use the Reserved Font Name.
+- Noto Sans CJK SC (extras/mhgurecomp-cjk.otf, shipped beside the program): the Chinese and Korean glyphs of the
+  host menu's translations (runtime/settings_locale.h), kana and symbols. SIL Open Font License 1.1, Copyright
+  2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'; the license is reproduced below.
+  Modified: a subset of NotoSansCJKsc-Regular.otf 2.004 from github.com/notofonts/noto-cjk (Sans/OTF), made by
+  tools/subset_cjk_font.py; it keeps the font's own name, which does not use the Reserved Font Name.
 
 Libraries the program uses that are not part of this repository (SDL3, shaderc, the Vulkan loader, and on Windows
 the GCC runtime linked in) keep their own licenses. The Windows build collects those of everything it ships or links
@@ -292,7 +291,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Noto Sans SC and Noto Sans KR (extras/mhgurecomp-cjk.otf, extras/mhgurecomp-kr.otf)
+Noto Sans CJK SC (extras/mhgurecomp-cjk.otf)
 ================================================================================
 
 Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'

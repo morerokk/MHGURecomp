@@ -902,7 +902,8 @@ static void test_menu_confirm_policy(void) {
     CHECK(act_menu_confirm_policy() == -1, "layer off: own setting");
 }
 
-// Crouch never fires while the left stick is pushed (split from Dodge), with the weapon out or away
+// Crouch never fires while the left stick is pushed (split from Dodge), with the weapon out or away; on an input of its
+// own it never fires with the weapon out (no crouching then: B would be a dodge)
 static void test_crouch_not_moving(void) {
     ActProfile p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nCrouch = pad:west\nDodge = pad:south\n");
     act_use_profile(&p);
@@ -911,7 +912,8 @@ static void test_crouch_not_moving(void) {
     int views[] = {ACT_VIEW_MB1, ACT_VIEW_SHEATHED, ACT_VIEW_HUNT_ANY};
     for (int i = 0; i < 3; i++) {
         uint32_t standing = act_view(views[i], 0, crouch, false), moving = act_view(views[i], stick, crouch, false);
-        CHECK(standing & 0x4000, "view %d: Crouch standing gives B: %x", views[i], standing);
+        if (views[i] == ACT_VIEW_MB1) CHECK(!(standing & 0x4000), "weapon out: Crouch standing gives no B (no dodge): %x", standing);
+        else CHECK(standing & 0x4000, "view %d: Crouch standing gives B: %x", views[i], standing);
         CHECK(!(moving & 0x4000), "view %d: Crouch with the stick pushed gives no B: %x", views[i], moving);
         CHECK(act_view(views[i], stick, dodge, false) & 0x4000, "view %d: Dodge with the stick pushed gives B (the roll)", views[i]);
     }
@@ -925,6 +927,91 @@ static void test_crouch_not_moving(void) {
     for (int i = 0; i < 3; i++)
         CHECK(act_view(views[i], stick, crouch | dodge, false) & 0x4000, "view %d: auto split, Dodge's input still rolls while moving", views[i]);
     CHECK(act_view(ACT_VIEW_MB1, stick, crouch, false) & 0x4000, "auto split, weapon out: Crouch following Dodge is not stopped while moving");
+}
+
+// Crouch and AttackA on one input (a player's report: AttackA east, Dodge + Interact south, Crouch east): crouch with the
+// weapon away, attack with it out, not a conflict; with SheathedAttackA=1 they clash again
+static void test_crouch_attack_a(void) {
+    int E = ACT_PAD + SDL_GAMEPAD_BUTTON_EAST, S = ACT_PAD + SDL_GAMEPAD_BUTTON_SOUTH;
+    const uint32_t MOVING = 0x10000;
+    ActSnap s;
+    ActHost h = (ActHost){NULL, fake_held, map_sources, 0, 0, false, false, 700};
+    #define SAMPLE(code) do { release_all(); press(code); h.sw_word = map_word(); act_sample(&h, &s); } while (0)
+    #define VIEW(view, ew) act_view((view), (ew), s.hold[0], false)
+    const char *ini = "[Actions]\nEnable=1\n[Actions.Pad]\nAttackA = pad:east\nCrouch = pad:east\nDodge = pad:south\nInteract = pad:south\n";
+    ActProfile p = parse(ini);
+    act_use_profile(&p);
+    SAMPLE(E);
+    CHECK(VIEW(ACT_VIEW_SHEATHED, 0) == 0x4000, "weapon away, standing: east crouches (B only): %x", VIEW(ACT_VIEW_SHEATHED, 0));
+    CHECK(VIEW(ACT_VIEW_MB1, 0) == 0x2000, "weapon out: east is Attack A only, no dodge: %x", VIEW(ACT_VIEW_MB1, 0));
+    CHECK(VIEW(ACT_VIEW_MB1, MOVING) == (MOVING | 0x2000), "weapon out, moving: Attack A: %x", VIEW(ACT_VIEW_MB1, MOVING));
+    SAMPLE(S);
+    CHECK(VIEW(ACT_VIEW_SHEATHED, 0) == 0x2000, "weapon away, standing: south gathers: %x", VIEW(ACT_VIEW_SHEATHED, 0));
+    CHECK(VIEW(ACT_VIEW_MB1, 0) == 0x4000, "weapon out: south dodges: %x", VIEW(ACT_VIEW_MB1, 0));
+    act_set_log(collect);
+    logbuf[0] = 0;
+    act_validate(&p);
+    CHECK(!strstr(logbuf, "Crouch"), "no conflict reported for Crouch: %s", logbuf);
+    act_set_log(quiet);
+    int crouch = row_named("Crouch"), attacka = row_named("AttackA");
+    CHECK(!act_rows_clash(&p, 0, crouch, attacka), "Simple: Crouch and AttackA rows don't clash");
+    // binding Crouch to east in Simple leaves AttackA its east
+    p = parse("[Actions]\nEnable=1\n[Actions.Pad]\nAttackA = pad:east\nDodge = pad:south\nInteract = pad:south\n");
+    act_row_claim(&p, 0, crouch, E, NULL, NULL, false);
+    int from = ACT_ATTACK_A;
+    const ActBinding *b = act_effective(&p, 0, ACT_ATTACK_A, 0, &from);
+    CHECK(b && b->n == 1 && b->alt[0].code[0] == E, "claiming east for Crouch leaves AttackA on east");
+    // SheathedAttackA: AttackA presses A with the weapon away too, so the two clash
+    p = parse("[Actions]\nEnable=1\nSheathedAttackA=1\n[Actions.Pad]\nAttackA = pad:east\nCrouch = pad:east\nDodge = pad:south\nInteract = pad:south\n");
+    CHECK(p.sheathed_attack, "(SheathedAttackA parsed)");
+    CHECK(act_rows_clash(&p, 0, crouch, attacka), "SheathedAttackA: Crouch and AttackA clash");
+    act_set_log(collect);
+    logbuf[0] = 0;
+    act_validate(&p);
+    CHECK(strstr(logbuf, "conflict: AttackA and Crouch") || strstr(logbuf, "conflict: Crouch and AttackA"), "and it is said: %s", logbuf);
+    act_set_log(quiet);
+    #undef SAMPLE
+    #undef VIEW
+}
+
+// The Hunter Arts on keys of their own: each Control Type's buttons for each Art (found in a hunt, 2026-11-18), the
+// switch in the ini, the keyboard's defaults, and an Art's input never shared in Simple
+static void test_hunter_arts(void) {
+    enum { A = 0x2000, B = 0x4000, X = 0x1000, L = 0x100, R = 0x200, ZL = 0x400, ZR = 0x800 };
+    const uint32_t up = 0x10, right = 0x20, down = 0x40, rs_up = 0x100000, rs_right = 0x200000, rs_down = 0x400000;
+    struct { int type; bool swap, alt; uint32_t want[3]; } cases[] = {
+        {0, false, false, {up, right, down}},          {0, true, false, {up, right, down}},
+        {0, false, true, {rs_up, rs_right, rs_down}},  {3, false, false, {rs_up, rs_right, rs_down}},
+        {3, false, true, {up, right, down}},           {1, false, false, {R | A | B, ZL, ZR}},
+        {1, true, false, {ZR | A | B, L, R}},          {2, false, false, {ZL | X, ZL | A, ZL | B}},
+        {2, true, false, {L | X, L | A, L | B}},
+    };
+    for (unsigned i = 0; i < sizeof cases / sizeof *cases; i++)
+        for (int n = 0; n < 3; n++) {
+            uint32_t got = act_art_bits(n, cases[i].type, cases[i].swap, cases[i].alt);
+            CHECK(got == cases[i].want[n], "type %d swap %d alt %d Art %d: %x, want %x", cases[i].type, cases[i].swap,
+                  cases[i].alt, n + 1, got, cases[i].want[n]);
+        }
+    CHECK(act_art_bits(0, 7, false, false) == 0 && act_art_bits(3, 2, false, false) == 0, "an unknown type or Art: nothing");
+    CHECK(act_find("HunterArt2") == ACT_ART2 && act_view_of(ACT_ART1) == ACT_VIEW_MB1, "registered, in the hunt");
+    CHECK(act_ew_bits(ACT_ART1, false) == 0, "no button of its own");
+    ActProfile p = parse("[Actions]\nEnable=1\n");
+    act_use_profile(&p);
+    CHECK(!p.art_keys && !act_art_keys(), "off unless asked for");
+    p = parse("[Actions]\nEnable=1\nHunterArtKeys=1\n");
+    act_use_profile(&p);
+    CHECK(p.art_keys && act_art_keys(), "HunterArtKeys=1");
+    char buf[4096];
+    act_format(&p, buf, sizeof buf);
+    CHECK(strstr(buf, "HunterArtKeys=1"), "written back: %s", buf);
+    const ActBinding *k = act_default_binding(ACT_ART3, 1);
+    CHECK(k && k->n == 1 && k->alt[0].code[0] == SDL_SCANCODE_3, "keyboard default: 3");
+    CHECK(!act_default_binding(ACT_ART1, 0), "no controller default");
+    int art1 = row_named("HunterArt1"), dodge = row_named("Dodge"), interact = row_named("Interact");
+    CHECK(art1 >= 0, "a Simple row");
+    p = parse("[Actions]\nEnable=1\nHunterArtKeys=1\n[Actions.Kbm]\nHunterArt1 = key:f\nDodge = key:f\nInteract = key:f\n");
+    CHECK(act_rows_clash(&p, 1, art1, dodge) && act_rows_clash(&p, 1, art1, interact), "an Art's input is its own");
+    act_set_log(quiet);
 }
 
 int main(void) {
@@ -946,6 +1033,8 @@ int main(void) {
     test_save();
     test_menu_confirm_policy();
     test_crouch_not_moving();
+    test_crouch_attack_a();
+    test_hunter_arts();
     test_rows();
     test_claim();
     test_scheme_layout();

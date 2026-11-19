@@ -240,7 +240,7 @@ Escape、Insert、F1 以及 F7 到 F12 被重编译层保留，无法绑定。
 - `[Discord]`：`RichPresence`（默认 On：你的 Discord 个人资料会显示你所在的位置、正在狩猎的怪物和地图，以及你的集会所或任务中有几个人；Discord 必须在同一台电脑上运行），`ShowHunter`（默认 On：同时显示你的猎人名称、HR 和武器种类）
 - `[Bonus Content]`：`BonusContent`（默认 On），见下文
 - `[Audio]`：`Volume`（0 到 100：整个游戏的音量），`MuteInBackground`（On / Off，默认 Off：游戏窗口位于后台时不发声），`Output`（Stereo，默认 / 5.1：游戏本身以 5.1 混音，与 Switch 的环绕声输出相同；5.1 在环绕声系统上播放，Stereo 则合并为两个声道；按「保存」后生效）
-- `[Application]`：`ConfirmExit`（关闭窗口前先询问），以及设置菜单的 `Language`（English / Spanish / 中文，即简体中文 / 한국어，即韩语；新玩家会使用系统语言（如果是其中之一），否则为英语，已保存的 Language 始终保持不变。中文和韩文字形来自程序旁边的 `mhgurecomp-cjk.otf` 和 `mhgurecomp-kr.otf`，否则来自系统字体（Android：Noto Sans CJK）；模组可以以 romfs `nativeNX/forge/fonts/MHGU-CJK.ttf` 的形式自带字体），`ButtonIcons`（Xbox / Switch / PlayStation），`Theme`（Hunter，默认 / Gold / Blue：设置菜单的配色）和 `MenuScale`（50 到 200 百分比），以及 `Updates`（Ask / Auto / Off：`mhgurecomp-updater` 的行为，见“保持最新”）。使用鼠标时，拖动设置菜单顶部（标签页）可移动它，拖动右下角的手柄可调整大小；「菜单选项」>「固定菜单」（Menu Options > Attach menu）可把它放回原位。
+- `[Application]`：`ConfirmExit`（关闭窗口前先询问），以及设置菜单的 `Language`（English / Spanish / 中文，即简体中文 / 한국어，即韩语；新玩家会使用系统语言（如果是其中之一），否则为英语，已保存的 Language 始终保持不变。中文和韩文字形来自程序旁边的 `mhgurecomp-cjk.otf`，否则来自系统字体（Android：Noto Sans CJK）；模组可以以 romfs `nativeNX/forge/fonts/MHGU-CJK.ttf` 的形式自带字体），`ButtonIcons`（Xbox / Switch / PlayStation），`Theme`（Hunter，默认 / Gold / Blue：设置菜单的配色）和 `MenuScale`（50 到 200 百分比），以及 `Updates`（Ask / Auto / Off：`mhgurecomp-updater` 的行为，见“保持最新”）。使用鼠标时，拖动设置菜单顶部（标签页）可移动它，拖动右下角的手柄可调整大小；「菜单选项」>「固定菜单」（Menu Options > Attach menu）可把它放回原位。
 
 </details>
 
@@ -263,7 +263,7 @@ Escape、Insert、F1 以及 F7 到 F12 被重编译层保留，无法绑定。
 你也可以与使用 Ryujinx / Ryubing 的玩家一起玩，还有 suyu、yuzu、Eden、Citron 以及其他保留了多人房间功能的分支。这仍处于实验阶段：已经针对这些模拟器的服务器软件进行过测试，但尚未与真实的模拟器玩家在实际狩猎中测试过。如果出了问题，请附上你的 `log.txt` [提交 issue](https://github.com/morerokk/MHGURecomp/issues/new/choose)。
 
 先了解几点：
-- 跨平台联机在 `mhgurecomp.ini` 的 `[Multiplayer]` 下设置，而不是在 F1 菜单中。如果你的 .ini 来自旧版本，还没有下面这些设置，直接添加即可。
+- 跨平台联机可以在 F1 菜单“网络”页的“模拟器跨平台联机”下设置，也可以在 `mhgurecomp.ini` 的 `[Multiplayer]` 下设置（即下面这些设置）。更改在重启后生效。
 - 所有人都需要 1.4.0 版游戏，模拟器玩家也一样。
 - 在有模拟器玩家的集会所中，本移植版的额外功能（小型怪物同步、体力缩放）会关闭：只有使用本移植版的玩家才能识别它们。
 

@@ -287,9 +287,9 @@ def main():
         for d in ("exefs", "romfs"):
             subprocess.run(["cp", "-cR", os.path.join(game, d), os.path.join(data, d)], check=True)
         os.symlink("../Resources/data", os.path.join(macos, "data"))
-    # the menu translations' Chinese and Korean glyphs (make's cjkfont): the overlay looks for them beside the program
+    # the menu translations' Chinese, Korean and symbol glyphs (make's cjkfont): the overlay looks for them beside the program
     # (runtime/overlay.cpp release_font: in an app, in Resources: codesign takes no data files in MacOS)
-    for name in ("mhgurecomp-cjk.otf", "mhgurecomp-kr.otf"):
+    for name in ("mhgurecomp-cjk.otf",):
         font = os.path.join(build, name)
         if os.path.isfile(font):
             shutil.copy2(font, os.path.join(resources, name))

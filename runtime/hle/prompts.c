@@ -511,6 +511,22 @@ static void melody_toggle(Cpu *c) {
 void prompts_init(void) {
     if (!fnhook_get(FN_MELODY_TOGGLE)) fnhook_set(FN_MELODY_TOGGLE, hle_register("prompts:melody_toggle", melody_toggle));
 }
+// The Hunter Arts' panel on the HUD shows each Art's buttons by the Control Type (options +0x446c; +0x446f swaps the
+// D-pad and the right stick): "ZL + X", "R + A + B" / "ZL", a right stick direction, or a D-pad direction - type 0, or
+// type 3 swapped: one picture a row, D-pad up, right, down. With the Arts on keys of their own (actions.c HunterArtKeys)
+// those three cells of the HUD's sheet carry the Arts' keys instead (prompts_frame). The other types keep the game's
+// pictures (their buttons, which still work): the code that lays the panel out by type isn't found yet - not in the
+// unit update (a read watch on the option bytes there sees only the controls' reads).
+#define G_OPTIONS       0x1a97f78u
+#define OPT_TYPE        0x446cu
+#define OPT_STICK_SWAP  0x446fu
+static bool art_panel_dpad(void) {
+    uint32_t opt = LD32(G_OPTIONS);
+    if (!opt) return false;
+    int type = LD8(opt + OPT_TYPE);
+    bool swap = LD8(opt + OPT_STICK_SWAP) != 0;
+    return (type == 0 && !swap) || (type == 3 && swap);
+}
 static bool melody_shown(void) {
     uint32_t pm = g_pause_menu;
     return pm && LD8(pm + PM_MELODY_SHOWN) == 1;
@@ -742,18 +758,25 @@ static void put_tile(int sw, uint8_t *rgba, const Cell *c, const uint8_t *tile) 
 // ------------------------------------------------------------------ each frame
 void prompts_frame(void) {
     if (g_ready <= 0) return;
-    static int shown[16];
+    static int shown[16 + 3];
     static bool shown_kbm, any_shown;
     static int shown_view = -1;
     bool kbm = config_live_kbm_prompts() && host_input_last_device() == 1;
-    int want[16], view = -1;  // (each Switch button's input now; 0: the game's glyph)
+    int want[16 + 3], view = -1;  // (each Switch button's input now; 0: the game's glyph; then the three Arts' keys)
     memset(want, 0, sizeof want);
     if (kbm) {
         ActProfile p;
         act_get_profile(&p);
         view = view_now();
         for (int b = 0; b < 16; b++) want[b] = input_for(&p, view, b);
+        if (act_art_keys() && art_panel_dpad())  // (the Arts' own keys: the HUD's Art panel shows them, by its D-pad cells)
+            for (int n = 0; n < 3; n++) {
+                const ActBinding *b = act_effective(&p, 1, ACT_ART1 + n, 0, NULL);
+                if (!b) b = act_default_binding(ACT_ART1 + n, 1);
+                want[16 + n] = b && b->n ? b->alt[0].code[0] : 0;
+            }
     }
+    bool art_hud = kbm && (want[16] || want[17] || want[18]);
     if (view != shown_view && kbm) {
         static int logged_views;
         if (logged_views++ < 200)
@@ -780,7 +803,10 @@ void prompts_frame(void) {
             for (int c = 0; c < s->ncells; c++) {
                 const Cell *cell = &s->cells[c];
                 uint8_t tile[CELL * CELL * 4];
-                if (!draw_tile(tile, cell, want[cell->btn], cell->btn2 >= 0 ? want[cell->btn2] : 0)) continue;
+                int key = want[cell->btn];
+                if (art_hud && s->cells == panel_cells)  // (the Art panel's three rows, by its D-pad cells)
+                    key = cell->btn == BTN_UP ? want[16] : cell->btn == BTN_RIGHT ? want[17] : cell->btn == BTN_DOWN ? want[18] : key;
+                if (!draw_tile(tile, cell, key, cell->btn2 >= 0 ? want[cell->btn2] : 0)) continue;
                 // (the cell's box at this version's scale, and the blocks it touches)
                 Cell box = {cell->x * k, cell->y * k, cell->w * k, cell->h * k, cell->btn, cell->btn2};
                 int bx0 = box.x / 4, by0 = box.y / 4, bx1 = (box.x + box.w - 1) / 4, by1 = (box.y + box.h - 1) / 4;

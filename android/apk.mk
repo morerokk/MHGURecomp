@@ -9,8 +9,8 @@
 #                                                 signed with the release key (on Windows, make dist does this too)
 #   make PLATFORM=android release-key           that key, once ever (below)
 # The assets are what a PC release has beside the exe: pipelines.list, licenses/ and bonus/system (BONUS), which the
-# app copies into its folder (runtime/platform/android.c), and the menus' Chinese and Korean fonts, which the overlay
-# reads from the APK as they are (runtime/overlay.cpp).
+# app copies into its folder (runtime/platform/android.c), and the menus' CJK font (Chinese, Korean, symbols), which
+# the overlay reads from the APK as it is (runtime/overlay.cpp).
 BUILD_TOOLS := $(lastword $(sort $(wildcard $(ANDROID_SDK)/build-tools/*)))
 ANDROID_JAR := $(lastword $(sort $(wildcard $(ANDROID_SDK)/platforms/android-*/android.jar)))
 TARGET_API  := $(patsubst android-%,%,$(notdir $(patsubst %/,%,$(dir $(ANDROID_JAR)))))

@@ -319,8 +319,7 @@ Escape, Insert, F1, F7~F12는 리컴프가 사용하므로 지정할 수 없습�
   5.1은 서라운드 시스템으로 재생하고, Stereo는 2채널로 다운믹스합니다. 저장하면 적용)
 - `[Application]`: `ConfirmExit`(창을 닫기 전에 확인), 설정 메뉴의 `Language` (English /
   Spanish / 中文(중국어 간체) / 한국어. 처음 실행하는 플레이어는 시스템 언어가 이 중 하나면 그 언어로,
-  아니면 English로 설정되며, 저장된 Language는 항상 유지됩니다. 중국어와 한국어 글리프는 프로그램 옆의 `mhgurecomp-cjk.otf`와
-  `mhgurecomp-kr.otf`에서, 없으면 시스템 글꼴(Android: Noto Sans CJK)에서 가져옵니다. 모드가 romfs
+  아니면 English로 설정되며, 저장된 Language는 항상 유지됩니다. 중국어와 한국어 글리프는 프로그램 옆의 `mhgurecomp-cjk.otf`에서, 없으면 시스템 글꼴(Android: Noto Sans CJK)에서 가져옵니다. 모드가 romfs
   `nativeNX/forge/fonts/MHGU-CJK.ttf`로 자체 글꼴을 넣을 수도 있습니다), `ButtonIcons` (Xbox / Switch /
   PlayStation), `Theme` (Hunter(기본값) / Gold / Blue: 설정 메뉴의 색상),
   `MenuScale` (50~200%), `Updates` (Ask / Auto / Off: `mhgurecomp-updater`의 동작. "최신 버전
@@ -348,7 +347,7 @@ LAN이나 VLAN에서는 별도 설정 없이 바로 작동합니다. 같은 네�
 Ryujinx / Ryubing 사용자, 그리고 suyu, yuzu, Eden, Citron 등 멀티플레이 룸 기능을 유지한 포크 사용자와도 함께 플레이할 수 있습니다. 아직 실험적인 기능입니다. 에뮬레이터의 서버 소프트웨어로는 테스트했지만, 실제 에뮬레이터 플레이어와 실제로 수렵하며 테스트하지는 않았습니다. 문제가 생기면 `log.txt`를 첨부해 [이슈를 등록](https://github.com/morerokk/MHGURecomp/issues/new/choose)해 주세요.
 
 먼저 알아 둘 점:
-- 크로스플레이는 F1 메뉴가 아니라 `mhgurecomp.ini`의 `[Multiplayer]` 아래에서 설정합니다. .ini가 이전 버전의 것이라 아래 설정이 아직 없다면 직접 추가하면 됩니다.
+- 크로스플레이는 F1 메뉴의 네트워크 페이지에 있는 에뮬레이터 크로스플레이 항목이나, `mhgurecomp.ini`의 `[Multiplayer]` 아래(아래 설정)에서 설정합니다. 변경 사항은 재시작 후 적용됩니다.
 - 에뮬레이터 플레이어를 포함해 모두 게임 버전 1.4.0이어야 합니다.
 - 에뮬레이터 플레이어가 있는 집회소에서는 이 포트의 추가 기능(소형 몬스터 동기화, 체력 배율)이 꺼집니다. 이 포트를 쓰는 플레이어만 이해할 수 있는 기능이기 때문입니다.
 

@@ -319,8 +319,8 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   Switch's surround output; 5.1 plays it on a surround system, Stereo folds it down to two channels; applies on Save)
 - `[Application]`: `ConfirmExit` (ask before the window closes), and the settings menu's `Language` (English /
   Spanish / 中文, Simplified Chinese / 한국어, Korean; a new player gets the system's language when it is one of these,
-  else English, and a saved Language always stays. The Chinese and Korean glyphs come from `mhgurecomp-cjk.otf` and
-  `mhgurecomp-kr.otf` beside the program, else from the system's fonts (Android: Noto Sans CJK); a mod can bring its
+  else English, and a saved Language always stays. The Chinese and Korean glyphs come from `mhgurecomp-cjk.otf`
+  beside the program, else from the system's fonts (Android: Noto Sans CJK); a mod can bring its
   own as romfs `nativeNX/forge/fonts/MHGU-CJK.ttf`), `ButtonIcons` (Xbox / Switch /
   PlayStation), `Theme` (Hunter, the default / Gold / Blue: the settings menu's colours) and
   `MenuScale` (50 to 200 percent), and `Updates` (Ask / Auto / Off: what `mhgurecomp-updater` does, see "Staying up
@@ -348,7 +348,7 @@ Choose the "Local Wireless" multiplayer options, as this port pretends to be a l
 You can also play with people on Ryujinx / Ryubing, and on suyu, yuzu, Eden, Citron and the other forks that kept their multiplayer rooms. This is still experimental: it has been tested against the emulators' server software, but not yet in real hunts with real emulator players. Please [open an issue](https://github.com/morerokk/MHGURecomp/issues/new/choose) with your `log.txt` if something goes wrong.
 
 Some things to know first:
-- Crossplay is set up in `mhgurecomp.ini`, under `[Multiplayer]`, not in the F1 menu. If your .ini is from an older version and doesn't have the settings below yet, just add them.
+- Crossplay is set up in the F1 menu, on the Network page under Emulator Crossplay, or in `mhgurecomp.ini` under `[Multiplayer]` (the settings below). Changes take effect after a restart.
 - Everyone needs game version 1.4.0, the emulator players too.
 - This port's extras (small monster sync, HP scaling) are off in a hub with emulator players: only players on this port understand them.
 

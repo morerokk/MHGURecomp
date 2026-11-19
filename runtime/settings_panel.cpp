@@ -33,6 +33,8 @@
 #include <thread>
 #include <vector>
 
+extern "C" const char *plat_utf8_path(const char *path, char *buf, size_t size);  // (runtime/platform.h)
+
 namespace {
 enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, Actions };
 enum class Command { None, Save };
@@ -245,6 +247,13 @@ int mod_index(const std::string &name) {
             return i;
     return -1;
 }
+// A mod's name as the menu shows it. The name is its folder's, as readdir gives it - in the ANSI code page on Windows
+// (GBK on a Chinese one), where ImGui reads UTF-8 (a name in Chinese was ???) - and also the folder the mod loads from,
+// so ModEntry keeps it as it is.
+std::string mod_title(const std::string &name) {
+    char buf[512];
+    return plat_utf8_path(name.c_str(), buf, sizeof buf);
+}
 bool dirty();
 // The tab that shows the build's version (MHGU_VERSION, the Makefile's VERSION) in the bottom right corner
 constexpr int VERSION_PAGE = APP_PAGE;
@@ -388,6 +397,11 @@ bool equal(const Config &a, const Config &b) {
     SAME(sync_small_monsters);
     SAME(lag_compensation);
     SAME(ldn_direct);
+    SAME(ldn_ryu_serve);
+    SAME(ldn_ryu_serve_port);
+    SAME(ldn_room_serve);
+    SAME(ldn_room_serve_port);
+    SAME(ldn_room_host);
     SAME(bonus_content);
     SAME(village_in_hub);
     SAME(quest_hold_send);
@@ -425,6 +439,10 @@ bool equal(const Config &a, const Config &b) {
         return false;
     if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key) ||
         strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.save_location, b.save_location) || strcmp(a.game_dir, b.game_dir))
+        return false;
+    if (strcmp(a.ldn_ryu_servers, b.ldn_ryu_servers) || strcmp(a.ldn_ryu_host, b.ldn_ryu_host) ||
+        strcmp(a.ldn_ryu_pass, b.ldn_ryu_pass) || strcmp(a.ldn_room_server, b.ldn_room_server) ||
+        strcmp(a.ldn_room_pass, b.ldn_room_pass) || strcmp(a.ldn_room_nick, b.ldn_room_nick))
         return false;
     for (int n = 0; n < 4; ++n)
         if (a.hp.scale[n] != b.hp.scale[n])
@@ -981,7 +999,7 @@ const char *scheme_name(int dev) { return tr(dev == 0 ? "Controller" : "Keyboard
 const char *action_note(int id) {
     switch (id) {
     case ACT_CROUCH:
-        return "B while the hunter stands still. Give it an input of its own and it is told apart from the roll: with the weapon away it works only standing still and Dodge only while moving. It cannot share an input with Interact.";
+        return "B while the hunter stands still with the weapon away (the only time a hunter can crouch). Give it an input of its own and it is told apart from the roll: it works only standing still and Dodge only while moving. It may share an input with Attack A, never with Interact.";
     case ACT_DODGE:
         return "With Crouch bound, or Dodge and Interact on one input, Dodge works only while moving when the weapon is away (the roll); weapon B-actions with the weapon out are as before.";
     case ACT_INTERACT:
@@ -994,10 +1012,11 @@ const char *action_note(int id) {
     }
 }
 // Two actions of one context on one input by design (not a conflict): Interact with Dodge, Crouch with Dodge (the game's
-// own B), AttackA with Interact; the item bar's two actions are a state of their own
+// own B), AttackA with Interact or Crouch (weapon out / weapon away); the item bar's two actions are a state of their own
 bool shares_by_design(int a, int b, bool sheathed_attack) {
     auto pair = [&](int x, int y) { return (a == x && b == y) || (a == y && b == x); };
-    if (pair(ACT_INTERACT, ACT_DODGE) || pair(ACT_CROUCH, ACT_DODGE) || (!sheathed_attack && pair(ACT_ATTACK_A, ACT_INTERACT)))
+    if (pair(ACT_INTERACT, ACT_DODGE) || pair(ACT_CROUCH, ACT_DODGE) ||
+        (!sheathed_attack && (pair(ACT_ATTACK_A, ACT_INTERACT) || pair(ACT_ATTACK_A, ACT_CROUCH))))
         return true;
     bool bar_a = a == ACT_ITEMBAR_RIGHT || a == ACT_ITEMBAR_LEFT, bar_b = b == ACT_ITEMBAR_RIGHT || b == ACT_ITEMBAR_LEFT;
     return (bar_a || bar_b) && !(bar_a && bar_b);
@@ -1267,6 +1286,9 @@ void action_rows(std::vector<Row> &r) {
         add_choice(r, "act.tab", "Show", a.tab, names, [](int v) { acts().tab = v; });
         r.back().help = tr("What the list and the drawing show: one part of the game at a time. L1 / R1 on a controller go through them. Keys: the keys that are not actions (movement, the item bar, chat).");
     }
+    if (kind == TAB_HUNT)
+        toggle("act.arts", "Hunter Art keys", &p.art_keys,
+               "On: each Hunter Art has an input of its own (keyboard: 1, 2 and 3 unless rebound below), whatever buttons the game's Control Type gives them; those keep working too. With a Control Type that puts the Arts on the D-pad, the HUD shows these keys for them on keyboard and mouse.");
     if (kind == TAB_KEYS)
         key_rows(r);
     else if (!simple) {
@@ -1718,6 +1740,17 @@ void reset_section() {
         SDL_strlcpy(c.ldn_server, f.ldn_server, sizeof c.ldn_server);
         SDL_strlcpy(c.ldn_key, f.ldn_key, sizeof c.ldn_key);
         c.ldn_direct = f.ldn_direct;
+        c.ldn_ryu_serve = f.ldn_ryu_serve;
+        c.ldn_ryu_serve_port = f.ldn_ryu_serve_port;
+        c.ldn_room_serve = f.ldn_room_serve;
+        c.ldn_room_serve_port = f.ldn_room_serve_port;
+        c.ldn_room_host = f.ldn_room_host;
+        SDL_strlcpy(c.ldn_ryu_servers, f.ldn_ryu_servers, sizeof c.ldn_ryu_servers);
+        SDL_strlcpy(c.ldn_ryu_host, f.ldn_ryu_host, sizeof c.ldn_ryu_host);
+        SDL_strlcpy(c.ldn_ryu_pass, f.ldn_ryu_pass, sizeof c.ldn_ryu_pass);
+        SDL_strlcpy(c.ldn_room_server, f.ldn_room_server, sizeof c.ldn_room_server);
+        SDL_strlcpy(c.ldn_room_pass, f.ldn_room_pass, sizeof c.ldn_room_pass);
+        SDL_strlcpy(c.ldn_room_nick, f.ldn_room_nick, sizeof c.ldn_room_nick);
         break;
     case 4:
         c.sync_small_monsters = f.sync_small_monsters;
@@ -1807,17 +1840,18 @@ void conflict_rows(std::vector<Row> &r) {
             continue;
         if (ia > ib)
             std::swap(ia, ib);
-        const char *first = mods.draft[ia].name, *second = mods.draft[ib].name;
-        std::string text = fmt("%s and %s both change %d file(s); %s is used", first, second, c.replaced, second);
-        std::string a = first, b = second;
+        std::string a = mods.draft[ia].name, b = mods.draft[ib].name;
+        std::string first = mod_title(a), second = mod_title(b);
+        std::string text = fmt("%s and %s both change %d file(s); %s is used", first.c_str(), second.c_str(), c.replaced,
+                               second.c_str());
         action(r, "mods.conflict." + std::to_string(k), text, []() {});
         {  // select it to choose which of the two is used: that one moves below the other
             Row &row = r.back();
             Row copy = row;
             copy.title = tr("Which mod is used?");
             row.menu = true;
-            row.activate = [copy, a, b]() {
-                choices(copy, {fmt("Use %s", a.c_str()), fmt("Use %s", b.c_str())}, 1, [a, b](int v) {
+            row.activate = [copy, a, b, first, second]() {
+                choices(copy, {fmt("Use %s", first.c_str()), fmt("Use %s", second.c_str())}, 1, [a, b](int v) {
                     int ia = mod_index(a), ib = mod_index(b), win = v ? ib : ia, lose = v ? ia : ib;
                     if (ia < 0 || ib < 0 || win > lose)
                         return;
@@ -1894,7 +1928,7 @@ void mods_rows(std::vector<Row> &r) {
             }
         Row row;
         row.id = "mod." + name;
-        row.title = name;
+        row.title = mod_title(name);
         row.value = std::string(tr(on ? "On" : "Off")) + (clash ? " !" : "");
         row.cold = true;
         auto set_on = [name](bool v) {
@@ -2173,6 +2207,43 @@ std::vector<Row> main_rows() {
         hub_check(r);
         add_bool(r, "direct", "Direct connections", &c.ldn_direct, ini("Direct"));
         r.back().help = tr("In an internet hub, your game and the host's send their packets straight to each other when both routers let them, for a lower ping; else through the hub server. The other player's game then sees your IP address. Off: always through the hub server.");
+        // (all of them take effect at the next start: config.c marks them restart)
+        header(r, "crossplay.header", tr("Emulator Crossplay"));
+        add_bool(r, "ryu.serve", "Host for Ryujinx players", &c.ldn_ryu_serve, ini("RyuServe"));
+        r.back().help = tr("While local play is open, this game runs a Ryujinx LDN server itself. Ryujinx and Ryubing players set their LDN server to this PC's address and the port below, then search for hubs in Local Play. Hubs you create are made on it. For the internet, forward the port (TCP) or use a VPN such as Radmin.");
+        if (c.ldn_ryu_serve) {
+            number(r, "ryu.serve.port", "Ryujinx server port (TCP)", &c.ldn_ryu_serve_port, 1, (int)hi("RyuServePort"), 1,
+                   ini("RyuServePort"));
+            r.back().help = tr("The port Ryujinx players connect to. Default: 30456, the one Ryujinx's own LDN server uses.");
+        }
+        add_bool(r, "room.serve", "Host for suyu / Eden / Citron players", &c.ldn_room_serve, ini("RoomServe"));
+        r.back().help = tr("While local play is open, this game runs a multiplayer room itself. suyu, yuzu, Eden and Citron players join a room at this PC's address and the port below, with the room password if there is one. Hubs you create are shared with the room, and with Ryujinx players too when both are on. For the internet, forward the port (UDP) or use a VPN.");
+        if (c.ldn_room_serve) {
+            number(r, "room.serve.port", "Room port (UDP)", &c.ldn_room_serve_port, 1, (int)hi("RoomServePort"), 1,
+                   ini("RoomServePort"));
+            r.back().help = tr("The port room players connect to. Default: 24872, the multiplayer rooms' usual port.");
+        }
+        text(r, "room.pass", "Room password", c.ldn_room_pass, sizeof c.ldn_room_pass,
+             *c.ldn_room_pass ? std::string(strlen(c.ldn_room_pass), '*') : std::string(tr("None")), ini("RoomPassword"));
+        r.back().help = tr("The password of the room this game hosts, or of the room server below that it joins. Empty: no password.");
+        text(r, "ryu.pass", "Ryujinx passphrase", c.ldn_ryu_pass, sizeof c.ldn_ryu_pass,
+             *c.ldn_ryu_pass ? c.ldn_ryu_pass : tr("Public"), ini("RyuPassphrase"));
+        r.back().help = tr("For a private group with Ryujinx players: Ryujinx- followed by exactly 8 hex digits (for example Ryujinx-1a2b3c4d), the same one the Ryujinx players enter. Anything else, a typo too, counts as none: your lobbies are public.");
+        text(r, "ryu.servers", "Ryujinx servers to search", c.ldn_ryu_servers, sizeof c.ldn_ryu_servers,
+             *c.ldn_ryu_servers ? c.ldn_ryu_servers : tr("None"), ini("RyuServers"));
+        r.back().help = tr("Ryujinx LDN servers whose hubs show up in Search Hubs, as host or host:port (default port 30456), separated by commas. To join a player on this port who hosts with Ryujinx players, enter their address. Please don't use Ryujinx's own public server.");
+        text(r, "ryu.host", "Ryujinx server for your hubs", c.ldn_ryu_host, sizeof c.ldn_ryu_host,
+             *c.ldn_ryu_host ? std::string(c.ldn_ryu_host) : std::string(tr(c.ldn_ryu_serve ? "This PC" : "None")),
+             ini("RyuHost"));
+        r.back().help = tr("A Ryujinx LDN server that hubs you create are made on, so Ryujinx players on it can join them. Not needed when this game hosts for Ryujinx players itself.");
+        text(r, "room.server", "Room server", c.ldn_room_server, sizeof c.ldn_room_server,
+             *c.ldn_room_server ? c.ldn_room_server : tr("None"), ini("RoomServer"));
+        r.back().help = tr("A suyu-style multiplayer room (host or host:port, default port 24872) this game joins while local play is open: the emulator players' hubs show up in Search Hubs.");
+        add_bool(r, "room.host", "Host hubs in the room", &c.ldn_room_host, ini("RoomHost"));
+        r.back().help = tr("Hubs you create live in the room server above, so its players can search and join them. Not needed when this game hosts the room itself.");
+        text(r, "room.name", "Name in the room", c.ldn_room_nick, sizeof c.ldn_room_nick,
+             *c.ldn_room_nick ? c.ldn_room_nick : "MHGU Player", ini("RoomName"));
+        r.back().help = tr("Your name in the room server above.");
         header(r, "discord.header", "Discord");
         add_bool(r, "discord", "Discord Rich Presence", &c.discord, ini("RichPresence"));
         add_bool(r, "discord.hunter", "Show hunter name and HR", &c.discord_hunter, ini("ShowHunter"));

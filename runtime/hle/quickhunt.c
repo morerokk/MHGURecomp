@@ -79,6 +79,22 @@ static void quest_event(Cpu *c) {
     fnhook_call_original(c, FN_QUEST_EVENT);
 }
 
+// (debug) MHGU_START_AREA=<n>: every hunt starts in area n of its map instead of the camp (or the area high rank's
+// random start picked), e.g. MHGU_QUICKHUNT=204 MHGU_START_AREA=8 for Arctic Ridge area 8. What it changes is the
+// random start's own choice: the town's move 0x8bdfd0 (r0 the town area, +0xcc its kind: 2 departing on a quest)
+// copies town +0xc9 (the start area) to sGameControl +0x49, the area the hunt's first area load goes to. The hunter
+// arrives as on a random start (at the area's entrance). An area the map doesn't have is not checked.
+#define FN_TOWN_MOVE 0x8bdfd0u
+static int g_start_area = -1;
+static void town_move(Cpu *c) {
+    uint32_t t = c->r[0];
+    if (LD32(t + 0xcc) == 2) {
+        LOG("[quickhunt] departing: start area %u, now %d\n", LD8(t + 0xc9), g_start_area);
+        ST8(t + 0xc9, (uint32_t)g_start_area);
+    }
+    fnhook_call_original(c, FN_TOWN_MOVE);
+}
+
 // (debug) MHGU_KILL_AFTER=<s>: that long after the first quest update (sQuest 0x59f8b8), the first large monster is put
 // at 1 HP and takes one hit through the game's own damage function (0x29d6f8), so it dies as in a hunt (carcass, clear,
 // what the quest does after). Unlike an insta-clear (sQuest +0xec = 0x29), which leaves the monster alive.
@@ -123,6 +139,12 @@ void quickhunt_init(void) {
     if (fe && *fe) {
         g_force_event = atoi(fe);
         fnhook_set(FN_QUEST_EVENT, hle_register("quickhunt:quest_event", quest_event));
+    }
+    const char *sa = getenv("MHGU_START_AREA");
+    if (sa && *sa) {
+        g_start_area = atoi(sa) & 0xff;
+        fnhook_set(FN_TOWN_MOVE, hle_register("quickhunt:town_move", town_move));
+        LOG("[quickhunt] hunts start in area %d\n", g_start_area);
     }
     const char *e = getenv("MHGU_QUICKHUNT");
     if (!e || !*e) return;

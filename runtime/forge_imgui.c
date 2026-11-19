@@ -342,12 +342,15 @@ static void m_destroy(uint32_t g) {  // (the host object was deleted by the call
 
 // A file name a plugin gives ImGui (fonts, ImFileOpen, the ini): a console path. On the console Forge's ImGui opens it
 // through the mounts; here one in the RomFS ("app:/nativeNX/...", forge_fs_getRomFsMountPoint, or "rom:/") is the host
-// file behind it (a mod's copy if one replaces it); anything else is left as it is.
+// file behind it (a mod's copy if one replaces it); anything else is left as it is. (The host path in UTF-8, as ImGui
+// opens files: on Windows it is in the ANSI code page, and a mod folder named in Chinese would not open.)
+const char *plat_utf8_path(const char *path, char *buf, size_t size);  // (runtime/platform.h)
 static const char *ig_path(uint32_t g) {
+    static _Thread_local char buf[1400];
     const char *p = GP(g);
     if (p && (!strncmp(p, "app:/", 5) || !strncmp(p, "rom:/", 5))) {
         const char *h = romfs_host_path(p + 5);
-        if (h) return h;
+        if (h) return plat_utf8_path(h, buf, sizeof buf);
     }
     return p;
 }

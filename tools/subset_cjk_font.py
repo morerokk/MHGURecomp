@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
-"""Make the settings menu's CJK fonts (runtime/settings_locale.h's Chinese and Korean lines), shipped beside the
-program and merged into the menu's font from the start (runtime/overlay.cpp), from the full Noto Sans SC and KR.
+"""Make extras/mhgurecomp-cjk.otf, the glyphs the menus' font (ImGui's ProggyVector: ASCII and Latin-1) lacks, shipped
+beside the program and merged into the menus' font from the start (runtime/overlay.cpp), from Noto Sans CJK SC.
 
-The full fonts are 8.3 and 4.6 MB, and every player downloads the release's copies with each update. The subsets keep:
-- extras/mhgurecomp-cjk.otf (Noto Sans SC): the 2,500 characters in common use (ImGui's
-  GetGlyphRangesChineseSimplifiedCommon, read from third_party/cimgui) and every character of the Chinese table;
-- extras/mhgurecomp-kr.otf (Noto Sans KR): the 2,350 Hangul syllables of KS X 1001 (the ones EUC-KR has), Hangul
-  compatibility jamo and every character of the Korean table;
-and CJK punctuation and full-width forms in both. tests/test_settings_locale.py fails when a line uses a character its
-font has not: run this again.
+It is for the menu's own translations (runtime/settings_locale.h: Chinese, Korean) and for the text it shows but does
+not write: cheat names (SELECT+↑), mod names, Forge plugins' windows. The full font is 16 MB, and every player
+downloads the release's copy with each update; the subset (1.7 MB) keeps:
+- the 2,500 Chinese characters in common use (ImGui's GetGlyphRangesChineseSimplifiedCommon, read from
+  third_party/cimgui) and every character of the Chinese table;
+- the 2,350 Hangul syllables of KS X 1001 (the ones EUC-KR has), Hangul compatibility jamo and every character of the
+  Korean table (Noto Sans CJK's Hangul is Noto Sans KR's);
+- hiragana and katakana, CJK punctuation and full-width forms;
+- the symbols controllers and the game are described with: arrows (the D-pad), geometric shapes (△○□ ▲▼◀▶), ①②,
+  ★♪, box drawing, letterlike and number forms, math operators and technical symbols.
+Uncommon hanzi (Traditional ones among them) and kanji are left out: Big5's level 1 alone would make it 4.4 MB.
+tests/test_settings_locale.py fails when a line uses a character the font has not: run this again.
 
-Noto Sans SC and KR are under the SIL Open Font License 1.1 (THIRD_PARTY_NOTICES), with Reserved Font Name 'Source': a
-subset keeps the fonts' own names (Noto Sans SC / KR), which do not use it.
+Noto Sans CJK is under the SIL Open Font License 1.1 (THIRD_PARTY_NOTICES), with Reserved Font Name 'Source': the
+subset keeps the font's own name (Noto Sans CJK SC), which does not use it.
 
     pip install fonttools
-    curl -LO https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf
-    curl -LO https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF/KR/NotoSansKR-Regular.otf
-    python tools/subset_cjk_font.py --sc NotoSansSC-Regular.otf --kr NotoSansKR-Regular.otf
+    curl -LO https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf
+    python tools/subset_cjk_font.py NotoSansCJKsc-Regular.otf
 
-(either one alone remakes that font only; the release's: version 2.004, SHA-256
- SC faa6c9df652116dde789d351359f3d7e5d2285a2b2a1f04a2d7244df706d5ea9,
- KR 69975a0ac8472717870aefeab0a4d52739308d90856b9955313b2ad5e0148d68)
+(the release's: version 2.004, SHA-256 2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b)
 """
 import argparse
 import re
@@ -28,7 +30,24 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PUNCTUATION = [(0x2000, 0x206F), (0x3000, 0x303F), (0xFF00, 0xFFEF), (0xFFFD, 0xFFFD)]
+OUT = "extras/mhgurecomp-cjk.otf"
+BLOCKS = [
+    (0x2000, 0x206F),  # General Punctuation
+    (0x2100, 0x214F),  # Letterlike Symbols
+    (0x2150, 0x218F),  # Number Forms
+    (0x2190, 0x21FF),  # Arrows
+    (0x2200, 0x22FF),  # Mathematical Operators
+    (0x2300, 0x23FF),  # Miscellaneous Technical
+    (0x2460, 0x24FF),  # Enclosed Alphanumerics
+    (0x2500, 0x257F),  # Box Drawing
+    (0x25A0, 0x25FF),  # Geometric Shapes
+    (0x2600, 0x26FF),  # Miscellaneous Symbols
+    (0x3000, 0x303F),  # CJK Symbols and Punctuation
+    (0x3040, 0x309F),  # Hiragana
+    (0x30A0, 0x30FF),  # Katakana
+    (0xFF00, 0xFFEF),  # Halfwidth and Fullwidth Forms
+    (0xFFFD, 0xFFFD),  # the replacement character
+]
 
 
 def imgui_common():
@@ -57,20 +76,14 @@ def table_chars(function):
     return {ord(c) for c in table if ord(c) > 0x7F}
 
 
-FONTS = {  # option: (output, the table's function, the characters beyond the table)
-    "sc": ("extras/mhgurecomp-cjk.otf", "settings_text_zh", imgui_common),
-    "kr": ("extras/mhgurecomp-kr.otf", "settings_text_ko", ks_x_1001),
-}
-
-
-def make(source, out, table, more):
+def make(source):
     from fontTools import subset
     from fontTools.ttLib import TTFont
     font = TTFont(source)
     have = set(font.getBestCmap())
-    used = table_chars(table)
-    wanted = used | more()
-    for lo, hi in PUNCTUATION:
+    used = table_chars("settings_text_zh") | table_chars("settings_text_ko")
+    wanted = used | imgui_common() | ks_x_1001()
+    for lo, hi in BLOCKS:
         wanted |= set(range(lo, hi + 1))
     missing = sorted(c for c in used if c not in have)
     if missing:
@@ -84,21 +97,15 @@ def make(source, out, table, more):
     sub = subset.Subsetter(opts)
     sub.populate(unicodes=sorted(wanted & have))
     sub.subset(font)
-    path = ROOT / out
+    path = ROOT / OUT
     font.save(path)
-    print("%s: %d characters, %d bytes" % (out, len(wanted & have), path.stat().st_size))
+    print("%s: %d characters, %d bytes" % (OUT, len(wanted & have), path.stat().st_size))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--sc", help="NotoSansSC-Regular.otf: remake extras/mhgurecomp-cjk.otf")
-    parser.add_argument("--kr", help="NotoSansKR-Regular.otf: remake extras/mhgurecomp-kr.otf")
-    args = parser.parse_args()
-    if not args.sc and not args.kr:
-        parser.error("give --sc and/or --kr")
-    for option, (out, table, more) in FONTS.items():
-        if getattr(args, option):
-            make(getattr(args, option), out, table, more)
+    parser.add_argument("source", help="NotoSansCJKsc-Regular.otf")
+    make(parser.parse_args().source)
 
 
 if __name__ == "__main__":

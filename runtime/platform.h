@@ -64,6 +64,11 @@ int plat_count_files(const char *dir);
 // A folder the player named (UTF-8, as the settings file has it), created if missing, as a path the runtime's file
 // functions can open: Windows' narrow ones take the ANSI code page, so one it can't spell becomes its 8.3 short form.
 bool plat_use_folder(const char *utf8, char *buf, size_t size);
+// A path (or name) the runtime's file functions use - what readdir and the narrow Windows calls give, in the ANSI code
+// page there (GBK on a Chinese Windows) - as UTF-8, for what wants that instead: ImGui (its text, and its file opens,
+// which go through _wfopen), SDL's files, FFmpeg. Returns buf (the path as it is when it doesn't convert or fit);
+// elsewhere the path is UTF-8 already: copied.
+const char *plat_utf8_path(const char *path, char *buf, size_t size);
 void plat_error_box(const char *msg);
 void plat_fatal_notice(void);
 
