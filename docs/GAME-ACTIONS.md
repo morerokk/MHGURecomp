@@ -171,9 +171,14 @@ one kind give the same value, so it is a category, not an object id.
 `[Actions] ConfirmTargets` lists the categories that are "open / talk"; the ones measured so far are the default, so
 an ini only needs the line to change them (an empty value turns `OpenTalk` off). They split the one A button in two: at
 such a target (with the weapon away) `OpenTalk` presses A and `Interact` is silent; anywhere else `Interact` presses A
-(gather, carve, climb, the wall jump) and `OpenTalk` is silent. Both default to the game's A button, so with no
-rebinding the split changes nothing. A category that is not listed keeps the interact key - the list is a set of
-exceptions, not a complete map of the game's interactables.
+(gather, carve, climb, the wall jump) and `OpenTalk` is silent. A category that is not listed keeps the interact key -
+the list is a set of exceptions, not a complete map of the game's interactables.
+
+The split is on only while `OpenTalk` has a binding of its own (for either device, base or a weapon class). Without
+one there is no open/talk target anywhere: `Interact` presses A at a box as it always did, and `OpenTalk` never does.
+So an ini from before `OpenTalk` existed that moved `Interact` to another input keeps opening, talking and sleeping
+with it, and an ini with no bindings at all is the game's own. (Merged first without this, PR #417: such an ini lost
+the box, the bed and the NPCs, since its `Interact` gave the press up to an `OpenTalk` it had never bound.)
 
 `OpenTalkAlsoInteract=1` is the other way round: at an open/talk target both keys press A, so a player can keep one
 interact key working everywhere and only *add* a key for the roll. Off by default: then the two keys are two halves of
@@ -196,8 +201,8 @@ the keyboard) and *Target log* (the log line). Saving applies them at once, with
 aside *when `OpenTalk` is held as well* (the two on one input, the target deciding what the press is), and elsewhere the
 roll keeps it. On a separate input the roll is untouched everywhere.
 
-Empty `ConfirmTargets` (the default) changes nothing at all: no category is an open/talk one, `OpenTalk` never delivers
-a bit, and `Interact` keeps every input it had.
+An empty `ConfirmTargets=` (the default is 5,8,9,13,17) changes nothing at all: no category is an open/talk one,
+`OpenTalk` never delivers a bit, and `Interact` keeps every input it had.
 
 ```ini
 [Actions]
@@ -264,7 +269,7 @@ low; (6) mash / struggle and the raw-word readers, not worth it.
 Enable=1                  ; 1 is the default (no section at all too); 0: nothing hooked, bit-for-bit the game's own input
 ManageMenus=1             ; the menu view too
 SheathedAttackA=0         ; 1: AttackA presses A with the weapon away too (only matters once Interact is bound)
-ConfirmTargets=           ; OpenTalk's targets (the interactable's category, see below): e.g. 5,8,9,13,17; empty: off
+ConfirmTargets=5,8,9,13,17 ; OpenTalk's targets (the interactable's category, see above), only with OpenTalk bound; empty: off
 Pointer=0                 ; feed the engine's (dormant) pointer block: experiment, see P1 below
 Log=0                     ; one line per frame (env MHGU_ACTION_LOG=1); env MHGU_ACTIONS=0|1 overrides Enable
 

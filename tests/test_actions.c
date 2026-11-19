@@ -1094,6 +1094,36 @@ static void test_confirm_target(void) {
     act_set_target(5);
     release_all(), press(S), act_sample(&h, &s);
     CHECK(act_view(ACT_VIEW_SHEATHED, 0, s.hold[0], false) == 0x4000, "empty ConfirmTargets: A is the roll even at a box");
+    // inis from before OpenTalk: no binding of its own, so no split (default ConfirmTargets) and the player's own
+    // interact input still opens, talks and sleeps
+    int W = ACT_PAD + SDL_GAMEPAD_BUTTON_WEST;
+    static const struct { const char *ini; int key; } old[] = {
+        {"[Actions]\nEnable=1\n[Actions.Pad]\nInteract = pad:north\n", 0},
+        {"[Actions]\nEnable=1\n[Actions.Pad]\nAttackA = pad:west\n", 1},  // (Interact follows AttackA)
+        {"[Actions]\nEnable=1\n[Actions.Pad]\nInteract = pad:north\nDodge = pad:south\n", 0},
+    };
+    for (unsigned k = 0; k < sizeof old / sizeof *old; k++) {
+        ActProfile o = parse(old[k].ini);
+        act_use_profile(&o);
+        for (int t = 0; t < 4; t++) {
+            static const uint32_t cats[] = {0, 1, 5, 13};
+            act_set_target(cats[t]);
+            release_all(), press(old[k].key ? W : N), act_sample(&h, &s);
+            uint32_t w = act_view(ACT_VIEW_SHEATHED, 0, s.hold[0], false);
+            CHECK(w == 0x2000, "old ini %u, OpenTalk unbound, category %u: the interact key presses A: %x", k, cats[t], w);
+        }
+    }
+    act_set_target(5);
+    release_all(), press(S), act_sample(&h, &s);
+    CHECK(act_view(ACT_VIEW_SHEATHED, 0, s.hold[0], false) == 0x4000, "old ini, Dodge on south: A still rolls at a box");
+    // the settings screen's list: numbers 1-63 and separators only
+    uint64_t m = 7;
+    CHECK(act_parse_targets(" 5, 9;13 ", &m) && m == ((1ull << 5) | (1ull << 9) | (1ull << 13)), "targets with separators");
+    CHECK(act_parse_targets("", &m) && m == 0, "empty targets: none");
+    m = 7;
+    CHECK(!act_parse_targets("5,x", &m) && !act_parse_targets("0", &m) && !act_parse_targets("64", &m) &&
+              !act_parse_targets("-5", &m) && !act_parse_targets("0x11", &m) && m == 7,
+          "bad targets refused, the list kept");
     act_set_target(0);
     act_set_log(quiet);
 }

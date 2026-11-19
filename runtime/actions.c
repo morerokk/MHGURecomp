@@ -609,6 +609,18 @@ static atomic_int shared_frames_now = 1;
 static atomic_int target_category = -1;
 static atomic_ullong confirm_mask_now;  // ConfirmTargets, as loaded
 static atomic_bool open_talk_union_on;  // OpenTalkAlsoInteract, as loaded
+// OpenTalk has a binding of its own on some device or weapon class. Without one the split is off (no ST_CONFIRM):
+// Interact presses A everywhere as before OpenTalk existed, so an ini that moved Interact to another input keeps
+// opening boxes and talking with it (#417)
+static atomic_bool open_talk_bound;
+static bool open_talk_bound_in(const ActProfile *p) {
+    for (int d = 0; d < 2; d++) {
+        if (p->dev[d].base[ACT_OPEN_TALK].set) return true;
+        for (int w = 0; w < ACT_WEAPONS; w++)
+            if (p->dev[d].weapon[w][ACT_OPEN_TALK].set) return true;
+    }
+    return false;
+}
 static atomic_flag prof_lock = ATOMIC_FLAG_INIT;
 static void lock(void) { while (atomic_flag_test_and_set_explicit(&prof_lock, memory_order_acquire)) {} }
 static void unlock(void) { atomic_flag_clear_explicit(&prof_lock, memory_order_release); }
@@ -720,6 +732,7 @@ void act_use_profile(const ActProfile *p) {
     atomic_store(&shared_frames_now, p->shared_frames > 0 ? p->shared_frames : 1);
     atomic_store(&confirm_mask_now, p->confirm_mask);
     atomic_store(&open_talk_union_on, p->open_talk_union);
+    atomic_store(&open_talk_bound, open_talk_bound_in(p));
     unlock();
 }
 // Dash and the weapon R-action are one game input (the R-role getter) unless the profile asks for two: the flag, or a
@@ -784,10 +797,24 @@ void act_format_targets(uint64_t mask, char *buf, size_t size) {
         n += (size_t)w;
     }
 }
-bool act_parse_targets(const char *text, uint64_t *mask) { *mask = parse_categories(text); return true; }
+// (strict, for the settings screen: only numbers 1-63 and separators, so a typo is an error rather than a list that
+// silently drops what follows it)
+bool act_parse_targets(const char *text, uint64_t *mask) {
+    for (const char *s = text; *s;) {
+        if (isspace((unsigned char)*s) || *s == ',' || *s == ';' || *s == '|') { s++; continue; }
+        if (!isdigit((unsigned char)*s)) return false;
+        char *end = NULL;
+        unsigned long c = strtoul(s, &end, 10);
+        if (c < 1 || c > 63) return false;
+        s = end;
+    }
+    *mask = parse_categories(text);
+    return true;
+}
 // The confirm key's target: one category, 0 (nothing to interact with) is never a confirm target
 void act_set_target(uint32_t category) { atomic_store(&target_category, category && category < 64 ? (int)category : -1); }
 static bool target_is_confirm(void) {
+    if (!atomic_load(&open_talk_bound)) return false;  // (OpenTalk unbound: no split, Interact as it always was)
     int c = atomic_load(&target_category);
     return c > 0 && (atomic_load(&confirm_mask_now) >> c & 1);
 }

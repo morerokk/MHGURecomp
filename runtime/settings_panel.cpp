@@ -1296,12 +1296,14 @@ void action_rows(std::vector<Row> &r) {
         row.id = "act.targets";
         row.title = tr("Open / talk targets");
         row.value = list[0] ? list : tr("None");
-        row.help = tr("The interactable categories the Open / talk action opens or talks to, by number. With Target log on, walk up to each kind once and read its number in log.txt. Empty: Open / talk never presses anything.");
+        row.help = tr("The interactable categories the Open / talk action opens or talks to, by number. Only used once Open / talk has an input of its own. With Target log on, walk up to each kind once and read its number in log.txt. Empty: Open / talk never presses anything.");
         row.activate = [list = std::string(list)]() {
             keyboard(tr("Open / talk targets"), list, 120, [](const std::string &typed, std::string &error) {
-                (void)error;
                 uint64_t mask = 0;
-                act_parse_targets(typed.c_str(), &mask);
+                if (!act_parse_targets(typed.c_str(), &mask)) {
+                    error = tr("Numbers from 1 to 63, separated by commas.");
+                    return false;
+                }
                 acts().draft.confirm_mask = mask;
                 return true;
             });
