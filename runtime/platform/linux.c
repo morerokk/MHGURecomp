@@ -451,6 +451,23 @@ static void fault_handler(int sig, siginfo_t *si, void *uc) {
 #else
     if (plat_committed(sp, &end) && end - sp >= 8) lr = *(const uint64_t *)(uintptr_t)sp;
 #endif
+#ifndef __ANDROID__
+    // In the loader while it opens the game code: a page of the file it couldn't read (cut short after the check in
+    // gamelib.c, or a read error from the drive: an SD card). The player is told that, not sent to a crash log.
+    extern const char *volatile g_gamelib_loading;  // (runtime/gamelib.c)
+    if (sig == SIGBUS && g_gamelib_loading) {
+        const char *path = g_gamelib_loading, *name = strrchr(path, '/');
+        name = name ? name + 1 : path;
+        fprintf(stderr, "\n*** SIGBUS (code %d, addr %llx) while loading %s: the file couldn't be read\n",
+                si ? si->si_code : 0, (unsigned long long)fa, path);
+        char msg[600];
+        snprintf(msg, sizeof msg, "The game's file %s couldn't be read from the disk (the file is damaged, or the "
+                 "drive it is on has a read error), so the game can't start. Download the release again and unpack it "
+                 "over the game folder; if this keeps happening, move the game folder to another drive.", name);
+        plat_error_box(msg);
+        _exit(1);
+    }
+#endif
     char what[80];
     snprintf(what, sizeof what, "%s (code %d, addr %llx)", sig_name(sig), si ? si->si_code : 0,
              (unsigned long long)fa);
