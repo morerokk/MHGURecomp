@@ -108,6 +108,8 @@ class SettingsLocaleTest(unittest.TestCase):
         source = re.sub(r'//[^\n]*|/\*.*?\*/', '', source, flags=re.S)
         # INI keys looked up in the settings table (ini("Mode"), lo("FPS")...) are not shown
         source = re.sub(r'\b(?:ini|cold|lo|hi)\(' + LITERAL + r'\)', '', source)
+        # nor is a C linkage specification (extern "C" ...)
+        source = re.sub(r'\bextern\s+"C"', '', source)
         unchanged = {"English", "Español", "中文", "한국어", "Chinese", "Korean", "Xbox", "Switch", "PlayStation",
                      "FSR", "MSAA", "FXAA", "Discord", "Settings##main", "Settings##dropdown", "Settings##bind",
                      "A", "B", "X", "Y", "L", "R", "ZL", "ZR",
