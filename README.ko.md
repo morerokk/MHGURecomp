@@ -316,7 +316,9 @@ Escape, Insert, F1, F7~F12는 리컴프가 사용하므로 지정할 수 없습�
 - `[Bonus Content]`: `BonusContent` (기본값 On), 아래 참고
 - `[Audio]`: `Volume` (0~100: 게임 전체), `MuteInBackground` (On / Off, 기본값 Off: 게임 창이 백그라운드에 있을 때
   소리를 끔), `Output` (Stereo(기본값) / 5.1: 게임은 Switch의 서라운드 출력처럼 소리를 5.1로 믹스합니다.
-  5.1은 서라운드 시스템으로 재생하고, Stereo는 2채널로 다운믹스합니다. 저장하면 적용)
+  5.1은 서라운드 시스템으로 재생하고, Stereo는 2채널로 다운믹스합니다. 저장하면 적용), `Device` (Default(기본값):
+  시스템의 기본 장치, 게임 중에 바뀌어도 따라감 / 설정 메뉴에 나오는 장치 이름: 항상 그 장치, 분리되어 있는 동안에는
+  소리 없음. 저장하면 적용)
 - `[Application]`: `ConfirmExit`(창을 닫기 전에 확인), 설정 메뉴의 `Language` (English /
   Spanish / 中文(중국어 간체) / 한국어. 처음 실행하는 플레이어는 시스템 언어가 이 중 하나면 그 언어로,
   아니면 English로 설정되며, 저장된 Language는 항상 유지됩니다. 중국어와 한국어 글리프는 프로그램 옆의 `mhgurecomp-cjk.otf`에서, 없으면 시스템 글꼴(Android: Noto Sans CJK)에서 가져옵니다. 모드가 romfs

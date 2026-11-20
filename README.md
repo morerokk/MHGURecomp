@@ -316,7 +316,9 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
 - `[Bonus Content]`: `BonusContent` (default On), see below
 - `[Audio]`: `Volume` (0 to 100: the whole game), `MuteInBackground` (On / Off, default Off: no sound while the
   game's window is in the background), `Output` (Stereo, the default / 5.1: the game mixes its sound in 5.1 as on the
-  Switch's surround output; 5.1 plays it on a surround system, Stereo folds it down to two channels; applies on Save)
+  Switch's surround output; 5.1 plays it on a surround system, Stereo folds it down to two channels; applies on Save),
+  `Device` (Default, the default: the system's default device, followed when it changes while the game runs / a
+  device's name as the settings menu lists it: always that device, silent while it's unplugged; applies on Save)
 - `[Application]`: `ConfirmExit` (ask before the window closes), and the settings menu's `Language` (English /
   Spanish / 中文, Simplified Chinese / 한국어, Korean; a new player gets the system's language when it is one of these,
   else English, and a saved Language always stays. The Chinese and Korean glyphs come from `mhgurecomp-cjk.otf`

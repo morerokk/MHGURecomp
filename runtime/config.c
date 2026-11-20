@@ -590,6 +590,11 @@ static const char DEFAULT_INI[] =
     "; Default: Stereo\n"
     "Output = Stereo\n"
     "\n"
+    "; Playback device, by its name as the settings menu lists it (\"Speakers (Realtek(R) Audio)\"...): always that\n"
+    "; device, no sound while it is unplugged. Empty or Default: the system's default device, followed when it changes.\n"
+    "; Default: empty\n"
+    "Device =\n"
+    "\n"
     "[Application]\n"
     "; Ask before the game window closes (closing does not save the game)\n"
     "; Default: On\n"
@@ -864,6 +869,7 @@ const ConfigSetting g_settings[] = {
     {"Audio", "Volume", SET_INT, F(volume), 0, 0, 100, NULL, NULL, false, ERR_MISC},
     ON_OFF("Audio", "MuteInBackground", mute_in_background, false),
     {"Audio", "Output", SET_CHOICE, F(audio_output), 0, 0, 0, "Stereo|2.0,5.1|surround|5.1surround", NULL, false, ERR_MISC},
+    {"Audio", "Device", SET_TEXT, F(audio_device), sizeof g_config.audio_device, 0, 0, NULL, NULL, false, ERR_MISC},
     ON_OFF("Application", "ConfirmExit", confirm_exit, false),
     {"Application", "Language", SET_CHOICE, F(language), 0, 0, 0, "English|en,Spanish|es,中文|zh|chinese,한국어|ko|korean", NULL, false, ERR_LANGUAGE},
     {"Application", "ButtonIcons", SET_CHOICE, F(button_icons), 0, 0, 0, "Xbox,Switch,PlayStation", NULL, false, ERR_ICONS},

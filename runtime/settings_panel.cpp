@@ -442,7 +442,8 @@ bool equal(const Config &a, const Config &b) {
         return false;
     if (strcmp(a.ldn_ryu_servers, b.ldn_ryu_servers) || strcmp(a.ldn_ryu_host, b.ldn_ryu_host) ||
         strcmp(a.ldn_ryu_pass, b.ldn_ryu_pass) || strcmp(a.ldn_room_server, b.ldn_room_server) ||
-        strcmp(a.ldn_room_pass, b.ldn_room_pass) || strcmp(a.ldn_room_nick, b.ldn_room_nick))
+        strcmp(a.ldn_room_pass, b.ldn_room_pass) || strcmp(a.ldn_room_nick, b.ldn_room_nick) ||
+        strcmp(a.audio_device, b.audio_device))
         return false;
     for (int n = 0; n < 4; ++n)
         if (a.hp.scale[n] != b.hp.scale[n])
@@ -1808,6 +1809,7 @@ void reset_section() {
         c.volume = f.volume;
         c.mute_in_background = f.mute_in_background;
         c.audio_output = f.audio_output;
+        SDL_strlcpy(c.audio_device, f.audio_device, sizeof c.audio_device);
         break;
     case 2:
         c.face_buttons = f.face_buttons;
@@ -2099,6 +2101,26 @@ void mods_rows(std::vector<Row> &r) {
     action(r, "mods.forge", tr("Open the Forge menu"), []() { forge_requested = true; }, plugins);
     r.back().help = tr("The Forge plugins' own settings, over this menu. Cancel (the button that goes back in the game's menus) or Start + Back closes it and comes back here. On a keyboard the Forge menu key (Insert) opens and closes it.");
 }
+// The playback devices plugged in now, by the names [Audio] Device keeps (looked up once a second: the rows are
+// rebuilt every frame). Left out: a name the file couldn't hold or read back.
+std::vector<std::string> playback_devices() {
+    static std::vector<std::string> list;
+    static Uint64 when;
+    if (when && SDL_GetTicks() - when < 1000)
+        return list;
+    when = SDL_GetTicks();
+    list.clear();
+    int n = 0;
+    SDL_AudioDeviceID *ids = SDL_GetAudioPlaybackDevices(&n);  // (none before the game opens its audio)
+    for (int i = 0; ids && i < n; ++i) {
+        const char *name = SDL_GetAudioDeviceName(ids[i]);
+        if (name && *name && strlen(name) < sizeof s.draft.audio_device && !strpbrk(name, "\r\n;#") &&
+            SDL_strcasecmp(name, "Default") && std::find(list.begin(), list.end(), name) == list.end())
+            list.push_back(name);
+    }
+    SDL_free(ids);
+    return list;
+}
 std::vector<Row> main_rows() {
     std::vector<Row> r;
     Config &c = s.draft;
@@ -2148,6 +2170,26 @@ std::vector<Row> main_rows() {
         add_choice(r, "audio.output", "Output", c.audio_output, {tr("Stereo"), tr("5.1 surround")},
                    [](int v) { c.audio_output = v; }, ini("Output"));
         r.back().help = tr("5.1 surround sends the game's own 5.1 mix (front, center, subwoofer, rear) to a surround system; Stereo folds it down to two speakers or headphones. With 5.1 on a stereo device, the system folds it down instead.");
+        {  // [Audio] Device: Default, the devices plugged in now, and the chosen one also while it isn't
+            std::vector<std::string> devs = playback_devices();
+            const char *now = SDL_GetAudioDeviceName(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK);
+            std::vector<std::string> names{now && *now ? std::string(tr("Default")) + " (" + now + ")" : tr("Default")};
+            for (const std::string &d : devs)
+                names.push_back(d);
+            int sel = 0;
+            if (*c.audio_device && SDL_strcasecmp(c.audio_device, "Default")) {
+                auto it = std::find(devs.begin(), devs.end(), std::string(c.audio_device));
+                sel = 1 + (int)(it - devs.begin());
+                if (it == devs.end()) {
+                    devs.push_back(c.audio_device);
+                    names.push_back(std::string(c.audio_device) + " (" + tr("not plugged in") + ")");
+                }
+            }
+            add_choice(r, "audio.device", "Device", sel, names,
+                       [devs](int v) { SDL_strlcpy(c.audio_device, v > 0 ? devs[v - 1].c_str() : "", sizeof c.audio_device); },
+                       ini("Device"));
+            r.back().help = tr("Where the game's sound plays. Default follows the system's default device, also when it changes while the game runs. A device chosen here is always used: while it is unplugged there is no sound, and it comes back when the device does.");
+        }
         header(r, "graphics.header", tr("Graphics"));
         add_bool(r, "show.fps", "FPS counter", &c.show_fps, ini("ShowFPS"));
 #ifdef __ANDROID__
