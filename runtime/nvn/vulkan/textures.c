@@ -443,6 +443,22 @@ static TexBackend *tex_backend(NvnTexture *t) {
 
 void backend_texture_destroyed(NvnTexture *t) {
     vk_lock();
+    // The texture pools' slots still naming it are emptied: a real pool holds a copy of the descriptor, so the game may
+    // finalize a texture whose slot a later draw still samples (an area change), and here that slot would point at freed
+    // memory (0.17.6 report: a crash in upload_pending, a 2D slot turned 1D once the memory was reused). An empty slot
+    // draws the black stand-in. (Under vk_lock: the render thread reads the slots while executing.)
+    extern NvnDescPool *g_texture_pools[64];
+    int emptied = 0;
+    for (int p = 0; p < 64 && g_texture_pools[p]; p++) {
+        NvnTexEntry *e = g_texture_pools[p]->entries;
+        for (int i = 0, n = g_texture_pools[p]->count; i < n; i++)
+            if (e[i].tex == t) e[i].tex = NULL, emptied++;
+    }
+    static bool logged;
+    if (emptied && !logged) {
+        logged = true;
+        LOG("[tex] a texture finalized while in %d texture pool slot(s): emptied (logged once)\n", emptied);
+    }
     TexBackend *b = t->backend;
     if (b) {
         destroy_image(b);
