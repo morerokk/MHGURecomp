@@ -216,7 +216,11 @@ static void list_load(Cpu *c) {
 // the hunt: Palicos drawn white and see-through at the start, terrain black later, then a crash freeing an area
 // bundle at a zone change (0x352d84 -> pc 0 from 0xd0ba68), only in Chinese (report 2026-11-13, quest 1044; English
 // fine). (Holding it through a quest started from a village didn't show it: why only the Hub's quests is not known.)
+static void switch_prompt(Cpu *c, bool want);
+static uint64_t g_prompt_ns;
+static bool g_prompt_on;
 void villagehub_tick(Cpu *c) {
+    if (g_prompt_on && plat_now_ns() - g_prompt_ns > 200000000ull) switch_prompt(c, false);  // (the counter closed)
     if (!g_vq_arc) return;
     uint32_t a = area_addr();
     if (a && hub_area(LD8(a))) return;
@@ -275,6 +279,45 @@ static void reload_list(Cpu *c) {
         LD32(sel + SEL_COUNT), (plat_now_ns() - t0) / 1e6, g_list_pending ? ", still loading" : "");
 }
 
+// The prompt for the switch: "(R) Village Quests" / "(R) Hub Quests" in the bottom right button guide while the
+// counter's rank or star menu is up (the R icon shows the key with the keyboard and mouse, prompts.c). The guide
+// (cUIOUnderKeyAssign, 0x85e758) shows a preset of the game's prompts (0x8439ec(guide, preset, flags, redraw); the
+// counter's menus set theirs, 0xc4 Back / Confirm / Target, through 0x85e794, which also empties the extras) and up
+// to 4 extra prompts {buttonName icon index, label text *} (+0x228; 0x85e8cc(icon, label) adds one and redraws,
+// as the game adds "Help"). The label is a string of our own; the counter's menus empty the extras when they change,
+// and it is added again the next frame. Taken out when the menus are left (ui_update) or the counter is closed
+// (villagehub_tick: no update for a moment).
+#define FN_GUIDE_GET     0x85e758u  // () -> the bottom right button guide (cUIOUnderKeyAssign) or 0
+#define FN_GUIDE_ADD     0x85e8ccu  // (icon, label): an extra prompt, then redraw
+#define FN_GUIDE_SHOW    0x8439ecu  // (guide, preset, flags, 1): redraw
+#define GUIDE_PRESET     0x4cu
+#define GUIDE_FLAGS      0x50u
+#define GUIDE_EXTRA      0x228u     // 4 x {u32 icon (-1 empty), u32 label}
+#define ICON_PAD_R       5u         // buttonName: <ICON PAD_R>
+static uint32_t g_label[2];         // guest strings: [0] "Village Quests", [1] "Hub Quests"
+// (g_prompt_on: our extra prompt is in the guide; g_prompt_ns: when the counter's menu last wanted it)
+
+// want: show the prompt for the switch as it is now (Village quests next when the counter shows the Hub's).
+static void switch_prompt(Cpu *c, bool want) {
+    if (!want && !g_prompt_on) return;
+    uint32_t kg = call1(c, FN_GUIDE_GET, 0);
+    g_prompt_on = false;
+    if (!kg) return;
+    uint32_t label = want ? g_label[g_village] : 0;
+    bool have = false, gone = false, room = false;
+    for (uint32_t i = 0; i < 4; i++) {
+        uint32_t e = kg + GUIDE_EXTRA + 8 * i, l = LD32(e + 4);
+        if (LD32(e) == 0xffffffffu) { room = true; continue; }
+        if (l != g_label[0] && l != g_label[1]) continue;
+        if (l == label) { have = true; continue; }
+        ST32(e, 0xffffffffu), ST32(e + 4, 0);  // (the other label, or not wanted)
+        gone = room = true;
+    }
+    if (label && !have && room) call4(c, FN_GUIDE_ADD, ICON_PAD_R, label, 0, 0), have = true;
+    else if (gone) call4(c, FN_GUIDE_SHOW, kg, LD32(kg + GUIDE_PRESET), LD32(kg + GUIDE_FLAGS), 1);
+    g_prompt_on = have;
+}
+
 static void ui_update(Cpu *c) {
     static uint64_t held;
     uint64_t b;
@@ -300,6 +343,10 @@ static void ui_update(Cpu *c) {
         }
     }
     as_village_menu(c, FN_UI_UPDATE);
+    st = LD8(ui + UI_STATE);
+    bool want = on && a && hub_area(LD8(a)) && (st == UI_RANK_MENU || st == UI_STAR_MENU);
+    if (want) g_prompt_ns = plat_now_ns();
+    if (st != 0) switch_prompt(c, want);  // (state 0 lays the menu out again: the prompt stays through a switch)
 }
 
 // The hooks are set whatever the setting: each follows [Village Quests] VillageQuestsInHub as it is now (a Save in the
@@ -422,6 +469,8 @@ void villagehub_init(void) {
     g_trace = getenv("MHGU_VQ_TRACE") != NULL;
     g_demo_test = getenv("MHGU_VQ_DEMO_TEST") != NULL;
     g_path = hle_alloc(64);
+    static const char *labels[2] = {"Village Quests", "Hub Quests"};
+    for (int i = 0; i < 2; i++) g_label[i] = hle_alloc(32), snprintf((char *)G2H(g_label[i]), 32, "%s", labels[i]);
     fnhook_set(FN_SPAWN_UPDATE, hle_register("villagehub:spawn_update", spawn_update));
     fnhook_set(FN_SUPPLY_DELIVER, hle_register("villagehub:supply_deliver", supply_deliver));
     fnhook_set(FN_QUEST_FILTER, hle_register("villagehub:quest_filter", quest_filter));
