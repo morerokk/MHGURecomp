@@ -13,6 +13,7 @@ void chat_open(void);                          // window side: "/" pressed (no t
 void chat_close(void);                         // the game opened its own text entry
 bool chat_composing(char *text, size_t size);  // the overlay: the line being typed
 bool chat_active(void);
+bool chat_hint(void);                          // the overlay: show which key opens chat (in the Hub or the Pub, online)
 // Where the box is, as fractions of the window: its left edge and its bottom (it grows upwards). The overlay reports
 // the box it drew; the mouse drags it while typing (runtime/host_input.c); chat_box.txt keeps it.
 void chat_position(float *left, float *bottom);

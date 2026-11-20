@@ -770,6 +770,33 @@ static void draw_chat(const char *line, uint64_t now, float scale) {
     dl->AddText(font, size, ImVec2(p0.x + bar + pad, p0.y + pad), ink, text.c_str(), nullptr, wrap);
 }
 
+// Which key opens chat, in the Hub or the Pub while online and the keyboard is what the player last used (issue #399):
+// "[-] Chat" where the line to type will show. ChatKey is a key position (an SDL scancode named after the US layout),
+// so the name is the key's on the player's layout: "/" is "-" on a Spanish keyboard, "!" on a French one.
+static void draw_chat_hint(float scale) {
+    int sc = config_live_chat_key();
+    if (!sc) return;
+    const char *name = SDL_GetKeyName(SDL_GetKeyFromScancode((SDL_Scancode)sc, SDL_KMOD_NONE, false));
+    if (!name || !*name) name = SDL_GetScancodeName((SDL_Scancode)sc);
+    if (!name || !*name) return;
+    ImGuiViewport *vp = ImGui::GetMainViewport();
+    ImFont *font = ImGui::GetFont();
+    float size = ImGui::GetFontSize() * 1.25f, pad = 4 * scale, gap = 6 * scale;  // (the chat box's size)
+    const char *label = "Chat";
+    ImVec2 ks = font->CalcTextSizeA(size, FLT_MAX, 0, name), ls = font->CalcTextSizeA(size, FLT_MAX, 0, label);
+    float cap_w = std::max(ks.x + 2 * pad, ks.y + 2 * pad), h = ks.y + 2 * pad;
+    float left, low;
+    chat_position(&left, &low);
+    ImVec2 p0(vp->WorkPos.x + vp->WorkSize.x * left, vp->WorkPos.y + vp->WorkSize.y * low - h - 2 * pad);
+    ImVec2 back1(p0.x + cap_w + gap + ls.x + 2 * pad, p0.y + h + 2 * pad);
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    dl->AddRectFilled(p0, back1, IM_COL32(0, 0, 0, 120), 4 * scale);  // (readable over a bright Hub)
+    ImVec2 c0(p0.x + pad, p0.y + pad), c1(c0.x + cap_w, c0.y + h);  // the key's cap
+    dl->AddRectFilled(c0, c1, IM_COL32(244, 247, 252, 230), 3 * scale);
+    dl->AddText(font, size, ImVec2(c0.x + (cap_w - ks.x) / 2, c0.y + pad), IM_COL32(20, 24, 32, 255), name);
+    dl->AddText(font, size, ImVec2(c1.x + gap, c0.y + pad), IM_COL32(244, 247, 252, 235), label);
+}
+
 // The battery's charge, "87%" ("87% +" while charging); false when there is no battery to tell of (a desktop PC). Asked
 // every few seconds: SDL goes through Java on Android.
 static bool battery_text(uint64_t now, char *out, size_t size) {
@@ -1022,6 +1049,7 @@ void overlay_frame(void *cpu) {
     bool notice = notice_due(now);
     char line[256];
     bool chat = chat_composing(line, sizeof line);
+    bool chat_key = !chat && !open && chat_hint() && host_input_last_device() == 1 && config_live_chat_key();
     ImGuiIO &io = ImGui::GetIO();
     g_wants_text = open && io.WantTextInput;  // (as of the last frame; the window side reads it: runtime/textinput.c)
 #ifdef __ANDROID__
@@ -1035,7 +1063,7 @@ void overlay_frame(void *cpu) {
 #else
     bool hdr_stats = false;
 #endif
-    if (!open && !free_render && !notice && !chat && !fps && !loading && !hdr_stats) {  // (nothing to draw)
+    if (!open && !free_render && !notice && !chat && !chat_key && !fps && !loading && !hdr_stats) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
         apply_input(io);  // (keep the queue short)
@@ -1104,6 +1132,7 @@ void overlay_frame(void *cpu) {
     forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);
     if (notice) draw_notice(now, scale);
     if (chat) draw_chat(line, now, scale);
+    if (chat_key) draw_chat_hint(scale);
     if (fps) draw_fps(now);
     if (hdr_stats) draw_hdr_analysis(g_hdr_stats, scale);
     if (loading) draw_loading(now, scale, loading);

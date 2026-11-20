@@ -31,13 +31,20 @@
 #define G_RECEIVE_DEPTH 0x1a64300u // s8: how deep that is in its own calls (above 0: a later row of a message)
 #define MSG_TYPE       9u
 #define MSG_NAME       0xau
+#define G_GAMECONTROL  0x1a8ca48u // sGameControl *: +0x4c the area's type (runtime/hle/villagehub.c)
+#define GC_AREA_TYPE   0x4cu
+#define AREA_HUB       0
+#define AREA_PUB       7
 
 static atomic_bool g_composing;
+static atomic_bool g_hint;  // in the Hub or the Pub, online: the overlay names the chat key (chat_hint)
 static float g_left = .016f, g_bottom = .74f, g_box[4];  // (above the game's chat window, bottom left)
 static bool g_loaded;
 #define POSITION_FILE "chat_box.txt"  // (beside mhgurecomp.ini)
 
 bool chat_active(void) { return atomic_load(&g_composing); }
+
+bool chat_hint(void) { return atomic_load(&g_hint); }
 
 void chat_position(float *left, float *bottom) {
     if (!g_loaded) {
@@ -148,7 +155,25 @@ static void receive_message(Cpu *c) {
 
 void chat_init(void) { fnhook_set(FN_RECEIVE, hle_register("chat:receive", receive_message)); }
 
+// Where the chat key's hint shows (issue #399: players don't know the key, or that "/" is a key position, the US
+// layout's, so on theirs it is another key): in the Hub or the Pub while in a session. Asked every half second or so.
+static void hint_update(Cpu *c) {
+    static uint32_t frames;
+    if (frames++ % 30) return;
+    uint32_t gc = LD32(G_GAMECONTROL), net = LD32(G_SNETWORK);
+    uint8_t area = gc ? LD8(gc + GC_AREA_TYPE) : 0xff;
+    bool hub = area == AREA_HUB || area == AREA_PUB, online = false;
+    if (hub && net) {
+        uint32_t saved[16];
+        memcpy(saved, c->r, sizeof saved);
+        online = call(c, FN_NET_ONLINE, net, 0, 0, 0) != 0;
+        memcpy(c->r, saved, sizeof saved);
+    }
+    atomic_store(&g_hint, hub && online);
+}
+
 void chat_tick(Cpu *c) {
+    hint_update(c);
     if (!atomic_load(&g_composing)) return;
     if (!textinput_active()) {  // (ended under it: the game's keyboard calls (swkbd.c Disappear, Finalize) end any entry;
                                 // the box would stay, and the chat key no longer open one)
