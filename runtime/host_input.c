@@ -859,12 +859,14 @@ static void menu_ptr_click(int btn, float mx, float my, int clicks) {
     if (hit >= 0) menuptr_select_at(hit, true, menu_ptr_gx, menu_ptr_gy);
     else if (hit == MENUPTR_PAGE_LEFT) host_input_press("LEFT", 12);
     else if (hit == MENUPTR_PAGE_RIGHT) host_input_press("RIGHT", 12);
-    // (a screen of a hunt's menu with no known cells - an option being changed in Options, Quest Info...: the click is
-    // Confirm there, as a right click is Cancel; a click beside a known menu's rows still does nothing)
-    else if (!menuptr_open()) host_input_press("A", 12);
+    // (a screen of a hunt's menu with no known cells - an option being changed in Options, Quest Info..., or a "how
+    // many?" count: the click is Confirm there, as a right click is Cancel; a click beside a known menu's rows still does
+    // nothing)
+    else if (!menuptr_open() || menuptr_spinner_open()) host_input_press("A", 12);
 }
 static void menu_ptr_wheel(int n) {  // (n > 0 up: a menu of pages turns to the previous one; else the row above)
     if (menuptr_slider_open()) return menuptr_slider_step(n > 0 ? 1 : -1);  // (Skin Tone: a tone a notch)
+    if (menuptr_spinner_open()) return menuptr_spinner_step(n);  // (a "how many?": the count, up or down a notch)
     if (menuptr_pages() > 1) return menuptr_page_turn(n > 0 ? -1 : 1);
     int cell = menuptr_row(), cells = menuptr_rows(), cols = menuptr_cols();
     if (cell < 0 || cells <= 0) return;

@@ -57,6 +57,10 @@ bool menuptr_slider_hit(float x, float y);
 bool menuptr_slider_panel(float x, float y);
 void menuptr_slider_set(float x, bool pick);
 void menuptr_slider_step(int d);
+// A "how many?" spinner (open: its update ran just now; menuptr_open counts it, and no menu's cells are offered meanwhile):
+// a click is Confirm there; a step of the count (the wheel, > 0 up)
+bool menuptr_spinner_open(void);
+void menuptr_spinner_step(int d);
 void menuptr_page_turn(int dir);         // the next (> 0) or previous page, the game's way (its own paging buttons)
 // Where the renderer put the menu in focus: from its layout's 1280x720 to the picture's (its whole width and height),
 // x' = m[0] x + m[1], y' = m[2] y + m[3]; false when not found lately (runtime/menulearn.c sets it every frame)
