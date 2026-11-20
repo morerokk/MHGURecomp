@@ -259,11 +259,19 @@ static const char DEFAULT_INI[] =
     "BoldText = " BOLD_TEXT_DEFAULT_INI "\n"
     "\n"
     "[HDR]\n"
+#ifdef __APPLE__
+    "; 16-bit HDR output for HDR capable displays (NOT FOR HDR400 DISPLAYS). Smooth gradients and FSR do not work with HDR\n"
+#else
     "; 16-bit HDR output for HDR capable monitors/phones (NOT FOR HDR400 DISPLAYS). Smooth gradients and FSR do not work with HDR\n"
+#endif
     "; Default: Off\n"
     "HDR = Off\n"
     "\n"
+#ifdef __APPLE__
+    "; The brightest your display can show, in nits (its specifications)\n"
+#else
     "; The brightest your display can show, in nits (its specifications, or Windows HDR Calibration)\n"
+#endif
     "; Between 80 and 10000\n"
     "; Default: 1000\n"
     "PeakBrightness = 1000\n"
@@ -344,8 +352,8 @@ static const char DEFAULT_INI[] =
     "ShowFPS = Off\n"
     "\n"
 #ifdef __APPLE__
-    "; Mac laptops and Android: show the battery's charge (in percent) in the same box as the frame rate, or in a box of\n"
-    "; its own. Nothing shows on a Mac without a battery\n"
+    "; Mac laptops: show the battery's charge (in percent) in the same box as the frame rate, or in a box of its own.\n"
+    "; Nothing shows on a Mac without a battery\n"
 #else
     "; Android only: show the battery's charge (in percent) in the same box as the frame rate, or in a box of its own\n"
 #endif
@@ -369,8 +377,13 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "ShaderPrewarm = On\n"
     "\n"
+#ifdef __APPLE__
+    "; A \"Loading\" box in the bottom right corner while the game starts up and prepares its shaders. In the Settings\n"
+    "; window, not the F1 menu: turn it off if it stays on screen or gets in the way.\n"
+#else
     "; A \"Loading\" box in the bottom right corner while the game starts up and prepares its shaders. Not in the\n"
     "; settings menu: turn it off here if it stays on screen or gets in the way.\n"
+#endif
     "; Default: On\n"
     "LoadingIndicator = On\n"
     "\n"
@@ -492,7 +505,9 @@ static const char DEFAULT_INI[] =
     "\n"
     "; Matchmaking key: hubs are only seen by players with the same key, so friends who all enter the same key\n"
     "; only see each other's hubs. Empty: public, your hubs are seen by (and you see) everyone without a key.\n"
+#ifndef __APPLE__
     "; On Android, empty means public among Android players only: to play with friends on PC, all enter the same key.\n"
+#endif
     "; Default:\n"
     "Key =\n"
     "\n"
@@ -529,14 +544,23 @@ static const char DEFAULT_INI[] =
     "RyuHost =\n"
     "RyuPassphrase =\n"
     "; RyuServe = On: this game runs the Ryujinx LDN server itself while local play is open, so nobody needs a separate\n"
+#ifdef __APPLE__
+    "; LdnServer: Ryujinx players set their LDN server to this Mac's address (port RyuServePort, default 30456; forward\n"
+    "; it or use a VPN), and hubs you create are made on it (RyuHost can stay empty).\n"
+#else
     "; LdnServer: Ryujinx players set their LDN server to this PC's address (port RyuServePort, default 30456; forward\n"
     "; it or use a VPN such as Radmin), and hubs you create are made on it (RyuHost can stay empty).\n"
+#endif
     "; Default: Off\n"
     "RyuServe = Off\n"
     "RyuServePort = 30456\n"
     "\n"
     "; RoomServe = On: this game also runs a small suyu-style room itself while local play is open, so suyu, yuzu, Eden and\n"
+#ifdef __APPLE__
+    "; Citron players join it (their multiplayer room address = this Mac, port RoomServePort, default 24872; forward it\n"
+#else
     "; Citron players join it (their multiplayer room address = this PC, port RoomServePort, default 24872; forward it\n"
+#endif
     "; for the internet) and play in the same hubs as Ryujinx players. Hubs you create are shared with the room. The room\n"
     "; password is RoomPassword.\n"
     "RoomServe = Off\n"
@@ -702,6 +726,8 @@ const SettingRow g_setting_rows[] = {
 #endif
     {"Graphics", "Graphics", "DrawDistance", "Draw Distance (People in Towns)", SETTING_VALUE, "0|0.5|1.0|1.5|2.0|3.0", NULL,
      true, true},
+    {"Graphics", "Graphics", "AnisotropicFiltering", "Anisotropic Filtering", SETTING_CHOICE, "Off|2x|4x|8x|16x", NULL, true,
+     true},
     {"Graphics", "Graphics", "SmoothGradients", "Smooth Gradients", SETTING_CHOICE, ONOFF, NULL, true, true},
     {"Graphics", "Graphics", "FixKerning", "Fix Kerning", SETTING_CHOICE, ONOFF, NULL, true, true},
     {"Graphics", "Graphics", "BoldText", "Bold Text", SETTING_CHOICE, ONOFF, NULL, true, true},
@@ -740,6 +766,7 @@ const SettingRow g_setting_rows[] = {
     {"Controls", "Controls", "KeyboardPrompts", "Keyboard Button Prompts", SETTING_CHOICE, ONOFF, NULL, true, true},
     {"Controls", "Controls", "ComboInputWindow", "Two-Button Inputs", SETTING_CHOICE, "Lenient|Strict", NULL, true, false},
     {"Controls", "Controls", "MenuChord", "Plus + Minus Opens the F1 Menu", SETTING_CHOICE, ONOFF, NULL, true, false},
+    {"Controls", "Controls", "TitleBackExit", "B on the Title Screen Asks to Quit", SETTING_CHOICE, ONOFF, NULL, true, false},
     {"Controls", "Controls", "ChatKey", "Chat Key", SETTING_VALUE, "/|T|Y|Return", NULL, true, false},
     {"Controls", "Mouse", "MouseSensitivity", "Mouse Sensitivity", SETTING_VALUE, "0.5|0.75|1.0|1.5|2.0|3.0", NULL, true, true},
     {"Controls", "Mouse", "MouseSensitivityY", "Vertical Sensitivity", SETTING_VALUE, "0.5|0.75|1.0|1.25|1.5|2.0", NULL, true,
@@ -748,6 +775,7 @@ const SettingRow g_setting_rows[] = {
     {"Controls", "Mouse", "MouseSmoothing", "Mouse Smoothing", SETTING_VALUE, "0.0|0.25|0.5|0.75|0.9", NULL, true, false},
     {"Controls", "Mouse", "MouseCapture", "Mouse Capture", SETTING_CHOICE, "Click|Hunt",
      "Click (Esc lets it go)|Hunt (also captured in a hunt)", true, true},
+    {"Controls", "Mouse", "MenuMouse", "Mouse in Menus", SETTING_CHOICE, ONOFF, NULL, true, true},
     KEYBIND("MoveUp", "Move Up"),
     KEYBIND("MoveDown", "Move Down"),
     KEYBIND("MoveLeft", "Move Left"),
@@ -805,7 +833,8 @@ const SettingRow g_setting_rows[] = {
     {"Extras", "Audio", "MuteInBackground", "Mute in the Background", SETTING_CHOICE, ONOFF, NULL, true, true},
     {"Extras", "Audio", "Output", "Audio Output", SETTING_CHOICE, "Stereo|5.1", "Stereo|5.1 Surround", true, true},
     {"Extras", "Application", "ConfirmExit", "Ask Before Closing", SETTING_CHOICE, ONOFF, NULL, true, true},
-    {"Extras", "Application", "Language", "F1 Menu Language", SETTING_CHOICE, "English|Spanish", "English|Español", true, false},
+    {"Extras", "Application", "Language", "F1 Menu Language", SETTING_CHOICE, "English|Spanish|Chinese|Korean",
+     "English|Español|中文|한국어", true, false},
     {"Extras", "Application", "ButtonIcons", "F1 Menu Button Icons", SETTING_CHOICE, "Xbox|Switch|PlayStation", NULL, true,
      false},
     {"Extras", "Application", "Theme", "F1 Menu Theme", SETTING_CHOICE, "Gold|Blue|Hunter", NULL, true, false},
