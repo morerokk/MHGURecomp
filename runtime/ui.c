@@ -285,6 +285,8 @@ void ui_init(void) {
     if (getenv("MHGU_HIDDEN")) flags |= SDL_WINDOW_HIDDEN;
     window = SDL_CreateWindow("Monster Hunter Generations Ultimate", win_w, win_h, flags);
     if (!window) FATAL("SDL_CreateWindow: %s\n", SDL_GetError());
+    // (NULL but on X11: a controller unplugged mid-request must not close the game, platform/linux.c)
+    plat_x11_display(SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_X11_DISPLAY_POINTER, NULL));
     set_window_icon();
     if (g_config.display_mode != DISPLAY_WINDOWED) set_fullscreen(true);
 }
