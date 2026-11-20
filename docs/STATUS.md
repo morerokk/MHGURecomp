@@ -625,6 +625,23 @@ that was set in these tests, set by 0x2b73c8) nets at most 0 for a hunter who on
 default Palico table climbs. Without Palicoes they attack the hunter, score 0. Most likely the original game's behaviour
 (game data, not compared with the original yet).
 
+Monsters' noticing meters and the frame rate (2026-11-20): fixed. Reported on 0.17.9: monsters that sleep in Arctic Ridge
+area 3 (Tigrex, Blangonga, Deviljho) go there at low HP but never lie down; area 7 sleepers are fine; Rathian sometimes
+hangs around her nest. Each monster keeps a meter per hunter (status +0x29c..+0x2a8) and Palico (+0x2ac..+0x2b8), 0..20000,
+and every update 0x2badac does `meter += (int)(rate * step)`, the rate by the hunter's distance (+150 near ... -2 far, out of
+sight or in another area; the 0x2bb1d8 defaults). A calm monster in an idle or move action whose meter passes 20000 notices
+that hunter (0x2bb5f0 in 0x27f0xx): it saves its routine (+0x73b4..+0x73b8) and runs its mode 3 routine (a Blangonga
+looks around, actions 1:5 and 1:6), and 0x2bb680 empties the meter. At 240 fps (step 0.25) the -2 became 0, so a meter
+filled in the fight never drained: the monster fled to area 3, walked to its spot (action 2:20), started turning to face its
+sleeping direction (2:1) and noticed the hunter two areas away on the next update. Repro (scratch-sleep, quest 413 The New
+Tenant: start in area 6, Blangonga's HP poked to 400, hit until it flees, hunter stays in area 6): 6 of 6 runs at 240 fps
+looked around and walked off, 60, 120 and 30 fps slept every time; the meter sat at 20000 for the whole retreat. Fix
+(runtime/hle/hatestep.c, beside the attention scores): 0x2badac runs in 30 fps updates with the step 2.0, except while the
+reset flag (status +0x2bc) is set. With it the meter drains 120 a second away from the hunter, as at 30 fps, and 2 of 2
+runs at 240 fps slept. MHGU_NO_NOTICESTEP=1 turns it off (for comparing). Not checked: other areas and species (same
+code), Rathian in particular. Why area 7 sleepers were fine is not known (maybe their routine reaches the sleep action
+without an idle or move action in between).
+
 Monsters' stall timers and the frame rate (2026-11-05): fixed. Reported: above 30 fps large monsters "forget" how to close the gap,
 circle the hunter and run diagonally (Rathian). While a monster hunts a target it can see, 0x2c3d08 counts how long it has gone
 without settling that: monster +0x1414 (past 300: bit 0x10 of +0x1408) and +0x1418 (past 1800: bit 0x20; only while it moves slowly,

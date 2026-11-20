@@ -343,9 +343,12 @@ static void control_poll(void) {
                 forge_test_hook((uint32_t)strtoul(arg, NULL, 16));
                 continue;
             }
-            if (!strcmp(cmd, "interpwatch")) {  // interpwatch <guest hex addr> <file of hex entries>: run those game
-                // functions (and all game code they call) in the interpreter, logging what changes the word at addr
+            if (!strcmp(cmd, "interpwatch")) {  // interpwatch <guest hex addr> <file of hex entries> [n]: run those game
+                // functions (and all game code they call) in the interpreter, logging the first n (default 40) changes
+                // of the word at addr
                 void interp_watch(uint32_t, int);
+                char arg3[16] = "";
+                sscanf(line, "%*s %*s %*s %15s", arg3);
                 void interp_add_range(uint32_t, uint32_t);
                 int dispatch_interpret(uint32_t, uint32_t);
                 FILE *fl = fopen(arg2, "r");
@@ -357,7 +360,7 @@ static void control_poll(void) {
                     if (e && dispatch_interpret(e, e + 4) > 0) n++;
                 }
                 if (fl) fclose(fl);
-                interp_watch((uint32_t)strtoul(arg, NULL, 16), 40);
+                interp_watch((uint32_t)strtoul(arg, NULL, 16), atoi(arg3) > 0 ? atoi(arg3) : 40);
                 LOG("[watch] %s: %d functions interpreted\n", arg, n);
                 continue;
             }
