@@ -22,6 +22,9 @@
 // breaks, KOs). Aggro is separate: 0x29dd40 is recorded, and called on the owner. The list of attack numbers that have
 // hit (+0x448: one hit per number and swing) isn't part of a report and isn't undone on the owner.
 //
+// The messages reach everyone in the hub, also those in another quest; an owner applies a report only from a slot
+// that has a hunter in its own quest (in_quest), so another quest's hits never land on this quest's monster.
+//
 // Mixed versions: no change to the link protocol. A game that has this on says so (Hello, to all, every second and when
 // it changes); an owner ignores its copy of a hunter, and applies that hunter's reports, only while it hears that
 // hunter's Hello and has this on itself. A game without this drops the unknown messages (the F_AUX handlers check their
@@ -158,6 +161,14 @@ static int local_slot(void) {
     uint32_t mem = LD32(G_MEMBER);
     int s = sane(mem) ? (int)LD32(mem + 0x30) : -1;
     return s >= 0 && s < 4 ? s : -1;
+}
+
+// That slot has a hunter in this game's quest. The messages go to the whole hub and a hunter keeps its hub slot in
+// any quest, so a report can come from a hunter in another quest, about that quest's monster with the same network id
+// (0 for the first large one of any quest): sPlayer's slots hold only this quest's hunters.
+static bool in_quest(int slot) {
+    uint32_t sp = LD32(G_SPLAYER);
+    return sane(sp) && slot >= 0 && slot < 4 && sane(LD32(sp + 0x1c + 4u * (uint32_t)slot));
 }
 
 static int slot_of(uint32_t player) {
@@ -358,6 +369,10 @@ static void en_apply(Cpu *c) {
         for (int i = 0; i < g_nq; i++) {
             if (now - g_q[i].at > QUEUE_STALE) continue;  // (its monster never came: another zone, or gone)
             if (g_q[i].r.id == id) {
+                if (!in_quest(g_q[i].r.slot)) {  // (another quest's hunter: dropped)
+                    if (g_log) LOG("[hitsync] report %u from slot %d dropped: not in this quest\n", g_q[i].r.seq, g_q[i].r.slot);
+                    continue;
+                }
                 if (owner && (g_q[i].r.kind == M_SHOT ? reports_shots(g_q[i].r.slot, now) : reports(g_q[i].r.slot, now))) take[n++] = g_q[i].r;
                 continue;
             }

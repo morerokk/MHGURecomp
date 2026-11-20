@@ -15,6 +15,7 @@
 //   ETag, without the JSON again), a cancelled or failed update: the game starts as it is, when the player asks for it.
 //   (A failure leaves the window open, with Try again and Start game: it never counts down and starts the game by itself.)
 // - [Application] Updates in mhgurecomp.ini: Ask (the default), Auto (no question), Off (start the game at once).
+// - After an install, the release's notes go to update/changelog.txt for the game's settings menu (save_changelog).
 //
 //   --update-force       update a development build too        --update-no-launch   don't start the game afterwards
 //   MHGU_UPDATE_API=url  another "latest release" address (tests)
@@ -460,6 +461,63 @@ static const Asset *pick_asset(const Release *r) {
     return best;
 }
 
+// The installed release's notes for the game's settings menu (Application: What's new, runtime/settings_panel.cpp):
+// update/changelog.txt, the version on its first line, then the notes as plain text up to "## Installation". The
+// release title (a "# " heading), the pre-release line, ** and ` marks are left out; "* " bullets become "- ". Only an
+// install writes it, from the release JSON it was installed from (update/latest.json).
+static void save_changelog(const char *tag) {
+    char p[1100];
+    size_t n;
+    path(p, sizeof p, "update/latest.json");
+    char *json = SDL_LoadFile(p, &n);
+    char *body = json ? json_body(json, n) : NULL;
+    SDL_free(json);
+    path(p, sizeof p, "update/changelog.txt");
+    char *out = body ? malloc(strlen(tag) + strlen(body) + 3) : NULL;
+    if (!out) {
+        free(body);
+        SDL_RemovePath(p);  // (an older version's: not this one's)
+        ulog("[update] the release has no notes\n");
+        return;
+    }
+    char *o = out + sprintf(out, "%s\n", tag), *notes = o;
+    for (char *line = body, *next; line; line = next) {
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = 0;
+        next = nl ? nl + 1 : NULL;
+        size_t len = strlen(line);
+        while (len && (line[len - 1] == '\r' || line[len - 1] == ' ')) line[--len] = 0;
+        if (!strncmp(line, "## Installation", 15)) break;
+        if (!strncmp(line, "**This is a pre-release", 23) || !strncmp(line, "# ", 2)) continue;
+        const char *s = line;
+        if (*s == '#') {  // ("## Fixes": its words)
+            while (*s == '#') s++;
+            while (*s == ' ') s++;
+        }
+        if (!*s && (o == notes || (o - notes >= 2 && o[-1] == '\n' && o[-2] == '\n'))) continue;  // (one blank line at most)
+        const char *t = s;
+        while (*t == ' ' || *t == '\t') t++;
+        bool star_bullet = t[0] == '*' && t[1] == ' ';
+        for (const char *c = s; *c; c++) {
+            if (c == t && star_bullet) *o++ = '-';
+            else if (*c != '`' && *c != '*') *o++ = *c;
+        }
+        *o++ = '\n';
+    }
+    free(body);
+    while (o > notes && o[-1] == '\n') o--;
+    if (o == notes) {
+        free(out);
+        SDL_RemovePath(p);
+        ulog("[update] the release has no notes\n");
+        return;
+    }
+    *o++ = '\n';
+    if (SDL_SaveFile(p, out, (size_t)(o - out))) ulog("[update] release notes saved: update/changelog.txt\n");
+    else ulog("[update] can't save the release notes: %s\n", SDL_GetError());
+    free(out);
+}
+
 static int SDLCALL worker(void *arg) {
     (void)arg;
     no_launch = false;
@@ -582,6 +640,7 @@ static int SDLCALL worker(void *arg) {
     char bak[1100];
     path(bak, sizeof bak, "update/backup");
     rm_tree(bak);  // (Windows keeps the running updater's own files: they go at the next start)
+    save_changelog(latest);
     ulog("[update] updated to %s\n", latest);
     set_state(ST_DONE);
     return 0;

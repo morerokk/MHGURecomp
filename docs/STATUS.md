@@ -402,7 +402,7 @@ Joining a posted quest looks its data up in the list (0x5ba50c): a quest from th
 (rQuestData loc\quest\questData\questData_<n>, resource manager *0x2326a64 vtable +0x30, mode 2) and appended -
 before that the joiner had to switch to the same list ("You do not meet the requirements"). Quest numbers: group *
 10000 + star * 100 + index (0 Village, 1 Hub, 2 Arena, 3 Village training, 4 Special Permit). HP: a Village quest
-started from the Hub or Pub gets [Village Quests] HubHP (default 2.0, 1.6 since 2026-11-16) first, then the [Monster HP] factor for the number of
+started from the Hub or Pub gets [Village Quests] HubHP (default 2.0, 1.6 since 2026-11-16, 1.5 since 2026-11-20) first, then the [Monster HP] factor for the number of
 hunters (runtime/hle/hpscale.c; the host's values in a hub, sent with the others). Tested (2026-10-22, two
 instances, the user driving): the switch both ways in the Pub and a Local Play Hub, the Village ★1 list in an online
 hub, a village quest (101) posted by the host, joined by the client from the Quest Board, both departed together;
@@ -745,6 +745,8 @@ Lag compensation for bows and bowguns (2026-11-09, two instances on one PC, 30 f
 
 Lag compensation in crossplay, with the emulators' Forge plugin (2026-11-10, branch feat/lagcomp-plugin-interop): hitsync.c ported to a Forge plugin for emulator players (lagcomp.nro, "Lag Compensation", kept outside this repo in C:\MHGURecompile\lagcomp-forge with its notes). The plugin can't use F_AUX, so it sends the same messages (magic 0xE7, Hello / Report / Shot, same layout) as UDP broadcasts on port 47318 of the local play network, through the game's own nn::socket; Ryujinx's LDN proxy carries any port. Now the port does the same in crossplay (ldn_crossplay(): a Ryujinx LDN lobby or a room): hitsync sends there with ldn_send (UDP broadcast, port HITSYNC_UDP_PORT) instead of ldn_send_aux, and vsock_deliver hands datagrams to that port to hitsync_aux_received; outside crossplay it stays F_AUX, so older builds keep working with this one. LagCompensation is no longer off in crossplay. A Hello or report carrying our own slot is dropped (a broadcast can come back). forge.c doesn't start a plugin named "Lag Compensation" (logged): the port has it built in, and with both on every hit would be reported twice. Checked: recomp-only hub, two instances, testsave/lagcomp_test/full.sh: 10 reports sent, 10 applied, 10 copy hits ignored, as before. Crossplay, one PC, this build with RyuServe = On as the LDN server and a Ryujinx 1.2.82 copy (C:\Ryujinx\lc1, Forge 1.5.1 + the plugin's test build that holds the monster like MHGU_DUMMY_SLOT=1), Great Sword, 1 HP per hit: the port's log "slot N reports its hits (crossplay, UDP)" and the plugin's Hello both ways. Port host owns the monster, Ryujinx swings: 6 reports sent by the plugin, 6 applied by the port, 6 copy hits ignored, HP -10 for 10 damage calls. Ryujinx posts the quest and owns it, the port's hunter swings: 9 sent by the port over UDP, 9 applied by the plugin, 9 copy hits ignored, each report consumed as one hunter damage call (3 more kind-1 calls of 10-13 damage on another part came with no swing, on both games: not weapon hits, left as they were). The plugin with the port's built-in one on the same machine: "plugin lagcomp.nro (Lag Compensation) not started". Not tested: suyu-style rooms, 3-4 players, two PCs.
 
+Lag compensation: hits from another quest in the same hub (2026-11-19). Reported against 0.17.7 as monsters "spamming one attack" in single player, and gone with LagCompensation off. The messages go to everyone in the hub (F_AUX, relayed by the host), not only to those in the quest, and a hunter keeps its hub slot in any quest. A report was matched only by monster network id, which is 0 for the first large monster of any quest, and by slot. So an owner alone in its own quest applied the reports of a hunter in another quest (one who doesn't run that quest's monster) to its own monster: damage, part damage on that monster's part numbers, KO and statuses, and the flinch with the other map's hit direction and position. Aggro for that slot stayed 0 (the game seems to drop aggro for a hunter not in the quest). Measured with three instances in one hub (testsave/lagcomp_test/three.sh, leak3.sh): host and joiner share the host's quest with the dummy held for the joiner, who swings; join2 posts its own quest and departs alone. Before: the joiner sent 70 reports, the host applied 70, and join2 applied 37 to its own monster, its HP falling. In a quest, sPlayer's slots (+0x1c) hold only that quest's hunters (join2: only slot 2; host and joiner: 0 and 1), so the owner now applies a report only from a slot that has a hunter in its quest (in_quest in hitsync.c), and drops the others (logged with MHGU_LOG_HITSYNC=1). Each game's own Hellos needed no change: an owner ignores only its copies of hunters in its quest, and a hunter's slot is unique in the hub. The emulators' Forge plugin (lagcomp-forge, outside this repo) has the same receive code and needs the same check. An A/B with the monster action trace (Hub 3 star Glavenus, free monster, HP topped up, 100 ms added each way, the joiner swinging, 20 min per arm, about 450 actions each) found no attack repeating with the setting on or off in a shared quest.
+
 Part breaks while a monster is down (2026-11-16, runtime/net/partsync.c; fixed 2026-11-17 after a report that it did nothing): the 0.17.6 version never applied anything on a client, for two reasons. 0x297ddc is only reached for a monster the game runs (the monster update branches off before 0x2a5900 -> 0x297ddc on a client), so packs waited there forever; and the vtable check used the heap range, but vtables are in main (0x019f1d44), so slot 0x428 would not have been called anyway. Now the client applies packs from an outer hook on the collision update 0x36b15c (every game, every update; dummy.c's hook sits behind it), finding the monster by id in sEnemy +0x1c. Tested (two instances, testsave/lagcomp_test rig, Glavenus held by MHGU_DUMMY, so one long action like a down; MHGU_LOG_PARTSYNC=1; the host's part 0 break count poked 0 -> 1): host "sent", client "received" then "applied, breaks now 1" within 3 s, and the client's party list showed the break icons at once. Before the fix the same run logged "received" and nothing more. Not tested: a real break by hits during a KO / trap / topple, the broken mesh itself (the head was off camera), a sever, 3-4 players. Original notes: Reported: in multiplayer a part broken while the monster is downed or staggered breaks at once on the host and only once the monster stands up on the clients. The original game does this: a client learns the parts only from netEmAction (dmPack[8] = break count << 12 | flinch HP & 0xfff, spPack[2] the same for the severs of the first two parts whose dtbase entry (monster +0x75ec, +0x68, 10 bytes each) has sever HP at +6), which the game running the monster sends from its set-action function 0x276154 (0x2765f8, through the type switch 0x2cafe8: type 1 = slot 0x42c 0x2cb330, packing at 0x2cb8a8) when an action starts. A break of a standing monster comes with a flinch (a new action); a down is one long action. The client's receive 0x2cc154 hands the packs to vtable slot 0x428 (0x2cb22c: the game's break 0x299d64 / 0x299f98 until each count, 0x29d428, is the received one; it stores the HPs) and then sets the action again (0x276154), so resending netEmAction would restart the knockdown. Fix: an outer hook on 0x297ddc (every game calls it for every large monster each update; hitsync.c's hook sits behind it): after it, the game that runs the monster (+0x7420) compares the 8 break counts (status block +0x3bc, 12-byte records) with the last update's and, when one went up, sends the packs as netEmAction would (F_AUX, magic 0xE8); before it, a game that doesn't run the monster takes a waiting pack with more breaks than it shows and calls slot 0x428 with it (dropped if +0x7424 names another slot as the owner). The next netEmAction then finds the counts there and breaks nothing twice. Older builds drop the message; off in crossplay (F_AUX). MHGU_NO_PARTSYNC=1: the original; MHGU_LOG_PARTSYNC=1 logs sends and applies. To test: two instances, a hunt, break a part while the monster is down (KO, trip, trap, mount topple) and watch the client; also a part break reward, a tail cut while down (the severs travel as in netEmAction, the cut itself is not part of this), the monster dying while down.
 
 Two-button inputs and the frame rate (2026-10-28): fixed. Reported: the Hunting Horn's X+A (and the Lance's R+X+A)
@@ -989,6 +991,22 @@ itself has no networking for this and never changes: `mhgurecomp` always just st
     code comes back. A second check got a 304 from GitHub.
 - Not covered: a release that drops a file leaves the old copy behind, and a new `bonus/system` is never installed,
   since bonus/ belongs to the player.
+- Release notes (2026-11-19): after an install the updater writes `update/changelog.txt` from the release JSON it
+  installed (`body`, updater/json.c json_body; save_changelog in updater.c). Line 1 is the tag; the rest is the
+  notes up to the `## Installation` line, as plain text: the `# ` title, the `**This is a pre-release` line, `**`,
+  `*` and backticks are dropped, `## ` headings keep their words, `* ` bullets become `- `, CRLF becomes LF. No
+  extra request: it's the JSON the update check already fetched. The game's settings menu (Menu Options, General)
+  shows "What's new in <version>" only when line 1 equals MHGU_VERSION (runtime/settings_panel.cpp changelog(),
+  read once from the working folder, i.e. the game folder or MHGU_HOME). It opens View::Changelog: the notes in a box
+  that fits the window and scrolls (wheel, up / down, Page Up / Down), `- ` lines drawn as bullets indented by their
+  leading spaces, and Back. A release installed by hand, a pre-release, a development build or Android has no
+  matching file, so no row.
+  - Tested 2026-11-19: a fake release (0.99.0, the 0.17.9 notes with CRLF) served locally to a copy of the updater
+    with its error box turned off: installed, notes saved as intended. In the game with a matching file: the row,
+    the dialog, Back, and scrolling notes 4x as long at 1280x720. Not tested: Korean / Chinese / Spanish menus.
+  - Seen while testing: started from the Claude app's tools, `make`-built updaters (this change's and HEAD's alike)
+    and sometimes a hand-built one stop at "mhgurecomp.exe is not here" and create no update/ folder, though the
+    file is there; a hand-built copy succeeded in other runs. Not seen from Explorer so far; cause not found.
 
 ## Fixed (2026-10-28): Linux sleeps were busy loops
 
@@ -1610,6 +1628,34 @@ being a submodule there is 1.92.8 by its header only).
 Extras beyond Fexty's exported.txt, kept as harmless: forge_log_trace(format, ...) (printed at any level, as [DEBUG]), forge_graphics_isInitialized, forge_graphics_isMenuOpen. MHGU_FORGE_LOG=debug|info|warn|error (default info; overrides the file when it names a level). Install = the mod's folder in mods\ (Forge itself is not needed). Log: "[forge] plugin ...",
 the plugin's own messages as "[forge] [INFO] ..." (Forge's tags). Plugins are built -mfloat-abi=softfp, as
 Forge is: floats in core registers (forge_onUpdate's dt in r0; until 2026-10-23 it went in s0 only).
+
+Forge 2.0.0 (2026-11-19; was 1.5.1, the same API plus what 2.0.0 adds): the port reports 2.0.0, so plugins asking for 2.0
+start (1.x ones still do). Files: forge_fs_openFile(path, mode, u32 *handle) / getFileSize / readFile(handle, s64 offset, buf,
+size) / closeFile are the game's own nn::fs OpenFile / GetFileSize / ReadFile / CloseFile (any mount the game has: "app:/"
+is the RomFS with the mods' files over it, "savedata:/" while forge_fs_mountSaveData holds it), false on a failed Result,
+the handle nn::fs's. As on the console, a Result nn::fs doesn't let the caller handle aborts the game (reading past the
+end: 2002-3005, wholly past it or partly); a missing file is just false. The abort's own lines name no file or plugin, so
+readFile first checks the read against GetFileSize and logs "FATAL: Tried to read past the end of a file! Plugin <file>
+(<its name>) read N bytes at offset X of <path>, which is M bytes long ..." (and a Forge [ERROR] line), and the abort
+handler (hle/abort.c) adds "[abort] inside a Forge mod's file call: <call, path, plugin>" for any abort inside
+openFile / readFile / closeFile (forge_abort_context; the paths by handle, from openFile; the plugin from lr). Rendering (runtime/nvn/objects.c tells forge.c what the game made):
+forge_onNvnInit(getProcAddress, device, queue) and forge_onNvnReady() at the first present after the plugins started
+(Forge: at its first present, with forge_onImGuiInit between them; here forge_onImGuiInit comes with the overlay's first
+frame on the game's thread), forge_onNvnRender(window, index) at every nvnQueuePresentTexture before the picture goes out,
+on the presenting thread. getProcAddress is the game's nvnDeviceGetProcAddress, so a plugin's NVN calls are the port's
+NVN layer, as the game's are. forge_graphics_getSwapChainTextures(&n) is a copy of the array nvnWindowBuilderSetTextures got
+(3 textures). forge_graphics_registerTexture(texture, view) returns a tag (0x7E57... | slot, 256 slots) for igImage /
+AddImage: each present, device.c makes the texture current outside the render pass (uploaded or MSAA-resolved) and looks up
+its sampled 2D view with the registered NVNtextureView (read at registration, as Forge's pool does); overlay_draw draws the
+tag as an ImGui Vulkan descriptor set for that view (made again when the view changes; old sets and those of unregistered
+textures are freed 10 presents later). A tag with no texture behind it (unregistered, or finalized first) draws nothing.
+Tested with a test plugin (C:\MHGURecompile\scratch-forge2, outside this repo; built like lagcomp-forge, softfp) with Key
+Quest Markers r20 beside it: fileExists / openFile / getFileSize / readFile of its own .nro in a mod's romfs ("NRO0" at
+0x10, MOD0 offset 0x1000, size 12288), a missing file false; onNvnInit with the device and queue, nvnDeviceGetInteger through
+its getProcAddress (API 53.207); 3 swap chain textures; the first one registered and drawn with igImage in a window of the
+plugin (the game's picture as a thumbnail, upright), unregistered after 14400 presents (the window then empty, the game
+going on), an unknown id's unregister a WARN line. Not tested: a plugin that makes its own NVN textures or draws into the
+swap chain texture from forge_onNvnRender (it would go through the same NVN layer as the game's own drawing).
 
 Forge's ImGui overlay (runtime/overlay.cpp, forge_imgui.c, tools/imgui_thunks.py; 2026-10-23): Forge's "forge"
 window (About, Loaded Plugins, Plugin UI = each plugin's forge_onImGuiRender) and forge_onImGuiFreeRender, on Dear

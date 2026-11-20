@@ -57,6 +57,10 @@
 #define PL_ACT_NO      0x250au    // weapon move, 1 a common one
 #define PL_DRAWN       0x114cu    // u8: 1 the weapon is out, 0 put away (constant over idle, walk, roll and attacks of
                                   // either state: compared in memory snapshots of a Hammer hunt, 2026-11-10)
+#define PL_TARGET      0x32b4u    // u32: the category of the interactable the hunter stands by (0: none). Found by
+                                  // diffing memory snapshots by the supply box, beds, NPCs and gather points: the same
+                                  // value at every gather point (1), the boxes 5 and 9, a bed 8, an NPC 13, 0 at a wall
+                                  // (actions.c ConfirmTargets, the confirm key)
 #define VF_BAR_OPEN    0x25cu     // vfunc (player, 1) 1: the item bar is open (L held; hle/itembar.c)
 #define PL_LOCAL_FLAG  0x13ccu    // u8: bit 0 the local player's (hle/combowin.c)
 #define CLS_PROWLER    14        // (no weapon to put away: its A button attacks and gathers)
@@ -83,6 +87,8 @@ static volatile bool g_dash_zr;
 static volatile int g_weapon_pub = -1;
 static uint32_t g_act_st, g_act_no, g_player;
 static bool g_drawn;
+static uint32_t g_target_class;      // the interactable's category, held a few frames (the prompt flickers at the edge)
+static uint64_t g_target_frame;
 static uint32_t g_bar_raw;
 static bool g_bar;              // the item bar was open at the hunter's last update
 static int g_view;              // the context the gameplay word was last built for
@@ -145,6 +151,15 @@ static void player_update(Cpu *c) {
         g_pl_frame = g_frame;
         g_player = pl, g_act_st = LD16(pl + PL_ACT_ST), g_act_no = LD16(pl + PL_ACT_NO);
         g_drawn = LD8(pl + PL_DRAWN) != 0;
+        // (0: nothing to interact with; kept a few frames so a prompt at the edge of its range does not flicker)
+        uint32_t cls = LD32(pl + PL_TARGET);
+        if (cls) g_target_class = cls, g_target_frame = g_frame;
+        else if (!g_target_frame || g_frame - g_target_frame > 3) g_target_class = 0;
+        act_set_target(g_target_class);
+        // (TargetLog=1: one line per change, the way ConfirmTargets is filled in: walk up to each kind of interactable
+        //  once and the log has its number)
+        static uint32_t logged;
+        if (act_target_log() && g_target_class != logged) LOG("[target] category %u\n", g_target_class), logged = g_target_class;
         uint32_t vt = LD32(pl), fn = vt ? LD32(vt + VF_BAR_OPEN) : 0;  // (vtables are in main's image, below the heap: not sane())
         g_bar_raw = fn ? call(c, fn, pl, 1, 0) : 0;
         g_bar = (g_bar_raw & 0xff) != 0;
@@ -185,6 +200,7 @@ static void mb_update(Cpu *c) {
         g_frame++;
         input_act_latch(&g_snap);
         if (g_var && g_frame - g_var_frame > 3) g_var = 0, g_weapon_pub = -1;  // (no hunter for a while)
+        if (g_target_class && (!g_pl_frame || g_frame - g_pl_frame > 3)) g_target_class = 0, act_set_target(0);
         uint32_t opt = LD32(G_OPTIONS);
         g_dash_zr = sane(opt) && LD8(opt + OPT_DASH_ROLE) != 0;
     }

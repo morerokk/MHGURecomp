@@ -351,6 +351,8 @@ void ui_init(void) {
     float a = (float)g_config.render_w / (float)g_config.render_h;
     SDL_SetWindowAspectRatio(window, a, a);
     fit_picture();
+    // (NULL but on X11: a controller unplugged mid-request must not close the game, platform/linux.c)
+    plat_x11_display(SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_X11_DISPLAY_POINTER, NULL));
     set_window_icon();
     if (g_config.display_mode != DISPLAY_WINDOWED) set_fullscreen(true);
 #ifdef __APPLE__

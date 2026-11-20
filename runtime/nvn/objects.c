@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../forge.h"
 #include "../kernel.h"
 #include "nvn.h"
 
@@ -36,6 +37,7 @@ NVN(nvnDeviceBuilderGetFlags) { RET(G(uint32_t, A(0), 0)); }
 NVN(nvnDeviceInitialize) {
     static bool once;
     if (!once) { once = true; backend_init(); }
+    forge_nvn_device((uint32_t)A(0));  // (Forge plugins' forge_onNvnInit)
     LOG("[nvn] device initialized\n");
     RET(1);
 }
@@ -630,7 +632,11 @@ NVN(nvnProgramSetShadersExt) { set_shaders(c, na_, 24); }  // NVNshaderDataExt {
 NVN(nvnWindowBuilderSetDevice) { G(uint64_t, A(0), 0) = A(1); }
 NVN(nvnWindowBuilderSetDefaults) { memset(AP(0) + 8, 0, 0x20); G(uint32_t, A(0), 0x20) = 1; }
 NVN(nvnWindowBuilderSetNativeWindow) { G(uint64_t, A(0), 8) = A(1); }
-NVN(nvnWindowBuilderSetTextures) { G(uint32_t, A(0), 0x10) = (uint32_t)A(1); G(uint64_t, A(0), 0x18) = A(2); }
+NVN(nvnWindowBuilderSetTextures) {
+    G(uint32_t, A(0), 0x10) = (uint32_t)A(1);
+    G(uint64_t, A(0), 0x18) = A(2);
+    forge_nvn_window_textures((uint32_t)A(2), (int)A(1));  // (forge_graphics_getSwapChainTextures)
+}
 NVN(nvnWindowBuilderSetPresentInterval) { G(uint32_t, A(0), 0x20) = (uint32_t)A(1); }
 NVN(nvnWindowBuilderSetNumActiveTextures) { G(uint32_t, A(0), 0x24) = (uint32_t)A(1); }
 NVN(nvnWindowBuilderGetDevice) { RET(G(uint64_t, A(0), 0)); }
@@ -682,6 +688,7 @@ NVN(nvnQueueAcquireTexture) {
 NVN(nvnQueuePresentTexture) {
     NvnWindow *w = HOST(NvnWindow, A(1));
     int i = (int)A(2);
+    forge_nvn_present(c, (uint32_t)A(0), (uint32_t)A(1), i);  // (Forge plugins' forge_onNvnRender: they may draw into it)
     if (i >= 0 && i < w->num) backend_present(HOST(NvnTexture, w->textures[i]));
 }
 

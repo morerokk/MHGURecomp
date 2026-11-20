@@ -153,6 +153,8 @@ void plat_sleep_until_ns(uint64_t t) {
 }
 
 // ---- process
+void plat_x11_display(void *display) { (void)display; }  // (no X11 here)
+
 void plat_init(void) {
     // send() on a dropped Local Play connection gives EPIPE here instead of killing the process: Windows reports
     // WSAEPIPE to the caller, which is what nn::socket expects.

@@ -119,7 +119,10 @@ is the default. The new button is used for navigation, all settings confirmation
 and Back; guides follow the saved policy. Held buttons are suppressed during a
 policy change and must release before the new mapping accepts them. Returning
 from an overlay also waits for held face buttons to release before gameplay.
-Forge retains its existing mapping, as do the original game's menus and combat.
+Forge's menu (and the plugin settings in it) follows the same policy as the settings
+since #417's follow-up, so one button confirms in both. What plugins read themselves
+(`forge_input_*`) stays the game's own A and B: plugins use them as hotkeys too. For a
+plugin's own screen to confirm with the bottom button, use `FaceButtons = Label`.
 
 This is the testable host portion of contextual confirmation. In-game sPad fields
 +0x6B8C/+0x6B90 were confirmed at runtime as 0x2000/0x4000, but exchanging them did

@@ -59,6 +59,15 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t);
 // render pass): the loading indicator alone, on the black window.
 void overlay_loading(VkCommandBuffer cb, const OverlayTarget *t);
 
+// Forge 2.0.0's forge_graphics_registerTexture / unregisterTexture (any thread): a plugin's NVNtexture (guest address)
+// with its NVNtextureView's 0x28 bytes (NULL: none) for ImGui::Image; the ImTextureID the plugin draws it with, 0 when
+// the table is full. remove: false for an id that is not registered.
+uint64_t overlay_user_texture_add(uint32_t tex, const void *view);
+bool overlay_user_texture_remove(uint64_t id);
+// device.c, each present, outside the render pass and before overlay_draw: view_of(texture, view or NULL) is the
+// registered texture's sampled Vulkan view now (VK_NULL_HANDLE: none)
+void overlay_user_textures_prepare(VkImageView (*view_of)(uint32_t tex, const void *view));
+
 #ifdef __cplusplus
 }
 #endif

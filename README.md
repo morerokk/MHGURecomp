@@ -306,7 +306,7 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   have unlocked it yourself)
 - `[Monster HP]`: factors on monster HP and part HP (flinches, breaks, severs) for 1 to 4 hunters in Hub quests, and per-quest exceptions (default: all 1, the
   original game)
-- `[Village Quests]`: `VillageQuestsInHub` (default On), `HubHP` (default 1.6: Village quests posted in the Hub
+- `[Village Quests]`: `VillageQuestsInHub` (default On), `HubHP` (default 1.5: Village quests posted in the Hub
   multiply their monsters' HP and part HP by this first, then by the `[Monster HP]` factor)
 - `[Quest Rewards]`: `HoldASend` (default On: at the end of a quest, hold A on the Reward Box's Send to the Item Box
   screen to send the items to the box one after another)

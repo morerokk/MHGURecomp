@@ -3,6 +3,7 @@
 // Main Menu and 0x10 the screen it arrives from (docs/research/title-menu.md). Elsewhere the menu's own Back applies.
 #include "../hle.h"
 #include "../app_actions.h"
+#include "../config.h"
 #include "../overlay.h"
 #include "input.h"
 #include "input_view.h"
@@ -42,7 +43,8 @@ static void title_update(Cpu *c) {
 
     // The request waits for the release: the settings menu opens on the next presented frame, and a B still held by
     // then is its Cancel at the main view (runtime/settings_panel.cpp, GamepadFaceRight), closing the question again
-    if (main_menu && pressed) armed = true;
+    // ([Controls] TitleBackExit off: a mod that swaps the menus' Confirm and Back makes every pick here a B)
+    if (main_menu && pressed && config_title_back_exit()) armed = true;
     if (armed && !down) { armed = false; ui_request_exit_menu(); }
 }
 

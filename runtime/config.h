@@ -128,6 +128,7 @@ typedef struct {
     int discord_hunter;       // [Discord] ShowHunter: your hunter's name and HR there too (runtime/hle/presence.c)
     int show_fps;             // [Performance] ShowFPS: the frame rate in a box on the screen (runtime/overlay.cpp)
     int menu_chord;           // [Controls] MenuChord: Plus + Minus together open the settings menu (runtime/host_input.c)
+    int title_back_exit;      // [Controls] TitleBackExit: B on the title screen's Main Menu asks to quit (runtime/hle/title_exit.c)
     int kbm_prompts;          // [Controls] KeyboardPrompts: the game's button glyphs show keys and mouse buttons (hle/prompts.c)
     int show_battery;         // [Performance] ShowBattery: BATTERY_*, the battery's charge beside the frame rate or alone
     char save_location[256];  // [Application] SaveLocation (PC): the folder holding the save (save_0/), "" the default
@@ -294,6 +295,7 @@ void config_window_focus(bool focused);  // the window got / lost the focus (run
 int config_language(void);     // last saved UI language, atomic across host threads
 bool config_confirm_exit(void); // atomic, safe on the host main thread
 bool config_menu_chord(void);   // [Controls] MenuChord as saved, atomic (the input is read on another thread)
+bool config_title_back_exit(void);  // [Controls] TitleBackExit as saved, atomic (the game's thread reads it)
 int config_show_battery(void);  // [Performance] ShowBattery as saved, atomic
 bool config_show_fps(void);     // [Performance] ShowFPS as saved, atomic (the game's thread draws it)
 

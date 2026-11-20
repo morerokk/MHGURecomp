@@ -36,7 +36,7 @@
 extern "C" const char *plat_utf8_path(const char *path, char *buf, size_t size);  // (runtime/platform.h)
 
 namespace {
-enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, Actions };
+enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, Actions, Changelog };
 enum class Command { None, Save };
 struct Row {
     std::string id, title, value;
@@ -430,6 +430,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(confirm_exit);
     SAME(show_fps);
     SAME(menu_chord);
+    SAME(title_back_exit);
     SAME(show_battery);
     SAME(updates);
     SAME(hp.village);
@@ -712,6 +713,73 @@ void action(std::vector<Row> &rows, const std::string &id, const std::string &na
     r.activate = std::move(fn);
     r.enabled = enabled;
     rows.push_back(std::move(r));
+}
+// This version's release notes (Application: What's new): update/changelog.txt, which the updater writes when it installs
+// a release (updater/updater.c save_changelog), as plain text after the version on its first line. Empty: there are
+// none, or they are another version's (a release installed by hand). Read once: only the updater changes the file.
+const std::string &changelog() {
+    static std::string notes;
+    static bool read = false;
+    if (!read) {
+        read = true;
+        size_t n = 0;
+        char *data = (char *)SDL_LoadFile("update/changelog.txt", &n);
+        if (data) {
+            std::string all(data, n);
+            SDL_free(data);
+            size_t nl = all.find('\n');
+            std::string version = all.substr(0, nl);
+            if (!version.empty() && version.back() == '\r')
+                version.pop_back();
+            if (nl != std::string::npos && version == MHGU_VERSION)
+                notes = all.substr(nl + 1);
+        }
+    }
+    return notes;
+}
+// The notes in a box under the view's title, at most room high: it scrolls with the mouse wheel, up / down (the D-pad,
+// the left stick, the arrow keys) and Page Up / Page Down. "- " lines are bullets, indented by their leading spaces.
+void changelog_box(float room) {
+    const std::string &notes = changelog();
+    float font = ImGui::GetFontSize();
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, std::max(room, font * 6)));
+    if (ImGui::BeginChild("##changelog", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY, ImGuiWindowFlags_NoNav)) {
+        for (size_t i = 0; i < notes.size();) {
+            size_t j = notes.find('\n', i);
+            if (j == std::string::npos)
+                j = notes.size();
+            std::string line = notes.substr(i, j - i);
+            i = j + 1;
+            size_t lead = line.find_first_not_of(" \t");
+            if (lead == std::string::npos) {
+                ImGui::Dummy(ImVec2(1, font * .4f));
+                continue;
+            }
+            int spaces = 0;
+            for (size_t k = 0; k < lead; ++k)
+                spaces += line[k] == '\t' ? 4 : 1;
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (spaces + 2) / 4 * font * 1.5f);
+            if (!line.compare(lead, 2, "- ")) {
+                ImGui::Bullet();  // (it stays on the line: the text wraps under its own first word)
+                ImGui::TextWrapped("%s", line.c_str() + lead + 2);
+            } else
+                ImGui::TextWrapped("%s", line.c_str() + lead);
+        }
+        float dy = 0, step = font * 25 * ImGui::GetIO().DeltaTime;
+        if (ImGui::IsKeyDown(ImGuiKey_DownArrow) || ImGui::IsKeyDown(ImGuiKey_GamepadDpadDown) ||
+            ImGui::IsKeyDown(ImGuiKey_GamepadLStickDown))
+            dy += step;
+        if (ImGui::IsKeyDown(ImGuiKey_UpArrow) || ImGui::IsKeyDown(ImGuiKey_GamepadDpadUp) ||
+            ImGui::IsKeyDown(ImGuiKey_GamepadLStickUp))
+            dy -= step;
+        if (ImGui::IsKeyPressed(ImGuiKey_PageDown))
+            dy += ImGui::GetWindowHeight() * .9f;
+        if (ImGui::IsKeyPressed(ImGuiKey_PageUp))
+            dy -= ImGui::GetWindowHeight() * .9f;
+        if (dy)
+            ImGui::SetScrollY(std::clamp(ImGui::GetScrollY() + dy, 0.f, ImGui::GetScrollMaxY()));
+    }
+    ImGui::EndChild();
 }
 // A text setting (a char array of the draft, size bytes) typed on the on-screen keyboard; shown: its row's value
 void text(std::vector<Row> &rows, const char *id, const char *name, char *field, size_t size, const std::string &shown,
@@ -1289,6 +1357,30 @@ void action_rows(std::vector<Row> &r) {
     if (kind == TAB_HUNT)
         toggle("act.arts", "Hunter Art keys", &p.art_keys,
                "On: each Hunter Art has an input of its own (keyboard: 1, 2 and 3 unless rebound below), whatever buttons the game's Control Type gives them; those keep working too. With a Control Type that puts the Arts on the D-pad, the HUD shows these keys for them on keyboard and mouse.");
+    if (kind == TAB_HUNT) {
+        // the categories OpenTalk is for: a comma list, read off log.txt with Target log on
+        char list[160];
+        act_format_targets(p.confirm_mask, list, sizeof list);
+        Row row;
+        row.id = "act.targets";
+        row.title = tr("Open / talk targets");
+        row.value = list[0] ? list : tr("None");
+        row.help = tr("The interactable categories the Open / talk action opens or talks to, by number. Only used once Open / talk has an input of its own. With Target log on, walk up to each kind once and read its number in log.txt. Empty: Open / talk never presses anything.");
+        row.activate = [list = std::string(list)]() {
+            keyboard(tr("Open / talk targets"), list, 120, [](const std::string &typed, std::string &error) {
+                uint64_t mask = 0;
+                if (!act_parse_targets(typed.c_str(), &mask)) {
+                    error = tr("Numbers from 1 to 63, separated by commas.");
+                    return false;
+                }
+                acts().draft.confirm_mask = mask;
+                return true;
+            });
+        };
+        r.push_back(std::move(row));
+        toggle("act.targetlog", "Target log", &p.target_log,
+               "On: one line per change of the interactable's category in log.txt, for filling the list above in: walk up to each kind once. Off: nothing is written.");
+    }
     if (kind == TAB_KEYS)
         key_rows(r);
     else if (!simple) {
@@ -1724,6 +1816,7 @@ void reset_section() {
         c.background_input = f.background_input;
         c.kbm_prompts = f.kbm_prompts;
         c.menu_chord = f.menu_chord;
+        c.title_back_exit = f.title_back_exit;
         c.combo_window = f.combo_window;
         c.mouse_sensitivity = f.mouse_sensitivity;
         c.mouse_sensitivity_y = f.mouse_sensitivity_y;
@@ -2191,6 +2284,8 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Rebind the game itself: every action of a hunt, of the town and of the menus on the controller button, key or mouse button you choose, also per weapon, with the controller or the keyboard drawn beside the list. The keys for moving, the item bar and chat are there too (Keys). Off by default.");
         add_bool(r, "menu.chord", "Plus + Minus opens this menu", &c.menu_chord, ini("MenuChord"));
         r.back().help = tr("Pressing Plus and Minus together (Start + Back on a controller) opens this menu. Turn it off to keep that combination for the game or a cheat, for example when you play with a keyboard and mouse. F1 still opens the menu.");
+        add_bool(r, "title.back", "Back on the Main Menu asks to quit", &c.title_back_exit, ini("TitleBackExit"));
+        r.back().help = tr("Pressing Back on the title screen's Main Menu asks whether to quit the game. Turn it off if a mod swaps the menus' Confirm and Back, so that confirming there no longer asks. Closing the window still asks.");
         break;
     case 3:
         number(r, "port", "Host port (TCP / UDP)", &c.ldn_port, (int)lo("Port"), (int)hi("Port"), 1, ini("Port"));
@@ -2360,6 +2455,10 @@ std::vector<Row> main_rows() {
         add_bool(r, "confirm.exit", "Confirm exit", &c.confirm_exit, ini("ConfirmExit"));
         add_choice(r, "updates", "Updates", c.updates, {tr("Ask"), tr("Auto"), tr("Off")},
                    [](int v) { c.updates = v; }, ini("Updates"));
+        if (!changelog().empty()) {
+            action(r, "changelog", fmt("What's new in %s", MHGU_VERSION), []() { push(View::Changelog, "changelog.back"); });
+            r.back().help = tr("This version's changes, from its release notes. The updater saved them when it installed this version.");
+        }
         add_bool(r, "bonus", "Bonus content", &c.bonus_content, ini("BonusContent"));
 #ifndef __ANDROID__  // (Android: its own tab's Save folder)
         header(r, "save.header", tr("Save data"));
@@ -2550,6 +2649,8 @@ std::vector<Row> rows_for_view(bool *open) {
         keybind_rows(r);
     } else if (s.view == View::Actions) {
         action_rows(r);
+    } else if (s.view == View::Changelog) {
+        action(r, "changelog.back", tr("Back"), []() { pop(); });
     } else if (s.view == View::KeyCapture && acts().capture >= 0) {
         action_capture_rows(r);
     } else if (s.view == View::KeyCapture) {
@@ -3302,6 +3403,7 @@ void settings_panel(bool *open) {
                                                       : "Press a key or mouse button for: %s (Esc: cancel)",
                                       tr(acts().capture_row >= 0 ? act_row(acts().capture_row)->label : act_label(acts().capture)))
                             : s.view == View::Actions ? fmt("Game actions: %s", scheme_name(acts().dev))
+                            : s.view == View::Changelog ? fmt("What's new in %s", MHGU_VERSION)
                             : s.view == View::KeyCapture && s.capture_bind >= 0
                                 ? fmt("Press a key or mouse button for %s (Esc: cancel)", tr(bind_titles[s.capture_bind]))
                                 : tr(s.view == View::Exit         ? "Exit game?"
@@ -3314,6 +3416,8 @@ void settings_panel(bool *open) {
                                                                   : "Unsaved changes");
         ImGui::TextWrapped("%s", title.c_str());
     }
+    if (s.view == View::Changelog)  // (the room under the title the window has, less the Back row's)
+        changelog_box(vp->WorkSize.y - 2 * margin - ImGui::GetCursorPosY() - ImGui::GetFontSize() * 4);
     if (s.view == View::Keyboard) {
         ImGuiIO &io = ImGui::GetIO();
         for (ImWchar ch : io.InputQueueCharacters) {

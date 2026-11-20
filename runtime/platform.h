@@ -71,6 +71,9 @@ bool plat_use_folder(const char *utf8, char *buf, size_t size);
 const char *plat_utf8_path(const char *path, char *buf, size_t size);
 void plat_error_box(const char *msg);
 void plat_fatal_notice(void);
+// The window's X11 Display (SDL_PROP_WINDOW_X11_DISPLAY_POINTER), once it is made: a device unplugged while SDL
+// still asks X about it is not a reason to close the game (linux.c). Nothing to do elsewhere.
+void plat_x11_display(void *display);
 
 // ---- diagnostics
 const char *plat_symbol(uint64_t pc, uint64_t *offset);

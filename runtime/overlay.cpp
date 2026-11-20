@@ -317,22 +317,24 @@ static void apply_input(ImGuiIO &io) {
     }
     // the controller (as Forge maps it: A activates, B cancels, the left stick and the d-pad move)
     if (!g_open) pad = {};
-    // Apply only to settings. Forge retains its existing semantic A/B mapping.
+    // Confirm and Cancel where the host menus have them (menu_confirm.h: the game's MenuConfirm binding, else
+    // [Controls] MenuConfirm), in the settings and in Forge's menu alike, so that one button confirms in both (#417).
+    // Only Forge's menu: what plugins read (forge_input_*) stays the game's own A and B.
     bool settings = g_settings_open && !g_forge_over;  // (the settings have the controller)
-    if (settings) {
+    int owner = settings ? 1 : g_forge_open ? 2 : 0;
+    int policy = owner ? menu_confirm_policy_now() : MENU_CONFIRM_ORIGINAL;
+    if (owner) {
         int a = overlay_face_position(0), b = overlay_face_position(1);
         int confirm, cancel;
-        menu_confirm_buttons(menu_confirm_policy_now(), a, b, pad.a, pad.b, &confirm, &cancel);
+        menu_confirm_buttons(policy, a, b, pad.a, pad.b, &confirm, &cancel);
         pad.a = confirm; pad.b = cancel;
     }
     // A or B held from the menu that had the controller (the settings' row that opened Forge's menu, Cancel that
     // closed it) does nothing in the next one until let go: as the host reads the controller, not as the clear left it
     static int last_policy = -1, was_owner;
     static bool wait_release;
-    int owner = settings ? 1 : g_forge_open ? 2 : 0;
     if (owner && owner != was_owner) wait_release = true;
     was_owner = owner;
-    int policy = settings ? menu_confirm_policy_now() : MENU_CONFIRM_ORIGINAL;
     if (last_policy >= 0 && policy != last_policy) wait_release = true;
     last_policy = policy;
     if (wait_release) {
@@ -1243,6 +1245,109 @@ static void loading_frame(VkCommandBuffer cb, const OverlayTarget *t) {
 }
 #endif
 
+// ------------------------------------------------------------------ plugins' own textures (Forge 2.0.0)
+// forge_graphics_registerTexture(texture, view): an NVNtexture (the plugin's or the game's) for ImGui::Image. Forge
+// puts it in its NVN backend's texture pool and hands out the texture handle. Here the plugin gets a tag (USER_TEX_TAG
+// | slot), the texture's Vulkan view is looked up each frame the game presents (device.c, outside the render pass:
+// the image is made current there, uploaded or resolved), and the overlay's draw turns the tag into an ImGui Vulkan
+// descriptor set for that view (a new one when the view changes; the old set is freed frames later, as are the sets
+// of unregistered textures). The view is read at registration, as Forge's pool does. A tag with no view this frame
+// (a texture finalized before it was unregistered) draws nothing.
+#define USER_TEX_MAX 256
+#define USER_TEX_TAG 0x7E57000000000000ull
+#define USER_TEX_TAG_MASK 0xFFFF000000000000ull
+#define USER_TEX_FREE_AFTER 10  // presents (the backend's ImageCount is 8)
+struct UserTex {
+    bool live;
+    uint32_t tex;               // guest NVNtexture *
+    bool has_view;
+    uint8_t view[0x28];         // its NVNtextureView, as registered
+    VkImageView vk;             // this frame's (overlay_user_textures_prepare)
+    VkImageView set_view;       // what set was made for
+    VkDescriptorSet set;
+};
+static std::mutex g_user_tex_lock;
+static UserTex g_user_tex[USER_TEX_MAX];
+struct DeadSet { VkDescriptorSet set; uint64_t at; };
+static std::vector<DeadSet> g_dead_sets;  // (under g_user_tex_lock)
+static uint64_t g_draws;                   // overlay_draw calls
+
+extern "C" uint64_t overlay_user_texture_add(uint32_t tex, const void *view) {
+    std::lock_guard<std::mutex> l(g_user_tex_lock);
+    for (int i = 0; i < USER_TEX_MAX; i++) {
+        UserTex &u = g_user_tex[i];
+        if (u.live) continue;
+        u = UserTex{};
+        u.live = true;
+        u.tex = tex;
+        u.has_view = view != nullptr;
+        if (view) memcpy(u.view, view, sizeof u.view);
+        return USER_TEX_TAG | (uint64_t)(i + 1);
+    }
+    return 0;
+}
+
+static UserTex *user_tex_of(uint64_t id) {
+    if ((id & USER_TEX_TAG_MASK) != USER_TEX_TAG) return nullptr;
+    uint64_t i = (id & ~USER_TEX_TAG_MASK) - 1;
+    return i < USER_TEX_MAX && g_user_tex[i].live ? &g_user_tex[i] : nullptr;
+}
+
+extern "C" bool overlay_user_texture_remove(uint64_t id) {
+    std::lock_guard<std::mutex> l(g_user_tex_lock);
+    UserTex *u = user_tex_of(id);
+    if (!u) return false;
+    u->live = false;
+    u->vk = VK_NULL_HANDLE;
+    if (u->set) g_dead_sets.push_back({u->set, g_draws});
+    u->set = VK_NULL_HANDLE;
+    return true;
+}
+
+extern "C" void overlay_user_textures_prepare(VkImageView (*view_of)(uint32_t tex, const void *view)) {
+    std::lock_guard<std::mutex> l(g_user_tex_lock);
+    for (UserTex &u : g_user_tex)
+        if (u.live) u.vk = view_of(u.tex, u.has_view ? u.view : nullptr);
+}
+
+#ifndef MHGU_NULL_BACKEND
+// (render thread, under the Vulkan lock and g_user_tex_lock) Sets for this frame's views; sets nothing draws any more
+// freed once the frames that may have drawn them are done
+static void user_tex_sets(void) {
+    g_draws++;
+    for (UserTex &u : g_user_tex) {
+        if (!u.live || !u.vk || u.vk == u.set_view) continue;
+        if (u.set) g_dead_sets.push_back({u.set, g_draws});
+        u.set = ImGui_ImplVulkan_AddTexture(VK_NULL_HANDLE, u.vk, VK_IMAGE_LAYOUT_GENERAL);  // (the renderer's images stay GENERAL)
+        u.set_view = u.set ? u.vk : VK_NULL_HANDLE;
+    }
+    size_t k = 0;
+    for (DeadSet &d : g_dead_sets) {
+        if (g_draws - d.at > USER_TEX_FREE_AFTER) ImGui_ImplVulkan_RemoveTexture(d.set);
+        else g_dead_sets[k++] = d;
+    }
+    g_dead_sets.resize(k);
+}
+
+// g_snap drawn with the plugins' texture tags as their sets (put back after: the copy may be drawn again)
+static void draw_snap(VkCommandBuffer cb) {
+    std::lock_guard<std::mutex> lt(g_user_tex_lock);
+    user_tex_sets();
+    struct Patched { ImDrawCmd *cmd; ImTextureID id; ImVec4 clip; };
+    std::vector<Patched> patched;
+    for (ImDrawList *list : g_snap.CmdLists)
+        for (ImDrawCmd &cmd : list->CmdBuffer) {
+            if (cmd.UserCallback || cmd.TexRef._TexData || (cmd.TexRef._TexID & USER_TEX_TAG_MASK) != USER_TEX_TAG) continue;
+            patched.push_back({&cmd, cmd.TexRef._TexID, cmd.ClipRect});
+            UserTex *u = user_tex_of(cmd.TexRef._TexID);
+            if (u && u->set && u->vk) cmd.TexRef._TexID = (ImTextureID)(uintptr_t)u->set;
+            else cmd.ClipRect = ImVec4(0, 0, 0, 0);  // (the backend skips an empty clip before it binds anything)
+        }
+    ImGui_ImplVulkan_RenderDrawData(&g_snap, cb);
+    for (Patched &p : patched) p.cmd->TexRef._TexID = p.id, p.cmd->ClipRect = p.clip;
+}
+#endif
+
 // (render thread) The game's overlay frame; before the game's thread has made one (its first frame or two), the
 // loading indicator as the loading screen draws it, so it doesn't blink out.
 void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
@@ -1256,7 +1361,7 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
         }
     }
     std::lock_guard<std::mutex> l(g_snap_lock);
-    if (g_snap.Valid && g_snap.CmdListsCount) ImGui_ImplVulkan_RenderDrawData(&g_snap, cb);
+    if (g_snap.Valid && g_snap.CmdListsCount) draw_snap(cb);
 #endif
 }
 

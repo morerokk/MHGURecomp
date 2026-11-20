@@ -54,6 +54,7 @@ static SDL_AtomicInt live_background = {1};
 static SDL_AtomicInt live_combo;
 static SDL_AtomicInt live_chat_key;
 static SDL_AtomicInt menu_chord = {1};
+static SDL_AtomicInt title_back_exit = {1};
 // [Mouse]
 static SDL_AtomicInt live_mouse, live_mouse_y, live_mouse_invert, live_mouse_smooth, live_mouse_capture;
 static SDL_AtomicInt live_menu_mouse = {1};
@@ -175,6 +176,7 @@ void config_store_loaded(const Config *c) {
     SDL_SetAtomicInt(&confirm_exit, c->confirm_exit);
     SDL_SetAtomicInt(&show_fps, c->show_fps);
     SDL_SetAtomicInt(&menu_chord, c->menu_chord);
+    SDL_SetAtomicInt(&title_back_exit, c->title_back_exit);
     SDL_SetAtomicInt(&show_battery, c->show_battery);
 }
 void config_runtime_init(const Config *effective) {
@@ -289,6 +291,7 @@ int config_audio_output(void) { return SDL_GetAtomicInt(&audio_output); }
 void config_window_focus(bool focused) { SDL_SetAtomicInt(&window_focused, focused); }
 bool config_confirm_exit(void) { return SDL_GetAtomicInt(&confirm_exit) != 0; }
 bool config_menu_chord(void) { return SDL_GetAtomicInt(&menu_chord) != 0; }
+bool config_title_back_exit(void) { return SDL_GetAtomicInt(&title_back_exit) != 0; }
 int config_show_battery(void) { return SDL_GetAtomicInt(&show_battery); }
 bool config_show_fps(void) { return SDL_GetAtomicInt(&show_fps) != 0; }
 bool config_restart_required(const Config *c) {

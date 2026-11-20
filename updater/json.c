@@ -113,6 +113,26 @@ static bool asset(J *j, Asset *a) {
     return eat(j, '}');
 }
 
+// The release's notes (its "body", Markdown as written on GitHub): malloc'd, NULL when it has none
+char *json_body(const char *text, size_t size) {
+    J j = {text, text + size, 0};
+    char key[64];
+    if (!eat(&j, '{') || eat(&j, '}')) return NULL;
+    do {
+        if (!str(&j, key, sizeof key) || !eat(&j, ':')) return NULL;
+        ws(&j);
+        if (!strcmp(key, "body") && j.p < j.end && *j.p == '"') {
+            size_t cap = (size_t)(j.end - j.p) + 1;  // (the decoded text is never longer than the JSON's)
+            char *out = malloc(cap);
+            if (out && str(&j, out, cap)) return out;
+            free(out);
+            return NULL;
+        }
+        if (!skip(&j)) return NULL;
+    } while (eat(&j, ','));
+    return NULL;
+}
+
 bool json_release(const char *text, size_t size, Release *r) {
     J j = {text, text + size, 0};
     char key[64];
