@@ -274,7 +274,8 @@ Escape, Insert, F1, F7~F12는 리컴프가 사용하므로 지정할 수 없습�
 - `[Display]`: `Mode` (Borderless / Fullscreen / Windowed), `Resolution`, `RenderResolution`(3D 해상도),
   `AspectRatio`(Auto는 창을 따릅니다. 16:10 이상으로 넓으면 창을 채우고, 그보다 좁으면 16:10에 검은 띠가 생깁니다), `FOV`
   (1.0 = 게임 기본값), `UIAnchor`(Center는 울트라와이드 화면에서 HUD를 가운데 16:9 영역에 두고, Edges는 양옆
-  가장자리로 펼칩니다)
+  가장자리로 펼칩니다). 창은 게임을 마지막으로 닫았을 때의 위치와 크기(`Resolution`을 바꾸기 전까지)로 같은 모니터에서 열리며(전체 화면도 마찬가지), F11 / Alt+Enter로 바꿔 둔 창 모드나 전체 화면도 그대로입니다(`Mode`를 바꾸기 전까지).
+  이 위치는 `mhgurecomp.ini` 옆의 `window.txt`에 저장됩니다(프로그램이 창 위치를 정할 수 없는 Wayland 제외)
 - `[Anti-aliasing]`: `MSAA` (Off / 2x / 4x / 8x), `FXAA` (On / Off), `FXAAMode` (Original / 3_11: GU의 FXAA 대신
   FXAA 3.11을 사용해 텍스처가 더 선명합니다. 기본값 Original)
 - `[Upscaler]`: `FSR` (Off / On, 기본값 Off), `FSRQuality` (NativeAA / Quality / Balanced / Performance /

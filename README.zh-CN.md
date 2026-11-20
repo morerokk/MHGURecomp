@@ -225,7 +225,7 @@ Escape、Insert、F1 以及 F7 到 F12 被重编译层保留，无法绑定。
 <summary><b>全部设置，按 <code>mhgurecomp.ini</code> 的分节列出</b></summary>
 
 
-- `[Display]`：`Mode`（Borderless / Fullscreen / Windowed），`Resolution`，`RenderResolution`（3D 渲染分辨率），`AspectRatio`（Auto 跟随窗口：16:10 及更宽的比例会填满窗口，更窄的则显示为带黑边的 16:10），`FOV`（1.0 = 游戏原始值），`UIAnchor`（Center 在超宽屏上把 HUD 保持在中间的 16:9 区域内，Edges 则把它铺到两侧）
+- `[Display]`：`Mode`（Borderless / Fullscreen / Windowed），`Resolution`，`RenderResolution`（3D 渲染分辨率），`AspectRatio`（Auto 跟随窗口：16:10 及更宽的比例会填满窗口，更窄的则显示为带黑边的 16:10），`FOV`（1.0 = 游戏原始值），`UIAnchor`（Center 在超宽屏上把 HUD 保持在中间的 16:9 区域内，Edges 则把它铺到两侧）。窗口会以上次关闭游戏时的位置和大小（直到更改 `Resolution`）在同一台显示器上打开（全屏也是如此），并保持用 F11 / Alt+Enter 切换后的窗口或全屏状态（直到更改 `Mode`），位置保存在 `mhgurecomp.ini` 旁边的 `window.txt` 中（Wayland 除外，那里程序无法自行放置窗口）
 - `[Anti-aliasing]`：`MSAA`（Off / 2x / 4x / 8x），`FXAA`（On / Off），`FXAAMode`（Original / 3_11：用 FXAA 3.11 代替 GU 自带的 FXAA，纹理更锐利；默认 Original）
 - `[Upscaler]`：`FSR`（Off / On，默认 Off），`FSRQuality`（NativeAA / Quality / Balanced / Performance / UltraPerformance），`Sharpness`。FSR 开启时会取代 MSAA 和 FXAA。详情：`docs/FSR-PORT.md`
 - `[Graphics]`：`DrawDistance`（村庄和集会所中的人物在多远距离内仍会被绘制：1 = 游戏原始值，2 = 两倍距离，0.5 = 一半，0 = 无限制；最大 10）
