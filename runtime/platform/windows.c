@@ -242,6 +242,8 @@ void plat_fatal_notice(void) {
         plat_error_box("The game stopped because of an error. The details are in log.txt, next to mhgurecomp.exe.");
 }
 
+void plat_x11_display(void *display) { (void)display; }  // (no X11 here)
+
 // ---- diagnostics
 const char *plat_symbol(uint64_t pc, uint64_t *offset) {
     static __thread char name[MAX_PATH];

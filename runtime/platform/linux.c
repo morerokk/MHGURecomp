@@ -339,6 +339,56 @@ void plat_error_box(const char *msg) {
     posix_spawnp(&pid, argv[0], NULL, NULL, argv, environ);  // (detached: nobody waits for the box to close)
 }
 
+// ---- X11: devices gone mid-request (#383)
+// SDL asks X about an input device by its XInput2 id when an event of it comes in or the device list changes
+// (XIQueryDevice: SDL_x11xinput2.c xinput2_get_device_info, SDL_x11pen.c X11_MaybeAddPenByDeviceID). A controller
+// that X also has as an input device can be gone by then: XI_BadDevice, and Xlib's default error handler prints
+// "X Error of failed request" and exits the process. SDL already copes with the request failing (no device info:
+// the event is dropped), so that one error is let through; every other X error still goes to the handler before.
+// libX11 is SDL's own copy (it opens it at run time): RTLD_NOLOAD, nothing is loaded that SDL didn't.
+#ifndef __ANDROID__
+typedef struct {  // (Xlib's XErrorEvent)
+    int type;
+    void *display;
+    unsigned long resourceid, serial;
+    unsigned char error_code, request_code, minor_code;
+} XErrorEvent_;
+typedef int (*XErrorHandler_)(void *display, XErrorEvent_ *e);
+static XErrorHandler_ x11_prev_handler;
+static int xi_opcode = -1, xi_first_error = -1;
+#define XI_BADDEVICE 0  // (XInput's first error: X11/extensions/XI.h XI_BadDevice)
+
+static int x11_error(void *display, XErrorEvent_ *e) {
+    if (e->request_code == xi_opcode && e->error_code == xi_first_error + XI_BADDEVICE) {
+        static int logged;
+        if (logged++ < 8)
+            fprintf(stderr, "[ui] X: an input device was gone when asked about (XInput request %u), ignored\n",
+                    e->minor_code);
+        return 0;
+    }
+    return x11_prev_handler ? x11_prev_handler(display, e) : 0;
+}
+#endif
+
+void plat_x11_display(void *display) {
+#ifndef __ANDROID__
+    static bool done;
+    if (!display || done) return;
+    done = true;
+    void *x11 = dlopen("libX11.so.6", RTLD_NOW | RTLD_NOLOAD);
+    if (!x11) return;
+    int (*query)(void *, const char *, int *, int *, int *) =
+        (int (*)(void *, const char *, int *, int *, int *))dlsym(x11, "XQueryExtension");
+    XErrorHandler_ (*set_handler)(XErrorHandler_) = (XErrorHandler_ (*)(XErrorHandler_))dlsym(x11, "XSetErrorHandler");
+    int first_event;
+    if (query && set_handler && query(display, "XInputExtension", &xi_opcode, &first_event, &xi_first_error))
+        x11_prev_handler = set_handler(x11_error);
+    dlclose(x11);  // (SDL's own reference keeps it loaded)
+#else
+    (void)display;
+#endif
+}
+
 void plat_fatal_notice(void) {
 #ifdef __ANDROID__
     android_mark_crash();
