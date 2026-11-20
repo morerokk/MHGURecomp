@@ -402,7 +402,7 @@ Joining a posted quest looks its data up in the list (0x5ba50c): a quest from th
 (rQuestData loc\quest\questData\questData_<n>, resource manager *0x2326a64 vtable +0x30, mode 2) and appended -
 before that the joiner had to switch to the same list ("You do not meet the requirements"). Quest numbers: group *
 10000 + star * 100 + index (0 Village, 1 Hub, 2 Arena, 3 Village training, 4 Special Permit). HP: a Village quest
-started from the Hub or Pub gets [Village Quests] HubHP (default 2.0, 1.6 since 2026-11-16) first, then the [Monster HP] factor for the number of
+started from the Hub or Pub gets [Village Quests] HubHP (default 2.0, 1.6 since 2026-11-16, 1.5 since 2026-11-20) first, then the [Monster HP] factor for the number of
 hunters (runtime/hle/hpscale.c; the host's values in a hub, sent with the others). Tested (2026-10-22, two
 instances, the user driving): the switch both ways in the Pub and a Local Play Hub, the Village ★1 list in an online
 hub, a village quest (101) posted by the host, joined by the client from the Quest Board, both departed together;

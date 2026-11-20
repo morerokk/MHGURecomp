@@ -116,7 +116,7 @@
     .lag_compensation = 1,                                                                          \
     .share_urgent = 1,                                                                              \
     /* [Monster HP, Village Quests] */                                                              \
-    .hp = {{1, 1, 1, 1}, 1.6f},                                                                     \
+    .hp = {{1, 1, 1, 1}, 1.5f},                                                                     \
     .village_in_hub = 1,                                                                            \
     /* [Quest Rewards] */                                                                           \
     .quest_hold_send = 1,                                                                           \
@@ -550,8 +550,8 @@ static const char DEFAULT_INI[] =
     "\n"
     "; When playing a Village Quest from the Hub, first multiply the monster HP by this amount.\n"
     "; This amount is then scaled again by the [Monster HP] settings.\n"
-    "; Default: 1.6\n"
-    "HubHP = 1.6\n"
+    "; Default: 1.5\n"
+    "HubHP = 1.5\n"
     "\n"
     "[Quest Rewards]\n"
     "; At the end of a quest, press and hold A on the Reward Box (Send to the Item Box option) to rapidly send items one-by-one, similar to World/Rise/Wilds.\n"
