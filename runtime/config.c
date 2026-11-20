@@ -94,6 +94,7 @@
     .combo_window = COMBO_LENIENT,                                                                  \
     .chat_key = "/",                                                                                \
     .menu_chord = 1,                                                                                \
+    .title_back_exit = 1,                                                                           \
     /* [Mouse] */                                                                                   \
     .mouse_sensitivity = 1.0f,                                                                      \
     .mouse_sensitivity_y = 1.0f,                                                                    \
@@ -379,6 +380,11 @@ static const char DEFAULT_INI[] =
     "; the settings menu. Turn it off to keep that combination for the game or a cheat: F1 still opens the menu\n"
     "; Default: On\n"
     "MenuChord = On\n"
+    "\n"
+    "; B (the menus' Back) on the title screen's Main Menu asks to quit the game. Turn it off when a mod swaps the\n"
+    "; menus' Confirm and Back, so that confirming there no longer asks\n"
+    "; Default: On\n"
+    "TitleBackExit = On\n"
     "\n"
     "; The key that opens a line of chat, anywhere (in a quest too): a key's name as the settings menu shows it, or\n"
     "; nothing for none\n"
@@ -808,6 +814,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Controls", "BackgroundInput", background_input, false),
     ON_OFF("Controls", "KeyboardPrompts", kbm_prompts, false),
     ON_OFF("Controls", "MenuChord", menu_chord, false),
+    ON_OFF("Controls", "TitleBackExit", title_back_exit, false),
     {"Controls", "ComboInputWindow", SET_CHOICE, F(combo_window), 0, 0, 0, "Lenient,Strict", NULL, false, ERR_MISC},
     {"Controls", "ChatKey", SET_TEXT, F(chat_key), sizeof g_config.chat_key, 0, 0, NULL, NULL, false, ERR_MISC},
     {"Mouse", "MouseSensitivity", SET_FLOAT, F(mouse_sensitivity), 0, 0.1f, 10.0f, NULL, NULL, false, ERR_VIEW},
