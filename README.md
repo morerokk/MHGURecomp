@@ -109,6 +109,8 @@ Releases may come out pretty often. To update automatically, start `mhgurecomp-u
 
 - The updater always checks against the latest release on GitHub. Sometimes pre-releases might be available, these won't be offered by the auto-updater since they might be broken.
 - Only the recomp files are replaced on update, all other folders (including `data` and `mods` and such) are kept.
+- When an update is found, choose **Update & launch** to start the game right after, or **Update only** to just install it and close the updater.
+- To never start the game from the updater, add `--update-no-launch` to its shortcut.
 - You can change the auto-updater behavior in the settings.
 - If you run into any issues, `updater.log` has more information.
 
