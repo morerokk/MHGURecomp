@@ -395,6 +395,7 @@ void vk_set_msaa(uint32_t n) {
 // ================================================================== swapchain
 static int swapchain_vsync = -1;
 static int configured_msaa = -1;
+static const char *present_name = "?";  // the swapchain's present mode, for the log
 static VkPresentModeKHR present_mode(void) {
     swapchain_vsync = config_live_vsync();
     // MAILBOX by default: no tearing, and the game paces itself (its own 30 fps vsync waits); with FIFO the game's frames
@@ -409,8 +410,13 @@ static VkPresentModeKHR present_mode(void) {
     VkPresentModeKHR m[16];
     if (n > 16) n = 16;
     vkGetPhysicalDeviceSurfacePresentModesKHR(g_vk.phys, g_vk.surface, &n, m);
-    for (uint32_t i = 0; i < n; i++) if (m[i] == want) return want;
+    for (uint32_t i = 0; i < n; i++)
+        if (m[i] == want) {
+            present_name = want == VK_PRESENT_MODE_FIFO_KHR ? "fifo" : want == VK_PRESENT_MODE_IMMEDIATE_KHR ? "immediate" : "mailbox";
+            return want;
+        }
     LOG("[vk] present mode %s not available: FIFO (vsync)\n", e);
+    present_name = "fifo";
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
@@ -653,8 +659,8 @@ static void create_swapchain(void) {
         VK_CHECK(vkCreateFramebuffer(g_vk.dev, &fi, NULL, g_hdr_out ? &hdr_fb[i] : &sc_fb[i]));
     }
     if (g_hdr_out) hdr_send_metadata(true);
-    LOG("[vk] swapchain %ux%u, %u images (asked for %u), format %d%s\n", ext.width, ext.height, g_vk.sc_count, count, sf.format,
-        g_hdr_out == HDR_OUT_PQ ? " (HDR10)" : g_hdr_out == HDR_OUT_SCRGB ? " (scRGB)" : "");
+    LOG("[vk] swapchain %ux%u, %u images (asked for %u), format %d%s, %s\n", ext.width, ext.height, g_vk.sc_count, count,
+        sf.format, g_hdr_out == HDR_OUT_PQ ? " (HDR10)" : g_hdr_out == HDR_OUT_SCRGB ? " (scRGB)" : "", present_name);
 }
 
 static void recreate_swapchain(void) {
@@ -731,6 +737,30 @@ static bool surface_ready(void) {
 typedef struct { uint32_t image; VkSemaphore acquired; bool ok; } Frame;
 static Frame cur_frame;
 
+// A stuck present, logged: the window calls that can block with no timeout of their own (vk_wait_seq logs after 10 s by
+// itself). The step the presenting thread is in (written under vk_lock) and since when; stall_watch looks twice a
+// second and logs once per stall after 5 s, and the call logs again when it returns. (A full screen window on an
+// RX 9070 hung before the game's first frames with nothing in the log.)
+enum { STEP_NONE, STEP_ACQUIRE, STEP_SWAPCHAIN, STEP_SUBMIT, STEP_PRESENT };
+static const char *const step_names[] = {"", "getting a window image (vkAcquireNextImageKHR)", "making the swapchain again",
+                                         "submitting the frame (vkQueueSubmit)", "presenting (vkQueuePresentKHR)"};
+static int step_now;                // (__atomic)
+static uint64_t step_t0, step_seq;  // (__atomic)
+static const uint64_t STUCK_NS = 5000000000ull;
+
+static void step_begin(int s) {
+    __atomic_store_n(&step_t0, plat_now_ns(), __ATOMIC_RELAXED);
+    __atomic_add_fetch(&step_seq, 1, __ATOMIC_RELAXED);
+    __atomic_store_n(&step_now, s, __ATOMIC_RELEASE);
+}
+
+static void step_end(void) {
+    int s = __atomic_load_n(&step_now, __ATOMIC_RELAXED);
+    uint64_t dt = plat_now_ns() - __atomic_load_n(&step_t0, __ATOMIC_RELAXED);
+    __atomic_store_n(&step_now, STEP_NONE, __ATOMIC_RELEASE);
+    if (s && dt >= STUCK_NS) LOG("[vk] %s returned after %.1f s\n", step_names[s], dt / 1e9);
+}
+
 // Acquire the next window image and begin its render pass (cleared to black). false: nothing to draw into.
 static bool frame_begin(void) {
     cur_frame.ok = false;
@@ -746,15 +776,25 @@ static bool frame_begin(void) {
     if (configured_msaa < 0) configured_msaa = g_config.msaa;
     if (msaa != configured_msaa) { vk_set_msaa((uint32_t)msaa); configured_msaa = msaa; }
     if (!g_vk.swapchain || (uint32_t)w != g_vk.sc_extent.width || (uint32_t)h != g_vk.sc_extent.height ||
-        config_live_vsync() != swapchain_vsync || hdr_wanted() != swapchain_hdr) recreate_swapchain();
+        config_live_vsync() != swapchain_vsync || hdr_wanted() != swapchain_hdr) {
+        step_begin(STEP_SWAPCHAIN);
+        recreate_swapchain();
+        step_end();
+    }
     if (!g_vk.swapchain) return false;
     slot = (slot + 1) % FRAMES;
     if (!acquire_sem[slot]) acquire_sem[slot] = binary_semaphore();
     vk_wait_seq(slot_seq[slot]);
+    step_begin(STEP_ACQUIRE);
     VkResult r = vkAcquireNextImageKHR(g_vk.dev, g_vk.swapchain, UINT64_MAX, acquire_sem[slot], VK_NULL_HANDLE, &cur_frame.image);
+    step_end();
     if (r == VK_ERROR_OUT_OF_DATE_KHR) {
+        step_begin(STEP_SWAPCHAIN);
         recreate_swapchain();
-        r = vkAcquireNextImageKHR(g_vk.dev, g_vk.swapchain, UINT64_MAX, acquire_sem[slot], VK_NULL_HANDLE, &cur_frame.image);
+        step_end();
+        step_begin(STEP_ACQUIRE);
+        r =vkAcquireNextImageKHR(g_vk.dev, g_vk.swapchain, UINT64_MAX, acquire_sem[slot], VK_NULL_HANDLE, &cur_frame.image);
+        step_end();
     }
 #ifdef __ANDROID__
     if (r == VK_ERROR_SURFACE_LOST_KHR) { surface_lost = true; return false; }
@@ -852,17 +892,25 @@ static void frame_end(const char *shot_path) {
     }
     if (!done_sem[img]) done_sem[img] = binary_semaphore();
     uint64_t seq = vk_pending_seq();
+    step_begin(STEP_SUBMIT);
     vk_submit_extra(cur_frame.acquired, done_sem[img]);
+    step_end();
     VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .waitSemaphoreCount = 1, .pWaitSemaphores = &done_sem[img],
                            .swapchainCount = 1, .pSwapchains = &g_vk.swapchain, .pImageIndices = &img};
+    step_begin(STEP_PRESENT);
     VkResult r = vkQueuePresentKHR(g_vk.queue, &pi);
+    step_end();
     // (Android says SUBOPTIMAL whenever the system turns the image: a new swapchain would be no better. A new
     // window size is caught in frame_begin.)
 #ifdef __ANDROID__
     if (r == VK_ERROR_OUT_OF_DATE_KHR) recreate_swapchain();
     if (r == VK_ERROR_SURFACE_LOST_KHR) surface_lost = true;
 #else
-    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) recreate_swapchain();
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
+        step_begin(STEP_SWAPCHAIN);
+        recreate_swapchain();
+        step_end();
+    }
 #endif
     cur_frame.ok = false;
     if (shot_path) {  // (the copy is taken here; the PNG is made on a thread of its own: encoding the window's size
@@ -1018,6 +1066,47 @@ static void exit_handler(void) {
     _exit(0);
 }
 
+// The window's state for a stall's log line (SDL_GetWindowFlags only reads the window's flags: fine off its thread)
+static void window_state(char *out, size_t n) {
+    SDL_Window *win = ui_window();
+    SDL_WindowFlags f = SDL_GetWindowFlags(win);
+    snprintf(out, n, "swapchain %ux%u %s; window %s, %s%s%s", g_vk.sc_extent.width, g_vk.sc_extent.height, present_name,
+             !(f & SDL_WINDOW_FULLSCREEN) ? "windowed" : SDL_GetWindowFullscreenMode(win) ? "exclusive full screen" : "borderless",
+             f & SDL_WINDOW_INPUT_FOCUS ? "focused" : "not focused", f & SDL_WINDOW_MINIMIZED ? ", minimised" : "",
+             f & SDL_WINDOW_OCCLUDED ? ", occluded" : "");
+}
+
+// Twice a second: a window call stuck for 5 s (once per stall), and once the game has presented, no frame for 10 s
+// while no window call is stuck (once per stall: the game waits elsewhere), with whether the renderer's lock is free.
+static void *stall_watch(void *arg) {
+    (void)arg;
+    uint64_t told_seq = 0, frames = 0, frames_t = plat_now_ns();
+    bool told_frames = false;
+    for (;;) {
+        SDL_Delay(500);
+        if (exiting) return NULL;
+        uint64_t now = plat_now_ns(), f = __atomic_load_n(&g_frames, __ATOMIC_RELAXED);
+        int s = __atomic_load_n(&step_now, __ATOMIC_ACQUIRE);
+        uint64_t seq = __atomic_load_n(&step_seq, __ATOMIC_RELAXED), t0 = __atomic_load_n(&step_t0, __ATOMIC_RELAXED);
+        char state[200];
+        if (s && seq != told_seq && now > t0 && now - t0 >= STUCK_NS) {
+            told_seq = seq;
+            window_state(state, sizeof state);
+            LOG("[vk] stuck %.0f s %s: %s\n", (now - t0) / 1e9, step_names[s], state);
+        }
+        if (f != frames) {
+            if (told_frames) LOG("[vk] frames again after %.1f s\n", (now - frames_t) / 1e9);
+            frames = f, frames_t = now, told_frames = false;
+        } else if (f && !s && !told_frames && now - frames_t >= 2 * STUCK_NS) {
+            told_frames = true;
+            bool free = pthread_mutex_trylock(&g_vk_mutex) == 0;
+            if (free) pthread_mutex_unlock(&g_vk_mutex);
+            window_state(state, sizeof state);
+            LOG("[vk] no frame for 10 s, not in a window call (renderer lock %s): %s\n", free ? "free" : "held", state);
+        }
+    }
+}
+
 void backend_init(void) {
     static bool done;
     if (done) return;
@@ -1038,6 +1127,8 @@ void backend_init(void) {
     vk_fsr_init();  // ([Upscaler] FSR: fsr.c)
     create_swapchain();
     atexit(exit_handler);
+    pthread_t watch;
+    if (pthread_create(&watch, NULL, stall_watch, NULL) == 0) pthread_detach(watch);
     SDL_SetAtomicInt(&vk_up, 1);
 }
 
