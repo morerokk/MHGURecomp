@@ -15,7 +15,9 @@
 //   ETag, without the JSON again), a cancelled or failed update: the game starts as it is, when the player asks for it.
 //   (A failure leaves the window open, with Try again and Start game: it never counts down and starts the game by itself.)
 // - [Application] Updates in mhgurecomp.ini: Ask (the default), Auto (no question), Off (start the game at once).
-//   The question offers Update & launch, Update only (the window stays, with Close, and no game) and Not now.
+//   The question offers Update & launch, Update only and Not now. Update only (until Try again asks again) is
+//   --update-no-launch for this run: no game after the install, a cancel or a failure (Close, not Start game), and
+//   the window stays on "Updated to" with Close. (The flag itself closes it by itself, as with the game.)
 // - After an install, the release's notes go to update/changelog.txt for the game's settings menu (save_changelog).
 //
 //   --update-force       update a development build too        --update-no-launch   don't start the game afterwards
@@ -254,7 +256,8 @@ static char latest[64], failure[300];
 static bool no_launch;  // (the game is running: don't start another)
 static bool closed;
 static bool launch_game = true;  // false: --update-no-launch, or the player chose "Update only"
-static bool ask_launch;          // the question offers "Update & launch" and "Update only" (not with --update-no-launch)
+static bool ask_launch;          // no --update-no-launch: the question offers "Update & launch" and "Update only", and
+                                 // each question (Try again too) starts from launching the game
 static char part[1100], part_tag[64];  // the checked download, kept when the game stopped the install
 static bool part_ready;
 static int mode;
@@ -751,7 +754,7 @@ static int buttons(int st, Button *b) {
         return 3;
     case ST_DOWNLOADING: b[0] = (Button){"Cancel", 2}; return 1;
     case ST_DONE:
-        if (launch_game) return 0;  // (it starts the game by itself)
+        if (launch_game || !ask_launch) return 0;  // (it goes on by itself: to the game, or out with the flag)
         b[0] = (Button){"Close", 3};
         return 1;
     case ST_FAILED:
@@ -819,7 +822,8 @@ static bool run_window(SDL_Thread *th) {
         int st = SDL_GetAtomicInt(&state);
         if (st != last) last = st, state_at = SDL_GetTicks(), sel = 0;
         if (st == ST_LAUNCH) break;
-        if (st == ST_DONE && launch_game && SDL_GetTicks() - state_at > 1500) break;  // (else: Close)
+        // (after "Update only": Close)
+        if (st == ST_DONE && (launch_game || !ask_launch) && SDL_GetTicks() - state_at > 1500) break;
         if (!rd) {
             if (st == ST_FAILED || st == ST_DONE) break;
             SDL_Delay(50);
@@ -839,8 +843,9 @@ static bool run_window(SDL_Thread *th) {
                 pad == SDL_GAMEPAD_BUTTON_EAST || pad == SDL_GAMEPAD_BUTTON_BACK) {
                 action = nb ? b[nb - 1].action : 0;
                 if (st == ST_FAILED) closed = true;  // closing is not "Start game": leave without starting it
-            } else if (key == SDLK_LEFT || key == SDLK_RIGHT || key == SDLK_TAB || pad == SDL_GAMEPAD_BUTTON_DPAD_LEFT ||
-                       pad == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) {
+            } else if (key == SDLK_LEFT || pad == SDL_GAMEPAD_BUTTON_DPAD_LEFT) {
+                if (nb) sel = (sel + nb - 1) % nb;
+            } else if (key == SDLK_RIGHT || key == SDLK_TAB || pad == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) {
                 if (nb) sel = (sel + 1) % nb;
             } else if (key == SDLK_RETURN || key == SDLK_SPACE || key == SDLK_KP_ENTER || pad == SDL_GAMEPAD_BUTTON_SOUTH ||
                        pad == SDL_GAMEPAD_BUTTON_START) {
@@ -860,6 +865,7 @@ static bool run_window(SDL_Thread *th) {
         if (action == 4 && st == ST_FAILED && thread) {  // try again: another check and install, from here
             SDL_WaitThread(thread, NULL);
             no_launch = false, closed = false;
+            launch_game = ask_launch;  // (the question comes again: "Update only" was the last answer's, not this one's)
             SDL_SetAtomicInt(&answer, 0), SDL_SetAtomicInt(&cancel, 0);
             set_state(ST_CHECKING);
             thread = SDL_CreateThread(worker, "update", NULL);
