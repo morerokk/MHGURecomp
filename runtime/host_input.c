@@ -859,10 +859,10 @@ static void menu_ptr_click(int btn, float mx, float my, int clicks) {
     if (hit >= 0) menuptr_select_at(hit, true, menu_ptr_gx, menu_ptr_gy);
     else if (hit == MENUPTR_PAGE_LEFT) host_input_press("LEFT", 12);
     else if (hit == MENUPTR_PAGE_RIGHT) host_input_press("RIGHT", 12);
-    // (a screen of a hunt's menu with no known cells - an option being changed in Options, Quest Info..., or a "how
-    // many?" count: the click is Confirm there, as a right click is Cancel; a click beside a known menu's rows still does
-    // nothing)
-    else if (!menuptr_open() || menuptr_spinner_open()) host_input_press("A", 12);
+    // (a screen of a hunt's menu with no known cells - an option being changed in Options, Quest Info..., a "how many?"
+    // count or a message waiting for Confirm: the click is Confirm there, as a right click is Cancel; a click beside a
+    // known menu's rows still does nothing)
+    else if (!menuptr_open() || menuptr_click_confirms()) host_input_press("A", 12);
 }
 static void menu_ptr_wheel(int n) {  // (n > 0 up: a menu of pages turns to the previous one; else the row above)
     if (menuptr_slider_open()) return menuptr_slider_step(n > 0 ? 1 : -1);  // (Skin Tone: a tone a notch)

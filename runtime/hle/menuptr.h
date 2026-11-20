@@ -61,6 +61,9 @@ void menuptr_slider_step(int d);
 // a click is Confirm there; a step of the count (the wheel, > 0 up)
 bool menuptr_spinner_open(void);
 void menuptr_spinner_step(int d);
+// A screen where a left click is Confirm and no menu's cells are offered: a "how many?", or a message that waits for
+// Confirm over a menu still drawn (the trade-in's "Items have been sent to your Item Box.")
+bool menuptr_click_confirms(void);
 void menuptr_page_turn(int dir);         // the next (> 0) or previous page, the game's way (its own paging buttons)
 // Where the renderer put the menu in focus: from its layout's 1280x720 to the picture's (its whole width and height),
 // x' = m[0] x + m[1], y' = m[2] y + m[3]; false when not found lately (runtime/menulearn.c sets it every frame)

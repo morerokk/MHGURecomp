@@ -399,11 +399,11 @@ static void log_front(uint32_t behind, uint32_t front) {  // (g_cur_lock held) t
     last_behind = behind, last_front = front;
     if (front) LOG("[menuptr] pointer off menu %08x: %08x, not known, came on screen after it (in front)\n", behind, front);
 }
-bool menuptr_spinner_open(void);
+bool menuptr_click_confirms(void);
 static Cursor *pick(int how) {
     uint64_t now = plat_now_ns(), best_t = 0;
     Cursor *best = NULL;
-    if (how == PICK_POINTER && menuptr_spinner_open()) return NULL;  // (a "how many?" in front: no cells)
+    if (how == PICK_POINTER && menuptr_click_confirms()) return NULL;  // (a "how many?" or a message in front: no cells)
     // (none of the open ones running - each known only from its frame on screen: the one that came on screen last, or
     // that last ran, is in front. A menu left a while ago, whose frame's key piece happens to sit on one of its cells on
     // the screen now - the item box's grid on Equipment Sets -, lost to the prompt there whose cursor never runs)
@@ -797,7 +797,8 @@ bool menuptr_pointer_focus(uint32_t *lr, int *row, int *col, uint64_t *since) {
 bool menuptr_slider_open(void);
 bool menuptr_open(void) {
     Cursor c;
-    return pointer_menu(&c) || menuptr_slider_open() || menuptr_spinner_open();  // (Skin Tone's slider, a "how many?": pointer screens too)
+    // (Skin Tone's slider, a "how many?", a message waiting for Confirm: pointer screens too)
+    return pointer_menu(&c) || menuptr_slider_open() || menuptr_click_confirms();
 }
 int menuptr_row(void) {
     Cursor c;
@@ -969,6 +970,24 @@ void menuptr_spinner_step(int d) {
     if (d) atomic_store(&g_spin_step, d > 0 ? 1 : -1);  // (a notch at a time: a fast wheel doesn't run on)
 }
 
+// ---- the trade-in's item box (scraps for monster parts): its update 0x9437bc(screen), once a frame from 0x93e480, runs
+// the state at +6 - 0 the grid, 3 the "how many?" spinner, 4 the Yes / No, 5 "Items have been sent to your Item Box.",
+// which waits for A (0x2000) with no cursor of its own. The grid's highlight is still drawn, so the grid kept the pointer
+// and only a click on the chosen cell went on; a click anywhere is Confirm there now.
+#define FN_TRADEIN_UPDATE 0x9437bcu
+#define TRADEIN_STATE     6u
+#define TRADEIN_SENT      5
+static atomic_ullong g_wait_ns;  // when a message that waits for Confirm was last up
+static void tradein_update(Cpu *c) {
+    if (LD8(c->r[0] + TRADEIN_STATE) == TRADEIN_SENT) atomic_store(&g_wait_ns, plat_now_ns());
+    fnhook_call_original(c, FN_TRADEIN_UPDATE);
+}
+static bool wait_open(void) {
+    uint64_t seen = atomic_load(&g_wait_ns);
+    return seen && plat_now_ns() - seen < OPEN_NS;
+}
+bool menuptr_click_confirms(void) { return menuptr_spinner_open() || wait_open(); }
+
 
 // ---- character creation's Skin Tone slider: a gradient of 184 tones (1..184, 0xb8) with a marker. Its update
 // 0x8babe4(slider, ..., pad bits r2), every frame from 0x8ba920: Left (0x80) / Right (0x20) step the tone by 1 (10 with
@@ -1065,7 +1084,7 @@ const char *menuptr_nudge_key(bool *nudge) {
 }
 
 static bool needs_nudge(void) {
-    if (menuptr_spinner_open()) {  // (a jump for the menu behind a "how many?": its Down would lower the count)
+    if (menuptr_click_confirms()) {  // (a jump for the menu behind a "how many?": its Down would lower the count)
         if (atomic_load(&g_target) >= 0 || atomic_load(&g_page_dir))
             atomic_store(&g_target, -1), atomic_store(&g_click, false), atomic_store(&g_page_dir, 0);
         return false;
@@ -1099,5 +1118,6 @@ void menuptr_init(void) {
     fnhook_set(FN_SLIDER_UPDATE, hle_register("menuptr:slider_update", slider_update));
     fnhook_set(FN_CHOICE_UPDATE, hle_register("menuptr:choice_update", choice_update));
     fnhook_set(FN_SPINNER_UPDATE, hle_register("menuptr:spinner_update", spinner_update));
+    fnhook_set(FN_TRADEIN_UPDATE, hle_register("menuptr:tradein_update", tradein_update));
     fnhook_set(FN_LIST_WIDGET, hle_register("menuptr:list_widget", list_widget));
 }
