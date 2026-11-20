@@ -115,6 +115,7 @@ static void fit_desktop(SDL_DisplayID d, int *w, int *h) {
 #define PLACE_FILE "window.txt"
 static int win_x = SDL_WINDOWPOS_UNDEFINED, win_y;
 static bool win_max, win_full, place_kept;
+static bool place_gone;  // (the kept place is on a monitor that is gone: kept for when it is back, until the window moves)
 static Uint64 place_dirty;  // (when it changed, unsaved: SDL_GetTicks; 0 = saved)
 
 static void save_place(void) {
@@ -128,11 +129,14 @@ static void save_place(void) {
 }
 
 // (and whether the game closed full screen or in a window - F11, Alt+Enter - so it starts that way, while Mode is still
-// the one it was kept with: a new Mode in the settings wins)
+// the one it was kept with: a new Mode in the settings wins). The file is written again in every session, so the Mode
+// and Resolution in it are always the last ones the game ran with: a Mode set back later does not find an old state.
+// Not with MHGU_WINDOW (a test run's window, which must not take the player's place nor leave its own).
 static void load_place(void) {
     win_full = g_config.display_mode != DISPLAY_WINDOWED;
-    if (getenv("MHGU_HIDDEN") || !SDL_strcmp(SDL_GetCurrentVideoDriver(), "wayland")) return;
+    if (getenv("MHGU_HIDDEN") || getenv("MHGU_WINDOW") || !SDL_strcmp(SDL_GetCurrentVideoDriver(), "wayland")) return;
     place_kept = true;
+    place_dirty = SDL_GetTicks() | 1;
     atexit(save_place);
     FILE *f = fopen(PLACE_FILE, "r");
     int x, y, max, w, h, rw, rh, full, mode;
@@ -180,7 +184,7 @@ static void track_place(const SDL_Event *e) {
     bool full = f & SDL_WINDOW_FULLSCREEN, max = f & SDL_WINDOW_MAXIMIZED;
     if (!full && max != win_max) win_max = max, place_dirty = SDL_GetTicks();
     if (e->type == SDL_EVENT_WINDOW_MOVED && !full && !max && (win_x != e->window.data1 || win_y != e->window.data2))
-        win_x = e->window.data1, win_y = e->window.data2, place_dirty = SDL_GetTicks();
+        win_x = e->window.data1, win_y = e->window.data2, place_gone = false, place_dirty = SDL_GetTicks();
     if (e->type == SDL_EVENT_WINDOW_RESIZED && !full && !max && (win_w != e->window.data1 || win_h != e->window.data2))
         win_w = e->window.data1, win_h = e->window.data2, place_dirty = SDL_GetTicks();
     if (e->type == SDL_EVENT_WINDOW_DISPLAY_CHANGED && (full || max)) {
@@ -188,7 +192,7 @@ static void track_place(const SDL_Event *e) {
         SDL_Rect u;
         if (place_display() != d && SDL_GetDisplayUsableBounds(d, &u)) {
             win_x = u.x + (u.w - win_w) / 2, win_y = u.y + (u.h - win_h) / 2;
-            place_dirty = SDL_GetTicks();
+            place_gone = false, place_dirty = SDL_GetTicks();
         }
     }
 }
@@ -199,7 +203,14 @@ static void track_place(const SDL_Event *e) {
 // stays shown when full screen comes while one is open: F11, Alt+Enter).
 static void set_fullscreen(bool on) {
     bool was = SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN;
-    if (on && !was) SDL_GetWindowSize(window, &win_w, &win_h);
+#ifndef __ANDROID__
+    // (maximized: not its windowed size, which track_place has - else the window came back from maximized as big as
+    // the screen)
+    bool max_kept = place_kept && (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED);
+#else
+    bool max_kept = false;
+#endif
+    if (on && !was && !max_kept) SDL_GetWindowSize(window, &win_w, &win_h);
     if (on && g_config.display_mode == DISPLAY_FULLSCREEN) {
         SDL_DisplayMode m;
         SDL_DisplayID d = SDL_GetDisplayForWindow(window);
@@ -228,7 +239,7 @@ static void set_fullscreen(bool on) {
         // out of an exclusive mode, Windows still gives that mode's, 1440x1920 for a 1440x3440 monitor, which would
         // move the window. The place was on the desktop when it was kept.)
         SDL_Rect r = {win_x, win_y, win_w, win_h};
-        if (place_kept && d && win_x != SDL_WINDOWPOS_UNDEFINED && SDL_GetDisplayForRect(&r) == d)
+        if (place_kept && !place_gone && d && win_x != SDL_WINDOWPOS_UNDEFINED && SDL_GetDisplayForRect(&r) == d)
             SDL_SetWindowPosition(window, win_x, win_y);
         else
 #endif
@@ -402,7 +413,7 @@ void ui_init(void) {
     } else if (win_x != SDL_WINDOWPOS_UNDEFINED) {
         LOG("[ui] the monitor of %s's place (%d,%d) is gone: the window opens where the system puts it\n", PLACE_FILE,
             win_x, win_y);
-        win_x = SDL_WINDOWPOS_UNDEFINED, win_max = false;
+        place_gone = true, win_max = false;
     }
 #endif
     SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "Monster Hunter Generations Ultimate");
@@ -412,6 +423,10 @@ void ui_init(void) {
     window = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
     if (!window) FATAL("SDL_CreateWindow: %s\n", SDL_GetError());
+#ifndef __ANDROID__
+    // (no place kept yet: where the system put it, so a window maximized or resized without being moved is kept too)
+    if (place_kept && win_x == SDL_WINDOWPOS_UNDEFINED) SDL_GetWindowPosition(window, &win_x, &win_y);
+#endif
     // (NULL but on X11: a controller unplugged mid-request must not close the game, platform/linux.c)
     plat_x11_display(SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_X11_DISPLAY_POINTER, NULL));
     set_window_icon();
