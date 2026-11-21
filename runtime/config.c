@@ -642,7 +642,11 @@ static const char DEFAULT_INI[] =
     "; Default: Stereo\n"
     "Output = Stereo\n"
     "\n"
+#ifdef __APPLE__
+    "; Playback device, by its name as the Settings window lists it (\"MacBook Pro Speakers\"...): always that\n"
+#else
     "; Playback device, by its name as the settings menu lists it (\"Speakers (Realtek(R) Audio)\"...): always that\n"
+#endif
     "; device, no sound while it is unplugged. Empty or Default: the system's default device, followed when it changes.\n"
     "; Default: empty\n"
     "Device =\n"
@@ -702,7 +706,12 @@ static const char DEFAULT_INI[] =
     "; Default: 10\n"
     "BackupsKept = 10\n"
     "\n"
+#ifdef __APPLE__
+    "; The folder the save backups go in. Use Choose... in the Settings window, or write the path as it is (spaces and ~\n"
+    "; included, no backslashes). Empty: a backups folder in the save folder, beside save_0.\n"
+#else
     "; PC only. The folder the save backups go in. Empty: a backups folder in the save folder, beside save_0.\n"
+#endif
     "; Takes effect at the next start\n"
     "BackupLocation =\n"
     "\n"
@@ -855,6 +864,7 @@ const SettingRow g_setting_rows[] = {
     {"Extras", "Audio", "Volume", "Volume", SETTING_VALUE, "0|25|50|75|100", NULL, true, true},
     {"Extras", "Audio", "MuteInBackground", "Mute in the Background", SETTING_CHOICE, ONOFF, NULL, true, true},
     {"Extras", "Audio", "Output", "Audio Output", SETTING_CHOICE, "Stereo|5.1", "Stereo|5.1 Surround", true, true},
+    {"Extras", "Audio", "Device", "Playback Device", SETTING_VALUE, "Default", NULL, true, false},  // (the Mac's devices: darwin_settings.m)
     {"Extras", "Application", "ConfirmExit", "Ask Before Closing", SETTING_CHOICE, ONOFF, NULL, true, true},
     {"Extras", "Application", "Language", "F1 Menu Language", SETTING_CHOICE, "English|Spanish|Chinese|Korean",
      "English|Español|中文|한국어", true, false},
@@ -863,6 +873,9 @@ const SettingRow g_setting_rows[] = {
     {"Extras", "Application", "Theme", "F1 Menu Theme", SETTING_CHOICE, "Gold|Blue|Hunter", NULL, true, false},
     {"Extras", "Application", "MenuScale", "F1 Menu Size (%)", SETTING_VALUE, "50|75|100|125|150|175|200", NULL, true, false},
     {"Extras", "Application", "SaveLocation", "Save Folder", SETTING_TEXT, NULL, NULL, false, false},
+    {"Extras", "Save Backups", "Backups", "Save Backups", SETTING_CHOICE, ONOFF, NULL, true, false},
+    {"Extras", "Save Backups", "BackupsKept", "Backups Kept", SETTING_VALUE, "5|10|20|50|100", NULL, true, false},
+    {"Extras", "Save Backups", "BackupLocation", "Backup Folder", SETTING_TEXT, NULL, NULL, false, false},
 };
 const int g_nsetting_rows = (int)(sizeof g_setting_rows / sizeof g_setting_rows[0]);
 // The per-quest Monster HP entries (Quest<number> = factors): set, listed and removed through config_set / config_quests

@@ -9,6 +9,9 @@
 // table, to add, change and remove.
 #import <Cocoa/Cocoa.h>
 
+#include <SDL3/SDL_audio.h>
+#include <SDL3/SDL_stdinc.h>
+
 #include "../app_actions.h"
 #include "../config.h"
 #include "darwin_ui.h"
@@ -66,6 +69,23 @@ static NSTextField *label(NSString *text, CGFloat size, bool bold, bool secondar
 
 static MHGUSettingsWindow *g_settings_window;
 
+// [Audio] Device's choices: Default, and the playback devices plugged in now by the names the file keeps (none before
+// the game opens its audio). Looked up each time the window is shown or a value changes, so a headset plugged in later
+// is there.
+static void fill_devices(NSComboBox *c) {
+    NSMutableArray<NSString *> *items = [NSMutableArray arrayWithObject:@"Default"];
+    int n = 0;
+    SDL_AudioDeviceID *ids = SDL_GetAudioPlaybackDevices(&n);
+    for (int i = 0; ids && i < n; i++) {
+        const char *name = SDL_GetAudioDeviceName(ids[i]);
+        NSString *s = name && *name && strlen(name) < 120 && !strpbrk(name, "\r\n;#") ? str(name) : nil;
+        if (s && ![items containsObject:s] && [s caseInsensitiveCompare:@"Default"] != NSOrderedSame) [items addObject:s];
+    }
+    SDL_free(ids);
+    [c removeAllItems];
+    [c addItemsWithObjectValues:items];
+}
+
 @implementation MHGUSettingsWindow
 
 // ---- values
@@ -91,7 +111,8 @@ static MHGUSettingsWindow *g_settings_window;
             }
             [p selectItemAtIndex:at];
         } else if (row.control.currentEditor == nil) {  // (not while the player is typing in it)
-            row.control.stringValue = now;
+            if (!strcmp(st->key, "Device")) fill_devices((NSComboBox *)row.control);
+            row.control.stringValue = !strcmp(st->key, "Device") && !now.length ? @"Default" : now;  // (empty = the default)
             ((NSTextField *)row.control).textColor = NSColor.controlTextColor;
         }
         bool pending = !st->live && config_restart_pending(st->key);
@@ -122,17 +143,22 @@ static MHGUSettingsWindow *g_settings_window;
 // Save Folder's Choose...: the system's folder picker. A save_0 folder picked means the folder around it (the setting
 // is the folder that holds save_0). The pick is written like a typed value; runtime/ui.c copies the save in use into
 // a folder that has none, at the next start.
-- (void)chooseSaveFolder:(NSButton *)b {
+- (void)chooseSaveFolder:(NSButton *)b { [self chooseFolderFor:"SaveLocation"]; }
+- (void)chooseBackupFolder:(NSButton *)b { [self chooseFolderFor:"BackupLocation"]; }
+
+- (void)chooseFolderFor:(const char *)key {
     MHGURow *row = nil;
-    for (MHGURow *r in self.rows) if (!strcmp(r.setting->key, "SaveLocation")) row = r;
+    for (MHGURow *r in self.rows) if (!strcmp(r.setting->key, key)) row = r;
     if (!row) return;
+    bool backups = !strcmp(key, "BackupLocation");
     NSOpenPanel *panel = [NSOpenPanel openPanel];
     panel.canChooseFiles = NO;
     panel.canChooseDirectories = YES;
     panel.canCreateDirectories = YES;
     panel.allowsMultipleSelection = NO;
     panel.prompt = @"Choose";
-    panel.message = @"Choose the folder that holds (or will hold) the save. A folder with no save in it gets a copy of the current one.";
+    panel.message = backups ? @"Choose the folder the save backups go in."
+                            : @"Choose the folder that holds (or will hold) the save. A folder with no save in it gets a copy of the current one.";
     NSString *now = [self valueOf:row.setting];
     BOOL dir = NO;
     if (now.length && [NSFileManager.defaultManager fileExistsAtPath:now isDirectory:&dir] && dir)
@@ -142,7 +168,7 @@ static MHGUSettingsWindow *g_settings_window;
     self.window.level = NSFloatingWindowLevel;
     if (result != NSModalResponseOK || !panel.URL) return;
     NSString *path = panel.URL.path;
-    if ([path.lastPathComponent isEqual:@"save_0"]) path = path.stringByDeletingLastPathComponent;
+    if (!backups && [path.lastPathComponent isEqual:@"save_0"]) path = path.stringByDeletingLastPathComponent;
     row.control.stringValue = path;
     [self apply:row value:path];
 }
@@ -529,10 +555,14 @@ static NSView *people(int n) {
     NSTextField *title = label(str(st->title), 13, false, false);
     title.alignment = NSTextAlignmentRight;
     [title.widthAnchor constraintEqualToConstant:200].active = YES;
-    [row.control.widthAnchor constraintEqualToConstant:!strcmp(st->key, "SaveLocation") ? 250 : st->kind == SETTING_TEXT ? 320 : 230].active = YES;
+    [row.control.widthAnchor constraintEqualToConstant:!strcmp(st->key, "SaveLocation") || !strcmp(st->key, "BackupLocation") ? 250 : st->kind == SETTING_TEXT ? 320 : 230].active = YES;
     NSMutableArray *views = [@[ title, row.control, row.note ] mutableCopy];
     if (!strcmp(st->key, "SaveLocation")) {  // (a picker beside the text: a path typed by hand is easy to get wrong)
         NSButton *choose = [NSButton buttonWithTitle:@"Choose…" target:self action:@selector(chooseSaveFolder:)];
+        [views insertObject:choose atIndex:2];
+    }
+    if (!strcmp(st->key, "BackupLocation")) {
+        NSButton *choose = [NSButton buttonWithTitle:@"Choose…" target:self action:@selector(chooseBackupFolder:)];
         [views insertObject:choose atIndex:2];
     }
     NSStackView *line = [NSStackView stackViewWithViews:views];
