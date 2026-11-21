@@ -6,6 +6,13 @@
 int main(void) {
     VkApplicationInfo app = {VK_STRUCTURE_TYPE_APPLICATION_INFO, NULL, "vkprobe", 1, NULL, 0, VK_API_VERSION_1_2};
     VkInstanceCreateInfo ici = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, NULL, 0, &app, 0, NULL, 0, NULL};
+#ifdef __APPLE__
+    // MoltenVK is a "portability" driver: the loader lists it only for an instance that asks for those.
+    const char *iext[] = {VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME};
+    ici.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    ici.enabledExtensionCount = 1;
+    ici.ppEnabledExtensionNames = iext;
+#endif
     VkInstance inst;
     VkResult r = vkCreateInstance(&ici, NULL, &inst);
     if (r) { printf("vkCreateInstance: %d\n", r); return 1; }

@@ -10,9 +10,16 @@
 
 #include "ffx_fsr3_glsl.h"
 
+#ifdef __APPLE__  // (Mach-O: its own section names, and C symbols carry a leading underscore)
+#define EMBED_SECTION "__DATA,__const"
+#define EMBED_SYM "_ffx_glsl_"
+#else
+#define EMBED_SECTION ".rodata"
+#define EMBED_SYM "ffx_glsl_"
+#endif
 #define EMBED(n, dir, file)                                                                                   \
-    __asm__(".pushsection .rodata\n.globl ffx_glsl_" #n "\nffx_glsl_" #n ":\n.incbin \"" dir "/" file "\"\n" \
-            ".globl ffx_glsl_" #n "_end\nffx_glsl_" #n "_end:\n.popsection");                                \
+    __asm__(".pushsection " EMBED_SECTION "\n.globl " EMBED_SYM #n "\n" EMBED_SYM #n ":\n.incbin \"" dir "/"  \
+            file "\"\n.globl " EMBED_SYM #n "_end\n" EMBED_SYM #n "_end:\n.popsection");                     \
     extern const char ffx_glsl_##n[], ffx_glsl_##n##_end[];
 #define ROW(n, dir, file) {file, ffx_glsl_##n, ffx_glsl_##n##_end},
 

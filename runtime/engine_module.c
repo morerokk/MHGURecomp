@@ -1,4 +1,4 @@
-// Engine modules (engine_module.h): engine_modules/<name>/<name>.dll (.so) for each <name> engine_modules/enabled.txt lists.
+// Engine modules (engine_module.h): engine_modules/<name>/<name>.dll (.so, macOS .dylib) for each <name> engine_modules/enabled.txt lists.
 #include "engine_module.h"
 
 #include <ctype.h>
@@ -14,7 +14,11 @@
 #define LIB_EXT ".dll"
 #else
 #include <dlfcn.h>
+#ifdef __APPLE__
+#define LIB_EXT ".dylib"
+#else
 #define LIB_EXT ".so"
+#endif
 #endif
 
 #include "config.h"
