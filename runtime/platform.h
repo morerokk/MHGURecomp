@@ -60,6 +60,9 @@ bool plat_use_folder(const char *utf8, char *buf, size_t size);
 // which go through _wfopen), SDL's files, FFmpeg. Returns buf (the path as it is when it doesn't convert or fit);
 // elsewhere the path is UTF-8 already: copied.
 const char *plat_utf8_path(const char *path, char *buf, size_t size);
+// Whether path is a folder (dir) or a regular file (!dir) itself, not a symlink, junction or other link to one
+// (services/fs.c: save backups only ever delete what really is in the backup folder).
+bool plat_plain_entry(const char *path, bool dir);
 void plat_error_box(const char *msg);
 void plat_fatal_notice(void);
 // The window's X11 Display (SDL_PROP_WINDOW_X11_DISPLAY_POINTER), once it is made: a device unplugged while SDL

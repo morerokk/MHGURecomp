@@ -224,8 +224,10 @@ static bool is_save_file_name(const char *name) {
     return false;
 }
 
-// Whether the folder holds nothing but save files (regular files named as one), at least min of them.
+// Whether the folder holds nothing but save files (regular files named as one), at least min of them. The folder and
+// its files must be themselves, not links: a link named like a backup can lead to a real save (a symlink, a junction).
 static bool only_save_files(const char *dir, int min) {
+    if (!plat_plain_entry(dir, true)) return false;
     DIR *d = opendir(dir);
     if (!d) return false;
     int n = 0;
@@ -234,9 +236,8 @@ static bool only_save_files(const char *dir, int min) {
     while (only && (e = readdir(d))) {
         if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
         char p[2048];
-        struct stat st;
         snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
-        only = is_save_file_name(e->d_name) && !stat(p, &st) && S_ISREG(st.st_mode);
+        only = is_save_file_name(e->d_name) && plat_plain_entry(p, false);
         n++;
     }
     closedir(d);
@@ -246,7 +247,7 @@ static bool only_save_files(const char *dir, int min) {
 // Deletes a backup's folder: only if it holds nothing but save files, and only those files and the folder itself.
 static bool delete_backup(const char *dir, int min) {
     if (!only_save_files(dir, min)) {
-        LOG("[fs] %s holds more than a save backup's files: left as it is\n", dir);
+        LOG("[fs] %s is not only a save backup (other files, a link, or not readable): left as it is\n", dir);
         return false;
     }
     for (int i = 0; i < NSAVE_FILES; i++) {

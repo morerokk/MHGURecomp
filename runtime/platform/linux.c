@@ -283,6 +283,11 @@ const char *plat_utf8_path(const char *path, char *buf, size_t size) {
     return buf;
 }
 
+bool plat_plain_entry(const char *path, bool dir) {
+    struct stat st;
+    return lstat(path, &st) == 0 && (dir ? S_ISDIR(st.st_mode) : S_ISREG(st.st_mode));
+}
+
 static int count_files(const char *dir, int depth) {
     DIR *dd = depth > 32 ? NULL : opendir(dir);
     if (!dd) return 0;
