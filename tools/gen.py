@@ -112,6 +112,10 @@ PATCHES = {
     # 10, s16 at r5) it now skips the push (`ldr r0, [r4, #0x18]`, the push's first instruction) for its end
     ('main', 0x5d6e74): (0xE5940018, '{ extern int stageview_skip_push(uint32_t); if (stageview_skip_push(c->r[5])) '
                          'goto L_5d6fc4; c->r[0] = LD32(c->r[4] + 0x18u); }'),
+    # Monster turns (runtime/hle/emturn.c): Duramboros' turn at the end of 7:32 divides by the frame step instead of
+    # multiplying (`vdiv.f32 s0, s6, s0`, s0 = (C2 / speed) * s2, s2 = step / 2, r4 = the monster)
+    ('main', 0x10dc744): (0xEE830A00, '{ extern float emturn_div(uint32_t, float, float, float); '
+                          'c->v.f[0] = emturn_div(c->r[4], c->v.f[6], c->v.f[0], c->v.f[2]); }'),
 }
 
 # Monster jump physics (runtime/hle/emjump.c): the stores of `pos += vel; vel += acc; acc.y += -0.2`, done once per

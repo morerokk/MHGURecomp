@@ -189,8 +189,8 @@ static void frame(Cpu *c) {
         g_seen[s].dist = sqrtf(dx * dx + dz * dz);
         g_seen[s].updates++;
         if (g_level >= 2)
-            LOG("[em] %08x %.1f ms act %08x pos %.1f %.1f %.1f step %.3f\n", en, (double)(now - g_seen[s].start_ns) / 1e6,
-                act, x, y, z, step);
+            LOG("[em] %08x %.1f ms act %08x pos %.1f %.1f %.1f yaw %d spd %.3f step %.3f\n", en,
+                (double)(now - g_seen[s].start_ns) / 1e6, act, x, y, z, (int)(LD32(info + 0x54) & 0xffff), LDF(info + 0x398), step);
     }
     if (__atomic_load_n(&g_sweep, __ATOMIC_ACQUIRE) && !g_req) {
         uint32_t en = 0;
