@@ -228,7 +228,7 @@ static const char DEFAULT_INI[] =
     "AnimSurf = On\n"
     "\n"
 #ifdef __APPLE__
-    "; macOS only. Upscale with Apple's MetalFX instead of FSR 3.1 (same quality levels, inputs and sharpness)\n"
+    "; Upscale with Apple's MetalFX instead of FSR 3.1 (same quality levels, inputs and sharpness)\n"
     "; Default: Off\n"
     "MetalFX = Off\n"
     "\n"
