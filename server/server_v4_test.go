@@ -257,11 +257,23 @@ type friendState struct {
 
 func askPresence(t *testing.T, s *Server, body []byte) map[[friendLen]byte]friendState {
 	t.Helper()
+	friends, _ := askPresence2(t, s, body)
+	return friends
+}
+
+type friendRequest struct {
+	id   [friendLen]byte
+	name string
+}
+
+// askPresence2: the answer's friends and its friend requests (in their order).
+func askPresence2(t *testing.T, s *Server, body []byte) (map[[friendLen]byte]friendState, []friendRequest) {
+	t.Helper()
 	c := dial(t, s)
 	send(t, c, tPresence, header4(4, [16]byte{}), body)
 	p := expect(t, c, tFriends)
 	const entry = friendLen + 1 + codeLen
-	if len(p) != 1+int(p[0])*entry {
+	if len(p) < 2+int(p[0])*entry {
 		t.Fatalf("FRIENDS of %d bytes for %d", len(p), p[0])
 	}
 	out := map[[friendLen]byte]friendState{}
@@ -271,7 +283,86 @@ func askPresence(t *testing.T, s *Server, body []byte) map[[friendLen]byte]frien
 		copy(f[:], e)
 		out[f] = friendState{e[friendLen], string(bytes.TrimRight(e[friendLen+1:entry], "\x00"))}
 	}
-	return out
+	r := p[1+int(p[0])*entry:]
+	var reqs []friendRequest
+	n, at := int(r[0]), 1
+	for i := 0; i < n; i++ {
+		var f [friendLen]byte
+		copy(f[:], r[at:])
+		nl := int(r[at+friendLen])
+		reqs = append(reqs, friendRequest{f, string(r[at+friendLen+1 : at+friendLen+1+nl])})
+		at += friendLen + 1 + nl
+	}
+	if at != len(r) {
+		t.Fatalf("FRIENDS: %d bytes after the requests", len(r)-at)
+	}
+	return out, reqs
+}
+
+func named(body []byte, name string) []byte { return append(append(body, byte(len(name))), name...) }
+
+// Friend requests: a player online that lists you while you don't list it, with the name it sent; gone once you
+// list it back (a friend then), when it stops listing you, or when it goes offline; the newest maxRequests.
+func TestFriendRequests(t *testing.T) {
+	s := start(t, func(c *Config) { c.ReqRate, c.ReqBurst = 1000, 1000 })
+	a, b := idOf(1), idOf(2)
+	askPresence(t, s, presenceBody(2, stateOnline, "")) // b online, listing nobody
+	if _, reqs := askPresence2(t, s, named(presenceBody(1, stateOnline, "", b), "Mia")); len(reqs) != 0 {
+		t.Fatalf("a has requests: %v", reqs)
+	}
+	_, reqs := askPresence2(t, s, presenceBody(2, stateOnline, ""))
+	if len(reqs) != 1 || reqs[0] != (friendRequest{a, "Mia"}) {
+		t.Fatalf("b's requests: %v", reqs)
+	}
+	// b accepts (lists a): a friend now, no request
+	friends, reqs := askPresence2(t, s, presenceBody(2, stateOnline, "", a))
+	if len(reqs) != 0 || len(friends) != 1 {
+		t.Fatalf("after accepting: friends %v, requests %v", friends, reqs)
+	}
+	// a stops listing b: b's listing of a is a request to a now
+	askPresence(t, s, named(presenceBody(1, stateOnline, ""), "Mia"))
+	if _, reqs := askPresence2(t, s, presenceBody(2, stateOnline, "", a)); len(reqs) != 0 {
+		t.Fatalf("b still gets a's request after a removed b: %v", reqs)
+	}
+	if _, reqs := askPresence2(t, s, presenceBody(1, stateOnline, "")); len(reqs) != 1 || reqs[0].id != b || reqs[0].name != "" {
+		t.Fatalf("a's requests: %v", reqs)
+	}
+	// offline requesters aren't told
+	s.mu.Lock()
+	s.online[b].seen = time.Now().Add(-2 * presenceTTL)
+	s.mu.Unlock()
+	if _, reqs := askPresence2(t, s, presenceBody(1, stateOnline, "")); len(reqs) != 0 {
+		t.Fatalf("an offline player's request told: %v", reqs)
+	}
+	// the newest maxRequests of many
+	for i := 0; i < maxRequests+4; i++ {
+		askPresence(t, s, named(presenceBody(byte(10+i), stateOnline, "", idOf(3)), "p"))
+		time.Sleep(2 * time.Millisecond)
+	}
+	_, reqs = askPresence2(t, s, presenceBody(3, stateOnline, ""))
+	if len(reqs) != maxRequests || reqs[0].id != idOf(byte(10+maxRequests+3)) {
+		t.Fatalf("%d requests, first %x", len(reqs), reqs[0].id)
+	}
+	// expired players leave the index
+	s.mu.Lock()
+	for _, p := range s.online {
+		p.seen = time.Now().Add(-2 * presenceTTL)
+	}
+	s.prunePresenceLocked()
+	left := len(s.listedBy)
+	s.mu.Unlock()
+	if left != 0 {
+		t.Fatalf("listedBy keeps %d entries after everyone left", left)
+	}
+	// names: at most nameMax bytes, no control characters
+	for _, bad := range [][]byte{named(presenceBody(1, stateOnline, ""), string(make([]byte, nameMax+1))),
+		named(presenceBody(1, stateOnline, ""), "a\nb"), append(presenceBody(1, stateOnline, ""), 5, 'x')} {
+		c := dial(t, s)
+		send(t, c, tPresence, header4(4, [16]byte{}), bad)
+		if typ, _, _ := readFrame(c, 1<<20); typ != tError {
+			t.Errorf("bad name %q answered", bad[len(bad)-3:])
+		}
+	}
 }
 
 // Presence: told only between players who list each other; state and code as last sent; stale ones are not told.
@@ -299,10 +390,10 @@ func TestPresence(t *testing.T) {
 	}
 	// bad bodies
 	for _, bad := range [][]byte{
-		presenceBody(1, 9, "", b),                      // no such state
-		presenceBody(1, stateHosting, "bad!", b),       // not a code
-		presenceBody(1, stateOnline, "")[:secretLen],   // cut short
-		append(presenceBody(1, stateOnline, "", b), 0), // a byte too many
+		presenceBody(1, 9, "", b),                         // no such state
+		presenceBody(1, stateHosting, "bad!", b),          // not a code
+		presenceBody(1, stateOnline, "")[:secretLen],      // cut short
+		append(presenceBody(1, stateOnline, "", b), 0, 0), // a byte after an empty name
 	} {
 		cn := dial(t, s)
 		send(t, cn, tPresence, header4(4, [16]byte{}), bad)

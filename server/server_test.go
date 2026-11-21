@@ -425,7 +425,8 @@ func testInfoCode(players byte, code uint16) []byte {
 }
 
 // testPairInfo: a NetworkInfo for 2 players with MHGU's advertise data, byte 0x1C = kind (0xFF: Hunter Search
-// network, 1: hub), as the game sends them (0x14: the constant 0x90abcdef 0x12345678).
+// network, 1: hub), as the game sends them (0x14: the host's account id, here the one every game had before
+// protocol 4).
 func testPairInfo(kind byte) []byte {
 	i := testInfoCode(1, 0xFFFF)
 	i[niNodeMax] = 2
@@ -435,10 +436,10 @@ func testPairInfo(kind byte) []byte {
 	return i
 }
 
-// What counts as a Hunter Search network: room for 2, MHGU's constant at 0x14, 0xFF at 0x1C.
+// What counts as a Hunter Search network: room for 2, 0xFF at 0x1C, whatever the host's account id at 0x14.
 func TestHuntSearch(t *testing.T) {
-	noMagic := testPairInfo(0xFF)
-	binary.LittleEndian.PutUint32(noMagic[niAdv+0x14:], 0)
+	otherID := testPairInfo(0xFF) // (protocol 4: each install's own account id)
+	binary.LittleEndian.PutUint64(otherID[niAdv+0x14:], 0x8123456789abcdef)
 	four := testPairInfo(0xFF)
 	four[niNodeMax] = 4
 	short := testPairInfo(0xFF)
@@ -448,7 +449,7 @@ func TestHuntSearch(t *testing.T) {
 		info []byte
 		want bool
 	}{{"Hunter Search", testPairInfo(0xFF), true}, {"2-player hub", testPairInfo(1), false},
-		{"no constant", noMagic, false}, {"room for 4", four, false}, {"short advertise data", short, false},
+		{"another account id", otherID, true}, {"room for 4", four, false}, {"short advertise data", short, false},
 		{"plain hub", testInfo(1), false}} {
 		if got := huntSearch(c.info); got != c.want {
 			t.Errorf("%s: huntSearch = %v, want %v", c.name, got, c.want)
@@ -468,12 +469,13 @@ func TestListHunterSearchApart(t *testing.T) {
 		return binary.LittleEndian.Uint64(expect(t, c, tHosted))
 	}
 	searches := map[uint64]bool{}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 4; i++ {
 		searches[hostInfo(testPairInfo(0xFF))] = true
 	}
-	noMagic := testPairInfo(0xFF) // 0xFF without MHGU's constant before it: not taken for a Hunter Search network
-	binary.LittleEndian.PutUint32(noMagic[niAdv+0x14:], 0)
-	hubs := map[uint64]bool{hostInfo(testPairInfo(1)): true, hostInfo(noMagic): true}
+	otherID := testPairInfo(0xFF) // (protocol 4: the host's own account id at 0x14: still a Hunter Search network)
+	binary.LittleEndian.PutUint64(otherID[niAdv+0x14:], 0x8123456789abcdef)
+	searches[hostInfo(otherID)] = true
+	hubs := map[uint64]bool{hostInfo(testPairInfo(1)): true}
 	for i := 0; i < 5; i++ {
 		hubs[hostInfo(testInfo(byte(1+i%3)))] = true
 	}

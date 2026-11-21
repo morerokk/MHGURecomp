@@ -69,7 +69,7 @@ const (
 	tPing   = 6 // keeps the connection alive (both ways)
 	// protocol 4 requests
 	tFind     = 7 // header, code[8] -> HUBS4 (0 or 1 hub)
-	tPresence = 8 // header, secret[32], u8 state, code[8], u8 n, n x friend[10] -> FRIENDS
+	tPresence = 8 // header, secret[32], u8 state, code[8], u8 n, n x friend[10] [, u8 len, name] -> FRIENDS
 	// answers
 	tHubs     = 16 // u32 count, count x (u64 hub id, NetworkInfo)
 	tHosted   = 17 // u64 hub id
@@ -77,7 +77,8 @@ const (
 	tSpliced  = 19 // u32 pair id, u64 secret (for UDP); then the connection is the link
 	tError    = 20 // u32 code
 	tHubs4    = 21 // u32 count, count x (u64 hub id, u16 link protocol, code[8] (zeros: none), NetworkInfo)
-	tFriends  = 22 // u8 n, n x (friend[10], u8 state, code[8]): the listed friends online that list the asker back
+	tFriends  = 22 // u8 n, n x (friend[10], u8 state, code[8]): the listed friends online that list the asker back;
+	// then u8 r, r x (friend[10], u8 len, name): friend requests, the players online that list the asker unlisted
 
 	errNotFound  = 1 // no such hub (or not for this key / version)
 	errNoAnswer  = 2 // the host did not take the player
@@ -97,6 +98,8 @@ const (
 	stateHosting  = 1                // hosting a hub (code: its session code, or zeros)
 	stateInHub    = 2                // in someone's hub (code: that hub's, when known)
 	stateMax      = stateInHub
+	nameMax       = 32 // bytes of a name in PRESENCE (UTF-8: the hunter name the player goes by)
+	maxRequests   = 8  // friend requests in one answer (the newest)
 	friendSalt    = "MHGURecomp friend:"
 	protoSessions = 4 // the first link protocol with session codes, FIND, PRESENCE and HUBS4
 
@@ -127,8 +130,8 @@ const (
 	// MHGU's advertise data: u16 passcode at 0xC0, 0xFFFF = none, else the 4-digit code in bits 0-14 and bit 15 set
 	// when it applies to everyone (clear: everyone but friends)
 	advPasscode = 0xC0
-	// ... and 0xFF at 0x1C in a Hunter Search network (hubs have 1 there, after the constant 0x90abcdef 0x12345678
-	// at 0x14): see huntSearch
+	// ... and 0xFF at 0x1C in a Hunter Search network (hubs have 1 there, after the host's account id at 0x14): see
+	// huntSearch
 	advHuntSearch = 0x1C
 	maxNodes      = 8
 )
@@ -207,6 +210,7 @@ type presence struct {
 	friends map[[friendLen]byte]bool // the friend codes it lists
 	state   uint8
 	code    [codeLen]byte
+	name    string // the name it goes by (for its friend requests)
 	seen    time.Time
 }
 
@@ -219,9 +223,12 @@ type Server struct {
 	pairs   map[uint32]*pair
 	ips     map[string]*ipState
 	online  map[[friendLen]byte]*presence
-	conns   int
-	ln      *net.TCPListener
-	udp     *net.UDPConn
+	// who lists whom, the other way around: listedBy[b][a] = since when a (online) lists b. A listing not returned
+	// is a friend request to b.
+	listedBy map[[friendLen]byte]map[[friendLen]byte]time.Time
+	conns    int
+	ln       *net.TCPListener
+	udp      *net.UDPConn
 	// the live settings (Apply): cfg.MinProto, cfg.MaxProto and cfg.SeparatePhones are only their first values
 	minProto atomic.Uint32
 	maxProto atomic.Uint32
@@ -230,7 +237,8 @@ type Server struct {
 
 func NewServer(cfg Config) *Server {
 	s := &Server{cfg: cfg, hubs: map[uint64]*hub{}, codes: map[[codeLen]byte]*hub{}, pending: map[uint64]*pending{},
-		pairs: map[uint32]*pair{}, ips: map[string]*ipState{}, online: map[[friendLen]byte]*presence{}}
+		pairs: map[uint32]*pair{}, ips: map[string]*ipState{}, online: map[[friendLen]byte]*presence{},
+		listedBy: map[[friendLen]byte]map[[friendLen]byte]time.Time{}}
 	s.minProto.Store(uint32(cfg.MinProto))
 	s.maxProto.Store(uint32(cfg.MaxProto))
 	s.separate.Store(cfg.SeparatePhones)
@@ -395,7 +403,23 @@ func (s *Server) janitor() {
 func (s *Server) prunePresenceLocked() {
 	for id, p := range s.online {
 		if time.Since(p.seen) > presenceTTL {
+			s.unlistLocked(id, p.friends, nil)
 			delete(s.online, id)
+		}
+	}
+}
+
+// unlistLocked: a's listings of the friends in old that keep (nil: none) doesn't have, out of listedBy.
+func (s *Server) unlistLocked(a [friendLen]byte, old, keep map[[friendLen]byte]bool) {
+	for f := range old {
+		if keep[f] {
+			continue
+		}
+		if m := s.listedBy[f]; m != nil {
+			delete(m, a)
+			if len(m) == 0 {
+				delete(s.listedBy, f)
+			}
 		}
 	}
 }
@@ -601,11 +625,11 @@ func passcoded(info []byte) bool {
 // huntSearch: a Hunter Search network, not a hub. With Hunter Search on (in a village or the offline Hub) the game
 // hosts one for ~10 s between its searches, over and over: room for 2 players, and 0xFF at advertise byte 0x1C,
 // where hubs have 1 (a 2-player hub too: checked). The game scans for 24 networks and shows up to 18 hubs in Join Hub and 6 players in its Hunter
-// Search list, so in an answer these get places of their own instead of taking the hubs'.
+// Search list, so in an answer these get places of their own instead of taking the hubs'. (The 8 bytes at 0x14 are the
+// host's account id: the same for every game before protocol 4, its own for each install since; not looked at.)
 func huntSearch(info []byte) bool {
 	adv := info[niAdv:]
 	return info[niNodeMax] == 2 && int(binary.LittleEndian.Uint16(info[niAdvSize:])) > advHuntSearch &&
-		binary.LittleEndian.Uint32(adv[0x14:]) == 0x90abcdef && binary.LittleEndian.Uint32(adv[0x18:]) == 0x12345678 &&
 		adv[advHuntSearch] == 0xFF
 }
 
@@ -902,9 +926,21 @@ func friendID(secret []byte) (id [friendLen]byte) {
 	return
 }
 
+// nameOK: a name for a friend request (UTF-8, as the game has it): no control characters.
+func nameOK(b []byte) bool {
+	for _, c := range b {
+		if c < 0x20 || c == 0x7F {
+			return false
+		}
+	}
+	return true
+}
+
 // PRESENCE (protocol 4): the asker is online (doing state, in or hosting the hub with code), until presenceTTL after
-// this; the answer is which of the friends it lists are online and list it back, and what they do. Body: secret[32],
-// u8 state, code[8] (zeros: none), u8 n, n x friend code[10].
+// this; the answer is which of the friends it lists are online and list it back, and what they do, then its friend
+// requests: the players online that list it while it doesn't list them, with the names they go by (the newest
+// maxRequests). Body: secret[32], u8 state, code[8] (zeros: none), u8 n, n x friend code[10], and optionally u8 len,
+// name[len] (at most nameMax bytes): the name its own requests show.
 func (s *Server) presence(c *net.TCPConn, body []byte) {
 	const fixed = secretLen + 1 + codeLen + 1
 	if len(body) < fixed {
@@ -913,13 +949,24 @@ func (s *Server) presence(c *net.TCPConn, body []byte) {
 	}
 	n := int(body[fixed-1])
 	state, code := body[secretLen], body[secretLen+1:secretLen+1+codeLen]
-	if n > maxFriends || len(body) != fixed+n*friendLen || state > stateMax ||
+	end := fixed + n*friendLen
+	var name []byte
+	if len(body) > end { // (the name: optional)
+		nl := int(body[end])
+		if nl > nameMax || len(body) != end+1+nl || !nameOK(body[end+1:]) {
+			sendError(c, errBadReq)
+			return
+		}
+		name = body[end+1:]
+	}
+	if n > maxFriends || len(body) < end || state > stateMax ||
 		(!codeOK(code) && !bytes.Equal(code, make([]byte, codeLen))) {
 		sendError(c, errBadReq)
 		return
 	}
 	id := friendID(body[:secretLen])
-	me := &presence{friends: map[[friendLen]byte]bool{}, state: state, seen: time.Now()}
+	now := time.Now()
+	me := &presence{friends: map[[friendLen]byte]bool{}, state: state, name: string(name), seen: now}
 	copy(me.code[:], code)
 	for i := 0; i < n; i++ {
 		var f [friendLen]byte
@@ -930,13 +977,33 @@ func (s *Server) presence(c *net.TCPConn, body []byte) {
 	}
 	var out []byte
 	count := 0
+	type request struct {
+		id    [friendLen]byte
+		name  string
+		since time.Time
+	}
+	var reqs []request
 	s.mu.Lock()
-	if s.online[id] == nil && len(s.online) >= s.cfg.MaxPresence {
+	old := s.online[id]
+	if old == nil && len(s.online) >= s.cfg.MaxPresence {
 		s.prunePresenceLocked()
 		if len(s.online) >= s.cfg.MaxPresence {
 			s.mu.Unlock()
 			sendError(c, errBusy)
 			return
+		}
+	}
+	if old != nil {
+		s.unlistLocked(id, old.friends, me.friends)
+	}
+	for f := range me.friends {
+		m := s.listedBy[f]
+		if m == nil {
+			m = map[[friendLen]byte]time.Time{}
+			s.listedBy[f] = m
+		}
+		if _, ok := m[id]; !ok {
+			m[id] = now
 		}
 	}
 	s.online[id] = me
@@ -950,8 +1017,25 @@ func (s *Server) presence(c *net.TCPConn, body []byte) {
 		out = append(out, o.code[:]...)
 		count++
 	}
+	for r, since := range s.listedBy[id] {
+		o := s.online[r]
+		if me.friends[r] || o == nil || time.Since(o.seen) > presenceTTL {
+			continue
+		}
+		reqs = append(reqs, request{r, o.name, since})
+	}
 	s.mu.Unlock()
-	writeFrame(c, frame(tFriends, []byte{byte(count)}, out))
+	sort.Slice(reqs, func(i, j int) bool { return reqs[i].since.After(reqs[j].since) })
+	if len(reqs) > maxRequests {
+		reqs = reqs[:maxRequests]
+	}
+	tail := []byte{byte(len(reqs))}
+	for _, r := range reqs {
+		tail = append(tail, r.id[:]...)
+		tail = append(tail, byte(len(r.name)))
+		tail = append(tail, r.name...)
+	}
+	writeFrame(c, frame(tFriends, []byte{byte(count)}, out, tail))
 }
 
 // The host's connection for a ticket: handed to the waiting join, which splices it; it stays open until then.
