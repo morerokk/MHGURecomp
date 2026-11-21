@@ -42,6 +42,7 @@
 #include "../hle.h"
 #include "../romfs.h"
 #include "../settings_panel.h"
+#include "chat.h"
 #include "input.h"
 #include "input_view.h"
 #include "menuptr.h"
@@ -57,12 +58,15 @@
 // A cell: its box in the sheet (what was the glyph's, cleared), the Switch button it is (or two: a pair of D-pad
 // directions, the button font's KEY_UD / KEY_RL). The picture is drawn 24 x 24, then fitted into the box.
 typedef struct { int x, y, w, h, btn, btn2; } Cell;
+// The chat key's cell: the button font's glyph 'o' (72, 216), which fontIcon names none of, so no text of the game draws
+// it; the chat key's prompt in the button guide does (runtime/hle/chat.c), with the key's cap on it whatever the device
+#define CHAT_CELL (16 + 3)
 #define G(x, y, b) {x, y, 24, 24, b, -1}  // (the button font's 24 x 24 cells)
 static const Cell font_cells[] = {
     G(0, 0, BTN_Y), G(24, 0, BTN_X), G(48, 0, BTN_B), G(72, 0, BTN_A), G(96, 0, BTN_L), G(0, 24, BTN_R),
     G(120, 24, BTN_ZL), G(144, 24, BTN_ZR), G(0, 72, BTN_PLUS), G(24, 72, BTN_MINUS), G(168, 24, BTN_LSTICK),
     G(192, 24, BTN_RSTICK), G(72, 24, BTN_UP), G(96, 24, BTN_RIGHT), G(0, 48, BTN_DOWN), G(24, 48, BTN_LEFT),
-    {48, 48, 24, 24, BTN_UP, BTN_DOWN}, {72, 48, 24, 24, BTN_RIGHT, BTN_LEFT},
+    {48, 48, 24, 24, BTN_UP, BTN_DOWN}, {72, 48, 24, 24, BTN_RIGHT, BTN_LEFT}, G(72, 216, CHAT_CELL),
 };
 #undef G
 // (the HUD sheets' boxes: each picture's ink, measured, and a texel around it)
@@ -304,7 +308,7 @@ static int page_alpha(const Page *p, uint32_t x, uint32_t y) {
     return p->data[off + 3];
 }
 static bool wanted_letter(uint32_t c) {
-    return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || (c >= 0x2190 && c <= 0x2193) || strchr("[];,./-=`'\\#", (int)c);
+    return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || (c >= 0x2190 && c <= 0x2193) || strchr("[];,./-=`'\\#!", (int)c);
 }
 // The letters wanted, from the first page. A font bigger than the game's (its tallest wanted cell over 24 px) is
 // scaled down to 24 px by area, so the drawing below works at the game's size for any font.
@@ -608,6 +612,18 @@ static int key_label(int code, uint32_t out[3]) {
         if (*s != ' ') out[n++] = (uint32_t)(*s >= 'a' && *s <= 'z' ? *s - 32 : (uint8_t)*s);
     return n;
 }
+// The chat key's cap: the key's name on the player's layout (ChatKey's "/" is "-" on a Spanish or German keyboard,
+// "!" on a French one: issue #399), when it is one letter the font has; else its name as the other caps have it
+static int layout_label(int code, uint32_t out[3]) {
+    const char *n = code > 0 && code < SDL_SCANCODE_COUNT
+                        ? SDL_GetKeyName(SDL_GetKeyFromScancode((SDL_Scancode)code, SDL_KMOD_NONE, false)) : NULL;
+    uint32_t u = n ? (uint8_t)n[0] : 0;
+    if (u > ' ' && u < 0x80 && !n[1]) {
+        if (u >= 'a' && u <= 'z') u -= 32;
+        if (letter(u)) return out[0] = u, 1;
+    }
+    return key_label(code, out);
+}
 
 // The label's letters, scaled down into the cap's face (ink at most FACE_W x FACE_H, centred on it), dark
 #define FACE_X0 4.0f
@@ -704,7 +720,7 @@ static bool draw_tile(uint8_t *tile, const Cell *c, int code, int code2) {
              : k == SRC_WHEEL_UP ? PROMPT_WHEEL_UP : k == SRC_WHEEL_DOWN ? PROMPT_WHEEL_DOWN : -1;
     if (icon >= 0) return memcpy(tile, prompt_icons[icon], CELL * CELL * 4), true;
     uint32_t t[3];
-    int n = key_label(code, t);
+    int n = c->btn == CHAT_CELL ? layout_label(code, t) : key_label(code, t);
     if (!n) return false;
     memcpy(tile, prompt_icons[PROMPT_KEYCAP], CELL * CELL * 4);
     put_label(tile, t, n);
@@ -758,12 +774,14 @@ static void put_tile(int sw, uint8_t *rgba, const Cell *c, const uint8_t *tile) 
 // ------------------------------------------------------------------ each frame
 void prompts_frame(void) {
     if (g_ready <= 0) return;
-    static int shown[16 + 3];
+    static int shown[16 + 4];
     static bool shown_kbm, any_shown;
     static int shown_view = -1;
     bool kbm = config_live_kbm_prompts() && host_input_last_device() == 1;
-    int want[16 + 3], view = -1;  // (each Switch button's input now; 0: the game's glyph; then the three Arts' keys)
-    memset(want, 0, sizeof want);
+    int want[16 + 4], view = -1;  // (each Switch button's input now; 0: the game's glyph; then the three Arts' keys,
+    memset(want, 0, sizeof want);  // and the chat key's prompt's, whatever the device: CHAT_CELL)
+    int chat_key = chat_key_prompt();
+    want[CHAT_CELL] = chat_key > 0 ? chat_key : 0;
     if (kbm) {
         ActProfile p;
         act_get_profile(&p);
@@ -794,7 +812,7 @@ void prompts_frame(void) {
             bool has = false;
             for (int k = 0; k < s->ncopies && !has; k++) has = s->copies[k].v == v;
             if (!has) continue;
-            if (!kbm) { write_copies(s, v, s->var[v]); continue; }
+            if (!kbm && !want[CHAT_CELL]) { write_copies(s, v, s->var[v]); continue; }
             uint64_t bytes = vbytes(s, v);
             int sw = vw(s, v), sh = vh(s, v), k = s->vk[v];
             if (s->cap < bytes) continue;

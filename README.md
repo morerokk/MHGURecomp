@@ -252,7 +252,7 @@ You can change them in the Settings menu (F1), Controls, Keybinds. You can bind 
 
 Escape, Insert, F1 and F7 to F12 cannot be bound, as they are reserved by the recomp.
 
-Sometimes the game might ask for keyboard input, such as naming your hunter or renaming item sets. Use the keyboard to enter text, `ENTER` to confirm, or `ESC` to cancel. You can use the `/` key to free-chat in multiplayer lobbies.
+Sometimes the game might ask for keyboard input, such as naming your hunter or renaming item sets. Use the keyboard to enter text, `ENTER` to confirm, or `ESC` to cancel. You can use the `/` key to free-chat in multiplayer lobbies. In an online Hub or Hunters' Pub, the button prompts at the bottom right show that key as **Chat** (a keyboard key, also when playing on a controller), and the game's own ZR prompt for the shoutouts and the chat history is called **Chat Log**.
 
 Other useful keybinds:
 

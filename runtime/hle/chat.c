@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../config.h"
 #include "../hle.h"
 #include "../textinput.h"
 
@@ -146,9 +147,168 @@ static void receive_message(Cpu *c) {
     if (later_row) ST8(name, first);
 }
 
-void chat_init(void) { fnhook_set(FN_RECEIVE, hle_register("chat:receive", receive_message)); }
+// ---- The chat key in the bottom right button guide (issue #399: players didn't know the key, nor that "/" names a key
+// position, the US layout's). In a town the guide shows the game's ZR "Chat" (Shoutouts, the chat log, the game's own
+// Keyboard: mostly for reading what was just posted), so that one is called "Chat Log" and the chat key gets "Chat",
+// both the game's own words in every language (buttonName 95 and 142). Its icon is always the key's cap, with the
+// controller too: chat has no button.
+//
+// The guide (cUIOUnderKeyAssign, runtime/hle/villagehub.c has more) takes each prompt from its preset, a slot's own
+// {buttonName icon, buttonName label} (+0x248, 8 bytes a slot: a town sets slot 2 to ZR "Chat" through 0x844d08, which
+// is hooked to give it "Chat Log"), or up to 4 extras {buttonName icon, label text *} (+0x228; the extra's adder
+// 0x844c34 is hooked too, as one way of adding the game's Chat, 0x99d3a4, goes there). An extra draws the text of its
+// icon's buttonName entry, then the label: the chat key's extra has an index past buttonName's end (the game gives
+// "" for it) and the label "<ICON CHATKEY>Chat". It is put in (or taken out) as the guide is drawn (0x8439ec, hooked):
+// the town's code sets the guide's state again as it goes, and an extra added between two drawings didn't show. The
+// text's icon names come from one object (*0x232668c, its vtable +0x48: (this, name, the fontIcon table) -> a button
+// font code); its hook gives CHATKEY the code of glyph 'o', a cell of the button font no name gives (so no text of the
+// game draws it), and runtime/hle/prompts.c draws the key's cap in that cell while the prompt shows (chat_key_prompt).
+// Shown in the Hub and the Pub while in a session, where the game shows its ZR prompt; not while a line is typed.
+#define FN_GUIDE_GET     0x85e758u  // () -> the bottom right button guide or 0
+#define FN_GUIDE_SHOW    0x8439ecu  // (guide, preset, flags, redraw): draws it (only on a change, unless redraw is 1)
+#define FN_GUIDE_SLOT    0x844d08u  // (guide, slot, icon, label): a slot's own prompt
+#define FN_GUIDE_EXTRA   0x844c34u  // (guide, icon, label *): an extra prompt (no redraw)
+#define GUIDE_PRESET     0x4cu
+#define GUIDE_FLAGS      0x50u
+#define GUIDE_EXTRA      0x228u     // 4 x {u32 icon (-1 empty), u32 label}
+#define GUIDE_SLOT       0x248u     // 10 x {u32 icon (-1: the preset's), u16 label}
+#define G_MESSAGES       0x1a99220u // the message manager *: +0x5c -> -> its tables, [0x12] buttonName
+#define GMD_BUTTON_NAME  0x12u
+#define GMD_COUNT        0x88u      // a message table: its count, and its strings (u32 * each)
+#define GMD_STRINGS      0x98u
+#define BN_CHAT          142u
+#define BN_CHAT_LOG      95u
+#define BN_ICON_ZR       0x81u      // (the town's Chat: ZR, or R with the ZR / R swap)
+#define BN_ICON_R        5u
+#define BN_NONE          999u       // (past buttonName's end: "")
+#define G_ICON_NAMES     0x232668cu // the text's icon names (see above)
+#define ICON_NAME        "CHATKEY"
+#define ICON_CODE        0x6fu
+#define G_GAMECONTROL    0x1a8ca48u // sGameControl *: +0x4c the area's type (runtime/hle/villagehub.c)
+#define GC_AREA_TYPE     0x4cu
+#define AREA_HUB         0
+#define AREA_PUB         7
+
+static atomic_int g_key_prompt;  // the chat key's scancode while its prompt is in the guide, else 0 (prompts.c)
+static atomic_int g_key_wanted;  // the chat key while its prompt should show where the game shows its Chat, else 0
+static uint32_t g_icon_fn;       // the icon name lookup, once hooked
+static uint32_t g_label;         // guest: "<ICON CHATKEY>" and buttonName's Chat
+static uint32_t g_label_from;    // (the Chat it was made from: another language's makes it again)
+
+int chat_key_prompt(void) { return atomic_load(&g_key_prompt); }
+
+// buttonName's text i (as 0x75bc4c / 0xd84114 read it), 0 when the table isn't there
+static uint32_t button_name(uint32_t i) {
+    uint32_t m = LD32(G_MESSAGES), t = m ? LD32(m + 0x5c) : 0;
+    t = t ? LD32(t) : 0;
+    t = t ? LD32(t) : 0;
+    uint32_t g = t ? LD32(t + 4 * GMD_BUTTON_NAME) : 0;
+    if (!g || i >= LD32(g + GMD_COUNT)) return 0;
+    uint32_t s = LD32(g + GMD_STRINGS);
+    return s ? LD32(s + 4 * i) : 0;
+}
+
+static void guide_slot(Cpu *c) {
+    if ((c->r[3] & 0xffff) == BN_CHAT) c->r[3] = (c->r[3] & ~0xffffu) | BN_CHAT_LOG;
+    fnhook_call_original(c, FN_GUIDE_SLOT);
+}
+
+static void guide_extra(Cpu *c) {
+    uint32_t chat = button_name(BN_CHAT), log = button_name(BN_CHAT_LOG);
+    if (chat && log && c->r[2] == chat) c->r[2] = log;
+    fnhook_call_original(c, FN_GUIDE_EXTRA);
+}
+
+static void icon_code(Cpu *c) {
+    if (c->r[1] && !strcmp((const char *)G2H(c->r[1]), ICON_NAME)) {
+        c->r[0] = ICON_CODE;
+        return;
+    }
+    fnhook_call_original(c, g_icon_fn);
+}
+
+static void guide_show(Cpu *c);
+
+void chat_init(void) {
+    fnhook_set(FN_RECEIVE, hle_register("chat:receive", receive_message));
+    fnhook_set(FN_GUIDE_SLOT, hle_register("chat:guide_slot", guide_slot));
+    fnhook_set(FN_GUIDE_EXTRA, hle_register("chat:guide_extra", guide_extra));
+    fnhook_set(FN_GUIDE_SHOW, hle_register("chat:guide_show", guide_show));
+    g_label = hle_alloc(160);
+}
+
+// (registers kept: chat_tick runs inside the game's input call)
+static uint32_t call_kept(Cpu *c, uint32_t fn, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
+    uint32_t saved[16];
+    memcpy(saved, c->r, sizeof saved);
+    uint32_t r = call(c, fn, a0, a1, a2, a3);
+    memcpy(c->r, saved, sizeof saved);
+    return r;
+}
+
+// The chat key's extra in guide kg as it should be now, before the guide is drawn; true when that changed it
+static bool place_key_prompt(uint32_t kg, bool fresh) {
+    bool town_chat = false;  // (the game's ZR Chat, renamed, is in the guide: a town as you walk around)
+    for (uint32_t i = 0; i < 10 && !town_chat; i++) {
+        uint32_t s = kg + GUIDE_SLOT + 8 * i, icon = LD32(s), label = LD16(s + 4);
+        town_chat = (icon == BN_ICON_ZR || icon == BN_ICON_R) && (label == BN_CHAT_LOG || label == BN_CHAT);
+    }
+    int key = atomic_load(&g_key_wanted);
+    bool want = key && town_chat, have = false, changed = false;
+    uint32_t room = 0;
+    for (uint32_t i = 0; i < 4; i++) {
+        uint32_t e = kg + GUIDE_EXTRA + 8 * i;
+        if (LD32(e) == 0xffffffffu) { if (!room) room = e; continue; }
+        if (LD32(e + 4) != g_label) continue;
+        if (want && !have && !fresh) { have = true; continue; }
+        ST32(e, 0xffffffffu), ST32(e + 4, 0);  // (not wanted, a second one, or its text changed: added again below)
+        if (!room) room = e;
+        changed = true;
+    }
+    if (want && !have && room) ST32(room, BN_NONE), ST32(room + 4, g_label), have = changed = true;
+    atomic_store(&g_key_prompt, have ? key : 0);
+    return changed;
+}
+
+// Every drawing of the guide gets the extra as it should be (a town's code sets the guide's state again as it goes:
+// an extra added between two drawings didn't last)
+static bool g_label_new;  // (the label's text changed: added again)
+static void guide_show(Cpu *c) {
+    uint32_t kg = c->r[0];
+    if (kg && g_label && place_key_prompt(kg, g_label_new)) c->r[3] = 1;  // (drawn again, though preset and flags are the same)
+    g_label_new = false;
+    fnhook_call_original(c, FN_GUIDE_SHOW);
+}
+
+static void key_prompt_update(Cpu *c) {
+    static uint32_t frames;
+    static bool online_town;
+    if (!g_icon_fn) {  // (the object is made at start-up)
+        uint32_t o = LD32(G_ICON_NAMES), vt = o ? LD32(o) : 0, fn = vt ? LD32(vt + 0x48) : 0;
+        if (fn && fnhook_set(fn, hle_register("chat:icon_code", icon_code))) g_icon_fn = fn;
+        else if (fn) g_icon_fn = 1;  // (not hookable: no prompt)
+    }
+    if (frames++ % 30 == 0) {  // (twice a second or so: in the Hub or the Pub, in a session)
+        uint32_t gc = LD32(G_GAMECONTROL), net = LD32(G_SNETWORK);
+        uint8_t area = gc ? LD8(gc + GC_AREA_TYPE) : 0xff;
+        online_town = (area == AREA_HUB || area == AREA_PUB) && net && call_kept(c, FN_NET_ONLINE, net, 0, 0, 0);
+    }
+    uint32_t chat = button_name(BN_CHAT);
+    bool redraw = false;
+    if (chat && chat != g_label_from) {  // (the label, in the game's language)
+        snprintf((char *)G2H(g_label), 160, "<ICON %s>%.140s", ICON_NAME, (const char *)G2H(chat));
+        redraw = g_label_new = g_label_from != 0;
+        g_label_from = chat;
+    }
+    int key = config_live_chat_key();
+    int want = g_icon_fn > 1 && g_label_from && online_town && !atomic_load(&g_composing) ? key : 0;
+    if (want != atomic_exchange(&g_key_wanted, want)) redraw = true;
+    uint32_t kg = redraw ? call_kept(c, FN_GUIDE_GET, 0, 0, 0, 0) : 0;
+    if (kg) call_kept(c, FN_GUIDE_SHOW, kg, LD32(kg + GUIDE_PRESET), LD32(kg + GUIDE_FLAGS), 1);
+}
 
 void chat_tick(Cpu *c) {
+    key_prompt_update(c);
     if (!atomic_load(&g_composing)) return;
     if (!textinput_active()) {  // (ended under it: the game's keyboard calls (swkbd.c Disappear, Finalize) end any entry;
                                 // the box would stay, and the chat key no longer open one)

@@ -270,7 +270,10 @@ Escape, Insert, F1 y de F7 a F12 no se pueden asignar, porque las reserva el rec
 
 A veces el juego pide escribir con el teclado, por ejemplo para poner nombre a tu cazador o renombrar sets de
 objetos. Usa el teclado para escribir, `ENTER` para confirmar o `ESC` para cancelar. En las salas multijugador puedes
-usar la tecla `/` para chatear libremente.
+usar la tecla `/` para chatear libremente. En el Centro de Caza o la Taberna en línea, las indicaciones de botones de
+abajo a la derecha muestran esa tecla como **Chat** (una tecla del teclado, también si juegas con mando), y la
+indicación ZR del propio juego, con los mensajes rápidos y el historial del chat, pasa a llamarse **Registro de chat**
+(con el texto del juego en tu idioma).
 
 Otras teclas útiles:
 

@@ -21,6 +21,9 @@ bool chat_in_box(float x, float y);
 void chat_move(float dx, float dy);
 void chat_save_position(void);
 void chat_tick(struct Cpu *c);                 // game thread, each frame (its input polling): send what was typed
+// The chat key's scancode while its prompt is in the bottom right button guide (<= 0: not there): runtime/hle/prompts.c
+// draws its cap in the button font's cell for it, whatever the device.
+int chat_key_prompt(void);
 
 #ifdef __cplusplus
 }
