@@ -895,6 +895,32 @@ void friends_rows(std::vector<Row> &rows) {
         });
     });
     rows.back().help = tr("Their friend code, then a space and the name you want to see for them (for example ABCD-EFGH-JKMN-PQRS Mia).");
+    // friend requests: Accept adds them, Reject keeps them out until the game restarts
+    LdnRequest reqs[8];
+    int nr = ldn_friend_requests(reqs, 8);
+    for (int i = 0; i < nr; i++) {
+        std::string code = reqs[i].code, name = reqs[i].name;
+        action(rows, "req.accept." + code, fmt("Accept %s", name.c_str()), [code]() { ldn_friend_request_answer(code.c_str(), true); });
+        rows.back().help = tr("A friend request: they added you. Accept adds them to your friends list.");
+        action(rows, "req.reject." + code, fmt("Reject %s", name.c_str()), [code]() { ldn_friend_request_answer(code.c_str(), false); });
+        rows.back().help = tr("Their request stays rejected until the game restarts, unless you add them yourself.");
+    }
+    // the other hunters in this hub (games that shared their friend code): Confirm adds one, which sends them a request
+    LdnHunter hunters[8];
+    int nh = ldn_hub_hunters(hunters, 8);
+    for (int i = 0; i < nh; i++) {
+        Row r;
+        r.id = std::string("hunter.") + hunters[i].code;
+        r.title = hunters[i].name;
+        r.value = hunters[i].state == LDN_HUNTER_FRIEND ? tr("Friend")
+                : hunters[i].state == LDN_HUNTER_ADDED ? tr("Request sent")
+                                                       : tr("In your hub: Confirm adds");
+        r.help = tr("A hunter in your hub. Confirm adds them as a friend: they get a friend request, and once they accept you see each other.");
+        r.enabled = hunters[i].state == LDN_HUNTER_ADD;
+        std::string typed = std::string(hunters[i].code) + " " + hunters[i].name;
+        r.activate = [typed]() { ldn_friend_add(typed.c_str()); };
+        rows.push_back(std::move(r));
+    }
     static LdnFriend list[LDN_FRIENDS_MAX];
     int server = HUB_UNKNOWN;
     int n = ldn_friends(list, LDN_FRIENDS_MAX, &server);
@@ -2448,6 +2474,8 @@ std::vector<Row> main_rows() {
         add_bool(r, "direct", "Direct connections", &c.ldn_direct, ini("Direct"));
         r.back().help = tr("In an internet hub, your game and the host's send their packets straight to each other when both routers let them, for a lower ping; else through the hub server. The other player's game then sees your IP address. Off: always through the hub server.");
         header(r, "friends.header", tr("Friends and Session Codes"));
+        add_bool(r, "friend.requests", "Friend requests", &c.ldn_friend_requests, ini("FriendRequests"));
+        r.back().help = tr("Players can send you friend requests, and the other hunters in your hub see your friend code to add you. A request you reject stays rejected until the game restarts, unless you add that player yourself. Off: no requests, and your code isn't shared in hubs; you can still add friends by their code.");
         friends_rows(r);
         // (all of them take effect at the next start: config.c marks them restart)
         header(r, "crossplay.header", tr("Emulator Crossplay"));

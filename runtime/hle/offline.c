@@ -34,10 +34,22 @@ HLE_FUNC("_ZN2nn7friends12UserPresenceC1Ev", friends_presence_ctor) { memset(ARG
 HLE_FUNC("_ZN2nn7friends12UserPresence10InitializeEv", friends_presence_init) { RET(0); }
 HLE_FUNC("_ZN2nn7friends12UserPresence11SetAppValueEPKcS3_", friends_presence_set) { RET(0); }
 HLE_FUNC("_ZN2nn7friends12UserPresence6CommitEv", friends_presence_commit) { RET(0); }
-// GetFriendList(int *count, ..., offset, max, const FriendFilter &): no friends
-HLE_FUNC("_ZN2nn7friends13GetFriendListEPiPNS0_6FriendEiiRKNS0_12FriendFilterE", friends_list) { if (ARG(0)) ST32(ARG(0), 0); RET(0); }
-HLE_FUNC("_ZN2nn7friends13GetFriendListEPiPNS_7account23NetworkServiceAccountIdEiiRKNS0_12FriendFilterE", friends_list_ids) {
+// GetFriendList(int *count, ..., offset, max, const FriendFilter &). The ids: the friends on the hub server who list
+// us back (runtime/net/ldn.c: their account ids, which their games report), so a hub's "everyone but friends" passcode
+// lets them in. The Friend records (their layout isn't known here): none. Which one the game calls is logged once.
+HLE_FUNC("_ZN2nn7friends13GetFriendListEPiPNS0_6FriendEiiRKNS0_12FriendFilterE", friends_list) {
+    ONCE("[offline] friends: GetFriendList (Friend records) asked: none given\n");
     if (ARG(0)) ST32(ARG(0), 0);
+    RET(0);
+}
+HLE_FUNC("_ZN2nn7friends13GetFriendListEPiPNS_7account23NetworkServiceAccountIdEiiRKNS0_12FriendFilterE", friends_list_ids) {
+    int ldn_friend_account_ids(uint64_t *out, int max);
+    uint64_t ids[64];
+    int n = ldn_friend_account_ids(ids, 64), offset = (int)ARG(2), max = (int)ARG(3), k = 0;
+    for (int i = offset < 0 ? 0 : offset; i < n && k < max; i++, k++) ST64(ARG(1) + 8u * (uint32_t)k, ids[i]);
+    if (ARG(0)) ST32(ARG(0), k);
+    static int last = -1;
+    if (k != last) LOG("[offline] friends: GetFriendList (ids): %d friend(s) given\n", k), last = k;
     RET(0);
 }
 HLE_FUNC("_ZN2nn7friends16UpdateFriendInfoEPNS0_6FriendEPKNS_7account23NetworkServiceAccountIdEi", friends_update) { RET(0); }

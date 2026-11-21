@@ -733,6 +733,18 @@ static inline const char *settings_text_zh(const char *english) {
         {"Their friend code, then a space and the name you want to see for them (for example ABCD-EFGH-JKMN-PQRS Mia).", "对方的好友代码，然后一个空格和你想为对方显示的名字（例如 ABCD-EFGH-JKMN-PQRS Mia）。"},
         {"Your friend code", "你的好友代码"},
         {"Your friend is playing.", "你的好友正在游戏。"},
+        {"%s wants to be friends", "%s 想加你为好友"},
+        {"A friend request: they added you. Accept adds them to your friends list.", "好友请求：对方添加了你。接受即可把对方加入你的好友列表。"},
+        {"A hunter in your hub. Confirm adds them as a friend: they get a friend request, and once they accept you see each other.", "你大厅中的猎人。确认即可添加为好友：对方会收到好友请求，对方接受后你们就能互相看到。"},
+        {"Accept %s", "接受 %s"},
+        {"Friend", "好友"},
+        {"Friend requests", "好友请求"},
+        {"In your hub: Confirm adds", "在你的大厅中：确认即可添加"},
+        {"Multiplayer settings: Friends, to accept or reject.", "在多人游戏设置的好友中接受或拒绝。"},
+        {"Players can send you friend requests, and the other hunters in your hub see your friend code to add you. A request you reject stays rejected until the game restarts, unless you add that player yourself. Off: no requests, and your code isn't shared in hubs; you can still add friends by their code.", "玩家可以向你发送好友请求，你大厅中的其他猎人能看到你的好友代码来添加你。你拒绝的请求在游戏重启前会一直保持拒绝，除非你自己添加该玩家。关闭：没有请求，你的代码也不会在大厅中共享；你仍可以通过代码添加好友。"},
+        {"Reject %s", "拒绝 %s"},
+        {"Request sent", "已发送请求"},
+        {"Their request stays rejected until the game restarts, unless you add them yourself.", "对方的请求在游戏重启前会一直保持拒绝，除非你自己添加对方。"},
     };
     for (unsigned i = 0; i < sizeof zh / sizeof *zh; i++)
         if (!strcmp(zh[i].en, english)) return zh[i].zh;
@@ -1471,6 +1483,18 @@ static inline const char *settings_text_ko(const char *english) {
         {"Their friend code, then a space and the name you want to see for them (for example ABCD-EFGH-JKMN-PQRS Mia).", "상대의 친구 코드, 공백, 그리고 표시할 이름(예: ABCD-EFGH-JKMN-PQRS Mia)."},
         {"Your friend code", "내 친구 코드"},
         {"Your friend is playing.", "친구가 플레이 중입니다."},
+        {"%s wants to be friends", "%s 님이 친구가 되고 싶어 합니다."},
+        {"A friend request: they added you. Accept adds them to your friends list.", "친구 요청입니다. 상대가 나를 추가했습니다. 수락하면 친구 목록에 추가됩니다."},
+        {"A hunter in your hub. Confirm adds them as a friend: they get a friend request, and once they accept you see each other.", "내 집회소에 있는 헌터입니다. 확인하면 친구로 추가합니다. 상대에게 친구 요청이 가고, 상대가 수락하면 서로가 보입니다."},
+        {"Accept %s", "%s 수락"},
+        {"Friend", "친구"},
+        {"Friend requests", "친구 요청"},
+        {"In your hub: Confirm adds", "내 집회소에 있음: 확인하면 추가"},
+        {"Multiplayer settings: Friends, to accept or reject.", "멀티플레이 설정의 친구에서 수락하거나 거절하세요."},
+        {"Players can send you friend requests, and the other hunters in your hub see your friend code to add you. A request you reject stays rejected until the game restarts, unless you add that player yourself. Off: no requests, and your code isn't shared in hubs; you can still add friends by their code.", "다른 플레이어가 친구 요청을 보낼 수 있고, 내 집회소의 다른 헌터가 내 친구 코드를 보고 나를 추가할 수 있습니다. 거절한 요청은 게임을 다시 시작할 때까지 거절된 상태로 남습니다. 단, 내가 그 플레이어를 직접 추가하면 예외입니다. 꺼짐: 요청을 받지 않고 내 코드도 집회소에 공유되지 않습니다. 코드로 친구를 추가하는 것은 계속 가능합니다."},
+        {"Reject %s", "%s 거절"},
+        {"Request sent", "요청 보냄"},
+        {"Their request stays rejected until the game restarts, unless you add them yourself.", "상대의 요청은 게임을 다시 시작할 때까지 거절된 상태로 남습니다. 단, 내가 직접 추가하면 예외입니다."},
     };
     for (unsigned i = 0; i < sizeof ko / sizeof *ko; i++)
         if (!strcmp(ko[i].en, english)) return ko[i].ko;
@@ -2130,6 +2154,18 @@ static inline const char *settings_text(int language, const char *english) {
         {"Their friend code, then a space and the name you want to see for them (for example ABCD-EFGH-JKMN-PQRS Mia).", "Su código de amigo, luego un espacio y el nombre con el que quieres verlo (por ejemplo ABCD-EFGH-JKMN-PQRS Mia)."},
         {"Your friend code", "Tu código de amigo"},
         {"Your friend is playing.", "Tu amigo está jugando."},
+        {"%s wants to be friends", "%s quiere ser tu amigo"},
+        {"A friend request: they added you. Accept adds them to your friends list.", "Una solicitud de amistad: te ha añadido. Aceptar lo añade a tu lista de amigos."},
+        {"A hunter in your hub. Confirm adds them as a friend: they get a friend request, and once they accept you see each other.", "Un cazador de tu sala. Confirmar lo añade como amigo: recibe una solicitud de amistad y, cuando la acepte, os veréis."},
+        {"Accept %s", "Aceptar a %s"},
+        {"Friend", "Amigo"},
+        {"Friend requests", "Solicitudes de amistad"},
+        {"In your hub: Confirm adds", "En tu sala: Confirmar lo añade"},
+        {"Multiplayer settings: Friends, to accept or reject.", "Para aceptar o rechazar: ajustes de Multijugador, Amigos."},
+        {"Players can send you friend requests, and the other hunters in your hub see your friend code to add you. A request you reject stays rejected until the game restarts, unless you add that player yourself. Off: no requests, and your code isn't shared in hubs; you can still add friends by their code.", "Los jugadores pueden enviarte solicitudes de amistad, y los demás cazadores de tu sala ven tu código de amigo para añadirte. Una solicitud que rechaces sigue rechazada hasta que reinicies el juego, salvo que añadas tú a ese jugador. No: sin solicitudes, y tu código no se comparte en las salas; aún puedes añadir amigos por su código."},
+        {"Reject %s", "Rechazar a %s"},
+        {"Request sent", "Solicitud enviada"},
+        {"Their request stays rejected until the game restarts, unless you add them yourself.", "Su solicitud sigue rechazada hasta que reinicies el juego, salvo que lo añadas tú."},
     };
     for (unsigned i = 0; i < sizeof messages / sizeof *messages; ++i)
         if (!strcmp(english, messages[i].en)) return messages[i].es;

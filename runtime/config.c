@@ -110,6 +110,7 @@
     .ldn_server = "",                                                                               \
     .ldn_key = "",                                                                                  \
     .ldn_direct = 1,                                                                                \
+    .ldn_friend_requests = 1,                                                                       \
     .ldn_ryu_serve_port = 30456,                                                                    \
     .ldn_room_serve_port = 24872,                                                                   \
     .sync_small_monsters = 1,                                                                       \
@@ -480,6 +481,13 @@ static const char DEFAULT_INI[] =
     "; server, nobody sees your address. Both ends need it On for a direct connection.\n"
     "; Default: On\n"
     "Direct = On\n"
+    "\n"
+    "; FriendRequests = On: players can send you friend requests (you accept or reject them in the settings menu), and\n"
+    "; the other players in your hub see your friend code to add you. A request you reject stays rejected until the\n"
+    "; game restarts, unless you add that player yourself. Off: no requests and your code isn't shared in hubs; you can\n"
+    "; still add friends by their code. Your friend code and friends list are kept in the save folder, not here.\n"
+    "; Default: On\n"
+    "FriendRequests = On\n"
     "\n"
     "; Sync small monsters between players in multiplayer. Everyone in the hunt should use the same setting.\n"
     "; Default: On\n"
@@ -861,6 +869,7 @@ const ConfigSetting g_settings[] = {
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},
     ON_OFF("Multiplayer", "Direct", ldn_direct, false),
+    ON_OFF("Multiplayer", "FriendRequests", ldn_friend_requests, false),
     ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, false),
     ON_OFF("Multiplayer", "LagCompensation", lag_compensation, false),
     ON_OFF("Multiplayer", "ShareUrgentCredit", share_urgent, false),

@@ -1,6 +1,8 @@
 // Discord Rich Presence: what the player is doing, on their Discord profile (ini [Discord]). discord.c talks to the
 // Discord app on this computer; runtime/hle/presence.c reads the game and says what to show.
 #pragma once
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -27,6 +29,7 @@ void discord_init(void);
 void discord_set_activity(const DiscordActivity *a);
 // runtime/hle/presence.c: the game's state into an activity (each frame, from the game's input polling)
 void presence_tick(void);
+bool presence_hunter_name(char *out, size_t size);  // the loaded hunter's name (UTF-8); false: none yet
 
 #ifdef __cplusplus
 }
