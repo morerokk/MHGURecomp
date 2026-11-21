@@ -327,7 +327,11 @@ def main():
         "CFBundleVersion": run("git", "-C", os.path.dirname(os.path.abspath(__file__)), "rev-parse", "--short",
                                "HEAD").strip() or "1",
         "LSMinimumSystemVersion": a.min_macos,
-        "LSApplicationCategoryType": "public.app-category.games",  # (Game Mode in full screen)
+        # (Game Mode in full screen, frontmost: halves AirPods / controller Bluetooth latency. The category marks a game;
+        # GCSupportsGameMode (macOS 14+) and LSSupportsGameMode (macOS 26+) make it eligible, the OS decides at run time)
+        "LSApplicationCategoryType": "public.app-category.games",
+        "GCSupportsGameMode": True,
+        "LSSupportsGameMode": True,
         "NSHighResolutionCapable": True,
         "GCSupportsControllerUserInteraction": True,
         # (Local Play finds other players' hunts by broadcasting on the local network: runtime/net/ldn.c)
