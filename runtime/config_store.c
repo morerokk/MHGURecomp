@@ -169,7 +169,8 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->lag_compensation != saved.lag_compensation) SDL_SetAtomicInt(&live_lagcomp, c->lag_compensation);
     if (all || c->ldn_direct != saved.ldn_direct) SDL_SetAtomicInt(&live_ldn_direct, c->ldn_direct);
     if (all || c->bonus_content != saved.bonus_content) SDL_SetAtomicInt(&live_bonus, c->bonus_content);
-    if (all || c->save_backups != saved.save_backups) SDL_SetAtomicInt(&live_backups, c->save_backups);
+    if (all || c->save_backups != saved.save_backups || c->backups_on != saved.backups_on)
+        SDL_SetAtomicInt(&live_backups, c->backups_on ? c->save_backups : 0);
 }
 void config_store_loaded(const Config *c) {
     publish_live(c, !have_saved);

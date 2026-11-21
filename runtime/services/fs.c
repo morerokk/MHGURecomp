@@ -191,17 +191,19 @@ static void fs_discard(HostFs *fs) {
 }
 
 // ------------------------------------------------------------------ save backups
-// [Save Backups] SaveBackups: after each commit of save_0, and at its first mount in a run (before this run changes it),
-// its files are copied to <backups>/<date>_<time>/, <backups> being BackupLocation or <save folder>/backups. A copy is
-// made in <name>.partial and renamed when complete, so a folder without the extension always holds a whole save. One
-// that would be the same as the newest is not made (a start right after a save); one of a commit soon after a save's
-// replaces that one (the game saves system and system_backup in two commits); past SaveBackups, the oldest go.
-// A failure only logs: the game's save itself has already succeeded.
+// [Save Backups] Backups: after each commit of save_0, its save files (system, system_backup) are copied to
+// <backups>/<YYYY-MM-DD_HH-MM-SS>/, <backups> being BackupLocation or <save folder>/backups. A copy is made in
+// <name>.partial and renamed when complete, so a backup's folder always holds a whole save. The game saves in two
+// commits a second or so apart (system, then system_backup): the first one's backup is half a save, and the second
+// one's replaces it. Past BackupsKept, the oldest go. Only a folder named like a backup that holds nothing but save
+// files is ever counted or deleted, and it is deleted file by file, never recursively: other folders and files in
+// BackupLocation (which can be any folder) are not touched. A failure only logs: the game's save has already succeeded.
 #define BACKUP_EXT ".partial"
 #define MAX_BACKUPS 512
-#define SAVE_STEPS_SECONDS 5  // (commits this close after a save's backup: more steps of the same save, ~1 s apart)
-static int rm_rf(const char *p, bool keep_root);
+#define SAVE_STEPS_SECONDS 5  // (a commit this soon after the last backup was made: the same save's next step)
 static void mkdirs(const char *path);
+static const char *const save_files[] = {"system", "system_backup"};
+#define NSAVE_FILES (int)(sizeof save_files / sizeof *save_files)
 
 static void backup_root(char *out, size_t n) {
     if (getenv("MHGU_BACKUP_DIR")) snprintf(out, n, "%s", getenv("MHGU_BACKUP_DIR"));
@@ -209,163 +211,130 @@ static void backup_root(char *out, size_t n) {
     else snprintf(out, n, "%s/backups", g_save_dir);
 }
 
-// A backup's folder: <YYYY-MM-DD_HH-MM-SS>, or with _<nn> after it (two in one second: save_backup).
-static bool is_backup_name(const char *s) {
+// A backup's folder name: YYYY-MM-DD_HH-MM-SS (the game can't save twice in one second), with BACKUP_EXT while made.
+static bool is_backup_name(const char *s, bool partial) {
     static const char form[] = "dddd-dd-dd_dd-dd-dd";
     for (int i = 0; form[i]; i++)
         if (form[i] == 'd' ? (s[i] < '0' || s[i] > '9') : s[i] != form[i]) return false;
-    const char *t = s + sizeof form - 1;
-    if (!*t) return true;
-    if (*t++ != '_' || !*t) return false;
-    for (; *t; t++) if (*t < '0' || *t > '9') return false;
+    return !strcmp(s + sizeof form - 1, partial ? BACKUP_EXT : "");
+}
+
+static bool is_save_file_name(const char *name) {
+    for (int i = 0; i < NSAVE_FILES; i++) if (!strcmp(name, save_files[i])) return true;
+    return false;
+}
+
+// Whether the folder holds nothing but save files (regular files named as one), at least min of them.
+static bool only_save_files(const char *dir, int min) {
+    DIR *d = opendir(dir);
+    if (!d) return false;
+    int n = 0;
+    bool only = true;
+    struct dirent *e;
+    while (only && (e = readdir(d))) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        char p[2048];
+        struct stat st;
+        snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
+        only = is_save_file_name(e->d_name) && !stat(p, &st) && S_ISREG(st.st_mode);
+        n++;
+    }
+    closedir(d);
+    return only && n >= min;
+}
+
+// Deletes a backup's folder: only if it holds nothing but save files, and only those files and the folder itself.
+static bool delete_backup(const char *dir, int min) {
+    if (!only_save_files(dir, min)) {
+        LOG("[fs] %s holds more than a save backup's files: left as it is\n", dir);
+        return false;
+    }
+    for (int i = 0; i < NSAVE_FILES; i++) {
+        char p[2048];
+        snprintf(p, sizeof p, "%s/%s", dir, save_files[i]);
+        if (unlink(p) && errno != ENOENT) { LOG("[fs] deleting %s: %s\n", p, strerror(errno)); return false; }
+    }
+    if (rmdir(dir)) { LOG("[fs] deleting %s: %s\n", dir, strerror(errno)); return false; }
     return true;
 }
 
 static int cmp_names(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
 
-// The backups' folder names, oldest first (the names sort by time). Partial ones left by a stop are deleted.
+// The backups' folder names, oldest first (the names sort by time). Partial ones a stop left are deleted.
 static int list_backups(const char *root, char **names, int max) {
     DIR *d = opendir(root);
     if (!d) return 0;
     int n = 0;
     struct dirent *e;
     while ((e = readdir(d))) {
-        if (has_ext(e->d_name, BACKUP_EXT)) {
-            char p[2048];
-            snprintf(p, sizeof p, "%s/%s", root, e->d_name);
-            rm_rf(p, false);
-        } else if (is_backup_name(e->d_name) && n < max)
-            names[n++] = strdup(e->d_name);
+        bool partial = is_backup_name(e->d_name, true);
+        if (!partial && !is_backup_name(e->d_name, false)) continue;
+        char p[2048];
+        snprintf(p, sizeof p, "%s/%s", root, e->d_name);
+        if (partial) delete_backup(p, 0);
+        else if (n < max && only_save_files(p, 1)) names[n++] = strdup(e->d_name);
     }
     closedir(d);
     qsort(names, (size_t)n, sizeof *names, cmp_names);
     return n;
 }
 
-static bool is_save_file(const char *dir, const char *name, struct stat *st) {
-    if (name[0] == '.' || has_ext(name, TMP_EXT) || has_ext(name, COMMIT_EXT)) return false;
-    char p[2048];
-    snprintf(p, sizeof p, "%s/%s", dir, name);
-    return !stat(p, st) && S_ISREG(st->st_mode);
-}
-
-static bool same_content(const char *a, const char *b) {
-    int fa = open(a, O_RDONLY | O_BINARY), fb = open(b, O_RDONLY | O_BINARY);
-    bool same = fa >= 0 && fb >= 0;
-    static char ba[1 << 16], bb[1 << 16];
-    for (int64_t off = 0; same;) {
-        ssize_t na = pread_full(fa, ba, sizeof ba, off), nb = pread_full(fb, bb, sizeof bb, off);
-        if (na < 0 || na != nb || memcmp(ba, bb, (size_t)na)) same = false;
-        if (na <= 0) break;
-        off += na;
-    }
-    if (fa >= 0) close(fa);
-    if (fb >= 0) close(fb);
-    return same;
-}
-
-static int count_save_files(const char *dir) {
-    DIR *d = opendir(dir);
-    if (!d) return 0;
-    int n = 0;
-    struct stat st;
-    struct dirent *e;
-    while ((e = readdir(d))) if (is_save_file(dir, e->d_name, &st)) n++;
-    closedir(d);
-    return n;
-}
-
-// Whether the backup folder holds exactly the save folder's files, with the same content.
-static bool same_as(const char *save, const char *backup) {
-    int nsave = 0, nbackup = count_save_files(backup);
-    struct stat st, bt;
-    struct dirent *e;
-    DIR *d = opendir(save);
-    if (!d) return false;
-    bool same = true;
-    while (same && (e = readdir(d))) {
-        if (!is_save_file(save, e->d_name, &st)) continue;
-        nsave++;
-        char a[2048], b[2048];
-        snprintf(a, sizeof a, "%s/%s", save, e->d_name);
-        snprintf(b, sizeof b, "%s/%s", backup, e->d_name);
-        same = !stat(b, &bt) && bt.st_size == st.st_size && same_content(a, b);
-    }
-    closedir(d);
-    return same && nsave == nbackup;
-}
-
-static void save_backup(const char *save, const char *why) {
+static void save_backup(const char *save) {
     int keep = config_live_save_backups();
-    if (keep <= 0 || !count_save_files(save)) return;  // (off, or no save yet)
+    char path[1300];
+    struct stat st;
+    snprintf(path, sizeof path, "%s/%s", save, save_files[0]);
+    if (keep <= 0 || stat(path, &st)) return;  // (off, or no save yet)
     char root[1100];
     backup_root(root, sizeof root);
     mkdirs(root);
-    char *names[MAX_BACKUPS];
+    char *names[MAX_BACKUPS + 1];
     int n = list_backups(root, names, MAX_BACKUPS);
-    char path[1300];
-    bool skip = false;
-    if (n) {
-        snprintf(path, sizeof path, "%s/%s", root, names[n - 1]);
-        skip = same_as(save, path);
+
+    time_t now = time(NULL);
+    char name[64];
+    strftime(name, sizeof name, "%Y-%m-%d_%H-%M-%S", localtime(&now));
+    snprintf(path, sizeof path, "%s/%s", root, name);
+    char part[1400];
+    snprintf(part, sizeof part, "%s" BACKUP_EXT, path);
+    mkdirs(part);
+    bool ok = true;
+    for (int i = 0; ok && i < NSAVE_FILES; i++) {
+        char src[2048], dst[2048];
+        snprintf(src, sizeof src, "%s/%s", save, save_files[i]);
+        snprintf(dst, sizeof dst, "%s/%s", part, save_files[i]);
+        if (stat(src, &st)) continue;
+        if (!(ok = copy_over(src, dst))) LOG("[fs] save backup: copying %s: %s\n", src, strerror(errno));
     }
-    if (!skip) {
-        time_t now = time(NULL);
-        struct tm *t = localtime(&now);
-        char name[64];
-        strftime(name, sizeof name, "%Y-%m-%d_%H-%M-%S", t);
-        // (a name sorting after the newest: the oldest is the first by name. In the same second, or with the clock
-        // set back, as when summer time ends, it is the newest's time with _02, _03... after it)
-        if (n && strcmp(name, names[n - 1]) <= 0) {
-            const char *last = names[n - 1];
-            int next = last[19] == '_' ? atoi(last + 20) + 1 : 2;
-            snprintf(name, sizeof name, "%.19s_%02d", last, next);
+    // (the same save's first step: this run's last backup, made a moment ago, and still the newest)
+    static char step[64];
+    static time_t step_at;
+    bool replace = ok && step[0] && n && !strcmp(names[n - 1], step) && time(NULL) - step_at <= SAVE_STEPS_SECONDS;
+    char old[1300] = "";
+    if (replace) snprintf(old, sizeof old, "%s/%s", root, names[n - 1]);
+    if (replace && !strcmp(name, names[n - 1]) && !delete_backup(old, 1)) ok = false;  // (in its second: its name)
+    if (ok && rename(part, path)) {
+        LOG("[fs] save backup: %s: %s\n", path, strerror(errno));
+        ok = false;
+    }
+    if (!ok) {
+        delete_backup(part, 0);
+        step[0] = 0;
+    } else {
+        LOG("[fs] save backup: %s\n", path);
+        if (replace) {
+            if (strcmp(name, names[n - 1])) delete_backup(old, 1);
+            LOG("[fs] (it replaces %s, the same save's first step)\n", names[n - 1]);
+            free(names[--n]);
         }
-        snprintf(path, sizeof path, "%s/%s", root, name);
-        struct stat st;
-        char part[1400];
-        snprintf(part, sizeof part, "%s" BACKUP_EXT, path);
-        mkdirs(part);
-        bool ok = true;
-        DIR *d = opendir(save);
-        struct dirent *e;
-        while (ok && d && (e = readdir(d))) {
-            if (!is_save_file(save, e->d_name, &st)) continue;
-            char src[2048], dst[2048];
-            snprintf(src, sizeof src, "%s/%s", save, e->d_name);
-            snprintf(dst, sizeof dst, "%s/%s", part, e->d_name);
-            ok = copy_over(src, dst);
-        }
-        if (d) closedir(d);
-        if (ok && d && !rename(part, path)) {
-            LOG("[fs] save backup (%s): %s\n", why, path);
-            // (the game saves in steps, a commit each: system, then system_backup. The backup of an earlier step
-            // of the same save, this run's newest, is half of it: the new one takes its place)
-            static char step[64];
-            static time_t step_at;
-            bool saving = !strcmp(why, "save");
-            if (saving && step[0] && n && !strcmp(names[n - 1], step) && now - step_at <= SAVE_STEPS_SECONDS) {
-                char old[1300];
-                snprintf(old, sizeof old, "%s/%s", root, names[n - 1]);
-                if (!rm_rf(old, false)) {  // (and the new one takes its name: the save's time, without _02)
-                    if (!rename(path, old)) snprintf(name, sizeof name, "%s", names[n - 1]);
-                    LOG("[fs] earlier step of this save's backup replaced: %s\n", old);
-                }
-                free(names[--n]);
-            }
-            snprintf(step, sizeof step, "%s", saving ? name : "");
-            step_at = now;
-            if (n == MAX_BACKUPS) free(names[--n]);
-            names[n++] = NULL;  // (the new one: counts toward the kept ones, never deleted)
-        } else {
-            LOG("[fs] save backup (%s) to %s failed: %s\n", why, path, strerror(errno));
-            rm_rf(part, false);
-        }
+        names[n++] = NULL;  // (the new one: counts toward the kept ones, never deleted)
+        snprintf(step, sizeof step, "%s", replace ? "" : name);  // (a save is two steps: a whole one starts the next)
+        step_at = time(NULL);  // (after the copy: on a slow drive, it took a while)
     }
     for (int i = 0; i < n; i++) {
         if (names[i] && i < n - keep) {
             snprintf(path, sizeof path, "%s/%s", root, names[i]);
-            if (!rm_rf(path, false)) LOG("[fs] old save backup deleted: %s\n", path);
+            if (delete_backup(path, 1)) LOG("[fs] old save backup deleted: %s\n", path);
         }
         free(names[i]);
     }
@@ -399,7 +368,6 @@ static void fs_recover(const char *root) {
         }
     }
     closedir(d);
-    if (is_main_save(root)) save_backup(root, "start");
 }
 
 static void file(Service *s, IpcReq *req, IpcResp *resp) {
@@ -600,7 +568,7 @@ static void filesystem(Service *s, IpcReq *req, IpcResp *resp) {
         if (fs->journal) {
             bool changed = fs->npending > 0;
             if (!fs_commit(fs)) resp->result = MAKE_RESULT(2, 4000);
-            else if (changed && is_main_save(fs->root)) save_backup(fs->root, "save");
+            else if (changed && is_main_save(fs->root)) save_backup(fs->root);
         }
         break;
     case 11: case 12: OUT(int64_t, 0) = 0x40000000; resp_size(resp, 8); break;  // free / total space

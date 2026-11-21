@@ -133,7 +133,8 @@ typedef struct {
     int show_battery;         // [Performance] ShowBattery: BATTERY_*, the battery's charge beside the frame rate or alone
     char save_location[256];  // [Application] SaveLocation (PC): the folder holding the save (save_0/), "" the default
                               // (%APPDATA%\MHGURecomp\save, ~/.local/share/MHGURecomp/save: main.c)
-    int save_backups;         // [Save Backups] SaveBackups: save copies kept (one per save, one per start), 0 none (services/fs.c)
+    int backups_on;           // [Save Backups] Backups: a copy of the save at each save (services/fs.c)
+    int save_backups;         // [Save Backups] BackupsKept: how many of those copies are kept, 1-100
     char backup_location[256]; // [Save Backups] BackupLocation (PC): the folder the backups go in, "" <save folder>/backups
     char save_dir[256];       // [Android] SaveFolder: the folder holding the save (save_0/), "" the app's own (fs.c)
     char game_dir[256];       // [Android] GameFolder: the folder holding exefs/ and romfs/, "" the app's own (main.c)
@@ -285,7 +286,7 @@ void config_live_ldn_join(char *join, size_t size);  // [Multiplayer] Join: the 
 int config_live_ldn_direct(void);  // [Multiplayer] Direct (net/ldn.c: for the next player link)
 int config_live_sync_small_monsters(void);  // [Multiplayer] SyncSmallMonsters (net/emsync.c)
 int config_live_lag_compensation(void);  // [Multiplayer] LagCompensation (net/hitsync.c)
-int config_live_save_backups(void);     // [Save Backups] SaveBackups: at each save (services/fs.c)
+int config_live_save_backups(void);     // [Save Backups] BackupsKept while Backups is on, else 0 (services/fs.c)
 int config_live_bonus_content(void);    // [Bonus Content] BonusContent: each time the game opens a save (services/bonus.c)
 int config_live_discord(void);         // [Discord] RichPresence
 int config_live_discord_hunter(void);  // [Discord] ShowHunter
