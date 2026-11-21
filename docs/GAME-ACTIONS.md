@@ -639,6 +639,21 @@ game's own glyphs back at its next button press.
   click, R3 ALT; the pause menu's Signal SPC, Zoom In Map R; the context hunt / menus / hunt as the menu opens and closes.
   Not checked by eye: the quest details' L / R (HD_window), the Hunting Horn's notes, other languages (the files are
   compared, so a mod's own pictures are left alone).
+* **The chat key's prompt** (2026-11-21, issue #399; `runtime/hle/chat.c`). In an online Hub or Pub the bottom right
+  guide gets "<chat key> Chat", and the game's ZR "Chat" there (Shoutouts, the chat log, its Keyboard) becomes "Chat
+  Log": buttonName 142 and 95, the game's own words in each language. The town sets that prompt as guide slot 2's own
+  {icon 0x81, label 0x8e} (+0x248, 8 bytes a slot, through `0x844d08`, hooked to give label 95); the chat key's is an
+  extra (+0x228) put in as the guide is drawn (`0x8439ec`, hooked: the town sets the guide's state again as it goes,
+  and an extra added between two drawings never showed), with a buttonName icon index past the table's end (the game
+  gives "") and the label `<ICON CHATKEY>` + buttonName 142. Icon names go through one object's lookup
+  (`*0x232668c`, vtable +0x48: (this, name, fontIcon table) -> button font code; the text tag parser at `0xc425d4`
+  calls it for ICON); its hook gives CHATKEY the button font's glyph `o` (72, 216), which fontIcon names none of, so no
+  text of the game draws it (its picture is a Palico icon). `prompts.c` draws the chat key's cap there while the prompt
+  shows, with the controller too, named on the player's keyboard layout ("/" is "-" on a Spanish keyboard). Tested in
+  the Pub with the session check forced: T / ZR Chat Log, BS Help, "/" Chat with the keyboard and with a virtual
+  controller; gone while a line is typed and in the Shoutouts menu, back after; the village has Chat Log alone. Not
+  tested: a real online session, another game language (`MHGU_LANGUAGE` crashes on the way from the title screen,
+  with or without this), another keyboard layout.
 
 ## Mouse camera (2026-11-11)
 

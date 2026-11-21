@@ -270,7 +270,10 @@ Escape, Insert, F1 y de F7 a F12 no se pueden asignar, porque las reserva el rec
 
 A veces el juego pide escribir con el teclado, por ejemplo para poner nombre a tu cazador o renombrar sets de
 objetos. Usa el teclado para escribir, `ENTER` para confirmar o `ESC` para cancelar. En las salas multijugador puedes
-usar la tecla `/` para chatear libremente.
+usar la tecla `/` para chatear libremente. En el Centro de Caza o la Taberna en línea, las indicaciones de botones de
+abajo a la derecha muestran esa tecla como **Chat** (una tecla del teclado, también si juegas con mando), y la
+indicación ZR del propio juego, con los mensajes rápidos y el historial del chat, pasa a llamarse **Registro de chat**
+(con el texto del juego en tu idioma).
 
 Otras teclas útiles:
 
@@ -293,7 +296,9 @@ Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
 - `[Display]`: `Mode` (Borderless / Fullscreen / Windowed), `Resolution`, `RenderResolution` (la resolución 3D),
   `AspectRatio` (Auto sigue a la ventana: 16:10 y más ancho la llenan, más estrecho queda en 16:10 con barras), `FOV`
   (1.0 = el del juego), `UIAnchor` (Center mantiene el HUD en el 16:9 central en una pantalla ultrapanorámica, Edges
-  lo extiende hacia los lados)
+  lo extiende hacia los lados). La ventana se abre donde estaba al cerrar el juego, con ese tamaño (hasta que cambie `Resolution`) y en el mismo monitor (también en
+  pantalla completa), en ventana o pantalla completa como quedó con F11 / Alt+Enter (hasta que cambie `Mode`), guardado en `window.txt` junto a `mhgurecomp.ini` (no en Wayland, donde los programas no pueden
+  ubicar sus ventanas)
 - `[Anti-aliasing]`: `MSAA` (Off / 2x / 4x / 8x), `FXAA` (On / Off), `FXAAMode` (Original / 3_11: FXAA 3.11 en lugar
   del FXAA de GU, texturas más nítidas; Original por defecto)
 - `[Upscaler]`: `FSR` (Off / On, Off por defecto), `FSRQuality` (NativeAA / Quality / Balanced / Performance /
@@ -339,7 +344,9 @@ Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
 - `[Audio]`: `Volume` (de 0 a 100: todo el juego), `MuteInBackground` (On / Off, Off por defecto: sin sonido mientras
   la ventana del juego está en segundo plano), `Output` (Stereo, el predeterminado / 5.1: el juego mezcla su sonido en
   5.1, como en la salida envolvente de la Switch; 5.1 lo reproduce en un equipo envolvente, Stereo lo reduce a dos
-  canales; se aplica al guardar)
+  canales; se aplica al guardar), `Device` (Default, el predeterminado: el dispositivo predeterminado del sistema,
+  también si cambia con el juego abierto / el nombre de un dispositivo como lo muestra el menú de ajustes: siempre ese
+  dispositivo, sin sonido mientras está desconectado; se aplica al guardar)
 - `[Application]`: `ConfirmExit` (preguntar antes de cerrar la ventana), y para el menú de ajustes `Language`
   (English / Spanish / 中文, chino simplificado / 한국어, coreano; un jugador nuevo recibe el idioma del sistema si es
   uno de estos, si no, inglés, y un Language guardado siempre se mantiene. Los caracteres chinos y coreanos salen de

@@ -403,6 +403,8 @@ bool equal(const Config &a, const Config &b) {
     SAME(ldn_room_serve_port);
     SAME(ldn_room_host);
     SAME(bonus_content);
+    SAME(backups_on);
+    SAME(save_backups);
     SAME(village_in_hub);
     SAME(quest_hold_send);
     SAME(share_urgent);
@@ -439,11 +441,12 @@ bool equal(const Config &a, const Config &b) {
     if (memcmp(a.binds, b.binds, sizeof a.binds))
         return false;
     if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key) ||
-        strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.save_location, b.save_location) || strcmp(a.game_dir, b.game_dir))
+        strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.save_location, b.save_location) || strcmp(a.backup_location, b.backup_location) || strcmp(a.game_dir, b.game_dir))
         return false;
     if (strcmp(a.ldn_ryu_servers, b.ldn_ryu_servers) || strcmp(a.ldn_ryu_host, b.ldn_ryu_host) ||
         strcmp(a.ldn_ryu_pass, b.ldn_ryu_pass) || strcmp(a.ldn_room_server, b.ldn_room_server) ||
-        strcmp(a.ldn_room_pass, b.ldn_room_pass) || strcmp(a.ldn_room_nick, b.ldn_room_nick))
+        strcmp(a.ldn_room_pass, b.ldn_room_pass) || strcmp(a.ldn_room_nick, b.ldn_room_nick) ||
+        strcmp(a.audio_device, b.audio_device))
         return false;
     for (int n = 0; n < 4; ++n)
         if (a.hp.scale[n] != b.hp.scale[n])
@@ -1810,6 +1813,7 @@ void reset_section() {
         c.volume = f.volume;
         c.mute_in_background = f.mute_in_background;
         c.audio_output = f.audio_output;
+        SDL_strlcpy(c.audio_device, f.audio_device, sizeof c.audio_device);
         break;
     case 2:
         c.face_buttons = f.face_buttons;
@@ -1867,6 +1871,8 @@ void reset_section() {
 #ifdef __ANDROID__
     case ANDROID_PAGE:
         SDL_strlcpy(c.save_dir, f.save_dir, sizeof c.save_dir);
+        c.backups_on = f.backups_on;
+        c.save_backups = f.save_backups;
         SDL_strlcpy(c.game_dir, f.game_dir, sizeof c.game_dir);
         break;
 #endif
@@ -1876,6 +1882,11 @@ void reset_section() {
         c.menu_scale = f.menu_scale;
         c.menu_confirm = f.menu_confirm;
         SDL_strlcpy(c.save_location, f.save_location, sizeof c.save_location);
+#ifndef __ANDROID__  // (Android: on its own tab)
+        c.backups_on = f.backups_on;
+        c.save_backups = f.save_backups;
+#endif
+        SDL_strlcpy(c.backup_location, f.backup_location, sizeof c.backup_location);
         c.button_icons = f.button_icons;
         c.confirm_exit = f.confirm_exit;
         c.updates = f.updates;
@@ -2101,6 +2112,26 @@ void mods_rows(std::vector<Row> &r) {
     action(r, "mods.forge", tr("Open the Forge menu"), []() { forge_requested = true; }, plugins);
     r.back().help = tr("The Forge plugins' own settings, over this menu. Cancel (the button that goes back in the game's menus) or Start + Back closes it and comes back here. On a keyboard the Forge menu key (Insert) opens and closes it.");
 }
+// The playback devices plugged in now, by the names [Audio] Device keeps (looked up once a second: the rows are
+// rebuilt every frame). Left out: a name the file couldn't hold or read back.
+std::vector<std::string> playback_devices() {
+    static std::vector<std::string> list;
+    static Uint64 when;
+    if (when && SDL_GetTicks() - when < 1000)
+        return list;
+    when = SDL_GetTicks();
+    list.clear();
+    int n = 0;
+    SDL_AudioDeviceID *ids = SDL_GetAudioPlaybackDevices(&n);  // (none before the game opens its audio)
+    for (int i = 0; ids && i < n; ++i) {
+        const char *name = SDL_GetAudioDeviceName(ids[i]);
+        if (name && *name && strlen(name) < sizeof s.draft.audio_device && !strpbrk(name, "\r\n;#") &&
+            SDL_strcasecmp(name, "Default") && std::find(list.begin(), list.end(), name) == list.end())
+            list.push_back(name);
+    }
+    SDL_free(ids);
+    return list;
+}
 std::vector<Row> main_rows() {
     std::vector<Row> r;
     Config &c = s.draft;
@@ -2150,6 +2181,26 @@ std::vector<Row> main_rows() {
         add_choice(r, "audio.output", "Output", c.audio_output, {tr("Stereo"), tr("5.1 surround")},
                    [](int v) { c.audio_output = v; }, ini("Output"));
         r.back().help = tr("5.1 surround sends the game's own 5.1 mix (front, center, subwoofer, rear) to a surround system; Stereo folds it down to two speakers or headphones. With 5.1 on a stereo device, the system folds it down instead.");
+        {  // [Audio] Device: Default, the devices plugged in now, and the chosen one also while it isn't
+            std::vector<std::string> devs = playback_devices();
+            const char *now = SDL_GetAudioDeviceName(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK);
+            std::vector<std::string> names{now && *now ? std::string(tr("Default")) + " (" + now + ")" : tr("Default")};
+            for (const std::string &d : devs)
+                names.push_back(d);
+            int sel = 0;
+            if (*c.audio_device && SDL_strcasecmp(c.audio_device, "Default")) {
+                auto it = std::find(devs.begin(), devs.end(), std::string(c.audio_device));
+                sel = 1 + (int)(it - devs.begin());
+                if (it == devs.end()) {
+                    devs.push_back(c.audio_device);
+                    names.push_back(std::string(c.audio_device) + " (" + tr("not plugged in") + ")");
+                }
+            }
+            add_choice(r, "audio.device", "Device", sel, names,
+                       [devs](int v) { SDL_strlcpy(c.audio_device, v > 0 ? devs[v - 1].c_str() : "", sizeof c.audio_device); },
+                       ini("Device"));
+            r.back().help = tr("Where the game's sound plays. Default follows the system's default device, also when it changes while the game runs. A device chosen here is always used: while it is unplugged there is no sound, and it comes back when the device does.");
+        }
         header(r, "graphics.header", tr("Graphics"));
         add_bool(r, "show.fps", "FPS counter", &c.show_fps, ini("ShowFPS"));
 #if defined(__ANDROID__) || defined(__APPLE__)
@@ -2470,6 +2521,18 @@ std::vector<Row> main_rows() {
         action(r, "save.location.reset", tr("Use the default folder"), []() { s.draft.save_location[0] = 0; },
                *c.save_location != 0);
         r.back().help = tr("Keeps the save in the default folder again (%APPDATA%\\MHGURecomp\\save on Windows, ~/.local/share/MHGURecomp/save on Linux) after Save and a restart. The save in the other folder is left where it is.");
+        add_bool(r, "backups", "Save backups", &c.backups_on, ini("Backups"));
+        r.back().help = tr("Each time the game saves, the save's files are copied to a folder named after the date and time. To restore one, close the game and copy its files into save_0. Off: no backups are made; those already made stay where they are.");
+        number(r, "backups.kept", "Backups to keep", &c.save_backups, (int)lo("BackupsKept"), (int)hi("BackupsKept"), 1, ini("BackupsKept"));
+        r.back().help = tr("How many save backups are kept: past this many, the oldest is deleted.");
+        text(r, "backup.location", "Backup folder", c.backup_location, sizeof c.backup_location,
+             *c.backup_location ? c.backup_location : tr("In the save folder"), ini("BackupLocation"));
+        r.back().help = tr("Where the save backups go, for example on another drive or in a folder you sync. Empty: a backups folder in the save folder, beside save_0. Type a path, or use Choose folder. Press Save, then restart the game. Backups already made stay where they are.");
+        action(r, "backup.location.pick", tr("Choose folder"), []() { ui_request_import(11); });
+        r.back().help = tr("Opens your system's folder picker to choose the backup folder.");
+        action(r, "backup.location.reset", tr("Use the save folder"), []() { s.draft.backup_location[0] = 0; },
+               *c.backup_location != 0);
+        r.back().help = tr("Puts the save backups in a backups folder in the save folder again, after Save and a restart. Backups in the other folder are left where they are.");
 #endif
         break;
 #ifdef __ANDROID__
@@ -2489,6 +2552,10 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Where the save is kept, so syncing software can keep it the same on your devices: pick the same folder on each. The folder holds save_0, like the PC version's save folder. Android asks for \"All files access\" so the app can use a folder outside its own. Press Save, then restart the app. Your current save is not moved: use Export save first to put it there.");
         action(r, "save.folder.reset", tr("Use the app's folder"), []() { s.draft.save_dir[0] = 0; }, *c.save_dir != 0);
         r.back().help = tr("Keeps the save in the app's own folder again (after Save and a restart). The save in the other folder is left where it is.");
+        add_bool(r, "backups", "Save backups", &c.backups_on, ini("Backups"));
+        r.back().help = tr("Each time the game saves, the save's files are copied to a folder named after the date and time. To restore one, close the game and copy its files into save_0. Off: no backups are made; those already made stay where they are.");
+        number(r, "backups.kept", "Backups to keep", &c.save_backups, (int)lo("BackupsKept"), (int)hi("BackupsKept"), 1, ini("BackupsKept"));
+        r.back().help = tr("How many save backups are kept: past this many, the oldest is deleted.");
         action(r, "import.save", tr("Import save"), []() { ui_request_import(2); });
         r.back().help = tr("Copies a save's system and system_backup files into the app from any folder on this device. Your current save is kept. The app closes afterwards.");
         action(r, "export.save", tr("Export save"), []() { ui_request_import(3); });
@@ -3521,6 +3588,9 @@ void settings_panel(bool *open) {
 #else
         Config temp = s.draft;  // (a folder whose path the settings file can't hold, with ';' or '#', is not taken)
         if (which == 4 && SDL_strlcpy(temp.save_location, folder, sizeof temp.save_location) < sizeof temp.save_location &&
+            config_validate(&temp, nullptr, 0))
+            s.draft = temp;
+        if (which == 11 && SDL_strlcpy(temp.backup_location, folder, sizeof temp.backup_location) < sizeof temp.backup_location &&
             config_validate(&temp, nullptr, 0))
             s.draft = temp;
 #endif

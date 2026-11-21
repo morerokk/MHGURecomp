@@ -75,10 +75,14 @@ static SDL_AtomicInt live_discord;
 static SDL_AtomicInt live_discord_hunter;
 // [Bonus Content]
 static SDL_AtomicInt live_bonus;
+// [Save Backups]
+static SDL_AtomicInt live_backups;
 // [Audio]
 static SDL_AtomicInt volume = {100};
 static SDL_AtomicInt mute_in_background;
 static SDL_AtomicInt audio_output;
+static SDL_SpinLock audio_device_lock;
+static char audio_device[sizeof saved.audio_device];
 // [Application]
 static SDL_AtomicInt confirm_exit = {1};
 static SDL_AtomicInt language = {0};
@@ -165,6 +169,8 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->lag_compensation != saved.lag_compensation) SDL_SetAtomicInt(&live_lagcomp, c->lag_compensation);
     if (all || c->ldn_direct != saved.ldn_direct) SDL_SetAtomicInt(&live_ldn_direct, c->ldn_direct);
     if (all || c->bonus_content != saved.bonus_content) SDL_SetAtomicInt(&live_bonus, c->bonus_content);
+    if (all || c->save_backups != saved.save_backups || c->backups_on != saved.backups_on)
+        SDL_SetAtomicInt(&live_backups, c->backups_on ? c->save_backups : 0);
 }
 void config_store_loaded(const Config *c) {
     publish_live(c, !have_saved);
@@ -173,6 +179,9 @@ void config_store_loaded(const Config *c) {
     SDL_SetAtomicInt(&volume, c->volume);
     SDL_SetAtomicInt(&mute_in_background, c->mute_in_background);
     SDL_SetAtomicInt(&audio_output, c->audio_output);
+    SDL_LockSpinlock(&audio_device_lock);
+    SDL_strlcpy(audio_device, c->audio_device, sizeof audio_device);
+    SDL_UnlockSpinlock(&audio_device_lock);
     SDL_SetAtomicInt(&confirm_exit, c->confirm_exit);
     SDL_SetAtomicInt(&show_fps, c->show_fps);
     SDL_SetAtomicInt(&menu_chord, c->menu_chord);
@@ -243,6 +252,7 @@ int config_live_sync_small_monsters(void) { return SDL_GetAtomicInt(&live_sync_z
 int config_live_lag_compensation(void) { return SDL_GetAtomicInt(&live_lagcomp); }
 int config_live_ldn_direct(void) { return SDL_GetAtomicInt(&live_ldn_direct); }
 int config_live_bonus_content(void) { return SDL_GetAtomicInt(&live_bonus); }
+int config_live_save_backups(void) { return SDL_GetAtomicInt(&live_backups); }
 void config_live_ldn_join(char *join, size_t size) {
     SDL_LockSpinlock(&live_ldn_lock);
     SDL_strlcpy(join, live_ldn_join, size);
@@ -288,6 +298,11 @@ float config_audio_gain(void) {
     return SDL_GetAtomicInt(&volume) / 100.0f;
 }
 int config_audio_output(void) { return SDL_GetAtomicInt(&audio_output); }
+void config_audio_device(char *name, size_t size) {
+    SDL_LockSpinlock(&audio_device_lock);
+    SDL_strlcpy(name, audio_device, size);
+    SDL_UnlockSpinlock(&audio_device_lock);
+}
 void config_window_focus(bool focused) { SDL_SetAtomicInt(&window_focused, focused); }
 bool config_confirm_exit(void) { return SDL_GetAtomicInt(&confirm_exit) != 0; }
 bool config_menu_chord(void) { return SDL_GetAtomicInt(&menu_chord) != 0; }

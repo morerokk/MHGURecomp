@@ -125,7 +125,8 @@ typedef struct {
     SplitDest *sdest;
     uint32_t nsdest;
     SDL_AudioStream *stream;
-    bool output;     // sound on (not MHGU_NO_AUDIO, SDL audio up): the stream follows [Audio] Output
+    bool output;     // sound on (not MHGU_NO_AUDIO, SDL audio up): the stream follows [Audio] Output and Device
+    SDL_AudioDeviceID dev;  // the device the stream was opened on (wanted_device), 0 none
     int out_ch;      // the stream's channels: 2, or 6 (5.1)
     FILE *wav;
     uint32_t wav_bytes;
@@ -1124,16 +1125,45 @@ static void to_device(const float *sink, float *out, uint32_t n, int channels) {
 static int output_channels(void) { return config_audio_output() == AUDIO_OUT_51 ? 6 : 2; }
 static void apply_gain(SDL_AudioStream *st);
 
+// [Audio] Device: SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK for the system's default (SDL itself moves a stream opened on it
+// to the new default when the system's changes: WASAPI, PipeWire, PulseAudio), else the named device's id while it
+// is plugged in, 0 while it isn't (no fallback to another device: sound comes back when it does). A device plugged
+// in again gets a new id, which is how the polling threads notice it.
+static SDL_AudioDeviceID wanted_device(char *name, size_t size) {
+    config_audio_device(name, size);
+    if (!*name || !SDL_strcasecmp(name, "Default")) return SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+    int n = 0;
+    SDL_AudioDeviceID *ids = SDL_GetAudioPlaybackDevices(&n), id = 0;  // (not the unplugged ones)
+    for (int i = 0; ids && i < n && !id; i++) {
+        const char *d = SDL_GetAudioDeviceName(ids[i]);
+        if (d && !strcmp(d, name)) id = ids[i];
+    }
+    SDL_free(ids);
+    return id;
+}
+
+// A stream on `dev` (wanted_device) with `spec`, resumed; NULL when the device isn't there or won't open.
+static SDL_AudioStream *open_device(const char *who, SDL_AudioDeviceID dev, const char *name, const SDL_AudioSpec *spec) {
+    if (!dev) { LOG("[%s] device \"%s\" not plugged in: no sound until it is\n", who, name); return NULL; }
+    SDL_AudioStream *st = SDL_OpenAudioDeviceStream(dev, spec, NULL, NULL);
+    if (!st) { LOG("[%s] SDL audio open failed (%d channels): %s\n", who, spec->channels, SDL_GetError()); return NULL; }
+    const char *real = SDL_GetAudioDeviceName(dev);  // (the default's: the current default device's name)
+    LOG("[%s] device %s%s\n", who, dev == SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK ? "default: " : "", real ? real : "?");
+    apply_gain(st);
+    SDL_ResumeAudioStreamDevice(st);
+    return st;
+}
+
+#define DEVICE_POLL_NS 500000000ull  // how often the audio threads look for [Audio] Device changes and (un)plugging
+
 // (Re)opens the SDL stream with `channels` (2, or 6 in SDL's 5.1 order, the sink's own). SDL converts to what the
 // device has: a stereo device gets 5.1 folded down by SDL, a 7.1 one gets it on its front / center / rear speakers.
-static void open_stream(Renderer *r, int channels) {
+static void open_stream(Renderer *r, int channels, SDL_AudioDeviceID dev, const char *name) {
     if (r->stream) SDL_DestroyAudioStream(r->stream);
     SDL_AudioSpec spec = {SDL_AUDIO_F32, channels, (int)r->sample_rate};
-    r->stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
-    r->out_ch = channels;  // (also after a failure: no retry every frame, only when the setting changes again)
-    if (!r->stream) { LOG("[audren] SDL audio open failed (%d channels): %s\n", channels, SDL_GetError()); return; }
-    apply_gain(r->stream);
-    SDL_ResumeAudioStreamDevice(r->stream);
+    r->stream = open_device("audren", dev, name, &spec);
+    r->out_ch = channels;  // (also after a failure: no retry every frame, only when the setting or device changes)
+    r->dev = dev;
 }
 
 static int64_t queued_frames(Renderer *r) {
@@ -1191,13 +1221,21 @@ static void *renderer_tick(void *arg) {
     // first holds half a device period less than the target (the device's pulls then swing it around the target).
     uint64_t period = (uint64_t)N * 1000000000ull / r->sample_rate;
     bool primed = !r->stream;
+    uint64_t dev_poll = 0;
     while (!r->quit) {
-        if (r->output && output_channels() != r->out_ch) {  // [Audio] Output changed in the settings menu
-            open_stream(r, output_channels());
-            p = pacing(r, N);
-            primed = !r->stream, next = 0;
-        }
         uint64_t t = plat_now_ns();
+        if (r->output) {  // [Audio] Output or Device changed in the settings menu, or the chosen device (un)plugged
+            char name[sizeof g_config.audio_device];
+            SDL_AudioDeviceID dev = r->dev;
+            if (t >= dev_poll) dev = wanted_device(name, sizeof name), dev_poll = t + DEVICE_POLL_NS;
+            if (output_channels() != r->out_ch || dev != r->dev) {
+                if (dev == r->dev) config_audio_device(name, sizeof name);
+                open_stream(r, output_channels(), dev, name);
+                p = pacing(r, N);
+                primed = !r->stream, next = 0;
+                t = plat_now_ns();
+            }
+        }
         int64_t q = queued_frames(r);
         if (!primed) {
             if (q >= p.prime) primed = true, next = t;
@@ -1588,7 +1626,13 @@ static void renderer_open_output(Renderer *r) {
     if (getenv("MHGU_NO_AUDIO") && strcmp(getenv("MHGU_NO_AUDIO"), "0")) return;
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) { LOG("[audren] SDL audio init failed: %s\n", SDL_GetError()); return; }
     r->output = true;
-    open_stream(r, output_channels());
+    int n = 0;
+    SDL_AudioDeviceID *ids = SDL_GetAudioPlaybackDevices(&n);
+    for (int i = 0; ids && i < n; i++) LOG("[audren] playback device %d: %s\n", i + 1, SDL_GetAudioDeviceName(ids[i]));
+    SDL_free(ids);
+    char name[sizeof g_config.audio_device];
+    SDL_AudioDeviceID dev = wanted_device(name, sizeof name);
+    open_stream(r, output_channels(), dev, name);
 }
 
 static void audio_renderer(Service *s, IpcReq *req, IpcResp *resp) {
@@ -1683,6 +1727,9 @@ typedef struct AudioOut {
     uint32_t rate, channels, state;
     uint64_t tags[64], sizes[64], datas[64];
     SDL_AudioStream *stream;
+    bool output;            // sound on: the stream follows [Audio] Device
+    SDL_AudioDeviceID dev;  // the device the stream was opened on (wanted_device), 0 none
+    int target;             // bytes to keep queued in the stream (audout_open)
     FILE *wav;
     uint32_t wav_bytes;
     int queued, released_n;
@@ -1753,18 +1800,32 @@ RT_ON_RESET(audio_reset) {
 
 // Buffers are copied into an SDL stream and released once the stream has drained below its target, so the
 // stream plays the role of the hardware queue. Without a device, buffers are released in real time.
+// (Re)opens the stream on `dev` (wanted_device), with its queue target: bytes of s16 at the source rate, two device
+// periods (close enough at 48 kHz)
+static void audout_open(AudioOut *a, SDL_AudioDeviceID dev, const char *name) {
+    if (a->stream) SDL_DestroyAudioStream(a->stream);
+    SDL_AudioSpec spec = {SDL_AUDIO_S16, (int)a->channels, (int)a->rate};
+    a->stream = open_device("audout", dev, name, &spec);
+    a->dev = dev;
+    SDL_AudioSpec fmt;
+    int dev_frames = 0;
+    if (!a->stream || !SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(a->stream), &fmt, &dev_frames) || dev_frames <= 0)
+        dev_frames = 1024;
+    a->target = 2 * dev_frames * 2 * (int)a->channels;
+}
+
 static void *audout_thread(void *arg) {
     AudioOut *a = arg;
     uint32_t ch = a->channels ? a->channels : 2;
-    int target = 0;
-    if (a->stream) {
-        SDL_AudioSpec dev;
-        int dev_frames = 0;
-        if (!SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(a->stream), &dev, &dev_frames) || dev_frames <= 0)
-            dev_frames = 1024;
-        target = 2 * dev_frames * 2 * (int)ch;  // bytes of s16 at the source rate (close enough at 48 kHz)
-    }
+    uint64_t dev_poll = plat_now_ns() + DEVICE_POLL_NS;
     while (!a->quit) {
+        if (a->output && plat_now_ns() >= dev_poll) {  // [Audio] Device changed, or the chosen device (un)plugged
+            char name[sizeof g_config.audio_device];
+            SDL_AudioDeviceID dev = wanted_device(name, sizeof name);
+            if (dev != a->dev) audout_open(a, dev, name);
+            dev_poll = plat_now_ns() + DEVICE_POLL_NS;
+        }
+        int target = a->target;
         pthread_mutex_lock(&a->lock);
         uint64_t size = 0, tag = 0, data = 0;
         if (a->state == 0 && a->queued) { size = a->sizes[0]; tag = a->tags[0]; data = a->datas[0]; }
@@ -1877,12 +1938,10 @@ SERVICE("audout:u", audout_u) {
         a->event = kernel_create_event_pair(&a->ev_w, &a->ev_r);
         if (getenv("MHGU_AUDOUT_WAV")) a->wav = fopen(getenv("MHGU_AUDOUT_WAV"), "wb");
         if (!(getenv("MHGU_NO_AUDIO") && strcmp(getenv("MHGU_NO_AUDIO"), "0")) && SDL_InitSubSystem(SDL_INIT_AUDIO)) {
-            SDL_AudioSpec spec = {SDL_AUDIO_S16, (int)a->channels, (int)a->rate};
-            a->stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
-            if (a->stream) {
-                apply_gain(a->stream);
-                SDL_ResumeAudioStreamDevice(a->stream);
-            }
+            char name[sizeof g_config.audio_device];
+            SDL_AudioDeviceID dev = wanted_device(name, sizeof name);
+            audout_open(a, dev, name);
+            a->output = true;
         }
         pthread_create(&a->thread, NULL, audout_thread, a);
         audio_track(NULL, a);

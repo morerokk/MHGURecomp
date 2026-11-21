@@ -217,6 +217,12 @@ const char *plat_utf8_path(const char *path, char *buf, size_t size) {
     return buf;
 }
 
+bool plat_plain_entry(const char *path, bool dir) {
+    DWORD a = GetFileAttributesA(path);  // (a symlink or junction is a reparse point; GetFileAttributes doesn't follow it)
+    if (a == INVALID_FILE_ATTRIBUTES || (a & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+    return dir ? (a & FILE_ATTRIBUTE_DIRECTORY) != 0 : !(a & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_DEVICE));
+}
+
 static int count_files(const char *dir, int depth) {
     char pat[MAX_PATH * 2];
     if (depth > 32 || snprintf(pat, sizeof pat, "%s\\*", dir) >= (int)sizeof pat) return 0;

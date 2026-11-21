@@ -206,7 +206,7 @@ Android 上的公开互联网集会所只与其他 Android 玩家共享。如果
 
 Escape、Insert、F1 以及 F7 到 F12 被重编译层保留，无法绑定。
 
-有时游戏会要求你用键盘输入文字，比如给猎人起名或重命名道具组合。用键盘输入文字，`ENTER` 确认，`ESC` 取消。在多人游戏大厅中可以按 `/` 键自由聊天。
+有时游戏会要求你用键盘输入文字，比如给猎人起名或重命名道具组合。用键盘输入文字，`ENTER` 确认，`ESC` 取消。在多人游戏大厅中可以按 `/` 键自由聊天。在线的集会所或酒馆里，右下角的按键提示会把这个键显示为**聊天**（即使用手柄游玩也显示键盘按键），而游戏本身打开快捷短语和聊天记录的 ZR 提示会改名为**聊天记录**（使用游戏语言的原文）。
 
 其他实用按键：
 
@@ -225,7 +225,7 @@ Escape、Insert、F1 以及 F7 到 F12 被重编译层保留，无法绑定。
 <summary><b>全部设置，按 <code>mhgurecomp.ini</code> 的分节列出</b></summary>
 
 
-- `[Display]`：`Mode`（Borderless / Fullscreen / Windowed），`Resolution`，`RenderResolution`（3D 渲染分辨率），`AspectRatio`（Auto 跟随窗口：16:10 及更宽的比例会填满窗口，更窄的则显示为带黑边的 16:10），`FOV`（1.0 = 游戏原始值），`UIAnchor`（Center 在超宽屏上把 HUD 保持在中间的 16:9 区域内，Edges 则把它铺到两侧）
+- `[Display]`：`Mode`（Borderless / Fullscreen / Windowed），`Resolution`，`RenderResolution`（3D 渲染分辨率），`AspectRatio`（Auto 跟随窗口：16:10 及更宽的比例会填满窗口，更窄的则显示为带黑边的 16:10），`FOV`（1.0 = 游戏原始值），`UIAnchor`（Center 在超宽屏上把 HUD 保持在中间的 16:9 区域内，Edges 则把它铺到两侧）。窗口会以上次关闭游戏时的位置和大小（直到更改 `Resolution`）在同一台显示器上打开（全屏也是如此），并保持用 F11 / Alt+Enter 切换后的窗口或全屏状态（直到更改 `Mode`），位置保存在 `mhgurecomp.ini` 旁边的 `window.txt` 中（Wayland 除外，那里程序无法自行放置窗口）
 - `[Anti-aliasing]`：`MSAA`（Off / 2x / 4x / 8x），`FXAA`（On / Off），`FXAAMode`（Original / 3_11：用 FXAA 3.11 代替 GU 自带的 FXAA，纹理更锐利；默认 Original）
 - `[Upscaler]`：`FSR`（Off / On，默认 Off），`FSRQuality`（NativeAA / Quality / Balanced / Performance / UltraPerformance），`Sharpness`。FSR 开启时会取代 MSAA 和 FXAA。详情：`docs/FSR-PORT.md`
 - `[Graphics]`：`DrawDistance`（村庄和集会所中的人物在多远距离内仍会被绘制：1 = 游戏原始值，2 = 两倍距离，0.5 = 一半，0 = 无限制；最大 10）
@@ -239,7 +239,7 @@ Escape、Insert、F1 以及 F7 到 F12 被重编译层保留，无法绑定。
 - `[Quest Rewards]`：`HoldASend`（默认 On：任务结束时，在奖励箱的“送入道具箱”画面长按 A，可把道具一个接一个地送入道具箱）
 - `[Discord]`：`RichPresence`（默认 On：你的 Discord 个人资料会显示你所在的位置、正在狩猎的怪物和地图，以及你的集会所或任务中有几个人；Discord 必须在同一台电脑上运行），`ShowHunter`（默认 On：同时显示你的猎人名称、HR 和武器种类）
 - `[Bonus Content]`：`BonusContent`（默认 On），见下文
-- `[Audio]`：`Volume`（0 到 100：整个游戏的音量），`MuteInBackground`（On / Off，默认 Off：游戏窗口位于后台时不发声），`Output`（Stereo，默认 / 5.1：游戏本身以 5.1 混音，与 Switch 的环绕声输出相同；5.1 在环绕声系统上播放，Stereo 则合并为两个声道；按「保存」后生效）
+- `[Audio]`：`Volume`（0 到 100：整个游戏的音量），`MuteInBackground`（On / Off，默认 Off：游戏窗口位于后台时不发声），`Output`（Stereo，默认 / 5.1：游戏本身以 5.1 混音，与 Switch 的环绕声输出相同；5.1 在环绕声系统上播放，Stereo 则合并为两个声道；按「保存」后生效），`Device`（Default，默认：系统的默认设备，游戏运行中更改也会跟随 / 设置菜单中列出的设备名称：始终使用该设备，断开期间没有声音；按「保存」后生效）
 - `[Application]`：`ConfirmExit`（关闭窗口前先询问），以及设置菜单的 `Language`（English / Spanish / 中文，即简体中文 / 한국어，即韩语；新玩家会使用系统语言（如果是其中之一），否则为英语，已保存的 Language 始终保持不变。中文和韩文字形来自程序旁边的 `mhgurecomp-cjk.otf`，否则来自系统字体（Android：Noto Sans CJK）；模组可以以 romfs `nativeNX/forge/fonts/MHGU-CJK.ttf` 的形式自带字体），`ButtonIcons`（Xbox / Switch / PlayStation），`Theme`（Hunter，默认 / Gold / Blue：设置菜单的配色）和 `MenuScale`（50 到 200 百分比），以及 `Updates`（Ask / Auto / Off：`mhgurecomp-updater` 的行为，见“保持最新”）。使用鼠标时，拖动设置菜单顶部（标签页）可移动它，拖动右下角的手柄可调整大小；「菜单选项」>「固定菜单」（Menu Options > Attach menu）可把它放回原位。
 
 </details>

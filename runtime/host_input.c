@@ -343,9 +343,12 @@ static void control_poll(void) {
                 forge_test_hook((uint32_t)strtoul(arg, NULL, 16));
                 continue;
             }
-            if (!strcmp(cmd, "interpwatch")) {  // interpwatch <guest hex addr> <file of hex entries>: run those game
-                // functions (and all game code they call) in the interpreter, logging what changes the word at addr
+            if (!strcmp(cmd, "interpwatch")) {  // interpwatch <guest hex addr> <file of hex entries> [n]: run those game
+                // functions (and all game code they call) in the interpreter, logging the first n (default 40) changes
+                // of the word at addr
                 void interp_watch(uint32_t, int);
+                char arg3[16] = "";
+                sscanf(line, "%*s %*s %*s %15s", arg3);
                 void interp_add_range(uint32_t, uint32_t);
                 int dispatch_interpret(uint32_t, uint32_t);
                 FILE *fl = fopen(arg2, "r");
@@ -357,7 +360,7 @@ static void control_poll(void) {
                     if (e && dispatch_interpret(e, e + 4) > 0) n++;
                 }
                 if (fl) fclose(fl);
-                interp_watch((uint32_t)strtoul(arg, NULL, 16), 40);
+                interp_watch((uint32_t)strtoul(arg, NULL, 16), atoi(arg3) > 0 ? atoi(arg3) : 40);
                 LOG("[watch] %s: %d functions interpreted\n", arg, n);
                 continue;
             }
@@ -876,12 +879,14 @@ static void menu_ptr_click(int btn, float mx, float my, int clicks) {
     if (hit >= 0) menuptr_select_at(hit, true, menu_ptr_gx, menu_ptr_gy);
     else if (hit == MENUPTR_PAGE_LEFT) host_input_press("LEFT", 12);
     else if (hit == MENUPTR_PAGE_RIGHT) host_input_press("RIGHT", 12);
-    // (a screen of a hunt's menu with no known cells - an option being changed in Options, Quest Info...: the click is
-    // Confirm there, as a right click is Cancel; a click beside a known menu's rows still does nothing)
-    else if (!menuptr_open()) host_input_press("A", 12);
+    // (a screen of a hunt's menu with no known cells - an option being changed in Options, Quest Info..., a "how many?"
+    // count or a message waiting for Confirm: the click is Confirm there, as a right click is Cancel; a click beside a
+    // known menu's rows still does nothing)
+    else if (!menuptr_open() || menuptr_click_confirms()) host_input_press("A", 12);
 }
 static void menu_ptr_wheel(int n) {  // (n > 0 up: a menu of pages turns to the previous one; else the row above)
     if (menuptr_slider_open()) return menuptr_slider_step(n > 0 ? 1 : -1);  // (Skin Tone: a tone a notch)
+    if (menuptr_spinner_open()) return menuptr_spinner_step(n);  // (a "how many?": the count, up or down a notch)
     if (menuptr_pages() > 1) return menuptr_page_turn(n > 0 ? -1 : 1);
     int cell = menuptr_row(), cells = menuptr_rows(), cols = menuptr_cols();
     if (cell < 0 || cells <= 0) return;

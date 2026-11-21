@@ -251,7 +251,7 @@ SDL을 지원하기만 하면 세상의 거의 모든 컨트롤러가 작동할 
 
 Escape, Insert, F1, F7~F12는 리컴프가 사용하므로 지정할 수 없습니다.
 
-헌터 이름을 정하거나 아이템 세트 이름을 바꿀 때처럼 게임이 키보드 입력을 요구할 때가 있습니다. 키보드로 텍스트를 입력하고, `ENTER`로 확인하거나 `ESC`로 취소하세요. 멀티플레이 로비에서는 `/` 키로 자유 채팅을 할 수 있습니다.
+헌터 이름을 정하거나 아이템 세트 이름을 바꿀 때처럼 게임이 키보드 입력을 요구할 때가 있습니다. 키보드로 텍스트를 입력하고, `ENTER`로 확인하거나 `ESC`로 취소하세요. 멀티플레이 로비에서는 `/` 키로 자유 채팅을 할 수 있습니다. 온라인 집회소나 주점에서는 오른쪽 아래 버튼 안내에 이 키가 **채팅**으로 표시되며(컨트롤러로 플레이할 때도 키보드 키로 표시), 정형문과 채팅 기록을 여는 게임 자체의 ZR 안내는 **채팅 로그**라는 이름이 됩니다(게임 언어의 텍스트 그대로).
 
 그 밖의 유용한 키:
 
@@ -274,7 +274,8 @@ Escape, Insert, F1, F7~F12는 리컴프가 사용하므로 지정할 수 없습�
 - `[Display]`: `Mode` (Borderless / Fullscreen / Windowed), `Resolution`, `RenderResolution`(3D 해상도),
   `AspectRatio`(Auto는 창을 따릅니다. 16:10 이상으로 넓으면 창을 채우고, 그보다 좁으면 16:10에 검은 띠가 생깁니다), `FOV`
   (1.0 = 게임 기본값), `UIAnchor`(Center는 울트라와이드 화면에서 HUD를 가운데 16:9 영역에 두고, Edges는 양옆
-  가장자리로 펼칩니다)
+  가장자리로 펼칩니다). 창은 게임을 마지막으로 닫았을 때의 위치와 크기(`Resolution`을 바꾸기 전까지)로 같은 모니터에서 열리며(전체 화면도 마찬가지), F11 / Alt+Enter로 바꿔 둔 창 모드나 전체 화면도 그대로입니다(`Mode`를 바꾸기 전까지).
+  이 위치는 `mhgurecomp.ini` 옆의 `window.txt`에 저장됩니다(프로그램이 창 위치를 정할 수 없는 Wayland 제외)
 - `[Anti-aliasing]`: `MSAA` (Off / 2x / 4x / 8x), `FXAA` (On / Off), `FXAAMode` (Original / 3_11: GU의 FXAA 대신
   FXAA 3.11을 사용해 텍스처가 더 선명합니다. 기본값 Original)
 - `[Upscaler]`: `FSR` (Off / On, 기본값 Off), `FSRQuality` (NativeAA / Quality / Balanced / Performance /
@@ -316,7 +317,9 @@ Escape, Insert, F1, F7~F12는 리컴프가 사용하므로 지정할 수 없습�
 - `[Bonus Content]`: `BonusContent` (기본값 On), 아래 참고
 - `[Audio]`: `Volume` (0~100: 게임 전체), `MuteInBackground` (On / Off, 기본값 Off: 게임 창이 백그라운드에 있을 때
   소리를 끔), `Output` (Stereo(기본값) / 5.1: 게임은 Switch의 서라운드 출력처럼 소리를 5.1로 믹스합니다.
-  5.1은 서라운드 시스템으로 재생하고, Stereo는 2채널로 다운믹스합니다. 저장하면 적용)
+  5.1은 서라운드 시스템으로 재생하고, Stereo는 2채널로 다운믹스합니다. 저장하면 적용), `Device` (Default(기본값):
+  시스템의 기본 장치, 게임 중에 바뀌어도 따라감 / 설정 메뉴에 나오는 장치 이름: 항상 그 장치, 분리되어 있는 동안에는
+  소리 없음. 저장하면 적용)
 - `[Application]`: `ConfirmExit`(창을 닫기 전에 확인), 설정 메뉴의 `Language` (English /
   Spanish / 中文(중국어 간체) / 한국어. 처음 실행하는 플레이어는 시스템 언어가 이 중 하나면 그 언어로,
   아니면 English로 설정되며, 저장된 Language는 항상 유지됩니다. 중국어와 한국어 글리프는 프로그램 옆의 `mhgurecomp-cjk.otf`에서, 없으면 시스템 글꼴(Android: Noto Sans CJK)에서 가져옵니다. 모드가 romfs

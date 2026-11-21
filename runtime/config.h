@@ -91,7 +91,9 @@ typedef struct {
     float draw_distance;      // [Graphics] DrawDistance: town NPCs' fade distance factor, 0 no limit (config.c npc_fade_dist2)
     int mute_in_background;   // [Audio] MuteInBackground: no sound while the window is not focused (config_audio_gain)
     int audio_output;         // [Audio] Output: AUDIO_OUT_*, the game's 5.1 mix folded to stereo or played as it is
-    int combo_window;         // [Controls] ComboInputWindow: COMBO_*, how long a press waits for a second button
+    char audio_device[256];   // [Audio] Device: the playback device's name as SDL gives it; "" (or "Default") the system's
+                              // default, followed when it changes (runtime/services/audio.c)
+    int combo_window;        // [Controls] ComboInputWindow: COMBO_*, how long a press waits for a second button
     char ldn_server[256];     // [Multiplayer] Server: hub server for internet hubs (host[:port]); "" the default, "Off" none
     char ldn_key[64];         // [Multiplayer] Key: matchmaking key, hubs seen only by players with the same; "" public
     int ldn_direct;           // [Multiplayer] Direct: in an internet hub, game packets go straight between the players when
@@ -133,6 +135,9 @@ typedef struct {
     int show_battery;         // [Performance] ShowBattery: BATTERY_*, the battery's charge beside the frame rate or alone
     char save_location[256];  // [Application] SaveLocation (PC): the folder holding the save (save_0/), "" the default
                               // (%APPDATA%\MHGURecomp\save, ~/.local/share/MHGURecomp/save: main.c)
+    int backups_on;           // [Save Backups] Backups: a copy of the save at each save (services/fs.c)
+    int save_backups;         // [Save Backups] BackupsKept: how many of those copies are kept, 1-100
+    char backup_location[256]; // [Save Backups] BackupLocation (PC): the folder the backups go in, "" <save folder>/backups
     char save_dir[256];       // [Android] SaveFolder: the folder holding the save (save_0/), "" the app's own (fs.c)
     char game_dir[256];       // [Android] GameFolder: the folder holding exefs/ and romfs/, "" the app's own (main.c)
     char ldn_ryu_servers[256]; // [Multiplayer] RyuServers: Ryujinx LDN servers searched for crossplay (host[:port], comma separated); "" none
@@ -283,6 +288,7 @@ void config_live_ldn_join(char *join, size_t size);  // [Multiplayer] Join: the 
 int config_live_ldn_direct(void);  // [Multiplayer] Direct (net/ldn.c: for the next player link)
 int config_live_sync_small_monsters(void);  // [Multiplayer] SyncSmallMonsters (net/emsync.c)
 int config_live_lag_compensation(void);  // [Multiplayer] LagCompensation (net/hitsync.c)
+int config_live_save_backups(void);     // [Save Backups] BackupsKept while Backups is on, else 0 (services/fs.c)
 int config_live_bonus_content(void);    // [Bonus Content] BonusContent: each time the game opens a save (services/bonus.c)
 int config_live_discord(void);         // [Discord] RichPresence
 int config_live_discord_hunter(void);  // [Discord] ShowHunter
@@ -291,6 +297,7 @@ void config_live_ldn(char *server, size_t server_size, char *key, size_t key_siz
 bool config_restart_required(const Config *draft); // Raw cold fields vs this process's startup INI values.
 float config_audio_gain(void);  // atomic, safe on audio threads; 0 while muted in the background
 int config_audio_output(void);  // [Audio] Output as saved (AUDIO_OUT_*), atomic: the audio thread reopens the device
+void config_audio_device(char *name, size_t size);  // [Audio] Device as saved ("" the default), for the audio threads
 void config_window_focus(bool focused);  // the window got / lost the focus (runtime/host_input.c)
 int config_language(void);     // last saved UI language, atomic across host threads
 bool config_confirm_exit(void); // atomic, safe on the host main thread
