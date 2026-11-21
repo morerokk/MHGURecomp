@@ -22,6 +22,7 @@ func main() {
 	flag.IntVar(&cfg.ListMax, "list-max", cfg.ListMax, "hubs in one search answer (a random choice when there are more)")
 	flag.IntVar(&cfg.ListSearchMax, "list-search-max", cfg.ListSearchMax, "Hunter Search networks in one search answer, after the hubs (a random choice when there are more)")
 	flag.Float64Var(&cfg.Bandwidth, "bandwidth", cfg.Bandwidth, "bytes a second per player link and direction")
+	flag.IntVar(&cfg.MaxPresence, "max-presence", cfg.MaxPresence, "players online at once that the friends list keeps track of (protocol 4)")
 	minProto := flag.Uint("min-proto", uint(cfg.MinProto), "oldest link protocol (the game's PROTO_VERSION) served; older games are refused (0: any)")
 	maxProto := flag.Uint("max-proto", uint(cfg.MaxProto), "newest link protocol served; newer ones are refused (0: any)")
 	flag.BoolVar(&cfg.SeparatePhones, "separate-phones", cfg.SeparatePhones, "public hubs of Android players among Android players only, as the game asks (-separate-phones=false: one public room for all)")

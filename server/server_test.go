@@ -84,6 +84,13 @@ func host(t *testing.T, s *Server, room byte, players byte) (*net.TCPConn, uint6
 func list(t *testing.T, s *Server, proto uint16, room byte) map[uint64][]byte {
 	c := dial(t, s)
 	send(t, c, tList, header(proto, room))
+	if proto >= protoSessions { // (HUBS4: server_v4_test.go)
+		out := map[uint64][]byte{}
+		for _, h := range readHubs4(t, c) {
+			out[h.id] = h.info
+		}
+		return out
+	}
 	p := expect(t, c, tHubs)
 	n := binary.LittleEndian.Uint32(p)
 	out := map[uint64][]byte{}
@@ -137,8 +144,11 @@ func TestMinProto(t *testing.T) {
 	if l := list(t, s, 3, 0); len(l) != 1 || l[id] == nil {
 		t.Fatalf("protocol 3 list %v", l)
 	}
-	if l := list(t, s, 4, 0); len(l) != 0 {
-		t.Fatal("protocol 4 sees a protocol 3 hub")
+	if l := list(t, s, 4, 0); len(l) != 1 || l[id] == nil { // (4 plays with 3: TestPool34)
+		t.Fatalf("protocol 4 list %v", l)
+	}
+	if l := list(t, s, 5, 0); len(l) != 0 {
+		t.Fatal("protocol 5 sees a protocol 3 hub")
 	}
 }
 
