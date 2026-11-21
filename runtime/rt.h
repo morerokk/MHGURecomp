@@ -157,6 +157,7 @@ void guest_call(Cpu *c, uint32_t addr);   // call a guest function (saves / rest
 uint32_t guest_sym(const char *name);     // cached loader_find_symbol, fatal if missing
 uint32_t hle_alloc(uint32_t size);        // zeroed guest memory owned by the host (never freed): guest address
 extern const char *g_game_dir;            // folder holding exefs/ and romfs/
+extern const char *g_backup_dir;          // host folder for save backups, NULL: <g_save_dir>/backups (services/fs.c)
 extern const char *g_save_dir;            // host folder for save data (services/fs.c; MHGU_SAVE_DIR overrides)
 void rt_unwind_point(void);
 extern volatile int g_rt_unwind;
