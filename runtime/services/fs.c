@@ -19,7 +19,7 @@
 #define FS_NOT_EMPTY MAKE_RESULT(2, 8)
 
 const char *g_save_dir = "save";
-const char *g_backup_dir;  // ([Application] BackupLocation, ui.c; MHGU_BACKUP_DIR overrides)
+const char *g_backup_dir;  // ([Save Backups] BackupLocation, ui.c; MHGU_BACKUP_DIR overrides)
 
 // ------------------------------------------------------------------ IStorage (the RomFS image)
 static void storage(Service *s, IpcReq *req, IpcResp *resp) {
@@ -191,13 +191,15 @@ static void fs_discard(HostFs *fs) {
 }
 
 // ------------------------------------------------------------------ save backups
-// [Application] SaveBackups: after each commit of save_0, and at its first mount in a run (before this run changes it),
+// [Save Backups] SaveBackups: after each commit of save_0, and at its first mount in a run (before this run changes it),
 // its files are copied to <backups>/<date>_<time>/, <backups> being BackupLocation or <save folder>/backups. A copy is
 // made in <name>.partial and renamed when complete, so a folder without the extension always holds a whole save. One
-// that would be the same as the newest is not made (a start right after a save); past SaveBackups, the oldest go.
+// that would be the same as the newest is not made (a start right after a save); one of a commit soon after a save's
+// replaces that one (the game saves system and system_backup in two commits); past SaveBackups, the oldest go.
 // A failure only logs: the game's save itself has already succeeded.
 #define BACKUP_EXT ".partial"
 #define MAX_BACKUPS 512
+#define SAVE_STEPS_SECONDS 5  // (commits this close after a save's backup: more steps of the same save, ~1 s apart)
 static int rm_rf(const char *p, bool keep_root);
 static void mkdirs(const char *path);
 
@@ -337,6 +339,22 @@ static void save_backup(const char *save, const char *why) {
         if (d) closedir(d);
         if (ok && d && !rename(part, path)) {
             LOG("[fs] save backup (%s): %s\n", why, path);
+            // (the game saves in steps, a commit each: system, then system_backup. The backup of an earlier step
+            // of the same save, this run's newest, is half of it: the new one takes its place)
+            static char step[64];
+            static time_t step_at;
+            bool saving = !strcmp(why, "save");
+            if (saving && step[0] && n && !strcmp(names[n - 1], step) && now - step_at <= SAVE_STEPS_SECONDS) {
+                char old[1300];
+                snprintf(old, sizeof old, "%s/%s", root, names[n - 1]);
+                if (!rm_rf(old, false)) {  // (and the new one takes its name: the save's time, without _02)
+                    if (!rename(path, old)) snprintf(name, sizeof name, "%s", names[n - 1]);
+                    LOG("[fs] earlier step of this save's backup replaced: %s\n", old);
+                }
+                free(names[--n]);
+            }
+            snprintf(step, sizeof step, "%s", saving ? name : "");
+            step_at = now;
             if (n == MAX_BACKUPS) free(names[--n]);
             names[n++] = NULL;  // (the new one: counts toward the kept ones, never deleted)
         } else {

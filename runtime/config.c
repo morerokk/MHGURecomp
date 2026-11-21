@@ -633,6 +633,7 @@ static const char DEFAULT_INI[] =
     "; Your save is not moved: copy save_0 there yourself. Takes effect at the next start\n"
     "SaveLocation =\n"
     "\n"
+    "[Save Backups]\n"
     "; How many backups of the save are kept. Each time the game saves, and once at each start, a copy of save_0's files\n"
     "; goes in a folder named after the date and time; past this many, the oldest is deleted. 0: no backups.\n"
     "; To restore one, close the game and copy its files into save_0. 0-100\n"
@@ -891,8 +892,8 @@ const ConfigSetting g_settings[] = {
     {"Application", "MenuScale", SET_INT, F(menu_scale), 0, 50, 200, NULL, NULL, false, ERR_SCALE},
     {"Application", "Updates", SET_CHOICE, F(updates), 0, 0, 0, "Ask,Auto|automatic,Off|never", NULL, false, ERR_UPDATES},
     {"Application", "SaveLocation", SET_TEXT, F(save_location), sizeof g_config.save_location, 0, 0, NULL, NULL, true, ERR_FOLDER},
-    {"Application", "SaveBackups", SET_INT, F(save_backups), 0, 0, 100, NULL, NULL, false, ERR_BACKUPS},
-    {"Application", "BackupLocation", SET_TEXT, F(backup_location), sizeof g_config.backup_location, 0, 0, NULL, NULL, true, ERR_BACKUP_FOLDER},
+    {"Save Backups", "SaveBackups", SET_INT, F(save_backups), 0, 0, 100, NULL, NULL, false, ERR_BACKUPS},
+    {"Save Backups", "BackupLocation", SET_TEXT, F(backup_location), sizeof g_config.backup_location, 0, 0, NULL, NULL, true, ERR_BACKUP_FOLDER},
 };
 #undef ON_OFF
 #undef KEYS

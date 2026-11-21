@@ -75,7 +75,7 @@ static SDL_AtomicInt live_discord;
 static SDL_AtomicInt live_discord_hunter;
 // [Bonus Content]
 static SDL_AtomicInt live_bonus;
-// [Application]
+// [Save Backups]
 static SDL_AtomicInt live_backups;
 // [Audio]
 static SDL_AtomicInt volume = {100};

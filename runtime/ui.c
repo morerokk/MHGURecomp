@@ -383,7 +383,7 @@ void ui_init(void) {
             LOG("[ui] SaveLocation \"%s\" can't be used (made or opened): the save stays in %s\n", g_config.save_location,
                 g_save_dir);
     }
-    if (g_config.backup_location[0]) {  // ([Application] BackupLocation: MHGU_BACKUP_DIR still wins, fs.c)
+    if (g_config.backup_location[0]) {  // ([Save Backups] BackupLocation: MHGU_BACKUP_DIR still wins, fs.c)
         static char backups[1100];
         if (plat_use_folder(g_config.backup_location, backups, sizeof backups)) {
             g_backup_dir = backups;
