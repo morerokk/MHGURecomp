@@ -101,6 +101,7 @@ static void boot(const char *root) {
     netrate_init();  // (debug, MHGU_NETRATE: runtime/hle/netrate.c)
     cheats_init();  // (cheat codes from cheats/: runtime/cheats.c)
     discord_init();  // (Discord Rich Presence: runtime/net/discord.c, runtime/hle/presence.c)
+    { void ldn_friends_start(void); ldn_friends_start(); }  // (friends on the hub server: runtime/net/ldn.c; after ui_init's SaveLocation)
     { void sampler_init(void); sampler_init(); }  // (debug, Windows, MHGU_SAMPLE: runtime/sampler.c)
 
     uint32_t stack_size = 0x100000;

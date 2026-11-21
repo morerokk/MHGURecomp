@@ -18,6 +18,7 @@ typedef struct {
     int64_t start;         // Unix time the elapsed timer counts from (0: none)
     int party, party_max;  // "(2 of 4)" (0: none)
     char party_id[64];     // the same for every player of a party
+    char join_secret[160]; // with a party: lets others "Join" from Discord (ldn_join_secret; "": not joinable)
 } DiscordActivity;
 
 void discord_init(void);

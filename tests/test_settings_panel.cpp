@@ -4,6 +4,7 @@
 #include "app_actions.h"
 #include "overlay.h"
 #include "modorder.h"
+#include "net/net.h"
 #include "imgui_internal.h"
 #include <SDL3/SDL.h>
 #include <cassert>
@@ -41,6 +42,13 @@ extern "C" const char *plat_utf8_path(const char *path, char *buf, size_t size) 
 }
 extern "C" int ldn_hub_status(const char *, const char *, int *, int *) { return 0; }
 extern "C" void ldn_hub_check(const char *, const char *) {}
+extern "C" bool ldn_session_code(char *, size_t) { return false; }
+extern "C" bool ldn_join_code(const char *, const char *) { return true; }
+extern "C" int ldn_invite_state(char *code, size_t size) { if (code) snprintf(code, size, "ABCD-EFGH"); return 0; }
+extern "C" void ldn_my_friend_code(char *out, size_t size) { snprintf(out, size, "ABCD-EFGH-JKMN-PQRS"); }
+extern "C" int ldn_friends(LdnFriend *, int, int *server_state) { if (server_state) *server_state = 0; return 0; }
+extern "C" const char *ldn_friend_add(const char *) { return nullptr; }
+extern "C" void ldn_friend_remove(const char *) {}
 extern "C" bool forge_plugins_have(int) { return false; }  // (no Forge plugins started)
 extern "C" int forge_plugin_titles(const char **, int) { return 0; }
 // (cheats.c: two cheats, a master code and one that can be turned off)

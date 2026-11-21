@@ -835,6 +835,105 @@ void hub_check(std::vector<Row> &rows) {
     r.activate = []() { ldn_hub_check(s.draft.ldn_server, s.draft.ldn_key); };
     rows.push_back(std::move(r));
 }
+// Session codes and friends (runtime/net/ldn.c, link version 4): the code of the hub you're in and the friend code to
+// share (Confirm copies them), join by code, and the friends with what they're doing (Confirm on one in a hub joins
+// it the way a code does). Remove friends turns Confirm on a friend into removing it.
+void friends_rows(std::vector<Row> &rows) {
+    static uint64_t copied_at;
+    static std::string copied;
+    static bool removing;
+    auto copy_row = [&](const char *id, const char *title, const std::string &code, const char *none, const char *help) {
+        Row r;
+        r.id = id;
+        r.title = tr(title);
+        bool shown = !copied.empty() && copied == code && SDL_GetTicks() - copied_at < 2000;
+        r.value = code.empty() ? std::string(tr(none)) : shown ? std::string(tr("Copied")) : code;
+        r.help = tr(help);
+        r.enabled = !code.empty();
+        r.activate = [code]() {
+            if (code.empty()) return;
+            SDL_SetClipboardText(code.c_str());
+            copied = code, copied_at = SDL_GetTicks();
+        };
+        rows.push_back(std::move(r));
+    };
+    char code[32] = "";
+    copy_row("code.mine", "Session code", ldn_session_code(code, sizeof code) ? code : "", "No hub",
+             "The code of the hub you host or joined through the hub server. Others enter it in Join by code to find the hub, with or without your matchmaking key. Confirm copies it.");
+    Row j;
+    j.id = "code.join";
+    j.title = tr("Join by code");
+    switch (ldn_invite_state(code, sizeof code)) {
+    case LDN_INVITE_SEARCHING: j.value = tr("Searching..."); break;
+    case LDN_INVITE_READY: j.value = fmt("%s: in Join Hub", code); break;
+    case LDN_INVITE_NOT_FOUND: j.value = fmt("%s: no such hub", code); break;
+    case LDN_INVITE_OLD_SERVER: j.value = tr("The hub server is too old"); break;
+    case LDN_INVITE_FAILED: j.value = tr("No answer"); break;
+    default: j.value = tr("Enter a code"); break;
+    }
+    j.help = tr("Enter a hub's session code: the hub server finds the hub, and it comes first in Join Hub for the next 10 minutes. Then search for hubs in the game and pick it.");
+    j.activate = []() {
+        keyboard(tr("Join by code"), "", 12, [](const std::string &typed, std::string &error) {
+            if (ldn_join_code(typed.c_str(), nullptr)) return true;
+            error = tr("That is not a session code: 8 letters and digits.");
+            return false;
+        });
+    };
+    rows.push_back(std::move(j));
+
+    char mine[32];
+    ldn_my_friend_code(mine, sizeof mine);
+    copy_row("friend.mine", "Your friend code", mine, "None",
+             "Give this code to friends to add you. You see each other once both of you added the other. It is kept with your saves. Confirm copies it.");
+    action(rows, "friend.add", tr("Add a friend"), []() {
+        keyboard(tr("Friend code and name"), "", 60, [](const std::string &typed, std::string &error) {
+            if (const char *why = ldn_friend_add(typed.c_str())) {
+                error = tr(why);
+                return false;
+            }
+            return true;
+        });
+    });
+    rows.back().help = tr("Their friend code, then a space and the name you want to see for them (for example ABCD-EFGH-JKMN-PQRS Mia).");
+    static LdnFriend list[LDN_FRIENDS_MAX];
+    int server = HUB_UNKNOWN;
+    int n = ldn_friends(list, LDN_FRIENDS_MAX, &server);
+    if (n && server != HUB_ONLINE && server != HUB_UNKNOWN) {
+        Row w;
+        w.id = "friend.server";
+        w.title = tr("Friends list");
+        w.value = server == HUB_OFF ? tr("No hub server") : server == HUB_VERSION ? tr("The hub server is too old")
+                                                                                 : tr("Hub server unreachable");
+        w.warn = true;
+        w.enabled = false;
+        rows.push_back(std::move(w));
+    }
+    for (int i = 0; i < n; i++) {
+        const LdnFriend &f = list[i];
+        Row r;
+        r.id = std::string("friend.") + f.code;
+        r.title = f.name;
+        bool hub = f.hub[0] != 0;
+        switch (f.state) {
+        case LDN_FRIEND_ONLINE: r.value = tr("Online"); break;
+        case LDN_FRIEND_HOSTING: r.value = hub ? tr("Hosting a hub (Confirm joins)") : tr("Hosting a hub"); break;
+        case LDN_FRIEND_IN_HUB: r.value = hub ? tr("In a hub (Confirm joins)") : tr("In a hub"); break;
+        case LDN_FRIEND_OFFLINE: r.value = tr("Offline"); break;
+        default: r.value = "..."; break;
+        }
+        if (removing) r.value = tr("Confirm removes");
+        r.help = f.code;
+        std::string fc = f.code, hc = f.hub;
+        r.enabled = removing || hub;
+        r.activate = [fc, hc]() {
+            if (removing) ldn_friend_remove(fc.c_str());
+            else if (!hc.empty()) ldn_join_code(hc.c_str(), nullptr);
+        };
+        rows.push_back(std::move(r));
+    }
+    if (n || removing)
+        action(rows, "friend.remove", tr(removing ? "Done removing" : "Remove friends"), []() { removing = !removing; });
+}
 // The keybinds' rows (config.h BIND_*): what each is called
 const char *const bind_titles[BINDS] = {"Move forward", "Move back", "Move left", "Move right", "Walk", "A", "B", "X",
                                         "Y", "L", "R", "ZL", "ZR", "Plus", "Minus", "D-pad up", "D-pad down",
@@ -2348,6 +2447,8 @@ std::vector<Row> main_rows() {
         hub_check(r);
         add_bool(r, "direct", "Direct connections", &c.ldn_direct, ini("Direct"));
         r.back().help = tr("In an internet hub, your game and the host's send their packets straight to each other when both routers let them, for a lower ping; else through the hub server. The other player's game then sees your IP address. Off: always through the hub server.");
+        header(r, "friends.header", tr("Friends and Session Codes"));
+        friends_rows(r);
         // (all of them take effect at the next start: config.c marks them restart)
         header(r, "crossplay.header", tr("Emulator Crossplay"));
         add_bool(r, "ryu.serve", "Host for Ryujinx players", &c.ldn_ryu_serve, ini("RyuServe"));

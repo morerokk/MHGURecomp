@@ -232,6 +232,8 @@ void presence_tick(void) {
     if (online && party > 0) {
         a.party = party, a.party_max = party_max;
         snprintf(a.party_id, sizeof a.party_id, "%s", party_id);
+        // in the hub (not on a quest: nobody joins one under way), its session code: Discord's "Join" for others
+        if (place != 100 && party < party_max) ldn_join_secret(a.join_secret, sizeof a.join_secret);
     }
     a.start = since;
     discord_set_activity(&a);
