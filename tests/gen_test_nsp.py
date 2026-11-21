@@ -336,12 +336,17 @@ def make_files(rng, big):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    args = [a for i, a in enumerate(sys.argv[1:], 1) if not a.startswith("--") and not (i > 1 and sys.argv[i - 1] in ("--seed", "--app-id"))]
     big = "--big" in sys.argv
     seed = 1
     if "--seed" in sys.argv:
         seed = int(sys.argv[sys.argv.index("--seed") + 1])
     out = args[0]
+    app_id = PROGRAM_ID_BASE
+    if "--app-id" in sys.argv:  # another game's application id (a base title id, hex)
+        app_id = int(sys.argv[sys.argv.index("--app-id") + 1], 16)
+    same_id = "--same-id" in sys.argv  # the update's Program NCA carrying the base game's id, as real update files do
+    upd_id = app_id if same_id else app_id | 0x800
     os.makedirs(out, exist_ok=True)
     rng = random.Random(seed)
     keys = Keys(rng)
@@ -362,7 +367,7 @@ def main():
     fsh0 = fs_header(1, 2, 3, sb0, gen_b, sec_b)
     ivfc = ivfc_header(D, len(base_img), rng)
     fsh1 = fs_header(0, 3, 3, ivfc + b"\0" * (0x138 - len(ivfc)), gen_b, sec_b)
-    base_nca, _ = make_nca(rng, keys, PROGRAM_ID_BASE, 0, [(fsh0, d0, hdr_ctr(gen_b, sec_b)), (fsh1, base_logical, hdr_ctr(gen_b, sec_b))],
+    base_nca, _ = make_nca(rng, keys, app_id, 0, [(fsh0, d0, hdr_ctr(gen_b, sec_b)), (fsh1, base_logical, hdr_ctr(gen_b, sec_b))],
                            crypto_old=2, crypto_new=3)
 
     # ---- the update: new ExeFS, some files changed in place, some added
@@ -401,10 +406,10 @@ def main():
     struct.pack_into("<QQ4sIII", bk, 0xF8, roff, rsize, b"BKTR", 1, nrel, 0)
     struct.pack_into("<QQ4sIII", bk, 0x118, soff, ssize, b"BKTR", 1, nsub, 0)
     fsh1u = fs_header(0, 3, 4, bytes(bk), gen_u, sec_u)
-    upd_nca, _ = make_nca(rng, keys, PROGRAM_ID_UPDATE, 0, [(fsh0u, d0u, hdr_ctr(gen_u, sec_u)), (fsh1u, enc_fn, None)],
+    upd_nca, _ = make_nca(rng, keys, upd_id, 0, [(fsh0u, d0u, hdr_ctr(gen_u, sec_u)), (fsh1u, enc_fn, None)],
                           rights_id=rights_id, titlekey=title_key, crypto_old=2, crypto_new=2)
     # (a Meta NCA and a ticket, as an NSP has: the importer has to skip the one and use the other)
-    meta_nca, _ = make_nca(rng, keys, PROGRAM_ID_UPDATE, 1, [], crypto_old=2, crypto_new=2)
+    meta_nca, _ = make_nca(rng, keys, upd_id, 1, [], crypto_old=2, crypto_new=2)
     enc_tk = ecb(keys.titlekek[1], title_key, True)
     tik = bytearray(0x2C0)
     struct.pack_into("<I", tik, 0, 0x10004)

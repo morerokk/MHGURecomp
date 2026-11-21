@@ -29,6 +29,12 @@ static bool is_nsp(const char *p) {
            tolower((unsigned char)p[n - 2]) == 's' && tolower((unsigned char)p[n - 1]) == 'p';
 }
 
+// The games it takes: the base game's NSP and its update's, of one game. Only the first is a game the port runs.
+#define APP_MHGU 0x0100770008DD8000ull  // Monster Hunter Generations Ultimate (Switch, worldwide)
+#define APP_MHXX 0x0100C3800049C000ull  // Monster Hunter XX Nintendo Switch Ver. (Japan)
+static const uint64_t k_games[2] = {APP_MHGU, APP_MHXX};
+#define GAMES_TEXT "Monster Hunter Generations Ultimate (0100770008DD8000) or Monster Hunter XX (0100C3800049C000)"
+
 // the program's own folder, into dir; false when it can't be told
 static bool exe_dir(char *dir, size_t size) {
 #ifdef _WIN32
@@ -47,7 +53,9 @@ static bool exe_dir(char *dir, size_t size) {
 }
 
 // the exefs/main of the update must be v1.4.0's: the port's recompiled code is, and no other version runs
+static bool g_check_version = true;  // (only for Monster Hunter Generations Ultimate: the build id of the port's code)
 static bool verify_exefs(const char *exefs_dir, char *err, size_t size) {
+    if (!g_check_version) return true;
     char path[1300];
     snprintf(path, sizeof path, "%s/main", exefs_dir);
     if (getenv("MHGU_NSP_ANY_VERSION")) return true;  // (tests with made-up NSP files)
@@ -106,8 +114,6 @@ int main(int argc, char **argv) {
     char home[1100] = ".", dflt[1200], found[4][1100];
     char *list[4];
     if (exe_dir(home, sizeof home) && CHDIR(home) != 0) snprintf(home, sizeof home, ".");
-    snprintf(dflt, sizeof dflt, "%s/data", home);
-    if (!out) out = dflt;
 
     if (!n) {  // nothing dragged on it: the NSP files beside it
 #ifdef _WIN32
@@ -135,14 +141,32 @@ int main(int argc, char **argv) {
     }
     for (int i = 0; i < 4; i++) list[i] = i < n ? nsps[i] : NULL;
 
-    printf("Base/update: %s\n             %s\nInto:        %s\n(about 13 GB, a few minutes)\n\n", nsps[0], nsps[1], out);
     NspImport job = {.nsp_paths = (const char *const *)list, .nsp_count = n, .keys_path = keys, .out_dir = out,
-                     .progress = progress_cb, .verify_exefs = verify_exefs};
+                     .progress = progress_cb, .verify_exefs = verify_exefs, .app_ids = k_games, .app_id_count = 2,
+                     .games = GAMES_TEXT};
     char err[1100];
+    uint64_t app = 0;
+    if (!nsp_identify(&job, &app, err, sizeof err)) {
+        printf("It did not work:\n\n%s\n", err);
+        return done_with(1);
+    }
+    bool mhxx = app == APP_MHXX;
+    g_check_version = !mhxx;
+    // each game in its own folder, so a game that runs is never displaced by one that doesn't
+    snprintf(dflt, sizeof dflt, "%s/%s", home, mhxx ? "data-mhxx" : "data");
+    if (!out) out = dflt;
+    job.out_dir = out;
+    printf("Game:        %s\nBase/update: %s\n             %s\nInto:        %s\n(about 13 GB, a few minutes)\n\n",
+           mhxx ? "Monster Hunter XX (Japan)" : "Monster Hunter Generations Ultimate", nsps[0], nsps[1], out);
+    if (mhxx)
+        printf("NOTE: MHGU Recomp runs only Monster Hunter Generations Ultimate 1.4.0: its recompiled code and its fixes are\n"
+               "for that game's program, not for Monster Hunter XX's. These files are extracted as they are, but\n"
+               "mhgurecomp.exe will not start them.\n\n");
     if (!nsp_import(&job, err, sizeof err)) {
         printf("\nIt did not work:\n\n%s\n", err);
         return done_with(1);
     }
-    printf("\nDone. The game files are in %s\nNow start mhgurecomp.exe.\n", out);
+    printf("\nDone. The game files are in %s\n", out);
+    if (!mhxx) printf("Now start mhgurecomp.exe.\n");
     return done_with(0);
 }

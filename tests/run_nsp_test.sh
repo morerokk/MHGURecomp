@@ -11,7 +11,7 @@ trap 'rm -rf "$W"' EXIT
 mkdir -p "$W"
 CC=${CC:-cc}
 $CC -std=gnu17 -O1 -g -Wall -Wextra -Wno-unused-parameter tests/test_nspimport.c runtime/nspimport.c -o "$W/imp"
-for cfg in "1" "2" "4 --big"; do
+for cfg in "1" "2 --same-id" "4 --big" "5 --big --same-id"; do
     set -- $cfg
     seed=$1; shift
     d="$W/s$seed"
@@ -28,4 +28,19 @@ for cfg in "1" "2" "4 --big"; do
     fi
     echo "seed $seed $*: OK"
 done
+
+# another game (as the extractor program takes them): its files come out in the folder it names, the games can't be mixed,
+# and the port's own check (the importer's default) refuses it
+python3 tests/gen_test_nsp.py "$W/x" --seed 8 --app-id 0100C3800049C000 --same-id > /dev/null
+python3 tests/gen_test_nsp.py "$W/y" --seed 8 > /dev/null  # (same seed: the same keys, another game)
+$CC -std=gnu17 -O1 -g -Wall -Wextra -Wno-unused-parameter tools/nspextract.c runtime/nspimport.c -o "$W/ext"
+mkdir -p "$W/xout"; cp "$W/ext" "$W/x/prod.keys" "$W/xout/"; cp "$W/x/base.nsp" "$W/x/update.nsp" "$W/xout/"
+(cd "$W/xout" && MHGU_NSP_ANY_VERSION=1 ./ext < /dev/null > run.log 2>&1) || { echo "other game: extractor failed"; cat "$W/xout/run.log"; exit 1; }
+diff -r "$W/x/expected" "$W/xout/data-mhxx" > /dev/null || { echo "other game: the extracted files differ"; exit 1; }
+rm -rf "$W/o2"; mkdir "$W/o2"
+if "$W/imp" "$W/x/prod.keys" "$W/o2" "$W/x/base.nsp" "$W/x/update.nsp" > "$W/o2.log" 2>&1; then echo "the port's importer took another game"; exit 1; fi
+grep -q "another game" "$W/o2.log" || { echo "no clear message for another game"; exit 1; }
+if (cd "$W/xout" && MHGU_NSP_ANY_VERSION=1 ./ext --out "$W/o3" "$W/x/base.nsp" "$W/y/update.nsp" < /dev/null > "$W/o3.log" 2>&1); then echo "mixed games were taken"; exit 1; fi
+grep -q "different games" "$W/o3.log" || { echo "no clear message for mixed games"; exit 1; }
+echo "other game / mixed games: OK"
 echo "test-nsp: OK"

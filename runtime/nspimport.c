@@ -22,8 +22,12 @@
 #define MKDIR(p) mkdir(p, 0777)
 #endif
 
-#define PROGRAM_ID_BASE 0x0100770008DD8000ull    // Monster Hunter Generations Ultimate
-#define PROGRAM_ID_UPDATE 0x0100770008DD8800ull  // (the update's title id: the base's with bit 11 set)
+// A title's application id: the base game's title id. The Program NCA of an update can carry the base game's id or the
+// update's own (the base's with bit 11 set: ...800): real update files have shown the base's, so only the id with its low
+// 12 bits cleared is compared, and base and update are told apart by their RomFS section (plain / patch), not by id.
+#define APP_ID(id) ((id) & ~0xFFFull)
+#define APP_ID_MHGU 0x0100770008DD8000ull  // Monster Hunter Generations Ultimate
+static const uint64_t k_mhgu_only[1] = {APP_ID_MHGU};
 
 static char g_err[600];
 static bool fail(const char *fmt, ...) {
@@ -973,44 +977,78 @@ static void say(const NspImport *job, const char *what) {
     if (job->progress) job->progress(job->user, what, 0, 0);
 }
 
-bool nsp_import(const NspImport *job, char *err, size_t err_size) {
-    g_err[0] = 0;
-    NspFile nsp[4];
-    int n = 0;
-    bool ok = true;
-    Keys *keys = calloc(1, sizeof *keys);
+// keys + the NSP files opened and told apart: base (plain RomFS) and update (patch RomFS) of one known game. n files in
+// nsp[] are open whatever the result (nsp_close_all closes them).
+static bool open_set(const NspImport *job, Keys *keys, NspFile nsp[4], int *n, NspFile **base, NspFile **upd, uint64_t *app) {
     char found[1024];
     const char *keys_path = job->keys_path;
-    if (!keys) ok = fail("Out of memory.");
-    if (ok && !keys_path) {
+    *n = 0;
+    *base = *upd = NULL;
+    if (!keys_path) {
         if (!nsp_find_keys(found, sizeof found))
-            ok = fail("prod.keys was not found. It holds the keys that unlock the NSP files, from your own Switch (Lockpick_RCM "
-                      "writes it). Put it in one of these places:\n%s", nsp_keys_places());
+            return fail("prod.keys was not found. It holds the keys that unlock the NSP files, from your own Switch (Lockpick_RCM "
+                        "writes it). Put it in one of these places:\n%s", nsp_keys_places());
         keys_path = found;
     }
-    if (ok && (job->nsp_count < 2 || job->nsp_count > 4))
-        ok = fail("Two NSP files are needed: the base game's and the 1.4.0 update's (%d given).", job->nsp_count);
-    if (ok) ok = keys_load(keys, keys_path);
-    for (int i = 0; ok && i < job->nsp_count; i++) {
-        ok = nspfile_open(&nsp[n], job->nsp_paths[i], keys);
-        n++;  // (counted before the check, so a half-open one is closed too)
+    if (job->nsp_count < 2 || job->nsp_count > 4)
+        return fail("Two NSP files are needed: the base game's and the update's (%d given).", job->nsp_count);
+    if (!keys_load(keys, keys_path)) return false;
+    for (int i = 0; i < job->nsp_count; i++) {
+        bool ok = nspfile_open(&nsp[*n], job->nsp_paths[i], keys);
+        (*n)++;  // (counted before the check, so a half-open one is closed too)
+        if (!ok) return false;
     }
-    NspFile *base = NULL, *upd = NULL;
-    for (int i = 0; ok && i < n; i++) {
-        Nca *p = &nsp[i].prog;
-        if (p->program_id != PROGRAM_ID_BASE && p->program_id != PROGRAM_ID_UPDATE) {
-            ok = fail("%s is not Monster Hunter Generations Ultimate (title id %016llX).", nsp[i].path, (unsigned long long)p->program_id);
-            break;
-        }
-        NspFile **slot = p->program_id == PROGRAM_ID_BASE ? &base : &upd;
-        if (*slot) {
-            ok = fail("%s and %s are both the %s: give the base game's NSP and the update's.", (*slot)->path, nsp[i].path,
-                      slot == &base ? "base game" : "update");
-            break;
-        }
+    const uint64_t *ids = job->app_ids ? job->app_ids : k_mhgu_only;
+    int nids = job->app_ids ? job->app_id_count : 1;
+    for (int i = 0; i < *n; i++) {
+        const Nca *p = &nsp[i].prog;
+        uint64_t id = APP_ID(p->program_id);
+        bool known = false;
+        for (int j = 0; j < nids; j++) known |= ids[j] == id;
+        if (!known)
+            return fail("%s is not %s: it is another game (title id %016llX).", nsp[i].path,
+                        job->games ? job->games : "Monster Hunter Generations Ultimate (0100770008DD8000)",
+                        (unsigned long long)p->program_id);
+        if (i && id != *app)
+            return fail("%s and %s are from different games (title ids %016llX and %016llX). Give the base game's NSP and the "
+                        "update's NSP of the same game.", nsp[0].path, nsp[i].path, (unsigned long long)*app, (unsigned long long)id);
+        *app = id;
+        bool is_update = p->sec[1].present && p->sec[1].crypt == 4;
+        NspFile **slot = is_update ? upd : base;
+        if (*slot)
+            return fail("%s and %s are both the %s: give the base game's NSP and the update's.", (*slot)->path, nsp[i].path,
+                        is_update ? "update" : "base game");
         *slot = &nsp[i];
     }
-    if (ok && (!base || !upd)) ok = fail("Two NSP files are needed: the base game's and the 1.4.0 update's. This has only the %s.", base ? "base game" : "update");
+    if (!*base || !*upd) return fail("Two NSP files are needed: the base game's and the update's. This has only the %s.", *base ? "base game" : "update");
+    return true;
+}
+
+static void close_all(NspFile nsp[4], int n) {
+    for (int i = 0; i < n; i++) nspfile_close(&nsp[i]);
+}
+
+bool nsp_identify(const NspImport *job, uint64_t *app_id, char *err, size_t err_size) {
+    g_err[0] = 0;
+    NspFile nsp[4], *base, *upd;
+    int n = 0;
+    uint64_t app = 0;
+    Keys *keys = calloc(1, sizeof *keys);
+    bool ok = keys ? open_set(job, keys, nsp, &n, &base, &upd, &app) : fail("Out of memory.");
+    close_all(nsp, n);
+    free(keys);
+    if (ok) *app_id = app;
+    else snprintf(err, err_size, "%s", g_err[0] ? g_err : "The NSP files could not be read.");
+    return ok;
+}
+
+bool nsp_import(const NspImport *job, char *err, size_t err_size) {
+    g_err[0] = 0;
+    NspFile nsp[4], *base = NULL, *upd = NULL;
+    int n = 0;
+    uint64_t app = 0;
+    Keys *keys = calloc(1, sizeof *keys);
+    bool ok = keys ? open_set(job, keys, nsp, &n, &base, &upd, &app) : fail("Out of memory.");
     if (ok) ok = nca_keys(&base->prog, keys, base->tik, base->ntik, base->tik_why, "The base game's Program NCA") &&
                  nca_keys(&upd->prog, keys, upd->tik, upd->ntik, upd->tik_why, "The update's Program NCA");
     if (ok && !(base->prog.sec[1].present && base->prog.sec[1].partition == 0 && base->prog.sec[1].crypt == 3))
@@ -1055,7 +1093,7 @@ bool nsp_import(const NspImport *job, char *err, size_t err_size) {
         else if (rename(tro, ro)) ok = fail("%s could not be moved to %s (%s).", tro, ro, strerror(errno));
         else rmdir(tmp);
     }
-    for (int i = 0; i < n; i++) nspfile_close(&nsp[i]);
+    close_all(nsp, n);
     free(keys);
     if (!ok) {
         snprintf(err, err_size, "%s", g_err[0] ? g_err : "The import failed.");

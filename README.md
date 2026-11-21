@@ -124,7 +124,9 @@ signatures, and nothing leaves your computer.
 `mhgu-nsp-extract.exe` (built by the repository's GitHub Actions: Actions > "NSP extractor" > latest run > Artifacts) is a
 small program that only extracts the game. Download the normal release zip, put `mhgu-nsp-extract.exe` in the same folder
 as `mhgurecomp.exe` and drag the base game's NSP and the update's NSP onto it (or put both next to it and open it). It
-writes `data\exefs` and `data\romfs` there; then start `mhgurecomp.exe`. Same keys, same limits as above.
+writes `data\exefs` and `data\romfs` there; then start `mhgurecomp.exe`. Same keys, same limits as above. It also takes the Japanese Monster Hunter XX (base + update of that game) and writes it to
+`data-mhxx`, but MHGU Recomp itself runs only Monster Hunter Generations Ultimate 1.4.0: the base game and the update must be
+of the same game, and MHXX's files are extracted for you to keep, not started by the port.
 
 ### Staying up to date
 

@@ -129,7 +129,9 @@ y nada sale de tu computadora.
 Artifacts) es un programa pequeño que solo extrae el juego. Descarga el zip normal de la versión, pon
 `mhgu-nsp-extract.exe` en la misma carpeta que `mhgurecomp.exe` y arrastra sobre él el NSP del juego base y el de la
 actualización (o ponlos al lado y ábrelo). Escribe `data\exefs` y `data\romfs` ahí; luego inicia `mhgurecomp.exe`. Mismas
-claves y mismos límites que arriba.
+claves y mismos límites que arriba. También acepta Monster Hunter XX japonés (base y update de ese juego) y lo escribe en
+`data-mhxx`, pero MHGU Recomp solo ejecuta Monster Hunter Generations Ultimate 1.4.0: el juego base y el update deben ser del
+mismo juego, y los archivos de MHXX se extraen para que los conserves, el port no los inicia.
 
 ### Mantenerlo actualizado
 

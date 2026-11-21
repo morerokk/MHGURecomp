@@ -24,6 +24,11 @@ typedef struct {
     const char *out_dir;           // the game folder (data): exefs/ and romfs/ are made in it
     NspProgress progress;          // (may be NULL)
     void *user;
+    // The games it may extract, as application ids (a game's base title id); NULL: only Monster Hunter Generations Ultimate.
+    // games: how to name them in the message when an NSP is another game ("Monster Hunter Generations Ultimate (0100...)").
+    const uint64_t *app_ids;
+    int app_id_count;
+    const char *games;
     // Called with the finished exefs folder, before the (long) RomFS is written: false (err filled) stops the import.
     // (main.c's check: the update's build id is v1.4.0's.)
     bool (*verify_exefs)(const char *exefs_dir, char *err, size_t err_size);
@@ -35,6 +40,10 @@ bool nsp_find_keys(char *path, size_t size);
 
 // The places nsp_find_keys looks in, for the message when it finds none (one per line).
 const char *nsp_keys_places(void);
+
+// Opens the NSP files (job's paths, keys and games) and says which game they are: the application id (the base game's title
+// id) of the pair, false (err filled) when they aren't a base game's and its update's NSP of a known game.
+bool nsp_identify(const NspImport *job, uint64_t *app_id, char *err, size_t err_size);
 
 // Does the whole import. err: what went wrong, in a sentence the player can act on.
 // Files the game folder already had (exefs/, romfs/) are moved to previous-N/ in it, not deleted.
