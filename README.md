@@ -275,7 +275,10 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
 - `[Display]`: `Mode` (Borderless / Fullscreen / Windowed), `Resolution`, `RenderResolution` (the 3D resolution),
   `AspectRatio` (Auto follows the window: 16:10 and anything wider fill it, narrower gets 16:10 with bars), `FOV`
   (1.0 = the game's), `UIAnchor` (Center keeps the HUD in the middle 16:9 on an ultrawide screen, Edges spreads it
-  to the sides)
+  to the sides). The window opens where it was when the game last closed, at that size (until `Resolution` changes) and on
+  the same monitor (full screen too), windowed or full screen as it was left with F11 / Alt+Enter (until `Mode`
+  changes),
+  kept in `window.txt` beside `mhgurecomp.ini` (not on Wayland, where programs can't place their windows)
 - `[Anti-aliasing]`: `MSAA` (Off / 2x / 4x / 8x), `FXAA` (On / Off), `FXAAMode` (Original / 3_11: FXAA 3.11 in
   place of GU's FXAA, sharper textures; default Original)
 - `[Upscaler]`: `FSR` (Off / On, default Off), `FSRQuality` (NativeAA / Quality / Balanced / Performance /

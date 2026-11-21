@@ -293,7 +293,9 @@ Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
 - `[Display]`: `Mode` (Borderless / Fullscreen / Windowed), `Resolution`, `RenderResolution` (la resolución 3D),
   `AspectRatio` (Auto sigue a la ventana: 16:10 y más ancho la llenan, más estrecho queda en 16:10 con barras), `FOV`
   (1.0 = el del juego), `UIAnchor` (Center mantiene el HUD en el 16:9 central en una pantalla ultrapanorámica, Edges
-  lo extiende hacia los lados)
+  lo extiende hacia los lados). La ventana se abre donde estaba al cerrar el juego, con ese tamaño (hasta que cambie `Resolution`) y en el mismo monitor (también en
+  pantalla completa), en ventana o pantalla completa como quedó con F11 / Alt+Enter (hasta que cambie `Mode`), guardado en `window.txt` junto a `mhgurecomp.ini` (no en Wayland, donde los programas no pueden
+  ubicar sus ventanas)
 - `[Anti-aliasing]`: `MSAA` (Off / 2x / 4x / 8x), `FXAA` (On / Off), `FXAAMode` (Original / 3_11: FXAA 3.11 en lugar
   del FXAA de GU, texturas más nítidas; Original por defecto)
 - `[Upscaler]`: `FSR` (Off / On, Off por defecto), `FSRQuality` (NativeAA / Quality / Balanced / Performance /

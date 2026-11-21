@@ -86,12 +86,16 @@ SDL_Window *ui_window(void) { return window; }
 // The window's size when windowed: the settings' size (or the last windowed size), no larger than the desktop's free
 // area with the window frame.
 static int win_w, win_h;
-static void fit_desktop(int *w, int *h) {
+static void frame_size(int *top, int *left, int *bottom, int *right) {
+    *top = *left = *bottom = *right = 0;
+    if (window) SDL_GetWindowBordersSize(window, top, left, bottom, right);
+    if (!*top) *top = 32, *left = *right = *bottom = 8;  // (not known before the window exists: typical Windows 10 frame)
+}
+static void fit_desktop(SDL_DisplayID d, int *w, int *h) {
     SDL_Rect r;
-    if (!SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &r)) return;
-    int top = 0, left = 0, bottom = 0, right = 0;
-    if (window) SDL_GetWindowBordersSize(window, &top, &left, &bottom, &right);
-    if (!top) top = 32, left = right = bottom = 8;  // (not known before the window exists: typical Windows 10 frame)
+    if (!SDL_GetDisplayUsableBounds(d ? d : SDL_GetPrimaryDisplay(), &r)) return;
+    int top, left, bottom, right;
+    frame_size(&top, &left, &bottom, &right);
     r.w -= left + right, r.h -= top + bottom;
     if (*w <= r.w && *h <= r.h) return;
     int fw = r.w, fh = r.w * *h / *w;
@@ -100,12 +104,113 @@ static void fit_desktop(int *w, int *h) {
     *w = fw, *h = fh;
 }
 
+// Where the window was when the game last closed, so it opens there again, on that monitor (issue #425): window.txt
+// beside mhgurecomp.ini, "x y maximized w h resolution-w resolution-h full mode", x and y the desktop position of the
+// window's inside (SDL's), w and h its size, full whether it was closed full screen (Mode's: load_place). Only the windowed place is kept: full screen and maximized keep the place they
+// leave to, and follow the window to another monitor (Win+Shift+arrow) by moving it to the middle of that one, so full
+// screen opens on the monitor it was last on too. The size dragged to is kept while Resolution is the one it was kept
+// with (a new Resolution in the settings wins). Written a second after the window stops moving and when the game closes. Not on
+// Android (one screen) nor Wayland (a program can't place its windows there), nor with MHGU_HIDDEN.
+#ifndef __ANDROID__
+#define PLACE_FILE "window.txt"
+static int win_x = SDL_WINDOWPOS_UNDEFINED, win_y;
+static bool win_max, win_full, place_kept;
+static bool place_gone;  // (the kept place is on a monitor that is gone: kept for when it is back, until the window moves)
+static Uint64 place_dirty;  // (when it changed, unsaved: SDL_GetTicks; 0 = saved)
+
+static void save_place(void) {
+    if (!place_dirty) return;
+    place_dirty = 0;
+    FILE *f = fopen(PLACE_FILE, "w");
+    if (!f) return;
+    fprintf(f, "%d %d %d %d %d %d %d %d %d\n", win_x, win_y, win_max, win_w, win_h, g_config.width, g_config.height,
+            win_full, g_config.display_mode);
+    fclose(f);
+}
+
+// (and whether the game closed full screen or in a window - F11, Alt+Enter - so it starts that way, while Mode is still
+// the one it was kept with: a new Mode in the settings wins). The file is written again in every session, so the Mode
+// and Resolution in it are always the last ones the game ran with: a Mode set back later does not find an old state.
+// Not with MHGU_WINDOW (a test run's window, which must not take the player's place nor leave its own).
+static void load_place(void) {
+    win_full = g_config.display_mode != DISPLAY_WINDOWED;
+    if (getenv("MHGU_HIDDEN") || getenv("MHGU_WINDOW") || !SDL_strcmp(SDL_GetCurrentVideoDriver(), "wayland")) return;
+    place_kept = true;
+    place_dirty = SDL_GetTicks() | 1;
+    atexit(save_place);
+    FILE *f = fopen(PLACE_FILE, "r");
+    int x, y, max, w, h, rw, rh, full, mode;
+    int n = f ? fscanf(f, "%d %d %d %d %d %d %d %d %d", &x, &y, &max, &w, &h, &rw, &rh, &full, &mode) : 0;
+    if (f) fclose(f);
+    if (n == 9 && mode == g_config.display_mode) {
+        if (win_full != (full != 0)) LOG("[ui] %s, as the game was closed (%s)\n", full ? "full screen" : "windowed", PLACE_FILE);
+        win_full = full != 0;
+    }
+    if (n < 3 || x == SDL_WINDOWPOS_UNDEFINED) return;
+    win_x = x, win_y = y, win_max = max;
+    // (the size it was dragged to, while Resolution is still the one it was kept with: a new Resolution wins)
+    if (n >= 7 && rw == g_config.width && rh == g_config.height && w >= 160 && h >= 90) win_w = w, win_h = h;
+}
+
+// The monitor the kept place is on: the one nearest the window's middle, when it shows enough of the window (none when
+// that monitor was unplugged or the monitors were moved around: the window then opens where the system puts it).
+static SDL_DisplayID place_display(void) {
+    if (win_x == SDL_WINDOWPOS_UNDEFINED) return 0;
+    SDL_Rect r = {win_x, win_y, win_w, win_h}, u, in;
+    SDL_DisplayID d = SDL_GetDisplayForRect(&r);
+    if (!d || !SDL_GetDisplayUsableBounds(d, &u) || !SDL_GetRectIntersection(&r, &u, &in)) return 0;
+    return d;
+}
+
+// The kept place, as it was: a window the player left hanging off an edge stays so (Windows allows it). Only moved
+// when its title bar would be out of reach on monitor d's free area (the taskbar's side excepted): less than 16
+// pixels of it below the top, or less than 128 of its width on the monitor. (The title bar's height is not known
+// before the window exists, so not "all of it below the top": a window at the very top came back a pixel lower.)
+static void keep_on(SDL_DisplayID d) {
+    SDL_Rect u;
+    if (!SDL_GetDisplayUsableBounds(d, &u)) return;
+    win_x = SDL_clamp(win_x, u.x + 128 - win_w, u.x + u.w - 128);
+    win_y = SDL_clamp(win_y, u.y + 16, u.y + u.h - 64);
+}
+
+// (the window's events, on this thread)
+static void track_place(const SDL_Event *e) {
+    if (!place_kept || !window) return;
+    if (e->type != SDL_EVENT_WINDOW_MOVED && e->type != SDL_EVENT_WINDOW_RESIZED && e->type != SDL_EVENT_WINDOW_MAXIMIZED &&
+        e->type != SDL_EVENT_WINDOW_RESTORED && e->type != SDL_EVENT_WINDOW_DISPLAY_CHANGED)
+        return;
+    SDL_WindowFlags f = SDL_GetWindowFlags(window);
+    if (f & SDL_WINDOW_MINIMIZED) return;
+    bool full = f & SDL_WINDOW_FULLSCREEN, max = f & SDL_WINDOW_MAXIMIZED;
+    if (!full && max != win_max) win_max = max, place_dirty = SDL_GetTicks();
+    if (e->type == SDL_EVENT_WINDOW_MOVED && !full && !max && (win_x != e->window.data1 || win_y != e->window.data2))
+        win_x = e->window.data1, win_y = e->window.data2, place_gone = false, place_dirty = SDL_GetTicks();
+    if (e->type == SDL_EVENT_WINDOW_RESIZED && !full && !max && (win_w != e->window.data1 || win_h != e->window.data2))
+        win_w = e->window.data1, win_h = e->window.data2, place_dirty = SDL_GetTicks();
+    if (e->type == SDL_EVENT_WINDOW_DISPLAY_CHANGED && (full || max)) {
+        SDL_DisplayID d = (SDL_DisplayID)e->window.data1;
+        SDL_Rect u;
+        if (place_display() != d && SDL_GetDisplayUsableBounds(d, &u)) {
+            win_x = u.x + (u.w - win_w) / 2, win_y = u.y + (u.h - win_h) / 2;
+            place_gone = false, place_dirty = SDL_GetTicks();
+        }
+    }
+}
+#endif
+
 // Full screen as the settings say (exclusive: the monitor mode closest to Resolution; else borderless desktop), or
 // windowed. The cursor only shows in a window, or over a menu or the chat box (they show it only as they open, so it
 // stays shown when full screen comes while one is open: F11, Alt+Enter).
 static void set_fullscreen(bool on) {
     bool was = SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN;
-    if (on && !was) SDL_GetWindowSize(window, &win_w, &win_h);
+#ifndef __ANDROID__
+    // (maximized: not its windowed size, which track_place has - else the window came back from maximized as big as
+    // the screen)
+    bool max_kept = place_kept && (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED);
+#else
+    bool max_kept = false;
+#endif
+    if (on && !was && !max_kept) SDL_GetWindowSize(window, &win_w, &win_h);
     if (on && g_config.display_mode == DISPLAY_FULLSCREEN) {
         SDL_DisplayMode m;
         SDL_DisplayID d = SDL_GetDisplayForWindow(window);
@@ -121,11 +226,24 @@ static void set_fullscreen(bool on) {
         SDL_SetWindowFullscreenMode(window, NULL);
     }
     SDL_SetWindowFullscreen(window, on);
+#ifndef __ANDROID__
+    if (place_kept && win_full != on) win_full = on, place_dirty = SDL_GetTicks();  // (to start this way next time)
+#endif
     if (!on && was) {  // (SDL restores the frame's size as the client size after an exclusive mode: set it again)
         SDL_SyncWindow(window);
-        fit_desktop(&win_w, &win_h);
+        SDL_DisplayID d = SDL_GetDisplayForWindow(window);
+        fit_desktop(d, &win_w, &win_h);
         SDL_SetWindowSize(window, win_w, win_h);
-        SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+#ifndef __ANDROID__
+        // (back where it was windowed, when that was on this monitor. Not checked against the monitor's free area: just
+        // out of an exclusive mode, Windows still gives that mode's, 1440x1920 for a 1440x3440 monitor, which would
+        // move the window. The place was on the desktop when it was kept.)
+        SDL_Rect r = {win_x, win_y, win_w, win_h};
+        if (place_kept && !place_gone && d && win_x != SDL_WINDOWPOS_UNDEFINED && SDL_GetDisplayForRect(&r) == d)
+            SDL_SetWindowPosition(window, win_x, win_y);
+        else
+#endif
+            SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED_DISPLAY(d), SDL_WINDOWPOS_CENTERED_DISPLAY(d));
     }
     if (on && !overlay_menu_open() && !chat_active() && !host_input_mouse_free()) SDL_HideCursor(); else SDL_ShowCursor();
 }
@@ -275,20 +393,50 @@ void ui_init(void) {
     // (a resizable window may turn any way on Android, whatever the manifest says: landscape only. The window
     // fills the screen there, so the settings' size does not apply.)
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
-#else
-    fit_desktop(&win_w, &win_h);
 #endif
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #ifndef MHGU_NULL_BACKEND
     flags |= SDL_WINDOW_VULKAN;
 #endif
     if (getenv("MHGU_HIDDEN")) flags |= SDL_WINDOW_HIDDEN;
-    window = SDL_CreateWindow("Monster Hunter Generations Ultimate", win_w, win_h, flags);
+    SDL_PropertiesID props = SDL_CreateProperties();
+#ifndef __ANDROID__
+    load_place();  // (where it was when the game last closed, on a monitor still there; else where the system puts it)
+    SDL_DisplayID d = place_display();
+    fit_desktop(d, &win_w, &win_h);
+    if (d) {
+        keep_on(d);
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, win_x);
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, win_y);
+        if (win_max) flags |= SDL_WINDOW_MAXIMIZED;
+        LOG("[ui] window at %d,%d%s (%s)\n", win_x, win_y, win_max ? ", maximized" : "", PLACE_FILE);
+    } else if (win_x != SDL_WINDOWPOS_UNDEFINED) {
+        LOG("[ui] the monitor of %s's place (%d,%d) is gone: the window opens where the system puts it\n", PLACE_FILE,
+            win_x, win_y);
+        place_gone = true, win_max = false;
+    }
+#endif
+    SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "Monster Hunter Generations Ultimate");
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, win_w);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, win_h);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, (Sint64)flags);
+    window = SDL_CreateWindowWithProperties(props);
+    SDL_DestroyProperties(props);
     if (!window) FATAL("SDL_CreateWindow: %s\n", SDL_GetError());
+#ifndef __ANDROID__
+    // (no place kept yet: where the system put it, so a window maximized or resized without being moved is kept too)
+    if (place_kept && win_x == SDL_WINDOWPOS_UNDEFINED) SDL_GetWindowPosition(window, &win_x, &win_y);
+#endif
     // (NULL but on X11: a controller unplugged mid-request must not close the game, platform/linux.c)
     plat_x11_display(SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_X11_DISPLAY_POINTER, NULL));
     set_window_icon();
+#ifdef __ANDROID__
     if (g_config.display_mode != DISPLAY_WINDOWED) set_fullscreen(true);
+#else
+    // (Mode, or how the game was closed: windowed after F11 from full screen, or full screen after F11 from Windowed -
+    // borderless then, as F11 does)
+    if (win_full) set_fullscreen(true);
+#endif
 }
 
 // Alt+Enter: windowed <-> the full-screen mode of the settings (Windowed in the settings: borderless).
@@ -315,9 +463,15 @@ int ui_run(void) {
                     overlay_request_close();
                     continue;
                 }
+#ifndef __ANDROID__
+                track_place(&e);
+#endif
                 host_input_event(&e);
             } while (SDL_PollEvent(&e));
         }
+#ifndef __ANDROID__
+        if (place_dirty && SDL_GetTicks() - place_dirty >= 1000) save_place();
+#endif
         int action = SDL_SetAtomicInt(&requested_action, 0);
         if (action == 12) {  // (the title screen's B: the same question as closing the window)
             if (!config_confirm_exit() && !overlay_settings_dirty()) {
