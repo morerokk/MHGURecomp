@@ -75,6 +75,8 @@ static SDL_AtomicInt live_discord;
 static SDL_AtomicInt live_discord_hunter;
 // [Bonus Content]
 static SDL_AtomicInt live_bonus;
+// [Application]
+static SDL_AtomicInt live_backups;
 // [Audio]
 static SDL_AtomicInt volume = {100};
 static SDL_AtomicInt mute_in_background;
@@ -167,6 +169,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->lag_compensation != saved.lag_compensation) SDL_SetAtomicInt(&live_lagcomp, c->lag_compensation);
     if (all || c->ldn_direct != saved.ldn_direct) SDL_SetAtomicInt(&live_ldn_direct, c->ldn_direct);
     if (all || c->bonus_content != saved.bonus_content) SDL_SetAtomicInt(&live_bonus, c->bonus_content);
+    if (all || c->save_backups != saved.save_backups) SDL_SetAtomicInt(&live_backups, c->save_backups);
 }
 void config_store_loaded(const Config *c) {
     publish_live(c, !have_saved);
@@ -248,6 +251,7 @@ int config_live_sync_small_monsters(void) { return SDL_GetAtomicInt(&live_sync_z
 int config_live_lag_compensation(void) { return SDL_GetAtomicInt(&live_lagcomp); }
 int config_live_ldn_direct(void) { return SDL_GetAtomicInt(&live_ldn_direct); }
 int config_live_bonus_content(void) { return SDL_GetAtomicInt(&live_bonus); }
+int config_live_save_backups(void) { return SDL_GetAtomicInt(&live_backups); }
 void config_live_ldn_join(char *join, size_t size) {
     SDL_LockSpinlock(&live_ldn_lock);
     SDL_strlcpy(join, live_ldn_join, size);

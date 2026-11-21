@@ -438,7 +438,7 @@ bool equal(const Config &a, const Config &b) {
     if (memcmp(a.binds, b.binds, sizeof a.binds))
         return false;
     if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key) ||
-        strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.save_location, b.save_location) || strcmp(a.game_dir, b.game_dir))
+        strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.save_location, b.save_location) || strcmp(a.backup_location, b.backup_location) || strcmp(a.game_dir, b.game_dir))
         return false;
     if (strcmp(a.ldn_ryu_servers, b.ldn_ryu_servers) || strcmp(a.ldn_ryu_host, b.ldn_ryu_host) ||
         strcmp(a.ldn_ryu_pass, b.ldn_ryu_pass) || strcmp(a.ldn_room_server, b.ldn_room_server) ||
@@ -1867,6 +1867,7 @@ void reset_section() {
 #ifdef __ANDROID__
     case ANDROID_PAGE:
         SDL_strlcpy(c.save_dir, f.save_dir, sizeof c.save_dir);
+        c.save_backups = f.save_backups;
         SDL_strlcpy(c.game_dir, f.game_dir, sizeof c.game_dir);
         break;
 #endif
@@ -1876,6 +1877,10 @@ void reset_section() {
         c.menu_scale = f.menu_scale;
         c.menu_confirm = f.menu_confirm;
         SDL_strlcpy(c.save_location, f.save_location, sizeof c.save_location);
+#ifndef __ANDROID__  // (Android: on its own tab)
+        c.save_backups = f.save_backups;
+#endif
+        SDL_strlcpy(c.backup_location, f.backup_location, sizeof c.backup_location);
         c.button_icons = f.button_icons;
         c.confirm_exit = f.confirm_exit;
         c.updates = f.updates;
@@ -2507,6 +2512,16 @@ std::vector<Row> main_rows() {
         action(r, "save.location.reset", tr("Use the default folder"), []() { s.draft.save_location[0] = 0; },
                *c.save_location != 0);
         r.back().help = tr("Keeps the save in the default folder again (%APPDATA%\\MHGURecomp\\save on Windows, ~/.local/share/MHGURecomp/save on Linux) after Save and a restart. The save in the other folder is left where it is.");
+        number(r, "backups", "Save backups", &c.save_backups, (int)lo("SaveBackups"), (int)hi("SaveBackups"), 1, ini("SaveBackups"));
+        r.back().help = tr("How many copies of the save are kept. Each time the game saves, and once at each start, the save's files are copied to a folder named after the date and time; past this many, the oldest is deleted. 0: no backups. To restore one, close the game and copy its files into save_0.");
+        text(r, "backup.location", "Backup folder", c.backup_location, sizeof c.backup_location,
+             *c.backup_location ? c.backup_location : tr("In the save folder"), ini("BackupLocation"));
+        r.back().help = tr("Where the save backups go, for example on another drive or in a folder you sync. Empty: a backups folder in the save folder, beside save_0. Type a path, or use Choose folder. Press Save, then restart the game. Backups already made stay where they are.");
+        action(r, "backup.location.pick", tr("Choose folder"), []() { ui_request_import(11); });
+        r.back().help = tr("Opens your system's folder picker to choose the backup folder.");
+        action(r, "backup.location.reset", tr("Use the save folder"), []() { s.draft.backup_location[0] = 0; },
+               *c.backup_location != 0);
+        r.back().help = tr("Puts the save backups in a backups folder in the save folder again, after Save and a restart. Backups in the other folder are left where they are.");
 #endif
         break;
 #ifdef __ANDROID__
@@ -2526,6 +2541,8 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Where the save is kept, so syncing software can keep it the same on your devices: pick the same folder on each. The folder holds save_0, like the PC version's save folder. Android asks for \"All files access\" so the app can use a folder outside its own. Press Save, then restart the app. Your current save is not moved: use Export save first to put it there.");
         action(r, "save.folder.reset", tr("Use the app's folder"), []() { s.draft.save_dir[0] = 0; }, *c.save_dir != 0);
         r.back().help = tr("Keeps the save in the app's own folder again (after Save and a restart). The save in the other folder is left where it is.");
+        number(r, "backups", "Save backups", &c.save_backups, (int)lo("SaveBackups"), (int)hi("SaveBackups"), 1, ini("SaveBackups"));
+        r.back().help = tr("How many copies of the save are kept. Each time the game saves, and once at each start, the save's files are copied to a folder named after the date and time; past this many, the oldest is deleted. 0: no backups. To restore one, close the game and copy its files into save_0.");
         action(r, "import.save", tr("Import save"), []() { ui_request_import(2); });
         r.back().help = tr("Copies a save's system and system_backup files into the app from any folder on this device. Your current save is kept. The app closes afterwards.");
         action(r, "export.save", tr("Export save"), []() { ui_request_import(3); });
@@ -3556,6 +3573,9 @@ void settings_panel(bool *open) {
 #else
         Config temp = s.draft;  // (a folder whose path the settings file can't hold, with ';' or '#', is not taken)
         if (which == 4 && SDL_strlcpy(temp.save_location, folder, sizeof temp.save_location) < sizeof temp.save_location &&
+            config_validate(&temp, nullptr, 0))
+            s.draft = temp;
+        if (which == 11 && SDL_strlcpy(temp.backup_location, folder, sizeof temp.backup_location) < sizeof temp.backup_location &&
             config_validate(&temp, nullptr, 0))
             s.draft = temp;
 #endif

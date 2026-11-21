@@ -383,6 +383,15 @@ void ui_init(void) {
             LOG("[ui] SaveLocation \"%s\" can't be used (made or opened): the save stays in %s\n", g_config.save_location,
                 g_save_dir);
     }
+    if (g_config.backup_location[0]) {  // ([Application] BackupLocation: MHGU_BACKUP_DIR still wins, fs.c)
+        static char backups[1100];
+        if (plat_use_folder(g_config.backup_location, backups, sizeof backups)) {
+            g_backup_dir = backups;
+            LOG("[ui] save backup folder (BackupLocation): %s\n", backups);
+        } else
+            LOG("[ui] BackupLocation \"%s\" can't be used (made or opened): backups go in the save folder\n",
+                g_config.backup_location);
+    }
 #endif
     // Initial background input policy. SDL documents this hint as changeable at runtime.
     // Subsequent saved changes are consumed by the host thread in ui_run().
@@ -498,6 +507,9 @@ int ui_run(void) {
         if (action == 6)  // (request 4: the save's folder. SDL wants its dialogs started on this thread)
             SDL_ShowOpenFolderDialog(folder_picked, (void *)(intptr_t)4, window,
                                      g_config.save_location[0] ? g_config.save_location : NULL, false);
+        if (action == 13)  // (request 11: the save backups' folder)
+            SDL_ShowOpenFolderDialog(folder_picked, (void *)(intptr_t)11, window,
+                                     g_config.backup_location[0] ? g_config.backup_location : NULL, false);
 #endif
         host_input_update();
         cheats_frame();

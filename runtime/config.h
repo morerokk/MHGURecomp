@@ -133,6 +133,8 @@ typedef struct {
     int show_battery;         // [Performance] ShowBattery: BATTERY_*, the battery's charge beside the frame rate or alone
     char save_location[256];  // [Application] SaveLocation (PC): the folder holding the save (save_0/), "" the default
                               // (%APPDATA%\MHGURecomp\save, ~/.local/share/MHGURecomp/save: main.c)
+    int save_backups;         // [Application] SaveBackups: save copies kept (one per save, one per start), 0 none (services/fs.c)
+    char backup_location[256]; // [Application] BackupLocation (PC): the folder the backups go in, "" <save folder>/backups
     char save_dir[256];       // [Android] SaveFolder: the folder holding the save (save_0/), "" the app's own (fs.c)
     char game_dir[256];       // [Android] GameFolder: the folder holding exefs/ and romfs/, "" the app's own (main.c)
     char ldn_ryu_servers[256]; // [Multiplayer] RyuServers: Ryujinx LDN servers searched for crossplay (host[:port], comma separated); "" none
@@ -283,6 +285,7 @@ void config_live_ldn_join(char *join, size_t size);  // [Multiplayer] Join: the 
 int config_live_ldn_direct(void);  // [Multiplayer] Direct (net/ldn.c: for the next player link)
 int config_live_sync_small_monsters(void);  // [Multiplayer] SyncSmallMonsters (net/emsync.c)
 int config_live_lag_compensation(void);  // [Multiplayer] LagCompensation (net/hitsync.c)
+int config_live_save_backups(void);     // [Application] SaveBackups: at each save (services/fs.c)
 int config_live_bonus_content(void);    // [Bonus Content] BonusContent: each time the game opens a save (services/bonus.c)
 int config_live_discord(void);         // [Discord] RichPresence
 int config_live_discord_hunter(void);  // [Discord] ShowHunter

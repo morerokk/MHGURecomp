@@ -33,7 +33,11 @@ extern "C" int ui_take_picked_folder(char *out, size_t size) {
     if (!picked_folder) return 0;
     SDL_strlcpy(out, picked_folder, size);
     picked_folder = nullptr;
-    return 4;
+    return import_requested == 11 ? 11 : 4;  // (the picker last asked for: the save's folder or the backups')
+}
+extern "C" const char *plat_utf8_path(const char *path, char *buf, size_t size) {  // (runtime/platform: the same on Linux)
+    SDL_strlcpy(buf, path, size);
+    return buf;
 }
 extern "C" int ldn_hub_status(const char *, const char *, int *, int *) { return 0; }
 extern "C" void ldn_hub_check(const char *, const char *) {}
