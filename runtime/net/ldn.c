@@ -1820,7 +1820,7 @@ static void friends_save_locked(void) {
     snprintf(tmp, sizeof tmp, "%s.new", path);
     FILE *f = fopen(tmp, "w");
     if (!f) { LOG("[ldn] can't write %s\n", tmp); return; }
-    fprintf(f, "# MHGURecomp friends: a friend code and a name a line (the settings menu's Multiplayer page edits it)\n");
+    fprintf(f, "# MHGURecomp friends: a friend code and a name a line (the settings menu's Friends tab edits it)\n");
     for (int i = 0; i < F.n; i++) {
         char t[17];
         friend_text(F.ids[i], t);

@@ -36,7 +36,7 @@
 extern "C" const char *plat_utf8_path(const char *path, char *buf, size_t size);  // (runtime/platform.h)
 
 namespace {
-enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, Actions, Changelog };
+enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, Actions, Changelog, OfflineFriends };
 enum class Command { None, Save };
 struct Row {
     std::string id, title, value;
@@ -838,11 +838,62 @@ void hub_check(std::vector<Row> &rows) {
 }
 // Session codes and friends (runtime/net/ldn.c, link version 4): the code of the hub you're in and the friend code to
 // share (Confirm copies them), join by code, and the friends with what they're doing (Confirm on one in a hub joins
-// it the way a code does). Remove friends turns Confirm on a friend into removing it.
+// it the way a code does). Remove friends turns Confirm on a friend into removing it. Offline friends have a submenu of
+// their own (View::OfflineFriends), so a long list doesn't bury the ones you can play with.
+bool removing;  // (Remove friends: on the Friends tab and in Offline friends alike)
+// The session code of the hub you're in as the friends list has them (no dash), "" when none
+std::string my_hub_code() {
+    char code[32] = "";
+    if (!ldn_session_code(code, sizeof code)) return "";
+    std::string raw;
+    for (const char *c = code; *c; c++)
+        if (*c != '-') raw += *c;
+    return raw;
+}
+// A friend's row; after removing one the focus goes to the Remove friends row given (the removed row is gone). A friend
+// in the hub you're in has nothing to join.
+void friend_row(std::vector<Row> &rows, const LdnFriend &f, const char *remove_row, const std::string &my_hub) {
+    Row r;
+    r.id = std::string("friend.") + f.code;
+    r.title = f.name;
+    bool here = f.hub[0] && !SDL_strcasecmp(f.hub, my_hub.c_str());
+    bool hub = f.hub[0] && !here;
+    switch (f.state) {
+    case LDN_FRIEND_ONLINE: r.value = tr("Online"); break;
+    case LDN_FRIEND_HOSTING: r.value = hub ? tr("Hosting a hub (Confirm joins)") : tr("Hosting a hub"); break;
+    case LDN_FRIEND_IN_HUB: r.value = hub ? tr("In a hub (Confirm joins)") : tr("In a hub"); break;
+    case LDN_FRIEND_OFFLINE: r.value = tr("Offline"); break;
+    default: r.value = "..."; break;
+    }
+    if (here) r.value = tr("In your hub");
+    if (removing) r.value = tr("Confirm removes");
+    r.help = f.code;
+    std::string fc = f.code, hc = f.hub, after = remove_row;
+    r.enabled = removing || hub;
+    r.activate = [fc, hc, after]() {
+        if (removing) {
+            ldn_friend_remove(fc.c_str());
+            focus(after);
+        } else if (!hc.empty())
+            ldn_join_code(hc.c_str(), nullptr);
+    };
+    rows.push_back(std::move(r));
+}
+void remove_friends_row(std::vector<Row> &rows, const char *id) {
+    action(rows, id, tr(removing ? "Done removing" : "Remove friends"), []() { removing = !removing; });
+}
+// The Offline friends submenu: Remove friends first (the friends' rows are disabled unless removing), Back last
+void offline_friends_rows(std::vector<Row> &rows) {
+    static LdnFriend list[LDN_FRIENDS_MAX];
+    int n = ldn_friends(list, LDN_FRIENDS_MAX, nullptr);
+    remove_friends_row(rows, "offline.remove");
+    for (int i = 0; i < n; i++)
+        if (list[i].state == LDN_FRIEND_OFFLINE) friend_row(rows, list[i], "offline.remove", "");
+    action(rows, "offline.back", tr("Back"), []() { pop(); });
+}
 void friends_rows(std::vector<Row> &rows) {
     static uint64_t copied_at;
     static std::string copied;
-    static bool removing;
     auto copy_row = [&](const char *id, const char *title, const std::string &code, const char *none, const char *help) {
         Row r;
         r.id = id;
@@ -918,16 +969,18 @@ void friends_rows(std::vector<Row> &rows) {
         });
         rows.back().help = tr("Their request stays rejected until the game restarts, unless you add them yourself.");
     }
-    // the other hunters in this hub (games that shared their friend code): Confirm adds one, which sends them a request
+    // the other hunters in this hub (games that shared their friend code): Confirm adds one, which sends them a request.
+    // Friends among them are left to the friends list below.
     LdnHunter hunters[8];
     int nh = ldn_hub_hunters(hunters, 8);
+    bool hub_header = false;
     for (int i = 0; i < nh; i++) {
+        if (hunters[i].state == LDN_HUNTER_FRIEND) continue;
+        if (!hub_header) header(rows, "hunters.header", tr("Hunters in your hub")), hub_header = true;
         Row r;
         r.id = std::string("hunter.") + hunters[i].code;
         r.title = hunters[i].name;
-        r.value = hunters[i].state == LDN_HUNTER_FRIEND ? tr("Friend")
-                : hunters[i].state == LDN_HUNTER_ADDED ? tr("Request sent")
-                                                       : tr("In your hub: Confirm adds");
+        r.value = hunters[i].state == LDN_HUNTER_ADDED ? tr("Request sent") : tr("In your hub: Confirm adds");
         r.help = tr("A hunter in your hub. Confirm adds them as a friend: they get a friend request, and once they accept you see each other.");
         r.enabled = hunters[i].state == LDN_HUNTER_ADD;
         std::string typed = std::string(hunters[i].code) + " " + hunters[i].name;
@@ -937,44 +990,45 @@ void friends_rows(std::vector<Row> &rows) {
         };
         rows.push_back(std::move(r));
     }
+    // the friends list: the ones online (or not known yet) here, the offline ones in their own submenu
     static LdnFriend list[LDN_FRIENDS_MAX];
     int server = HUB_UNKNOWN;
     int n = ldn_friends(list, LDN_FRIENDS_MAX, &server);
-    if (n && server != HUB_ONLINE && server != HUB_UNKNOWN) {
+    if (!n && !removing)
+        return;
+    header(rows, "friends.list.header", tr("Friends list"));
+    if (server != HUB_ONLINE && server != HUB_UNKNOWN) {
         Row w;
         w.id = "friend.server";
-        w.title = tr("Friends list");
+        w.title = tr("Hub server");
         w.value = server == HUB_OFF ? tr("No hub server") : server == HUB_VERSION ? tr("The hub server is too old")
                                                                                  : tr("Hub server unreachable");
         w.warn = true;
         w.enabled = false;
         rows.push_back(std::move(w));
     }
+    int shown = 0, offline = 0;
+    std::string my_hub = my_hub_code();
     for (int i = 0; i < n; i++) {
-        const LdnFriend &f = list[i];
-        Row r;
-        r.id = std::string("friend.") + f.code;
-        r.title = f.name;
-        bool hub = f.hub[0] != 0;
-        switch (f.state) {
-        case LDN_FRIEND_ONLINE: r.value = tr("Online"); break;
-        case LDN_FRIEND_HOSTING: r.value = hub ? tr("Hosting a hub (Confirm joins)") : tr("Hosting a hub"); break;
-        case LDN_FRIEND_IN_HUB: r.value = hub ? tr("In a hub (Confirm joins)") : tr("In a hub"); break;
-        case LDN_FRIEND_OFFLINE: r.value = tr("Offline"); break;
-        default: r.value = "..."; break;
-        }
-        if (removing) r.value = tr("Confirm removes");
-        r.help = f.code;
-        std::string fc = f.code, hc = f.hub;
-        r.enabled = removing || hub;
-        r.activate = [fc, hc]() {
-            if (removing) ldn_friend_remove(fc.c_str());
-            else if (!hc.empty()) ldn_join_code(hc.c_str(), nullptr);
-        };
-        rows.push_back(std::move(r));
+        if (list[i].state == LDN_FRIEND_OFFLINE)
+            offline++;
+        else
+            friend_row(rows, list[i], "friend.remove", my_hub), shown++;
     }
-    if (n || removing)
-        action(rows, "friend.remove", tr(removing ? "Done removing" : "Remove friends"), []() { removing = !removing; });
+    if (!shown && n) {
+        Row none;
+        none.id = "friend.none";
+        none.title = tr("No friends online");
+        none.enabled = false;
+        rows.push_back(std::move(none));
+    }
+    if (offline) {
+        action(rows, "friend.offline", std::string(tr("Offline friends")) + " (" + std::to_string(offline) + ")",
+               []() { push(View::OfflineFriends, "offline.remove"); });
+        rows.back().help = tr("Your friends who aren't playing online right now, and the ones who haven't added you back yet.");
+    }
+    if (shown || removing)
+        remove_friends_row(rows, "friend.remove");
 }
 // The keybinds' rows (config.h BIND_*): what each is called
 const char *const bind_titles[BINDS] = {"Move forward", "Move back", "Move left", "Move right", "Walk", "A", "B", "X",
@@ -2860,6 +2914,8 @@ std::vector<Row> rows_for_view(bool *open) {
         action_rows(r);
     } else if (s.view == View::Changelog) {
         action(r, "changelog.back", tr("Back"), []() { pop(); });
+    } else if (s.view == View::OfflineFriends) {
+        offline_friends_rows(r);
     } else if (s.view == View::KeyCapture && acts().capture >= 0) {
         action_capture_rows(r);
     } else if (s.view == View::KeyCapture) {
@@ -3619,6 +3675,7 @@ void settings_panel(bool *open) {
                                      : s.view == View::Reset      ? "Reset this tab?"
                                      : s.view == View::Move       ? "Move menu"
                                      : s.view == View::Conflicts  ? "Mod conflicts"
+                                     : s.view == View::OfflineFriends ? "Offline friends"
                                      : s.view == View::Keybinds   ? "Keybinds"
                                      : s.view == View::KeyCapture ? "Press the key for chat (Esc: cancel)"
                                                                   : "Unsaved changes");
