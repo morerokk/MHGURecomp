@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -131,6 +132,55 @@ func TestPool34(t *testing.T) {
 	}
 }
 
+// The pool changes while the server runs (Apply), for the hubs already listed too: off, each protocol plays with its
+// own; 4-5, 4 and 5 play together and 3 is apart.
+func TestLinkPoolSetting(t *testing.T) {
+	s := start(t, func(c *Config) { c.MaxHubsPerIP = 16 })
+	h3, id3, _ := hostAs(t, s, 3, [16]byte{}, infoWith(1), "")
+	_, id4, _ := hostAs(t, s, 4, [16]byte{}, infoWith(2), "")
+	h5, id5, _ := hostAs(t, s, 5, [16]byte{}, infoWith(3), "EEEE5555")
+	sees := func(proto uint16, want ...uint64) {
+		t.Helper()
+		l := ids3(t, s, proto, [16]byte{})
+		ok := len(l) == len(want)
+		for _, id := range want {
+			ok = ok && l[id]
+		}
+		if !ok {
+			t.Fatalf("pool %s: protocol %d sees %v, want %v", s.Settings().poolText(), proto, l, want)
+		}
+	}
+	st := s.Settings()
+	st.LinkPoolLow, st.LinkPoolHigh = 0, 0
+	s.Apply(st)
+	sees(3, id3)
+	sees(4, id4)
+	c := dial(t, s)
+	send(t, c, tJoin, header4(4, [16]byte{}), u64(id3))
+	if typ, p, _ := readFrame(c, 1<<20); typ != tError || binary.LittleEndian.Uint32(p) != errNotFound {
+		t.Fatal("protocol 4 joined a protocol 3 hub with no pool")
+	}
+	st.LinkPoolLow, st.LinkPoolHigh = 4, 5
+	s.Apply(st)
+	sees(3, id3)
+	sees(4, id4, id5)
+	sees(5, id4, id5)
+	c = dial(t, s)
+	send(t, c, tJoin, header4(4, [16]byte{}), u64(id5))
+	expect(t, h5, tIncoming)
+	f := dial(t, s)
+	send(t, f, tFind, header4(4, [16]byte{}), []byte("EEEE5555"))
+	if l := readHubs4(t, f); len(l) != 1 || l[0].proto != 5 {
+		t.Fatalf("FIND across the pool: %+v", l)
+	}
+	c = dial(t, s)
+	send(t, c, tJoin, header4(4, [16]byte{}), u64(id3))
+	if typ, _, _ := readFrame(c, 1<<20); typ != tError {
+		t.Fatal("protocol 4 joined a protocol 3 hub outside the pool")
+	}
+	_ = h3
+}
+
 // HUBS4: each hub's link protocol and code, for a protocol 4 asker only; a protocol 3 asker gets plain HUBS.
 func TestHubs4(t *testing.T) {
 	s := start(t, nil)
@@ -158,7 +208,7 @@ func TestHubs4(t *testing.T) {
 // Session codes: only the alphabet's; a code another hub holds is refused; the same hub listing again takes it back
 // (and its old listing is closed); a gone hub frees its code.
 func TestSessionCodes(t *testing.T) {
-	s := start(t, nil)
+	s := start(t, func(c *Config) { c.MaxHubsPerIP = 16 })
 	for _, bad := range []string{"abcd2345", "ABCDI345", "ABC", "ABCD23456"} {
 		c := dial(t, s)
 		send(t, c, tHost, header4(4, [16]byte{}), infoWith(1), []byte(bad))
@@ -190,11 +240,27 @@ func TestSessionCodes(t *testing.T) {
 	if _, id3, e := hostAs(t, s, 4, [16]byte{}, infoWith(2), "QQQQ1111"); id3 == 0 {
 		t.Fatalf("a gone hub's code stays taken: error %d", e)
 	}
-	// a protocol 3 game never sends a code: the same bytes are a bad request for it
+	// a protocol 3 game never sends a code: bytes after its NetworkInfo are ignored, as anything after the fields a
+	// request has (a newer game's additions)
 	c := dial(t, s)
-	send(t, c, tHost, header4(3, [16]byte{}), infoWith(5), []byte("ABCD2345"))
-	if typ, p, _ := readFrame(c, 1<<20); typ != tError || binary.LittleEndian.Uint32(p) != errBadReq {
-		t.Fatal("protocol 3 HOST with a code accepted")
+	send(t, c, tHost, header4(3, [16]byte{}), infoWith(5), []byte("CCCC3333"))
+	expect(t, c, tHosted)
+	f2 := dial(t, s)
+	send(t, f2, tFind, header4(4, [16]byte{}), []byte("CCCC3333"))
+	if l := readHubs4(t, f2); len(l) != 0 {
+		t.Fatalf("a protocol 3 hub took a code: %+v", l)
+	}
+	// protocol 4: a code of zeros is none, and what follows the code is ignored
+	z := dial(t, s)
+	send(t, z, tHost, header4(4, [16]byte{}), infoWith(6), make([]byte, codeLen), []byte("more"))
+	expect(t, z, tHosted)
+	x := dial(t, s)
+	send(t, x, tHost, header4(4, [16]byte{}), infoWith(7), []byte("ZZZZ7777"), []byte("more"))
+	expect(t, x, tHosted)
+	f3 := dial(t, s)
+	send(t, f3, tFind, header4(4, [16]byte{}), []byte("ZZZZ7777"), []byte("more"))
+	if l := readHubs4(t, f3); len(l) != 1 {
+		t.Fatalf("FIND with more after the code: %+v", l)
 	}
 }
 
@@ -354,13 +420,23 @@ func TestFriendRequests(t *testing.T) {
 	if left != 0 {
 		t.Fatalf("listedBy keeps %d entries after everyone left", left)
 	}
-	// names: at most nameMax bytes, no control characters
-	for _, bad := range [][]byte{named(presenceBody(1, stateOnline, ""), string(make([]byte, nameMax+1))),
-		named(presenceBody(1, stateOnline, ""), "a\nb"), append(presenceBody(1, stateOnline, ""), 5, 'x')} {
-		c := dial(t, s)
-		send(t, c, tPresence, header4(4, [16]byte{}), bad)
-		if typ, _, _ := readFrame(c, 1<<20); typ != tError {
-			t.Errorf("bad name %q answered", bad[len(bad)-3:])
+	// names as the requests show them: control characters and broken UTF-8 left out, cut to nameMax bytes at a whole
+	// character; a name that doesn't fit in the request is none; bytes after the name are ignored
+	long := strings.Repeat("a", nameMax-1) + "\u00e9" // (the last character's second byte is past nameMax)
+	for i, tc := range []struct {
+		body []byte
+		want string
+	}{
+		{named(presenceBody(40, stateOnline, "", idOf(41)), long), strings.Repeat("a", nameMax-1)},
+		{named(presenceBody(42, stateOnline, "", idOf(41)), "a\nb\xff"), "ab"},
+		{append(presenceBody(43, stateOnline, "", idOf(41)), 5, 'x'), ""},
+		{append(named(presenceBody(44, stateOnline, "", idOf(41)), "Mia"), "more"...), "Mia"},
+		{named(presenceBody(45, stateOnline, "", idOf(41)), strings.Repeat("\u732b", 20)), strings.Repeat("\u732b", nameMax/3)},
+	} {
+		askPresence(t, s, tc.body)
+		_, reqs := askPresence2(t, s, presenceBody(41, stateOnline, ""))
+		if len(reqs) == 0 || reqs[0].name != tc.want {
+			t.Errorf("name %d: requests %+v, want %q first", i, reqs, tc.want)
 		}
 	}
 }
@@ -388,12 +464,26 @@ func TestPresence(t *testing.T) {
 	if got := askPresence(t, s, presenceBody(1, stateOnline, "", b, c)); len(got) != 0 {
 		t.Fatalf("a stale friend told: %v", got)
 	}
-	// bad bodies
+	// what a newer game may send more of: a state this server doesn't know is told as it came, a code that isn't one
+	// is none, bytes after the name are ignored
+	askPresence(t, s, presenceBody(2, stateOnline, "", a))
+	askPresence(t, s, append(named(presenceBody(1, 9, "bad!", b), "A"), 0, 0))
+	if got := askPresence(t, s, presenceBody(2, stateOnline, "", a)); got[a] != (friendState{9, ""}) {
+		t.Fatalf("a newer state: %v", got)
+	}
+	// friends past maxFriends are left out, not the request
+	many := make([][friendLen]byte, 0, maxFriends+1)
+	for i := 0; i < maxFriends; i++ {
+		many = append(many, idOf(byte(100+i)))
+	}
+	many = append(many, b) // (b lists a back, but comes after maxFriends others)
+	if got := askPresence(t, s, presenceBody(1, stateOnline, "", many...)); len(got) != 0 {
+		t.Fatalf("a friend past maxFriends told: %v", got)
+	}
+	// cut short: refused
 	for _, bad := range [][]byte{
-		presenceBody(1, 9, "", b),                         // no such state
-		presenceBody(1, stateHosting, "bad!", b),          // not a code
-		presenceBody(1, stateOnline, "")[:secretLen],      // cut short
-		append(presenceBody(1, stateOnline, "", b), 0, 0), // a byte after an empty name
+		presenceBody(1, stateOnline, "")[:secretLen],
+		presenceBody(1, stateOnline, "", b)[:secretLen+1+codeLen+1+5],
 	} {
 		cn := dial(t, s)
 		send(t, cn, tPresence, header4(4, [16]byte{}), bad)

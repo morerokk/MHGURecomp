@@ -1335,11 +1335,14 @@ static void lobby_hubs(const uint8_t *buf, int n, uint8_t type, LobbyList *r) {
     r->n = 0;
     for (uint32_t i = 0; i < count && r->n < LOBBY_LIST_MAX && 4 + (i + 1) * entry <= (uint32_t)n; i++) {
         const uint8_t *e = buf + 4 + i * entry;
+        // (the server lists the protocols it pools: one older than PROTO_MIN can't be played with; to one newer than
+        // ours we say ours, and its host decides, as ours does for 3)
+        if (type == S_HUBS4 && rd16(e + 8) < PROTO_MIN) continue;
         r->ids[r->n] = rd64(e);
         r->vers[r->n] = PROTO_VERSION, r->codes[r->n][0] = 0;
         if (type == S_HUBS4) {
             uint16_t v = rd16(e + 8);
-            r->vers[r->n] = link_version_ok(v) ? v : PROTO_MIN;
+            r->vers[r->n] = v > PROTO_VERSION ? PROTO_VERSION : v;
             char raw[CODE_LEN + 1];
             memcpy(raw, e + 10, CODE_LEN), raw[CODE_LEN] = 0;  // (zeros: no code; anything else not a code: none)
             if (!raw[0] || strlen(raw) != CODE_LEN || !ldn_code_normalize(raw, r->codes[r->n])) r->codes[r->n][0] = 0;

@@ -25,8 +25,9 @@ func main() {
 	flag.IntVar(&cfg.MaxPresence, "max-presence", cfg.MaxPresence, "players online at once that the friends list keeps track of (protocol 4)")
 	minProto := flag.Uint("min-proto", uint(cfg.MinProto), "oldest link protocol (the game's PROTO_VERSION) served; older games are refused (0: any)")
 	maxProto := flag.Uint("max-proto", uint(cfg.MaxProto), "newest link protocol served; newer ones are refused (0: any)")
+	pool := flag.String("link-pool", Settings{LinkPoolLow: cfg.LinkPoolLow, LinkPoolHigh: cfg.LinkPoolHigh}.poolText(), "the link protocols that play together, low-high (their hubs are listed and joined across them; off: each its own)")
 	flag.BoolVar(&cfg.SeparatePhones, "separate-phones", cfg.SeparatePhones, "public hubs of Android players among Android players only, as the game asks (-separate-phones=false: one public room for all)")
-	settings := flag.String("settings", "", "file with min-proto, max-proto and separate-phones, read at the start and again on SIGHUP (systemctl reload): they change without a restart; the file wins over the flags")
+	settings := flag.String("settings", "", "file with min-proto, max-proto, link-pool and separate-phones, read at the start and again on SIGHUP (systemctl reload): they change without a restart; the file wins over the flags")
 	flag.BoolVar(&cfg.Verbose, "v", false, "log hubs and joins (never IP addresses)")
 	flag.Parse()
 	if *minProto > 0xFFFF {
@@ -36,15 +37,21 @@ func main() {
 		log.Fatalf("-max-proto %d: at most 65535", *maxProto)
 	}
 	cfg.MinProto, cfg.MaxProto = uint16(*minProto), uint16(*maxProto)
-	flags := Settings{cfg.MinProto, cfg.MaxProto, cfg.SeparatePhones}
+	var ok bool
+	if cfg.LinkPoolLow, cfg.LinkPoolHigh, ok = parsePool(*pool); !ok {
+		log.Fatalf("-link-pool %q: low-high (for example 3-4), or off", *pool)
+	}
+	flags := Settings{MinProto: cfg.MinProto, MaxProto: cfg.MaxProto, LinkPoolLow: cfg.LinkPoolLow,
+		LinkPoolHigh: cfg.LinkPoolHigh, SeparatePhones: cfg.SeparatePhones}
 	if *settings != "" {
 		st, err := readSettings(*settings, flags)
 		if err != nil {
 			log.Fatal(err)
 		}
 		cfg.MinProto, cfg.MaxProto, cfg.SeparatePhones = st.MinProto, st.MaxProto, st.SeparatePhones
+		cfg.LinkPoolLow, cfg.LinkPoolHigh = st.LinkPoolLow, st.LinkPoolHigh
 	}
-	if err := checkProtos(Settings{cfg.MinProto, cfg.MaxProto, cfg.SeparatePhones}); err != nil {
+	if err := checkProtos(Settings{MinProto: cfg.MinProto, MaxProto: cfg.MaxProto}); err != nil {
 		log.Fatal(err)
 	}
 	s := NewServer(cfg)
@@ -58,6 +65,7 @@ func main() {
 	if cfg.MaxProto > 0 {
 		log.Printf("refusing link protocols newer than %d", cfg.MaxProto)
 	}
+	log.Printf("link protocols that play together: %s", Settings{LinkPoolLow: cfg.LinkPoolLow, LinkPoolHigh: cfg.LinkPoolHigh}.poolText())
 	if !cfg.SeparatePhones {
 		log.Printf("one public room: Android players' public hubs are listed with everyone's")
 	}
@@ -78,8 +86,8 @@ func reloadOnHangup(s *Server, path string, flags Settings) {
 		case err != nil:
 			log.Printf("settings unchanged: %v", err)
 		case st == s.Settings():
-			log.Printf("settings unchanged: %s has the same ones (min-proto %d, max-proto %d, separate-phones %v)", path,
-				st.MinProto, st.MaxProto, st.SeparatePhones)
+			log.Printf("settings unchanged: %s has the same ones (min-proto %d, max-proto %d, link-pool %s, "+
+				"separate-phones %v)", path, st.MinProto, st.MaxProto, st.poolText(), st.SeparatePhones)
 		default:
 			s.Apply(st)
 		}
@@ -94,9 +102,24 @@ func checkProtos(st Settings) error {
 	return nil
 }
 
-// readSettings reads "key = value" lines ('#' starts a comment): min-proto and max-proto (numbers, 0: any) and
-// separate-phones (on / off). A key the file leaves out keeps the flag's value (flags). An unknown key, a bad value or
-// a max-proto below min-proto is an error.
+// parsePool: "low-high" (low at most high, both from 1), or "off" / "0": no pool.
+func parsePool(v string) (low, high uint16, ok bool) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "off" || v == "0" || v == "none" {
+		return 0, 0, true
+	}
+	a, b, found := strings.Cut(v, "-")
+	lo, err1 := strconv.ParseUint(strings.TrimSpace(a), 10, 16)
+	hi, err2 := strconv.ParseUint(strings.TrimSpace(b), 10, 16)
+	if !found || err1 != nil || err2 != nil || lo == 0 || hi < lo {
+		return 0, 0, false
+	}
+	return uint16(lo), uint16(hi), true
+}
+
+// readSettings reads "key = value" lines ('#' starts a comment): min-proto and max-proto (numbers, 0: any), link-pool
+// (low-high, or off) and separate-phones (on / off). A key the file leaves out keeps the flag's value (flags). An
+// unknown key, a bad value or a max-proto below min-proto is an error.
 func readSettings(path string, flags Settings) (Settings, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -112,8 +135,8 @@ func readSettings(path string, flags Settings) (Settings, error) {
 		if !ok && k == "" {
 			continue
 		}
-		bad := fmt.Errorf("%s line %d: %q (min-proto = <number>, max-proto = <number> or separate-phones = on / off)",
-			path, n, strings.TrimSpace(line))
+		bad := fmt.Errorf("%s line %d: %q (min-proto = <number>, max-proto = <number>, link-pool = <low>-<high> / off "+
+			"or separate-phones = on / off)", path, n, strings.TrimSpace(line))
 		switch k {
 		case "min-proto", "max-proto":
 			p, err := strconv.ParseUint(v, 10, 16)
@@ -125,6 +148,12 @@ func readSettings(path string, flags Settings) (Settings, error) {
 			} else {
 				st.MaxProto = uint16(p)
 			}
+		case "link-pool":
+			lo, hi, good := parsePool(v)
+			if !ok || !good {
+				return flags, bad
+			}
+			st.LinkPoolLow, st.LinkPoolHigh = lo, hi
 		case "separate-phones":
 			switch v {
 			case "on", "true", "yes", "1":

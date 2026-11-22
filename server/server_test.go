@@ -317,7 +317,7 @@ func TestApply(t *testing.T) {
 	if l := listIn(3, phoneRoom); len(l) != 1 || !l[phone3] {
 		t.Fatalf("apart again: phones see %v", l)
 	}
-	if got := s.Settings(); got != (Settings{3, 0, true}) {
+	if got := s.Settings(); got != (Settings{MinProto: 3, SeparatePhones: true}) {
 		t.Fatalf("Settings() = %+v", got)
 	}
 }
@@ -333,20 +333,31 @@ func TestReadSettings(t *testing.T) {
 	}
 	flags := Settings{MinProto: 2, SeparatePhones: true}
 	st, err := readSettings(write("# comment\n\nmin-proto = 3   # from Sunday\r\nSeparate-Phones=Off\n"), flags)
-	if err != nil || st != (Settings{3, 0, false}) {
+	if err != nil || st != (Settings{MinProto: 3}) {
 		t.Fatalf("%+v, %v", st, err)
 	}
-	if st, err = readSettings(write("separate-phones = on\n"), Settings{4, 100, false}); err != nil || st != (Settings{4, 100, true}) {
+	if st, err = readSettings(write("separate-phones = on\n"), Settings{MinProto: 4, MaxProto: 100, LinkPoolLow: 3, LinkPoolHigh: 4}); err != nil ||
+		st != (Settings{MinProto: 4, MaxProto: 100, LinkPoolLow: 3, LinkPoolHigh: 4, SeparatePhones: true}) {
 		t.Fatalf("a key left out keeps the flag's value: %+v, %v", st, err)
 	}
-	if st, err = readSettings(write("max-proto = 50\nmin-proto = 3\n"), Settings{0, 100, true}); err != nil || st != (Settings{3, 50, true}) {
+	if st, err = readSettings(write("max-proto = 50\nmin-proto = 3\n"), Settings{MaxProto: 100, SeparatePhones: true}); err != nil ||
+		st != (Settings{MinProto: 3, MaxProto: 50, SeparatePhones: true}) {
 		t.Fatalf("max-proto: %+v, %v", st, err)
 	}
-	if st, err = readSettings(write("max-proto = 0\n"), Settings{3, 100, true}); err != nil || st != (Settings{3, 0, true}) {
+	if st, err = readSettings(write("max-proto = 0\n"), Settings{MinProto: 3, MaxProto: 100, SeparatePhones: true}); err != nil ||
+		st != (Settings{MinProto: 3, SeparatePhones: true}) {
 		t.Fatalf("max-proto 0: %+v, %v", st, err)
 	}
+	pooled := Settings{MinProto: 3, LinkPoolLow: 3, LinkPoolHigh: 4}
+	if st, err = readSettings(write("link-pool = 4-5\n"), pooled); err != nil || st.LinkPoolLow != 4 || st.LinkPoolHigh != 5 {
+		t.Fatalf("link-pool 4-5: %+v, %v", st, err)
+	}
+	if st, err = readSettings(write("link-pool = off\n"), pooled); err != nil || st.LinkPoolLow != 0 || st.LinkPoolHigh != 0 {
+		t.Fatalf("link-pool off: %+v, %v", st, err)
+	}
 	for _, bad := range []string{"min-proto = three\n", "min-proto = 70000\n", "separate-phones = maybe\n", "min-proto\n", "port = 1\n",
-		"max-proto = -1\n", "max-proto = 70000\n", "max-proto = 1\n" /* below the flags' min-proto 2 */, "min-proto = 5\nmax-proto = 4\n"} {
+		"max-proto = -1\n", "max-proto = 70000\n", "max-proto = 1\n" /* below the flags' min-proto 2 */, "min-proto = 5\nmax-proto = 4\n",
+		"link-pool = 4\n", "link-pool = 5-4\n", "link-pool = 0-4\n", "link-pool = a-b\n", "link-pool\n"} {
 		if st, err := readSettings(write(bad), flags); err == nil || st != flags {
 			t.Errorf("%q: %+v, %v (want an error and the flags' values)", bad, st, err)
 		}

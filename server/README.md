@@ -49,19 +49,21 @@ Open the port for **TCP and UDP** in the firewall (and forward it, if the server
 | `-max-presence` | 20000 | players online at once that the friends list keeps track of (protocol 4). When it is full, new players' friends lists get "busy" until others go offline (90 s after their last request) |
 | `-min-proto` | 0 | the oldest link protocol (the game's `PROTO_VERSION`, runtime/net/ldn.c) served: older games are refused, and they say "The hub server runs another version" and show only LAN / Join hubs. `-min-proto 3` refuses 0.14.2 and older. 0: any version. Can change while the server runs (`-settings`) |
 | `-max-proto` | 100 | the newest link protocol served: newer ones are refused the same way. 0: no newest. Can change while the server runs (`-settings`) |
+| `-link-pool` | 3-4 | the link protocols that play together, `low-high`: their hubs are listed and joined across them (a protocol 4 game sees each hub's protocol in HUBS4 and speaks the lower one). A protocol outside it plays with its own only; `off`: each with its own. When a new game version still plays with the last one, `4-5` (and once 3 is retired, `min-proto 4`) lets them meet without a new server. Can change while the server runs (`-settings`) |
 | `-separate-phones` | on | Android players without a matchmaking key get public hubs of their own: the game sends the key `public-phone` then, and this server keeps that room apart, so phones and PCs don't see each other's public hubs. `-separate-phones=false` makes it the public room: everyone without a key sees everyone's hubs. Keyed rooms are not affected either way. Can change while the server runs (`-settings`) |
-| `-settings` | none | a settings file for the three above, read at the start and again on SIGHUP: see below. Its values win over the flags'; a setting it leaves out keeps the flag's |
+| `-settings` | none | a settings file for the four above, read at the start and again on SIGHUP: see below. Its values win over the flags'; a setting it leaves out keeps the flag's |
 | `-v` | off | log hubs and joins (never IP addresses): each hub with its link protocol and room, and hubs refused by `-min-proto` or `-max-proto` |
 
 ### Changing settings while the server runs
 
-`-min-proto`, `-max-proto` and `-separate-phones` can change without a restart, so no hub or game is dropped. Put
-them in a file:
+`-min-proto`, `-max-proto`, `-link-pool` and `-separate-phones` can change without a restart, so no hub or game is
+dropped. Put them in a file:
 
 ```
 # /etc/mhgurecomp-hubserver.conf
 min-proto = 3          # a number; 0: any version
 max-proto = 100        # a number; 0: no newest
+link-pool = 3-4        # low-high, or off
 separate-phones = on   # on / off
 ```
 
@@ -74,7 +76,9 @@ start it stops the server instead. Windows has no SIGHUP: there the file is only
   closes those hosts' connections, and their games try again and say the server runs another version. Players already
   in such a hub play on through the relay until they leave it. A lower one lets those games back in at once.
   `max-proto` works the same way from the other end: a lower one takes newer protocols' hubs off.
-- `separate-phones` applies to every search and join from then on, to the hubs already listed too: nobody reconnects.
+- `link-pool` and `separate-phones` apply to every search and join from then on, to the hubs already listed too:
+  nobody reconnects.
+- A server older than `link-pool` refuses a file that has it (an unknown key): add it only after updating the server.
 
 With Docker: `docker build -t mhgurecomp-hubserver server` and
 `docker run -d --restart unless-stopped -p 39510:39510/tcp -p 39510:39510/udp mhgurecomp-hubserver`.
@@ -134,9 +138,9 @@ older than this simply keeps every game on the relay.
 ### Link protocol 4
 
 MHGURecomp 0.19 speaks link protocol 4, which plays with 3: its hosts accept a protocol 3 player and its players
-speak 3 to a protocol 3 host (the link frames are the same). The server keeps 3 and 4 in one pool, so players of
-either version see and join each other's hubs, and `min-proto 4` can retire 3 once few games still use it. A game
-asking under 4 also gets:
+speak 3 to a protocol 3 host (the link frames are the same). The server keeps 3 and 4 in one pool (`-link-pool`), so
+players of either version see and join each other's hubs, and `min-proto 4` can retire 3 once few games still use it.
+A game asking under 4 also gets:
 
 - **HUBS4** instead of HUBS: each hub with its link protocol and session code.
 - **Session codes**: a protocol 4 host may send its hub's code (8 characters of `0123456789ABCDEFGHJKMNPQRSTVWXYZ`)
@@ -147,9 +151,9 @@ asking under 4 also gets:
 - **JOIN with a code**: the hub id followed by its code. With the right code the matchmaking key doesn't have to
   match: a code is an invitation.
 - **PRESENCE** (request 8, the friends list): header, the install's secret (32 bytes), its state (0 in the game, 1
-  hosting, 2 in a hub), a code (its hub's, or zeros), the number of friends and their friend codes (10 bytes each,
-  at most 64), and optionally a name length and the name (UTF-8, at most 32 bytes: the hunter name the player's
-  friend requests show). Answer FRIENDS (22): the count, then for each listed friend who is online and lists the
+  hosting, 2 in a hub; another value is passed on as it came), a code (its hub's, or zeros), the number of friends and
+  their friend codes (10 bytes each: the first 64 count), and optionally a name length and the name (UTF-8: the hunter
+  name the player's friend requests show, cut to 32 bytes at a whole character, control characters left out). Answer FRIENDS (22): the count, then for each listed friend who is online and lists the
   asker back: its friend code, state and code; then the friend requests: their count, and for each player online
   who lists the asker while the asker doesn't list them (the newest 8): its friend code, name length and name.
   Accepting a request is listing that player back. A friend code is the first 10 bytes of
@@ -157,6 +161,10 @@ asking under 4 also gets:
   It never tells a player's state to anyone the player doesn't list.
 - Hunter Search networks are told from hubs by room for 2 and 0xFF at advertise byte 0x1C. The 8 bytes at 0x14 are
   the host's account id: the same for every game before protocol 4, each install's own since.
+
+Newer games may send more: every request's bytes after the fields above are ignored (a code of zeros is none), and
+PRESENCE takes what is over its limits as far as they go instead of refusing it. So a game can add to a request
+without a new server, as long as it copes with this one ignoring the addition.
 
 Safety: sizes capped, every NetworkInfo checked before it is listed, LIST / JOIN / FIND / PRESENCE rate limited per IP address,
 connections and hubs per IP address limited, handshakes time out, the relay only forwards between the two ends of a

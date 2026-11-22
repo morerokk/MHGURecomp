@@ -12,7 +12,7 @@
 //
 // Control frames: u32 size (of what follows), u8 type, payload; little endian. The first frame of a connection is a
 // request, whose payload starts with a header: "MHGS", u16 server protocol, u16 link protocol (the port's
-// PROTO_VERSION: only hubs of the same one, or of one it plays with - see linkGroup - are listed or joined), room[16]
+// PROTO_VERSION: only hubs of the same one, or of one it plays with - see Settings.group - are listed or joined), room[16]
 // (the first 16 bytes of SHA-256 of the matchmaking key, all zero without a key).
 //
 // Link protocol 4 (MHGURecomp 0.19) plays with 3: its hosts take a protocol 3 player's hello, and its players say 3
@@ -29,6 +29,9 @@
 //     is the first 10 bytes of SHA-256("MHGURecomp friend:" + secret). The server stores neither for long: only who
 //     was online in the last presenceTTL, with their friend codes and what they were doing. A player's state is told
 //     only to the players it lists that list it back.
+//
+// Requests may carry more than this server reads: bytes after the fields it knows are ignored, so a newer game can
+// add some without a new server (and loses nothing with this one but what it added).
 //
 // Everything a client sends is untrusted: sizes are capped, NetworkInfo is checked before it is listed, requests are
 // rate limited per IP address, connections and hubs per IP address are limited, and the relay only ever forwards
@@ -48,9 +51,11 @@ import (
 	mrand "math/rand/v2"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -88,16 +93,16 @@ const (
 	errCodeTaken = 6 // another hub holds that session code: pick another
 
 	// protocol 4
-	codeLen       = 8
-	codeAlphabet  = "0123456789ABCDEFGHJKMNPQRSTVWXYZ" // (Crockford's base 32: no I, L, O, U)
-	secretLen     = 32
-	friendLen     = 10
-	maxFriends    = 64
-	presenceTTL   = 90 * time.Second // the game asks every 30 s
-	stateOnline   = 0                // in the game
-	stateHosting  = 1                // hosting a hub (code: its session code, or zeros)
-	stateInHub    = 2                // in someone's hub (code: that hub's, when known)
-	stateMax      = stateInHub
+	codeLen      = 8
+	codeAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ" // (Crockford's base 32: no I, L, O, U)
+	secretLen    = 32
+	friendLen    = 10
+	maxFriends   = 64
+	presenceTTL  = 90 * time.Second // the game asks every 30 s
+	stateOnline  = 0                // in the game
+	stateHosting = 1                // hosting a hub (code: its session code, or zeros)
+	stateInHub   = 2                // in someone's hub (code: that hub's, when known); a state the server doesn't
+	// know is passed on as it came (a newer game's: older games show it as online)
 	nameMax       = 32 // bytes of a name in PRESENCE (UTF-8: the hunter name the player goes by)
 	maxRequests   = 8  // friend requests in one answer (the newest)
 	friendSalt    = "MHGURecomp friend:"
@@ -150,11 +155,16 @@ type Config struct {
 	MaxPresence   int           // players online at once that the friends list keeps (PRESENCE)
 	HandshakeTime time.Duration // for the first frame, and a joining player's wait for the host
 	PingEvery     time.Duration
-	// The two settings that can change while the server runs (Server.Apply): their values at the start.
+	// The settings that can change while the server runs (Server.Apply: these, LinkPool* and SeparatePhones): their
+	// values at the start.
 	MinProto uint16 // the oldest link protocol (PROTO_VERSION) served; older games get errVersion (0: any)
 	// the newest link protocol served; newer ones get errVersion (0: any). Other ports that borrow this server under
 	// a link protocol of their own (MH Rise's sends 0x5201) are above it, as long as MHGURecomp's stays below it.
 	MaxProto uint16
+	// The link protocols from LinkPoolLow to LinkPoolHigh play together: their hubs are listed and joined across them
+	// (the game tells HUBS4 askers each hub's protocol, and speaks the lower one). Others play with their own only.
+	// LinkPoolLow 0: no pool. It can change while the server runs too.
+	LinkPoolLow, LinkPoolHigh uint16
 	// Android's public hubs (the game sends the key "public-phone" when it has none) in a room of their own, as the
 	// game asks; false: that room is the public room, so phones and PCs without a key see each other's hubs
 	SeparatePhones bool
@@ -165,7 +175,7 @@ func DefaultConfig() Config {
 	return Config{
 		Addr: ":39510", MaxConns: 4000, MaxConnsPerIP: 24, MaxHubs: 2000, MaxHubsPerIP: 4, ListMax: 18, ListSearchMax: 6,
 		ReqRate: 2, ReqBurst: 15, Bandwidth: 1 << 20, MaxPresence: 20000, HandshakeTime: 10 * time.Second,
-		PingEvery: 15 * time.Second, MaxProto: 100, SeparatePhones: true,
+		PingEvery: 15 * time.Second, MaxProto: 100, LinkPoolLow: 3, LinkPoolHigh: 4, SeparatePhones: true,
 	}
 }
 
@@ -229,9 +239,11 @@ type Server struct {
 	conns    int
 	ln       *net.TCPListener
 	udp      *net.UDPConn
-	// the live settings (Apply): cfg.MinProto, cfg.MaxProto and cfg.SeparatePhones are only their first values
+	// the live settings (Apply): cfg.MinProto, cfg.MaxProto, cfg.LinkPool* and cfg.SeparatePhones are only their
+	// first values
 	minProto atomic.Uint32
 	maxProto atomic.Uint32
+	pool     atomic.Uint32 // LinkPoolLow | LinkPoolHigh<<16
 	separate atomic.Bool
 }
 
@@ -241,6 +253,7 @@ func NewServer(cfg Config) *Server {
 		listedBy: map[[friendLen]byte]map[[friendLen]byte]time.Time{}}
 	s.minProto.Store(uint32(cfg.MinProto))
 	s.maxProto.Store(uint32(cfg.MaxProto))
+	s.pool.Store(uint32(cfg.LinkPoolLow) | uint32(cfg.LinkPoolHigh)<<16)
 	s.separate.Store(cfg.SeparatePhones)
 	return s
 }
@@ -249,6 +262,8 @@ func NewServer(cfg Config) *Server {
 type Settings struct {
 	MinProto       uint16
 	MaxProto       uint16 // 0: no newest
+	LinkPoolLow    uint16 // the link protocols that play together (0: none)
+	LinkPoolHigh   uint16
 	SeparatePhones bool
 }
 
@@ -258,18 +273,21 @@ func (st Settings) serves(proto uint16) bool {
 }
 
 func (s *Server) Settings() Settings {
-	return Settings{uint16(s.minProto.Load()), uint16(s.maxProto.Load()), s.separate.Load()}
+	pool := s.pool.Load()
+	return Settings{MinProto: uint16(s.minProto.Load()), MaxProto: uint16(s.maxProto.Load()), LinkPoolLow: uint16(pool),
+		LinkPoolHigh: uint16(pool >> 16), SeparatePhones: s.separate.Load()}
 }
 
 // Apply changes the settings without a restart; open connections stay. A higher MinProto or a lower MaxProto refuses
 // the games left out from the next request on and takes their hubs off the list: their hosts' connections here are
 // closed (the game tries again and is told the server runs another version), while players already in such a hub
-// play on through the relay until they leave. SeparatePhones applies to every search and join from now on, to the hubs
-// already listed too (no host has to reconnect). Returns how many hubs were taken off.
+// play on through the relay until they leave. The link pool and SeparatePhones apply to every search and join from now
+// on, to the hubs already listed too (no host has to reconnect). Returns how many hubs were taken off.
 func (s *Server) Apply(n Settings) int {
 	old := s.Settings()
 	s.minProto.Store(uint32(n.MinProto))
 	s.maxProto.Store(uint32(n.MaxProto))
+	s.pool.Store(uint32(n.LinkPoolLow) | uint32(n.LinkPoolHigh)<<16)
 	s.separate.Store(n.SeparatePhones)
 	var gone []*net.TCPConn
 	s.mu.Lock()
@@ -283,21 +301,33 @@ func (s *Server) Apply(n Settings) int {
 		c.Close()
 	}
 	if old != n {
-		log.Printf("settings: min-proto %d -> %d, max-proto %d -> %d, separate-phones %v -> %v (%d hub(s) of games no "+
-			"longer served taken off)", old.MinProto, n.MinProto, old.MaxProto, n.MaxProto, old.SeparatePhones,
-			n.SeparatePhones, len(gone))
+		log.Printf("settings: min-proto %d -> %d, max-proto %d -> %d, link-pool %s -> %s, separate-phones %v -> %v (%d "+
+			"hub(s) of games no longer served taken off)", old.MinProto, n.MinProto, old.MaxProto, n.MaxProto, old.poolText(),
+			n.poolText(), old.SeparatePhones, n.SeparatePhones, len(gone))
 	}
 	return len(gone)
 }
 
-// linkGroup: the link protocols that play together share one: 4 plays with 3 (its hosts take a protocol 3 hello and
-// its players speak 3 to a protocol 3 host), so their hubs are listed and joined across the two.
-func linkGroup(proto uint16) uint16 {
-	if proto == 4 {
-		return 3
+// group: the link protocols that play together share one, the pool's (LinkPoolLow to LinkPoolHigh: 3 to 4 by default,
+// as 4's hosts take a protocol 3 hello and its players speak 3 to a protocol 3 host), so their hubs are listed and
+// joined across them. A protocol outside the pool plays with its own only.
+func (st Settings) group(proto uint16) uint16 {
+	if st.LinkPoolLow != 0 && proto >= st.LinkPoolLow && proto <= st.LinkPoolHigh {
+		return st.LinkPoolLow
 	}
 	return proto
 }
+
+// poolText: the pool as the settings file writes it ("3-4", or "off").
+func (st Settings) poolText() string {
+	if st.LinkPoolLow == 0 {
+		return "off"
+	}
+	return fmt.Sprintf("%d-%d", st.LinkPoolLow, st.LinkPoolHigh)
+}
+
+// zeros: all zero bytes ("none" for a code).
+func zeros(b []byte) bool { return len(bytes.Trim(b, "\x00")) == 0 }
 
 // codeOK: a session code as the game makes them (codeAlphabet only; zeros are "none" and not a code).
 func codeOK(c []byte) bool {
@@ -558,31 +588,31 @@ func (s *Server) handle(c *net.TCPConn) {
 			return
 		}
 		s.list(c, proto, room)
-	case tHost:
+	case tHost: // (NetworkInfo [, code[8] (protocol 4: zeros, or none, for no code)], and whatever a newer game adds)
 		var code []byte
-		if v4 && len(body) == netInfoSize+codeLen { // (a protocol 4 hub may come without a code too)
-			code, body = body[netInfoSize:], body[:netInfoSize]
+		if v4 && len(body) >= netInfoSize+codeLen && !zeros(body[netInfoSize:netInfoSize+codeLen]) {
+			code = body[netInfoSize : netInfoSize+codeLen]
 			if !codeOK(code) {
 				sendError(c, errBadReq)
 				return
 			}
 		}
-		if len(body) != netInfoSize || !infoOK(body) {
+		if len(body) < netInfoSize || !infoOK(body[:netInfoSize]) {
 			sendError(c, errBadReq)
 			return
 		}
-		s.host(c, ip, proto, room, body, code)
+		s.host(c, ip, proto, room, body[:netInfoSize], code)
 	case tAttach:
-		if len(body) != 8 {
+		if len(body) < 8 {
 			return
 		}
 		s.attach(c, binary.LittleEndian.Uint64(body))
-	case tJoin:
+	case tJoin: // (u64 hub id [, code[8] (protocol 4)], ...)
 		var code []byte
-		if v4 && len(body) == 8+codeLen {
-			code, body = body[8:], body[:8]
+		if v4 && len(body) >= 8+codeLen && !zeros(body[8:8+codeLen]) {
+			code = body[8 : 8+codeLen]
 		}
-		if len(body) != 8 {
+		if len(body) < 8 {
 			return
 		}
 		if !s.allowRequest(ip) {
@@ -591,7 +621,7 @@ func (s *Server) handle(c *net.TCPConn) {
 		}
 		s.join(c, proto, room, binary.LittleEndian.Uint64(body), code)
 	case tFind:
-		if !v4 || len(body) != codeLen {
+		if !v4 || len(body) < codeLen {
 			sendError(c, errBadReq)
 			return
 		}
@@ -599,7 +629,7 @@ func (s *Server) handle(c *net.TCPConn) {
 			sendError(c, errBusy)
 			return
 		}
-		s.find(c, proto, body)
+		s.find(c, proto, body[:codeLen])
 	case tPresence:
 		if !v4 {
 			sendError(c, errBadReq)
@@ -706,10 +736,11 @@ func (s *Server) list(c *net.TCPConn, proto uint16, room [16]byte) {
 	var hubs, searches []listEntry
 	sep := s.separate.Load()
 	room = meet(room, sep)
-	group := linkGroup(proto)
+	set := s.Settings()
+	group := set.group(proto)
 	s.mu.Lock()
 	for _, h := range s.hubs {
-		if linkGroup(h.proto) == group && meet(h.room, sep) == room {
+		if set.group(h.proto) == group && meet(h.room, sep) == room {
 			e := entryOf(h)
 			if huntSearch(h.info[:]) {
 				searches = append(searches, e)
@@ -728,7 +759,8 @@ func (s *Server) find(c *net.TCPConn, proto uint16, code []byte) {
 	var k [codeLen]byte
 	copy(k[:], code)
 	s.mu.Lock()
-	if h := s.codes[k]; h != nil && linkGroup(h.proto) == linkGroup(proto) {
+	set := s.Settings()
+	if h := s.codes[k]; h != nil && set.group(h.proto) == set.group(proto) {
 		es = append(es, entryOf(h))
 	}
 	s.mu.Unlock()
@@ -838,14 +870,15 @@ func (s *Server) host(c *net.TCPConn, ip string, proto uint16, room [16]byte, in
 	}
 }
 
-// A player's JOIN: the hub must be in its room and play its link protocol (linkGroup) - or, with the hub's session
+// A player's JOIN: the hub must be in its room and play its link protocol (Settings.group) - or, with the hub's session
 // code (protocol 4), in any room.
 func (s *Server) join(c *net.TCPConn, proto uint16, room [16]byte, id uint64, code []byte) {
 	s.mu.Lock()
 	h := s.hubs[id]
 	sep := s.separate.Load()
 	invited := h != nil && code != nil && codeOK(code) && bytes.Equal(h.code[:], code)
-	if h == nil || (!invited && meet(h.room, sep) != meet(room, sep)) || linkGroup(h.proto) != linkGroup(proto) {
+	set := s.Settings()
+	if h == nil || (!invited && meet(h.room, sep) != meet(room, sep)) || set.group(h.proto) != set.group(proto) {
 		s.mu.Unlock()
 		sendError(c, errNotFound)
 		return
@@ -926,21 +959,29 @@ func friendID(secret []byte) (id [friendLen]byte) {
 	return
 }
 
-// nameOK: a name for a friend request (UTF-8, as the game has it): no control characters.
-func nameOK(b []byte) bool {
-	for _, c := range b {
-		if c < 0x20 || c == 0x7F {
-			return false
+// cleanName: a name for friend requests as the game sent it (UTF-8), without control characters or broken UTF-8, cut to
+// at most nameMax bytes at a whole character.
+func cleanName(b []byte) string {
+	name := strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7F {
+			return -1
 		}
+		return r
+	}, strings.ToValidUTF8(string(b), ""))
+	for len(name) > nameMax {
+		_, size := utf8.DecodeLastRuneInString(name)
+		name = name[:len(name)-size]
 	}
-	return true
+	return name
 }
 
 // PRESENCE (protocol 4): the asker is online (doing state, in or hosting the hub with code), until presenceTTL after
 // this; the answer is which of the friends it lists are online and list it back, and what they do, then its friend
 // requests: the players online that list it while it doesn't list them, with the names they go by (the newest
 // maxRequests). Body: secret[32], u8 state, code[8] (zeros: none), u8 n, n x friend code[10], and optionally u8 len,
-// name[len] (at most nameMax bytes): the name its own requests show.
+// name[len]: the name its own requests show; anything after that is ignored. What a newer game may send more of is
+// taken as far as this server goes rather than refused: the first maxFriends friends, the name cut to nameMax bytes (and
+// without control characters), a state it doesn't know as it came, and a code that isn't one as none.
 func (s *Server) presence(c *net.TCPConn, body []byte) {
 	const fixed = secretLen + 1 + codeLen + 1
 	if len(body) < fixed {
@@ -950,23 +991,23 @@ func (s *Server) presence(c *net.TCPConn, body []byte) {
 	n := int(body[fixed-1])
 	state, code := body[secretLen], body[secretLen+1:secretLen+1+codeLen]
 	end := fixed + n*friendLen
-	var name []byte
-	if len(body) > end { // (the name: optional)
-		nl := int(body[end])
-		if nl > nameMax || len(body) != end+1+nl || !nameOK(body[end+1:]) {
-			sendError(c, errBadReq)
-			return
-		}
-		name = body[end+1:]
-	}
-	if n > maxFriends || len(body) < end || state > stateMax ||
-		(!codeOK(code) && !bytes.Equal(code, make([]byte, codeLen))) {
+	if len(body) < end { // (the friends cut short)
 		sendError(c, errBadReq)
 		return
 	}
+	var name string
+	if len(body) > end { // (the name: optional; one that doesn't fit in the request is left out)
+		if nl := int(body[end]); len(body) >= end+1+nl {
+			name = cleanName(body[end+1 : end+1+nl])
+		}
+	}
+	if !codeOK(code) {
+		code = make([]byte, codeLen)
+	}
+	n = min(n, maxFriends)
 	id := friendID(body[:secretLen])
 	now := time.Now()
-	me := &presence{friends: map[[friendLen]byte]bool{}, state: state, name: string(name), seen: now}
+	me := &presence{friends: map[[friendLen]byte]bool{}, state: state, name: name, seen: now}
 	copy(me.code[:], code)
 	for i := 0; i < n; i++ {
 		var f [friendLen]byte
