@@ -221,25 +221,33 @@ static void follow(void) {
     MenuGeom v[4], best;
     int n = menuptr_variants(lr, v, 4);
     float best_d = 1e18f, bx = 0, by = 0;
+    bool best_small = false;
     for (int k = 0; k < n; k++) {
         if (!v[k].kw) continue;  // (no signature: a fixed place)
         float ox, oy;  // (where this cell is from the first: its row's own place when known, else by steps)
         menuptr_row_offset(&v[k], row, &ox, &oy);
         ox += v[k].cdx * (float)col, oy += v[k].cdy * (float)col;
         // (a frame of a small scale, which many other pieces share - icons, letters: not followed, its menu stays where
-        // it was learned; scan_small finds it on its cells)
-        if (fabsf(4.0f * v[k].kw * v[k].kh) < 100.0f) continue;
+        // it was learned; scan_small finds it on its cells. But for a choice laid out across - a prompt's Yes / No, whose
+        // dialog sits higher or lower with its message: the Hub Quest Board's "Join this Quest?" 60 below where the
+        // prompt was learned, and the pointer on the lower half of its Yes / No missed - followed up and down only, by a
+        // piece of its signature exactly where the chosen option is across: the one nearest where it was learned)
+        bool small = fabsf(4.0f * v[k].kw * v[k].kh) < 100.0f;
+        bool across = small && v[k].dy == 0.0f && v[k].dx != 0.0f && v[k].cdx == 0.0f && v[k].cdy == 0.0f;
+        if (small && !across) continue;
         for (int i = 0; i < g_ncur; i++) {
             const Piece *p = &g_cur[i];
             if (!near(p->z, v[k].z) || !near(p->w, v[k].kw) || !near(p->h, v[k].kh)) continue;
             MenuGeom g = v[k];
             g.x = p->x + g.ox - ox, g.y = p->y + g.oy - oy;
+            if (across && fabsf(g.x - v[k].x) > 0.5f) continue;
             float d = (g.x - v[k].x) * (g.x - v[k].x) + (g.y - v[k].y) * (g.y - v[k].y);
-            if (d < best_d) best_d = d, best = g, bx = p->x + g.ox - g.cdx * (float)col, by = p->y + g.oy - g.cdy * (float)col;
+            if (d < best_d)
+                best_d = d, best = g, best_small = small, bx = p->x + g.ox - g.cdx * (float)col, by = p->y + g.oy - g.cdy * (float)col;
         }
     }
     menuptr_live(best_d < 1e18f ? &best : NULL);
-    if (best_d < 1e18f) menuptr_row_seen(&best, row, bx, by);  // (rows not one step apart: their own places)
+    if (best_d < 1e18f && !best_small) menuptr_row_seen(&best, row, bx, by);  // (rows not one step apart: their own places)
     // A list whose last row is a button below it (the Palico training setups' Begin Training / Select details): the
     // list's bar is gone while the button is chosen, which is recoloured in place (nothing moves onto it). Settled on
     // the last row with no bar of the menu's on screen, the one button there (layer 97, 210 x 34) is that row's place.

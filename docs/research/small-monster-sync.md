@@ -108,6 +108,29 @@ list alone. Two instances, Server Off, MHGU_EMTRACE_ZAKO=1 and `MHGU_CONTROL` dr
   240 fps, 3-4 players, two PCs. A monster stuck looping a later action wouldn't be caught. Since 2026-11-04 a monster joins the
   sync once its action word has been non-zero (others pass through 0:0 for a moment, so the word alone can't tell); this route not
   run again since.
+- uEms100 is file ems101, species 0x1065: Volcanic Hollow's breakable rock (models ems101_rock00-02, sounds rock_break_s,
+  rock_break_collapse, fire_stone_broke; ems100-106 are the same rock for the other maps). Quest 10537 (Hub, Volcanic Hollow) has
+  two in zone 7 at fixed spots (3464,-390 and -1204,-1854); the user remembers the first flood in zone 5 next to it. Whole, a rock's
+  action word is 0 in every sample. Broken (by hits or a large monster), it goes 0 -> 0xb once and stays (measured on both games
+  46 ms apart), and isn't spawned again on re-entry. Rocks and other small monsters don't spawn in an MHGU_START_AREA zone until an
+  area change; the Hub's random high rank start does spawn them, but each hunter gets their own start zone.
+- 2026-11-22 report: players dropped on area entry in quest 10537 (4 players, SyncSmallMonsters mixed On/Off, the reporter alone in
+  zone 11). Not reproduced with two instances at 240 fps: both On, hunters walked zone by zone through nearly every zone, each in
+  turn arriving where the other was (peak netEmAction 2.4/s per game); host Off / joiner On (the On joiner owns a zone the moment it
+  walks in on an Off player), zone 7, a rock broken, the joiner out and back in (peak 2.2/s). Busiest normal small monster: 9 action
+  changes in one second (species 0x1013), most stay under 5.
+- Flood cap (2026-11-23, emsync.c em_send / emsync_filter): a hook on 0x2cafe8 counts each small monster's netEmAction (kind 1)
+  per second; over CAP_PER_SEC (20; MHGU_EMSYNC_CAP=<n> for tests) the send is dropped, the monster made local for the rest of the
+  owner's stay in the zone, and an aux message (magic 0xE9: slot, area, id) tells the others twice a second, who keep their copy
+  local for 5 s after the last one. Incoming kind-1 messages for a small monster are counted the same way (byte 3 of the message at
+  0x2cb120 is the kind) and dropped past the cap, whatever the setting, so an older owner's flood stops at a newer follower too.
+  The left-first check is keyed by network id as well as address (a new monster can take a departed one's address and list place).
+  MHGU_EMSYNC_NOGUARD=1 turns that check off, bringing the rock flood back for testing the cap. Tested (two instances, 240 fps,
+  both On, NOGUARD=1, quest 10537, the user walking the host then the joiner into zone 7): the owner logged both rocks (10016,
+  10017) over the cap, the joiner logged both caps heard, nobody dropped; netEmAction averaged 8.1/s over that 5 s report and
+  ~1/s otherwise (the same rocks without the cap: 480/s). No other small monster hit the cap in this or the earlier runs. Rig:
+  C:\MHGURecompile\scratch-vhsync\user (launch.sh: two instances into quest 10537 by poking sQuestSelector +0xd68). Not tested:
+  3-4 players, two PCs, an older owner flooding a newer follower (the receive-side count).
 - Maccao preferring Palicoes comes from their score table (docs/STATUS.md, "Monsters' attention scores"), not from sync: the user
   reports they rarely go for hunters unprovoked. Use Jaggi or Rhenoplos to test hostility.
 - Herds: sEnemy (0x1a51fe0, class sEnemyMure) +0x25c0 holds 10 herds of 0x50 bytes: +0 type, +1 id, +2 the herd's master
