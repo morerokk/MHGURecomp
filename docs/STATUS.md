@@ -1475,6 +1475,28 @@ old way while on.
   sampler still gets the setting on 3D draws (MHGU_SAMPLER_LOG: "used 1" in the loading screen, "used 16" in town).
   Checked with frames shot every 0.12 s at 16x: before, 3 of 5 loading frames had a seam; after, 0 of 16.
 
+## Pause/Suspend: [Controls] PauseKey (2026-11-22)
+
+- runtime/pause.c: the key (Pause by default; Esc and Enter also resume) holds the game's render thread in
+  nvnQueuePresentTexture after its present. The main thread then waits for it within a frame: a player-update fntrace
+  sent while paused fired only after the resume. The held thread presents the same image again at 60 Hz and builds the
+  overlay's frames itself (overlay_frame with its cpu), so the F1 menu and Forge's work meanwhile; the plugins'
+  forge_onNvnRender is not called for those (they would draw into the image again). PAUSED over a dimmed picture:
+  overlay.cpp draw_paused, on ImGui's background list (under the menus).
+- The guest's clock stops: rt_ticks reads pause_clock_ns (a seqlock over the paused time; now is read inside it, so a
+  time is never earlier than the stop). Checked: the game's frame step (Forge's dt, app +0x68) was 0.25 right after a
+  5.4 s pause at 240 fps. The audio mixer renders nothing while held (voices keep their place; the game's audio thread
+  still gets its events): the mixer's frame counter did not advance over a 6.9 s pause in quest 101.
+- Refused (a notice says why): ldn_offline false - a network in any state past Initialize, and for 15 s after one
+  closes, since Hunter Search closes its network for each scan and opens it again - or fs_writing (files open for
+  writing, a save mount with uncommitted changes, a commit and its backup). Checked: refused with Hunter Search on (12
+  presses over 24 s), allowed 16 s after turning it off; a press during Quit Game's save was refused, the next one after
+  it paused. Not checked: in an online Hub (same ldn state check), a movie, an area load.
+- Settings: the Pause/Suspend row in Keybinds and in Game actions' Keys (capture view CAPTURE_PAUSE = -2; Esc, Enter,
+  mouse buttons and the recomp's keys refused), shown on the keyboard drawing, red when the chat key or a keybind has
+  the same key. Forge's setKeybind refuses it as it does the chat key. Not on a controller (by design).
+- tests/test_settings_panel.cpp stops at its "fps" focus assertion; it does so on HEAD before this change too.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,

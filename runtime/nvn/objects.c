@@ -6,6 +6,7 @@
 
 #include "../forge.h"
 #include "../kernel.h"
+#include "../pause.h"
 #include "nvn.h"
 
 static uint64_t next_debug_id = 1;
@@ -685,11 +686,17 @@ NVN(nvnQueueAcquireTexture) {
     w->next = (w->next + 1) % (w->active ? w->active : 1);
     RET(0);
 }
+static void present_again(void *t) { backend_present(t); }
 NVN(nvnQueuePresentTexture) {
     NvnWindow *w = HOST(NvnWindow, A(1));
     int i = (int)A(2);
     forge_nvn_present(c, (uint32_t)A(0), (uint32_t)A(1), i);  // (Forge plugins' forge_onNvnRender: they may draw into it)
-    if (i >= 0 && i < w->num) backend_present(HOST(NvnTexture, w->textures[i]));
+    if (i < 0 || i >= w->num) return;
+    NvnTexture *t = HOST(NvnTexture, w->textures[i]);
+    backend_present(t);
+    // Pause/Suspend: the game held here, the picture shown again (not given to the plugins again: they would draw
+    // into it once more each time)
+    pause_frame(c, present_again, t);
 }
 
 // ================================================================== small state objects

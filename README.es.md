@@ -281,6 +281,9 @@ Otras teclas útiles:
 - Alt+Enter o F11: cambia entre ventana y pantalla completa
 - F7: cambia el MSAA
 - F12: captura de pantalla
+- Pausa: pausa el juego, con **EN PAUSA** sobre la imagen oscurecida; Pausa, `ESC` o `ENTER` lo reanudan. Solo sin
+  conexión: no hace nada en una sala, con la Búsqueda de cazadores activa o mientras el juego guarda. Su tecla es
+  **Pausa/Suspender** en Controles, Asignación de teclas (`[Controls] PauseKey`)
 
 ## Ajustes
 

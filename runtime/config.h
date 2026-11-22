@@ -98,6 +98,7 @@ typedef struct {
                               // their routers let them (hole punching; they see each other's IP address), else through the server
     char chat_key[32];        // [Controls] ChatKey: the key that opens a line of chat (runtime/hle/chat.c), by SDL's
                               // name for it ("/", "Y"...); "" none
+    char pause_key[32];       // [Controls] PauseKey: Pause/Suspend's key (runtime/pause.h), by SDL's name; "" none
     int fxaa_mode;            // [Anti-aliasing] FXAAMode: FXAA_*, which FXAA draws while FXAA is on
     int aniso;                // [Graphics] AnisotropicFiltering: 1 (off: the game's own), 2, 4, 8, 16: at least that much on
                               // the game's mipmapped textures (nvn/vulkan/textures.c vk_sampler)
@@ -245,6 +246,7 @@ int config_live_menu_confirm(void);
 int config_live_background_input(void);
 int config_live_combo_window(void);
 int config_live_chat_key(void);  // [Controls] ChatKey as an SDL scancode (0: none)
+int config_live_pause_key(void);  // [Controls] PauseKey as an SDL scancode (0: none)
 int config_live_bind(int bind, int slot);  // [Keybinds]: one of BIND_*'s keys (Config.binds, or a mod's for now)
 // A mod's keys for BIND_* for now (runtime/forge.c forge_input_setKeybind), over the settings' own; NULL: theirs again.
 // Not saved: mhgurecomp.ini and the settings menu keep the player's.

@@ -54,6 +54,7 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #include "forge.h"
 #include "menu_confirm.h"
 #include "overlay.h"
+#include "pause.h"
 #include "hle/chat.h"
 #include "settings_locale.h"
 #include "settings_panel.h"
@@ -913,6 +914,23 @@ static float loading_alpha(uint64_t now) {  // (the game's frames)
     return std::max(a, 0.0f);
 }
 
+// Pause/Suspend (runtime/pause.h): the held picture dimmed, PAUSED in the middle. Behind every window (the settings
+// menu, Forge's), which stay usable meanwhile.
+static void draw_paused() {
+    ImGuiViewport *vp = ImGui::GetMainViewport();
+    ImDrawList *dl = ImGui::GetBackgroundDrawList();
+    ImVec2 p0 = vp->Pos, p1(vp->Pos.x + vp->Size.x, vp->Pos.y + vp->Size.y);
+    dl->AddRectFilled(p0, p1, IM_COL32(0, 0, 0, 140));
+    const char *text = settings_text(config_language(), "PAUSED");
+    ImFont *font = ImGui::GetFont();
+    float size = std::max(vp->Size.y * .075f, 24.f);  // (a fixed share of the window's height)
+    ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0, text);
+    ImVec2 at(p0.x + (vp->Size.x - ts.x) * .5f, p0.y + (vp->Size.y - ts.y) * .5f);
+    float sh = std::max(size * .05f, 1.f);
+    dl->AddText(font, size, ImVec2(at.x + sh, at.y + sh), IM_COL32(0, 0, 0, 200), text);
+    dl->AddText(font, size, at, IM_COL32(255, 255, 255, 255), text);
+}
+
 static void draw_loading(uint64_t now, float scale, float alpha) {
     auto color = [alpha](float r, float g, float b, float a) {
         return ImGui::ColorConvertFloat4ToU32(ImVec4(r, g, b, a * alpha));
@@ -1035,7 +1053,8 @@ void overlay_frame(void *cpu) {
 #else
     bool hdr_stats = false;
 #endif
-    if (!open && !free_render && !notice && !chat && !fps && !loading && !hdr_stats) {  // (nothing to draw)
+    bool paused = pause_held();
+    if (!open && !free_render && !notice && !chat && !fps && !loading && !hdr_stats && !paused) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
         apply_input(io);  // (keep the queue short)
@@ -1102,6 +1121,7 @@ void overlay_frame(void *cpu) {
         if (!keep) set_open(false);
     }
     forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);
+    if (paused) draw_paused();
     if (notice) draw_notice(now, scale);
     if (chat) draw_chat(line, now, scale);
     if (fps) draw_fps(now);

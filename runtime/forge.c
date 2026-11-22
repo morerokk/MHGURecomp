@@ -1150,18 +1150,18 @@ static void keys_out(uint32_t out, uint32_t size, const int keys[BIND_KEYS]) {  
 // forge_input_setKeybind(const char *row, const char *keys): the row's keys from now on (up to two); NULL: the settings'
 // again. A row has one mod's keys at a time: the last call wins, and NULL gives it back whoever set it (getModKeybind
 // shows what is set). False, and nothing changed: no such row, an empty string ("None" is no keys), a key without a name
-// or one the port keeps (Esc, Insert, F1...), or the chat key.
+// or one the port keeps (Esc, Insert, F1...), or the chat key or the pause key.
 HLE_FUNC("forge_input_setKeybind", f_in_set_keybind) {
     int bind = bind_of(ARG(0));
     if (bind < 0) { RET(0); return; }
     if (!ARG(1)) { config_mod_bind(bind, NULL); RET(1); return; }
     const char *text = gstr(ARG(1));
-    int keys[BIND_KEYS], chat = config_live_chat_key();
+    int keys[BIND_KEYS], chat = config_live_chat_key(), pause = config_live_pause_key();
     if (!config_parse_keys(text, keys)) { RET(0); return; }
     // (no keys only if it says so: "" is a mod's empty buffer, and would take the button away)
     if (!keys[0] && SDL_strncasecmp(text + strspn(text, " \t"), "none", 4)) { RET(0); return; }
-    for (int k = 0; chat && k < BIND_KEYS; k++)
-        if (keys[k] == chat) { RET(0); return; }
+    for (int k = 0; k < BIND_KEYS; k++)
+        if (keys[k] && (keys[k] == chat || keys[k] == pause)) { RET(0); return; }
     config_mod_bind(bind, keys);
     RET(1);
 }
