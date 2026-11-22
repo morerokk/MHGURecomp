@@ -1497,6 +1497,27 @@ old way while on.
   the same key. Forge's setKeybind refuses it as it does the chat key. Not on a controller (by design).
 - tests/test_settings_panel.cpp stops at its "fps" focus assertion; it does so on HEAD before this change too.
 
+## Android: CPU and GPU work not overlapping on an Adreno 725 (issue #444, 2026-11-22, open)
+
+- Report: POCO F5 (Turnip fork PurpleVK on KGSL), 37.7 fps in the village while the GPU is 69% busy and the submitting
+  thread waits in the GPU fence wait 67% of the time. CPU clocks barely change the frame rate.
+- Measured here (scratch-subs rig, town, MHGU_VK_STATS plus temporary counters, since removed): the game makes 2
+  submissions a frame (its command list, then our present), so the 8-slot submission ring (exec.c SUBS) is 4 frames
+  deep and never waited. Its one nvnSyncWait a frame comes right after submitting frame N and waits for frame N-1's
+  present submission: one frame of overlap, as on the Switch. With a temporary CPU spin and GPU buffer fills in
+  backend_execute, 10 ms CPU + 11 ms GPU ran at 89 fps (11 ms alone: 89), and 6 ms + ~17 ms at 58.7 fps at the 60
+  cap: frame time is max(CPU, GPU) here, and no snapping to 30 fps. A thread blocked 67% in the fence wait is also
+  what an overlapped GPU-bound frame looks like. What doesn't fit is the 31% of the phone's GPU time that is idle.
+- Mesa's Turnip on KGSL emulates timeline semaphores, which puts its queue in deferred submit mode; deferral only
+  holds submissions that wait on a timeline, and ours wait on nothing but the acquire semaphore, so nothing there
+  explains it either (read, not run).
+- MHGU_CONTROL `gpuprof` now covers two frames and every submission: a top-of-pipe timestamp where each main command
+  buffer begins ("GPU idle: waiting for this submission", shown when it's 0.5 µs or more), the end of each submission
+  and of the present's, per-frame "GPU busy / idle", and the CPU's submit times and its GPU waits in that time.
+  Frame 2's idle time before the game's work is the number that says whether the CPU keeps the GPU fed; idle before
+  the present submission points at the acquire semaphore (the display) instead. At the 60 cap on the desktop: 15.4 ms
+  idle before the game's work, as expected for 1.1 ms of GPU work. Next: that output from the reporter's phone.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,
