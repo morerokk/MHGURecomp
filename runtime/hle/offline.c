@@ -34,12 +34,35 @@ HLE_FUNC("_ZN2nn7friends12UserPresenceC1Ev", friends_presence_ctor) { memset(ARG
 HLE_FUNC("_ZN2nn7friends12UserPresence10InitializeEv", friends_presence_init) { RET(0); }
 HLE_FUNC("_ZN2nn7friends12UserPresence11SetAppValueEPKcS3_", friends_presence_set) { RET(0); }
 HLE_FUNC("_ZN2nn7friends12UserPresence6CommitEv", friends_presence_commit) { RET(0); }
-// GetFriendList(int *count, ..., offset, max, const FriendFilter &). The ids: the friends on the hub server who list
-// us back (runtime/net/ldn.c: their account ids, which their games report), so a hub's "everyone but friends" passcode
-// lets them in. The Friend records (their layout isn't known here): none. Which one the game calls is logged once.
+// GetFriendList(int *count, ..., offset, max, const FriendFilter &): the friends on the hub server who list us back
+// (runtime/net/ldn.c: their account ids, which their games report), so a hub's "everyone but friends" passcode lets
+// them in. MHGU asks for the Friend records. nn::friends::Friend (0x200 bytes, as the SDK's accessors read it):
+// +0x00 the user's Uid, +0x10 the friend's NetworkServiceAccountId, +0x18 nickname[0x21], +0x40 UserPresence,
+// +0x120 favorite, +0x121 newly added, +0x128 valid. The filter is not applied (every friend counts).
+#define FRIEND_SIZE 0x200
+extern const uint8_t g_user_id[16];  // (services/misc.c)
+int ldn_game_friends(uint64_t *ids, char (*names)[33], int max);
+static int friends_given(int k, const char *which) {
+    static int last[2] = {-1, -1};
+    int i = which[0] == 'r';
+    if (k != last[i]) LOG("[offline] friends: GetFriendList (%s): %d friend(s) given\n", which, k), last[i] = k;
+    return k;
+}
 HLE_FUNC("_ZN2nn7friends13GetFriendListEPiPNS0_6FriendEiiRKNS0_12FriendFilterE", friends_list) {
-    ONCE("[offline] friends: GetFriendList (Friend records) asked: none given\n");
-    if (ARG(0)) ST32(ARG(0), 0);
+    uint64_t ids[64];
+    char names[64][33];
+    int n = ldn_game_friends(ids, names, 64), offset = (int)ARG(2), max = (int)ARG(3), k = 0;
+    for (int i = offset < 0 ? 0 : offset; i < n && k < max; i++, k++) {
+        uint32_t f = ARG(1) + (uint32_t)k * FRIEND_SIZE;
+        uint8_t *p = G2H(f);
+        memset(p, 0, FRIEND_SIZE);
+        memcpy(p, g_user_id, 16);
+        memcpy(p + 0x10, &ids[i], 8);
+        snprintf((char *)p + 0x18, 0x21, "%s", names[i]);
+        p[0x128] = 1;  // valid
+    }
+    if (ARG(0)) ST32(ARG(0), k);
+    friends_given(k, "records");
     RET(0);
 }
 HLE_FUNC("_ZN2nn7friends13GetFriendListEPiPNS_7account23NetworkServiceAccountIdEiiRKNS0_12FriendFilterE", friends_list_ids) {
@@ -48,13 +71,12 @@ HLE_FUNC("_ZN2nn7friends13GetFriendListEPiPNS_7account23NetworkServiceAccountIdE
     int n = ldn_friend_account_ids(ids, 64), offset = (int)ARG(2), max = (int)ARG(3), k = 0;
     for (int i = offset < 0 ? 0 : offset; i < n && k < max; i++, k++) ST64(ARG(1) + 8u * (uint32_t)k, ids[i]);
     if (ARG(0)) ST32(ARG(0), k);
-    static int last = -1;
-    if (k != last) LOG("[offline] friends: GetFriendList (ids): %d friend(s) given\n", k), last = k;
+    friends_given(k, "ids");
     RET(0);
 }
 HLE_FUNC("_ZN2nn7friends16UpdateFriendInfoEPNS0_6FriendEPKNS_7account23NetworkServiceAccountIdEi", friends_update) { RET(0); }
-HLE_FUNC("_ZN2nn7friends6FriendC1Ev", friends_friend_ctor) { (void)c; }
-HLE_FUNC("_ZNK2nn7friends6Friend7IsValidEv", friends_friend_valid) { RET(0); }
+HLE_FUNC("_ZN2nn7friends6FriendC1Ev", friends_friend_ctor) { memset(ARGP(0), 0, FRIEND_SIZE); }
+HLE_FUNC("_ZNK2nn7friends6Friend7IsValidEv", friends_friend_valid) { RET(LD8(ARG(0) + 0x128)); }
 HLE_FUNC("_ZN2nn7friends12AsyncContextC1Ev", friends_async_ctor) { memset(ARGP(0), 0, 0x10); }
 HLE_FUNC("_ZN2nn7friends12AsyncContextD1Ev", friends_async_dtor) { (void)c; }
 HLE_FUNC("_ZN2nn7friends12AsyncContext7HasDoneEPb", friends_async_done) { if (ARG(1)) ST8(ARG(1), 1); RET(0); }

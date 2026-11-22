@@ -1974,7 +1974,8 @@ void friends_aux_received(const void *data, uint32_t len) {
     if (memcmp(m + 8, F.id, FRIEND_LEN)) {
         int i = 0;
         while (i < F.nhunters && F.hunters[i].ip != ip) i++;
-        if (i == F.nhunters && F.nhunters < HUNTERS_MAX) F.nhunters++;
+        if (i == F.nhunters && F.nhunters < HUNTERS_MAX)
+            F.nhunters++, LOG("[ldn] friends: a hunter in the hub shared their friend code (%d now)\n", F.nhunters);
         if (i < F.nhunters) {
             F.hunters[i].ip = ip;
             memcpy(F.hunters[i].id, m + 8, FRIEND_LEN);
@@ -2046,7 +2047,12 @@ static void *friends_thread(void *arg) {
         char notes[6][96];
         int nn = 0;
         pthread_mutex_lock(&friends_mu);
+        if (state != F.server_state && (state == HUB_ONLINE || F.server_state == HUB_ONLINE || F.server_state == HUB_UNKNOWN))
+            LOG("[ldn] friends: the hub server %s\n", state == HUB_ONLINE ? "answers" : state == HUB_VERSION
+                ? "doesn't know friends (older than this game)" : "can't be asked now");
         F.server_state = state;
+        int was_req = F.nreq, was_mutual = 0, now_mutual = 0;
+        for (int i = 0; i < F.n; i++) was_mutual += F.list[i].mutual && F.list[i].state != LDN_FRIEND_OFFLINE;
         if (state == HUB_ONLINE) {
             int count = buf[0];
             const int entry = FRIEND_LEN + 1 + CODE_LEN;
@@ -2100,6 +2106,9 @@ static void *friends_thread(void *arg) {
                 }
             }
             F.polled = true;
+            for (int i = 0; i < F.n; i++) now_mutual += F.list[i].mutual && F.list[i].state != LDN_FRIEND_OFFLINE;
+            if (F.nreq != was_req) LOG("[ldn] friends: %d friend request(s)\n", F.nreq);
+            if (now_mutual != was_mutual) LOG("[ldn] friends: %d of %d friend(s) online\n", now_mutual, F.n);
         }
         pthread_mutex_unlock(&friends_mu);
         int lang = config_language();
@@ -2287,16 +2296,21 @@ uint64_t ldn_account_id(void) {
 }
 
 // The game's friends: those in our list the hub server has told us list us back (adding a code alone doesn't make
-// someone a friend to the game: that would let them past a friends-only passcode one-sidedly).
-int ldn_friend_account_ids(uint64_t *out, int max) {
+// someone a friend to the game: that would let them past a friends-only passcode one-sidedly). names (may be NULL):
+// the names in our list.
+int ldn_game_friends(uint64_t *ids, char (*names)[33], int max) {
     pthread_mutex_lock(&friends_mu);
     friends_load_locked();
     int n = 0;
     for (int i = 0; i < F.n && n < max; i++)
-        if (F.list[i].mutual) out[n++] = account_of(F.ids[i]);
+        if (F.list[i].mutual) {
+            if (names) snprintf(names[n], sizeof names[n], "%s", F.list[i].name);
+            ids[n++] = account_of(F.ids[i]);
+        }
     pthread_mutex_unlock(&friends_mu);
     return n;
 }
+int ldn_friend_account_ids(uint64_t *out, int max) { return ldn_game_friends(out, NULL, max); }
 
 static bool host_start(void) {
     hnet_init();

@@ -93,6 +93,7 @@ int ldn_hub_hunters(LdnHunter *out, int max);
 // "everyone but friends" lets them in).
 uint64_t ldn_account_id(void);
 int ldn_friend_account_ids(uint64_t *out, int max);
+int ldn_game_friends(uint64_t *ids, char (*names)[33], int max);  // the same, with the names in our list
 void friends_aux_received(const void *data, uint32_t len);  // an F_AUX message from another game (0xE9: a friend hello)
 
 // vsock.c

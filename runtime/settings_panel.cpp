@@ -900,9 +900,17 @@ void friends_rows(std::vector<Row> &rows) {
     int nr = ldn_friend_requests(reqs, 8);
     for (int i = 0; i < nr; i++) {
         std::string code = reqs[i].code, name = reqs[i].name;
-        action(rows, "req.accept." + code, fmt("Accept %s", name.c_str()), [code]() { ldn_friend_request_answer(code.c_str(), true); });
+        // (the request's rows go once answered: the focus moves to Add a friend, above the friends; a friend's own row
+        // can't take it while it has no hub to join, being disabled)
+        action(rows, "req.accept." + code, fmt("Accept %s", name.c_str()), [code]() {
+            ldn_friend_request_answer(code.c_str(), true);
+            focus("friend.add");
+        });
         rows.back().help = tr("A friend request: they added you. Accept adds them to your friends list.");
-        action(rows, "req.reject." + code, fmt("Reject %s", name.c_str()), [code]() { ldn_friend_request_answer(code.c_str(), false); });
+        action(rows, "req.reject." + code, fmt("Reject %s", name.c_str()), [code]() {
+            ldn_friend_request_answer(code.c_str(), false);
+            focus("friend.add");
+        });
         rows.back().help = tr("Their request stays rejected until the game restarts, unless you add them yourself.");
     }
     // the other hunters in this hub (games that shared their friend code): Confirm adds one, which sends them a request
@@ -918,7 +926,10 @@ void friends_rows(std::vector<Row> &rows) {
         r.help = tr("A hunter in your hub. Confirm adds them as a friend: they get a friend request, and once they accept you see each other.");
         r.enabled = hunters[i].state == LDN_HUNTER_ADD;
         std::string typed = std::string(hunters[i].code) + " " + hunters[i].name;
-        r.activate = [typed]() { ldn_friend_add(typed.c_str()); };
+        r.activate = [typed]() {  // (the row turns disabled once added: the focus to Add a friend)
+            ldn_friend_add(typed.c_str());
+            focus("friend.add");
+        };
         rows.push_back(std::move(r));
     }
     static LdnFriend list[LDN_FRIENDS_MAX];
