@@ -116,6 +116,10 @@ PATCHES = {
     # multiplying (`vdiv.f32 s0, s6, s0`, s0 = (C2 / speed) * s2, s2 = step / 2, r4 = the monster)
     ('main', 0x10dc744): (0xEE830A00, '{ extern float emturn_div(uint32_t, float, float, float); '
                           'c->v.f[0] = emturn_div(c->r[4], c->v.f[6], c->v.f[0], c->v.f[2]); }'),
+    # Carry run (runtime/hle/plcarry.c): the push of `vmov.f32 s6, #2.5` units per update along the hunter's facing
+    # (r4 = the player) is scaled by the frame step; 0x49430c the Moofy's run, 0x490380 its twin (motion 0x138f)
+    ('main', 0x49430c): (0xEEB03A04, '{ extern float plcarry_push(uint32_t); c->v.f[6] = plcarry_push(c->r[4]); }'),
+    ('main', 0x490380): (0xEEB03A04, '{ extern float plcarry_push(uint32_t); c->v.f[6] = plcarry_push(c->r[4]); }'),
 }
 
 # Monster jump physics (runtime/hle/emjump.c): the stores of `pos += vel; vel += acc; acc.y += -0.2`, done once per

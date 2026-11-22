@@ -719,6 +719,19 @@ curve.py (height every 100 ms of the leap). Finding the code: the zako set lists
 area, species byte = ems number) gave 0x28 for Volcano / Volcanic Hollow only; interpwatch on status +0x44 with the
 class's vtable entries (0x1a15944) as the function list showed the writers.
 
+Running with the Moofy (2026-11-22): fixed. Reported: in Bherna, carrying the Moofy and running (R held) is far too
+fast at 240 fps; walking with it is right. The carry run (action function 0x494200, motions 0xc91 / 0xc92) moves the
+hunter by the animation (cModel root motion, 0xb55aa0, step-based) and in its state 1, every update the stick is held,
+also pushes them along their facing: 0x494308, `pos += (sin, 0, cos) * 2.5` (angle = player +0xfec x 2pi / 65536), no
+frame step: 75 units a second at 30 fps, 600 at 240. Walking has no push. Fix (runtime/hle/plcarry.c, gen.py PATCHES
+0x49430c, the `vmov.f32 s6, #2.5`): 2.5 x the player's step +0x1c / 2; the same at 30 fps. 0x49028c is the same code
+with motion 0x138f (not identified), patched the same (0x490380). MHGU_NO_PLCARRY=1: the original. Measured (one game,
+fps switched live, the test save; the user picked the Moofy up): 405 units/s at 30, 60, 120 and 240 fps (the original
+at 240: ~930). A scan of the player code (0x470000-0x4d0000) for `pos += ...` stores without the step found only these
+two per-update pushes (0x4ae390, 0x4be178, 0x4c89dc are one-off placements). Found with interpwatch on player +0x40
+(the town hunter, r0 of 0x48d1f0) with the player's vtable entries (0x1948534) as the function list. Not checked: the
+0x138f twin in game, eggs carried in a hunt.
+
 Monster turns and the frame rate (2026-11-21): Duramboros fixed, Deviljho not reproduced. Reported: one of Duramboros'
 spinning attacks far too fast at high frame rates; a Deviljho bite (calm, not enraged; not confirmed by the reporter).
 Rig (scratchpad, C:\MHGURecompile\scratch-emspeed): quest 627 (Duramboros alone) / 1007 (Deviljho alone),
