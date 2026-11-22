@@ -980,7 +980,7 @@ void friends_rows(std::vector<Row> &rows) {
         Row r;
         r.id = std::string("hunter.") + hunters[i].code;
         r.title = hunters[i].name;
-        r.value = hunters[i].state == LDN_HUNTER_ADDED ? tr("Request sent") : tr("In your hub: Confirm adds");
+        r.value = hunters[i].state == LDN_HUNTER_ADDED ? tr("Request sent") : tr("Add friend");
         r.help = tr("A hunter in your hub. Confirm adds them as a friend: they get a friend request, and once they accept you see each other.");
         r.enabled = hunters[i].state == LDN_HUNTER_ADD;
         std::string typed = std::string(hunters[i].code) + " " + hunters[i].name;
