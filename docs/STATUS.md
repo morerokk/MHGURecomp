@@ -331,6 +331,9 @@ Fixed 2026-11-04: small monsters ignored players with sync on: it forced flag 0x
 them and left followers running their own AI. Jaggi and Rhenoplos now target and attack both hunters, the same on both games.
 Fixed 2026-11-03: players dropping in some zones (Volcanic Hollow zone 7): uEms100 restarts its first action every update,
 and a master's copy would send each restart. Such a monster is now left out of the sync.
+2026-11-23: flood cap. After a new report of drops on area entry in Volcanic Hollow (not reproduced; uEms100 turned out to be the
+map's breakable rock), any small monster sending more than 20 actions a second, or whose actions arrive faster than that, is
+dropped from the sync for that zone visit on every game, so a looping monster can no longer take the link down whatever triggers it.
 
 ## Text entry (2026-10-21)
 

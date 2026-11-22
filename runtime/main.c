@@ -98,6 +98,7 @@ static void boot(const char *root) {
     dummy_init();  // (debug, MHGU_DUMMY: runtime/hle/dummy.c)
     hitsync_init();  // (multiplayer: hits as their hunter saw them: runtime/net/hitsync.c)
     partsync_init();  // (multiplayer: part breaks reach the other games at once: runtime/net/partsync.c)
+    emsync_init();  // (multiplayer: a small monster's message flood is capped: runtime/net/emsync.c)
     netrate_init();  // (debug, MHGU_NETRATE: runtime/hle/netrate.c)
     cheats_init();  // (cheat codes from cheats/: runtime/cheats.c)
     discord_init();  // (Discord Rich Presence: runtime/net/discord.c, runtime/hle/presence.c)
