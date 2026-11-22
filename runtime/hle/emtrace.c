@@ -2,7 +2,9 @@
 // in game updates, for comparing a monster's moves at different frame rates. MHGU_EMTRACE=2 also logs the monster's
 // position every update. MHGU_CONTROL's "emact <group> <index> [mode]" starts that action on the zone's first large
 // monster (as its AI does: f_276154). MHGU_EMTRACE_ZAKO=1 logs small monsters: every new action and, twice a second,
-// each one's distance to the hunter and current targets.
+// each one's distance to the hunter and current targets; MHGU_EMTRACE_ZAKO=2 also each one's species, action, position
+// and velocity every update ("[emz]") and the zone's enemy list every 2 s. MHGU_EMACT_SPECIES=<hex> (monster +0xb5f0:
+// 0x1000 + the ems number for small monsters) points emact / emsweep at the first monster of that species instead.
 // Hooked: the engine's frame function (0xda5824: the limiter, which also measures the frame step), after it runs.
 #include <math.h>
 #include <stdlib.h>
@@ -49,6 +51,14 @@ static bool zako(uint32_t en) {
     if (!info) return false;
     uint32_t id = LD16(info + 0x1b6);
     return id != 0xffff && id >= 10000;
+}
+
+// The monster emact / emsweep drive: the first large one, or with MHGU_EMACT_SPECIES=<hex> (monster +0xb5f0, 0x1000 + the
+// ems number for small ones) the first one of that species.
+static bool target(uint32_t en) {
+    static int sp = -1;
+    if (sp < 0) sp = getenv("MHGU_EMACT_SPECIES") ? (int)strtol(getenv("MHGU_EMACT_SPECIES"), NULL, 16) : 0;
+    return sp ? LD32(en + EN_INFO) && LD32(en + 0xb5f0) == (uint32_t)sp : large(en);
 }
 
 // The hunter's distance from a monster (sPlayer +0x1c: the 4 player slots, position at +0x40).
@@ -137,6 +147,26 @@ static void frame(Cpu *c) {
     uint64_t now = plat_now_ns();
     if (g_zako) zako_log(sen, now);
     float step = sys ? LDF(sys + 0x68) : 0;
+    static uint64_t list_last;
+    if (g_zako >= 2 && now - list_last > 2000000000ull) {
+        list_last = now;
+        char buf[256];
+        int n = 0;
+        for (int k = 0; k < MAX_EN; k++) {
+            uint32_t en = LD32(sen + 0x1c + 4u * (uint32_t)k), info = en ? LD32(en + EN_INFO) : 0;
+            n += snprintf(buf + n, sizeof buf - (size_t)n, " %08x:%u", en, info ? LD16(info + 0x1b6) : 0u);
+        }
+        LOG("[emz] list%s\n", buf);
+    }
+    if (g_zako >= 2)  // MHGU_EMTRACE_ZAKO=2: every small monster's action and position every update
+        for (int k = 0; k < MAX_EN; k++) {
+            uint32_t en = LD32(sen + 0x1c + 4u * (uint32_t)k);
+            if (!en || large(en) || !LD32(en + EN_INFO)) continue;
+            uint32_t info = LD32(en + EN_INFO);
+            LOG("[emz] %llu %08x id %u sp %x act %08x pos %.1f %.1f %.1f vel %.2f %.2f %.2f step %.3f\n",
+                (unsigned long long)(now / 1000000), en, LD16(info + 0x1b6), LD32(en + 0xb5f0), LD32(en + EN_ACTION), LDF(info + 0x40), LDF(info + 0x44),
+                LDF(info + 0x48), LDF(info + 0x10), LDF(info + 0x14), LDF(info + 0x18), step);
+        }
     static bool pos_log, pos_read;  // MHGU_EMTRACE_POS=1: 10 times a second, each large monster and the hunter
     static uint64_t pos_last;
     if (!pos_read) pos_read = true, pos_log = getenv("MHGU_EMTRACE_POS") != NULL;
@@ -196,7 +226,7 @@ static void frame(Cpu *c) {
         uint32_t en = 0;
         for (int k = 0; k < MAX_EN && !en; k++) {
             uint32_t e = LD32(sen + 0x1c + 4u * (uint32_t)k);
-            if (e && large(e)) en = e;
+            if (e && target(e)) en = e;
         }
         uint32_t cur = en ? (LD32(en + EN_ACTION) & 0xffff) : 0;
         if (g_sweep_act && (cur != g_sweep_act || now >= g_sweep_end_ns)) {  // the swept action ended (or ran 12 s)
@@ -219,7 +249,7 @@ static void frame(Cpu *c) {
         uint32_t en = 0;
         for (int k = 0; k < MAX_EN && !en; k++) {
             uint32_t e = LD32(sen + 0x1c + 4u * (uint32_t)k);
-            if (e && large(e)) en = e;
+            if (e && target(e)) en = e;
         }
         if (!en) { LOG("[em] emact: no large monster in the zone\n"); return; }
         LOG("[em] emact %08x %u:%u mode %u\n", en, g_req_group, g_req_index, g_req_mode);
@@ -244,7 +274,8 @@ static void set_action(Cpu *c) {
 
 void emtrace_init(void) {
     const char *e = getenv("MHGU_EMTRACE");
-    g_zako = getenv("MHGU_EMTRACE_ZAKO") != NULL;
+    const char *z = getenv("MHGU_EMTRACE_ZAKO");
+    g_zako = z ? (atoi(z) > 1 ? atoi(z) : 1) : 0;
     if ((!e || !*e || !(g_level = atoi(e))) && !g_zako) return;
     fnhook_set(FN_FRAME, hle_register("emtrace:frame", frame));
     fnhook_set(FN_SET_ACTION, hle_register("emtrace:set_action", set_action));

@@ -700,6 +700,25 @@ Test setup (scratchpad, not in the repo): quest 404 (Hunt a Volvidon) moved to t
 stage from; the Arena's b_m09em062_00 spawn), MHGU_QUICKHUNT=404, then the hunter walks from the waiting room (north
 2 s, east 2.7 s, north through the gate: an area change, so the hunter can't be placed there by poking its position).
 
+Uroktor's leap out of the ground (2026-11-22): fixed. Reported: alone (not in multiplayer), an Uroktor (ems040, small
+monster, species 0x1028) that drills up out of the ground snaps from the drill into standing instead of leaping into the
+air and landing; its half-out spit attack is fine. Action 7:44 (update 0x13085e8, sub-state +0x1a1): when the drill
+motion ends it stores a launch speed (size x 12.5, 100 here) to the vertical velocity, moves once with it (0x27d718:
+pos += vel * t + acc * t^2 / 2, t = the monster's step +0x1c, 2 at 30 fps), then sets the velocity to 25 and the gravity
++0x24 to -0.6. The airborne sub-state lands (0x2bf5a0, then mode 0 via 0x2bc8b0 puts it on the ground height +0x5b4)
+as soon as it is below ground + size x a species height (~150), rising or not. At 30 fps the launch lifts it 200 and it
+arcs up to 724 (4.8 s action); at 240 fps it lifts 25 and lands the next update (peak 29, 3.4 s). Fix (emjump.c
+emjump_launch, gen.py PATCHES 0x1308838, the launch speed's store): the speed that makes that one move 2v + 2a, as long
+as the 30 fps update's; untouched at 30 fps and below; MHGU_NO_EMJUMP=1 turns it off too. Checked at 240 fps: five
+natural leaps peak at 724-726, 4.8 s, and the height every 100 ms matches the 30 fps run within 1-2 units. Seen right in
+game by the user. Searched: no other call of the one-update move (0x27d718 / 0x27d7c4, 131 calls) is followed by a reset of
+the vertical velocity. Rig (scratchpad, C:\MHGURecompile\scratch-urok): quest 427 (Uroktor quest, Volcano), start area 4,
+then out and back in (STICK_DOWN 700 / STICK_UP 900 at 240 fps): small monsters aren't spawned in the area a hunt starts
+in with MHGU_START_AREA, only after an area change. MHGU_EMTRACE_ZAKO=2, acts.py (per action: length, height range) and
+curve.py (height every 100 ms of the leap). Finding the code: the zako set lists (quest\zako\emSetList, "ESD" blocks per
+area, species byte = ems number) gave 0x28 for Volcano / Volcanic Hollow only; interpwatch on status +0x44 with the
+class's vtable entries (0x1a15944) as the function list showed the writers.
+
 Monster turns and the frame rate (2026-11-21): Duramboros fixed, Deviljho not reproduced. Reported: one of Duramboros'
 spinning attacks far too fast at high frame rates; a Deviljho bite (calm, not enraged; not confirmed by the reporter).
 Rig (scratchpad, C:\MHGURecompile\scratch-emspeed): quest 627 (Duramboros alone) / 1007 (Deviljho alone),

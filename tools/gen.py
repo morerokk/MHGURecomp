@@ -137,6 +137,9 @@ for _a, _kind, _axis, _jerk in EMJUMP:
     _reg = 1 if _a == 0x1122bc8 else 0  # vstr s2 there, s0 elsewhere
     _word = 0xED800A00 | (_reg << 12) | (_off // 4)
     PATCHES[('main', _a)] = (_word, f'{{ extern void emjump_{_kind}(Cpu *, int, float); emjump_{_kind}(c, {_axis}, {float(_jerk)}f); }}')
+# Uroktor's leap out of the ground (emjump.c emjump_launch): the store of the launch speed before its one-update move
+# (`vstr s0, [r0, #0x14]`), so that move lifts it as far as at 30 fps and the landing check doesn't end the leap at once
+PATCHES[('main', 0x1308838)] = (0xED800A05, '{ extern void emjump_launch(Cpu *); emjump_launch(c); }')
 
 
 class Module:
