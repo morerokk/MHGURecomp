@@ -413,6 +413,55 @@ static VkSpan guest_copy_vertex(uint64_t addr, uint64_t size) {
 
 static bool guest_range_ok(uint64_t addr, uint64_t size) { return addr && addr < GUEST_SPACE && size <= GUEST_SPACE - addr; }
 
+// ---- (debug) MHGU_LATE_WRITES=1: the vertices a small draw reads (immediate quads: at most 512 bytes), as copied for
+// it, compared with guest memory again when the frame is presented (vk_latewrite_frame). A difference means the game
+// wrote them after the copy: a Switch GPU reads them when it runs the commands, later than this submit-time copy.
+// (The Deck's shadow cascades cleared to 0 in a rectangle: is the clear quad's data copied before the game wrote it?)
+#define LW_TAB 4096
+static struct { uint64_t addr, vs; uint32_t len, stride, count; float vp_y; uint8_t depth_only, snap[512]; } lw[LW_TAB];
+static uint32_t lw_n, lw_frames, lw_checked, lw_changed, lw_logged, lw_quads;
+static bool latewrite_on(void) {
+    static int on = -1;
+    if (on < 0) on = getenv("MHGU_LATE_WRITES") && atoi(getenv("MHGU_LATE_WRITES"));
+    return on;
+}
+static void latewrite_note(uint64_t addr, const void *copied, uint32_t len, uint32_t stride, uint32_t count, uint64_t vs,
+                           bool depth_only, float vp_y) {
+    if (!len || len > sizeof lw[0].snap || lw_n >= LW_TAB || !guest_range_ok(addr, len)) return;
+    lw[lw_n].addr = addr, lw[lw_n].len = len, lw[lw_n].stride = stride, lw[lw_n].count = count, lw[lw_n].vs = vs;
+    lw[lw_n].depth_only = depth_only, lw[lw_n].vp_y = vp_y;
+    memcpy(lw[lw_n].snap, copied ? copied : G2H((uint32_t)addr), len);
+    lw_n++;
+}
+void vk_latewrite_frame(void) {
+    if (!latewrite_on()) return;
+    uint32_t changed = 0;
+    for (uint32_t i = 0; i < lw_n; i++) {
+        lw_quads += lw[i].depth_only && lw[i].count == 4;  // (the shadow cascades' clear quads among them)
+        if (!memcmp(lw[i].snap, G2H((uint32_t)lw[i].addr), lw[i].len)) continue;
+        changed++;
+        if (lw_logged >= 300) continue;
+        lw_logged++;
+        char cp[200] = "", now[200] = "";
+        int a = 0, b = 0;
+        for (uint32_t v = 0; v < lw[i].count && v < 4 && (v + 1) * lw[i].stride <= lw[i].len && lw[i].stride >= 12; v++) {
+            float f[3], g[3];
+            memcpy(f, lw[i].snap + v * lw[i].stride, 12);
+            memcpy(g, G2H((uint32_t)(lw[i].addr + v * lw[i].stride)), 12);
+            a += snprintf(cp + a, sizeof cp - a, " (%.3g %.3g %.3g)", f[0], f[1], f[2]);
+            b += snprintf(now + b, sizeof now - b, " (%.3g %.3g %.3g)", g[0], g[1], g[2]);
+        }
+        LOG("[latew] present %llu: vs %llx %s vp y %.0f, %u vertices at %llx (%u bytes) changed after the copy\n"
+            "[latew]   copied:%s\n[latew]   now:   %s\n", (unsigned long long)vk_frame_counter(), (unsigned long long)lw[i].vs,
+            lw[i].depth_only ? "depth-only" : "colour", lw[i].vp_y, lw[i].count, (unsigned long long)lw[i].addr, lw[i].len, cp, now);
+    }
+    lw_checked += lw_n, lw_changed += changed, lw_frames++;
+    if (lw_frames % 600 == 0)
+        LOG("[latew] %u frames: %u small vertex ranges checked (%u depth-only 4-vertex), %u changed after their copy\n", lw_frames,
+            lw_checked, lw_quads, lw_changed);
+    lw_n = 0;
+}
+
 // ---- vertex cache: device-local copies of bound vertex ranges, kept across submissions and refreshed only when the
 // CPU wrote their pages since (page write tracking, textures.c vk_pages_changed). The copy goes into the submission's
 // upload command buffer, which starts with a full barrier (earlier submissions' reads are done) and completes before
@@ -4324,6 +4373,12 @@ static void draw(CmdRec *r, bool indexed) {
                 sp = (VkSpan){cached, 0, NULL};
                 vtail_put(v.addr, v.size, sp);
             } else sp = guest_copy_vertex(v.addr, need ? need : 16);
+            if (latewrite_on() && v.addr && stride && max_index && (uint64_t)max_index * stride <= 512) {  // (debug)
+                uint32_t lo = indexed ? 0 : first, len = (max_index - lo) * (uint32_t)stride;
+                latewrite_note(v.addr + (uint64_t)lo * stride, sp.ptr ? (const uint8_t *)sp.ptr + (uint64_t)lo * stride : NULL,
+                               len, (uint32_t)stride, max_index - lo, st.program->stages[0].code_addr, !st.rt.ncolor,
+                               st.viewport[0][1]);
+            }
         }
         VkDeviceSize off = sp.off;
         if ((ss.vb_known >> s & 1) && ss.vb[s] == sp.buf && ss.vo[s] == off) continue;

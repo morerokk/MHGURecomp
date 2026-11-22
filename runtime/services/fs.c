@@ -70,7 +70,13 @@ static Service *open_romfs_storage(void) {
 #define MAX_PENDING 16
 typedef struct { char path[1100]; bool deleted, created; } Pending;  // created: the new content is in path + TMP_EXT
 typedef struct { char root[1024]; bool journal; int npending; Pending pending[MAX_PENDING]; } HostFs;
-typedef struct { int fd; char path[1100]; } HostFile;
+typedef struct { int fd; bool writes; char path[1100]; } HostFile;
+
+// Writing now (Pause/Suspend waits for it: runtime/pause.h): files open for writing, save mounts with changes not
+// committed yet (a save deletes, creates and writes its files, then commits), a commit with its backup
+static int g_writing;
+static void writing(int d) { __atomic_add_fetch(&g_writing, d, __ATOMIC_ACQ_REL); }
+bool fs_writing(void) { return __atomic_load_n(&g_writing, __ATOMIC_ACQUIRE) > 0; }
 typedef struct { DIR *d; char path[1024]; int mode; } HostDir;
 
 static const char *in_path(IpcReq *req, int i) {
@@ -148,6 +154,7 @@ static Pending *pending(HostFs *fs, const char *p) {
 static Pending *pending_add(HostFs *fs, const char *p) {
     Pending *q = pending(fs, p);
     if (q || fs->npending == MAX_PENDING) return q;
+    if (!fs->npending) writing(1);
     q = &fs->pending[fs->npending++];
     memset(q, 0, sizeof *q);
     snprintf(q->path, sizeof q->path, "%s", p);
@@ -176,6 +183,7 @@ static bool fs_commit(HostFs *fs) {
             LOG("[fs] commit: deleting %s: %s\n", q->path, strerror(errno));
         }
     }
+    if (fs->npending) writing(-1);
     fs->npending = 0;
     return ok;
 }
@@ -187,6 +195,7 @@ static void fs_discard(HostFs *fs) {
         tmp_path(fs->pending[i].path, TMP_EXT, tmp, sizeof tmp);
         if (fs->pending[i].created) unlink(tmp);
     }
+    if (fs->npending) writing(-1);
     fs->npending = 0;
 }
 
@@ -418,6 +427,7 @@ static void file(Service *s, IpcReq *req, IpcResp *resp) {
 static void file_close(Service *s) {
     HostFile *f = s->state;
     if (f->fd >= 0) close(f->fd);
+    if (f->writes) writing(-1);
     free(f);
 }
 
@@ -549,6 +559,7 @@ static void filesystem(Service *s, IpcReq *req, IpcResp *resp) {
         if (fd < 0) { resp->result = errno_result(); break; }
         HostFile *f = calloc(1, sizeof *f);
         f->fd = fd;
+        if ((f->writes = (mode & 6) != 0)) writing(1);  // (Write, Append)
         strlcpy(f->path, p, sizeof f->path);
         Service *fsvc = service_new("IFile", file, f);
         fsvc->on_close = file_close;
@@ -568,8 +579,10 @@ static void filesystem(Service *s, IpcReq *req, IpcResp *resp) {
     case 10:  // Commit
         if (fs->journal) {
             bool changed = fs->npending > 0;
+            writing(1);
             if (!fs_commit(fs)) resp->result = MAKE_RESULT(2, 4000);
             else if (changed && is_main_save(fs->root)) save_backup(fs->root);
+            writing(-1);
         }
         break;
     case 11: case 12: OUT(int64_t, 0) = 0x40000000; resp_size(resp, 8); break;  // free / total space

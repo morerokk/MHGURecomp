@@ -8,6 +8,7 @@
 
 #include "hle.h"
 #include "kernel.h"
+#include "pause.h"
 
 // ------------------------------------------------------------------ results
 #define R_OK_ 0
@@ -76,7 +77,7 @@ void kernel_signal(KObject *o) {
 
 // ------------------------------------------------------------------ time
 uint64_t rt_ticks(void) {  // 19.2 MHz system tick
-    uint64_t ns = plat_now_ns();  // (ns * 12 / 625 without a 128-bit division: called all the time)
+    uint64_t ns = pause_clock_ns();  // (stopped while paused: runtime/pause.h. ns * 12 / 625 without a 128-bit division: called all the time)
     return ns / 625 * 12 + ns % 625 * 12 / 625;
 }
 

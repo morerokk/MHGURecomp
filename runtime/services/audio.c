@@ -10,6 +10,7 @@
 #include "../hle.h"
 #include "../ipc.h"
 #include "../config.h"
+#include "../pause.h"
 
 // ------------------------------------------------------------------ audren: a CPU mixer modelled on
 // Ryujinx's AudioRenderer (VoiceState / DataSourceHelper / StateUpdater, copies in notes/ryujinx_audio).
@@ -1252,7 +1253,8 @@ static void *renderer_tick(void *arg) {
         }
         int64_t queued = r->stream && r->vt ? queued_frames(r) : -1;
         pthread_mutex_lock(&r->lock);
-        if (r->state == 0) {
+        bool held = pause_held();  // (Pause/Suspend: silence, every voice where it is until the game runs again)
+        if (r->state == 0 && !held) {
             double t0 = r->vt ? now_ms() : 0;
             render_frame(r, sink);
             r->elapsed_frames++;
@@ -1269,7 +1271,7 @@ static void *renderer_tick(void *arg) {
         }
         TraceStats snap;
         uint32_t open = 0;
-        int report = r->vt && r->state == 0 && ++r->ts.frames >= r->sample_rate / N;
+        int report = r->vt && r->state == 0 && !held && ++r->ts.frames >= r->sample_rate / N;
         if (report) {
             snap = r->ts, trace_reset_second(&r->ts);
             for (uint32_t i = 0; i < r->voices; i++) open += r->vt[i].open;
@@ -1295,7 +1297,7 @@ static void *renderer_tick(void *arg) {
             apply_gain(r->stream);
             SDL_PutAudioStreamData(r->stream, out, (int)(N * r->out_ch * sizeof(float)));
         }
-        if (r->wav && r->state == 0) {  // (in the Output the dump was opened with, whatever the device does since)
+        if (r->wav && r->state == 0 && !held) {  // (in the Output the dump was opened with, whatever the device does since)
             to_device(sink, out, N, r->wav_ch);
             uint32_t bytes = N * r->wav_ch * (uint32_t)sizeof(float);
             fwrite(out, 1, bytes, r->wav);

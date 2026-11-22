@@ -642,6 +642,15 @@ static Hello make_hello(bool scan_only, const uint8_t *user_name, uint16_t versi
 uint32_t ldn_own_ip(void) { return L.own_ip; }
 uint32_t ldn_broadcast_ip(void) { return L.subnet ? L.subnet | (L.ryu ? ~L.ryu_mask : 0xFFu) : 0xFFFFFFFFu; }
 bool ldn_net_up(void) { return L.state == ST_AP_CREATED || L.state == ST_STATION_CONNECTED; }
+// No network, and none for a while: Hunter Search closes its network for each scan (~10 s apart) and opens it again, so
+// a moment between the two is not offline
+static uint64_t g_net_left_ns;  // when the game last closed a network or a search (to_initialized)
+#define OFFLINE_AFTER_NS 15000000000ull
+bool ldn_offline(void) {
+    int s = __atomic_load_n(&L.state, __ATOMIC_ACQUIRE);
+    uint64_t left = __atomic_load_n(&g_net_left_ns, __ATOMIC_ACQUIRE);
+    return (s == ST_NONE || s == ST_INITIALIZED) && (!left || plat_now_ns() - left >= OFFLINE_AFTER_NS);
+}
 bool ldn_hosting(void) { return L.state == ST_AP_CREATED; }
 bool ldn_crossplay(void) { return (L.ryu || L.room) && ldn_net_up(); }  // a lobby on a Ryujinx LDN server: the port-only extras are off
 bool ldn_party(int *n, int *max, char *id, size_t size) {
@@ -2925,6 +2934,7 @@ HLE_FUNC("_ZN2nn3ldn10InitializeEv", ldn_initialize) { NTRACE(); LDN_CALL();
 
 static void to_initialized(void) {
     int st = L.state;
+    if (st > ST_INITIALIZED) __atomic_store_n(&g_net_left_ns, plat_now_ns(), __ATOMIC_RELEASE);  // (ldn_offline)
     if (L.ryu || L.room) {
         if (L.ryu) ryu_stop();
         else room_stop();
