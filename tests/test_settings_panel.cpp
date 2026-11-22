@@ -339,6 +339,8 @@ int main() {
     selected("face");
     tab();
     tab();
+    selected("code.join");  // (the Friends tab: Session code is disabled without a hub)
+    tab();
     selected("sync");  // (the Hub heading first)
     down(5);  // (lag compensation, village quests, urgent quests, hold A, then the HP heading is passed)
     selected("hp.0");
@@ -547,7 +549,8 @@ int main() {
     tab();
     tab();
     tab();
-    tab();  // (Misc, Mods, Cheats, Menu Options)
+    tab();
+    tab();  // (Friends, Misc, Mods, Cheats, Menu Options)
     selected("language");
     // The menu's confirm button (Menu controls): saved, it applies to the menu right away
     down(4);  // (theme, scale, detach, menu.confirm)
@@ -665,6 +668,7 @@ int main() {
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
     press(ImGuiKey_GamepadL1);
+    press(ImGuiKey_GamepadL1);  // (Friends, Network, Controls, Graphics & Audio)
     selected("volume");
     down(15);  // (mutebg, audio.output, show.fps, fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, aniso, smooth, kerning,
                // boldtext, fsr)

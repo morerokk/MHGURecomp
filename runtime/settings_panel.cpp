@@ -177,9 +177,10 @@ const Theme &theme() {
 ImVec4 vec(ImU32 c) { return ImGui::ColorConvertU32ToFloat4(c); }
 // The Mods tab: the mods folder's state (modorder.h), which is saved with the rest of the settings
 #ifdef __ANDROID__
-constexpr int PAGES = 9, MODS_PAGE = 5, CHEATS_PAGE = 6, APP_PAGE = 7, ANDROID_PAGE = 8;  // (Android: the tab for its own settings)
+constexpr int PAGES = 10, FRIENDS_PAGE = 4, MISC_PAGE = 5, MODS_PAGE = 6, CHEATS_PAGE = 7, APP_PAGE = 8,
+              ANDROID_PAGE = 9;  // (Android: the tab for its own settings)
 #else
-constexpr int PAGES = 8, MODS_PAGE = 5, CHEATS_PAGE = 6, APP_PAGE = 7;
+constexpr int PAGES = 9, FRIENDS_PAGE = 4, MISC_PAGE = 5, MODS_PAGE = 6, CHEATS_PAGE = 7, APP_PAGE = 8;
 #endif
 struct ScanResult {
     std::vector<std::string> names;  // (the order ModConflict's indexes are in)
@@ -857,6 +858,7 @@ void friends_rows(std::vector<Row> &rows) {
         };
         rows.push_back(std::move(r));
     };
+    header(rows, "codes.header", tr("Session Codes"));
     char code[32] = "";
     copy_row("code.mine", "Session code", ldn_session_code(code, sizeof code) ? code : "", "No hub",
              "The code of the hub you host or joined through the hub server. Others enter it in Join by code to find the hub, with or without your matchmaking key. Confirm copies it.");
@@ -881,6 +883,9 @@ void friends_rows(std::vector<Row> &rows) {
     };
     rows.push_back(std::move(j));
 
+    header(rows, "friends.header", tr("Friends"));
+    add_bool(rows, "friend.requests", "Friend requests", &s.draft.ldn_friend_requests, ini("FriendRequests"));
+    rows.back().help = tr("Players can send you friend requests, and the other hunters in your hub see your friend code to add you. A request you reject stays rejected until the game restarts, unless you add that player yourself. Off: no requests, and your code isn't shared in hubs; you can still add friends by their code.");
     char mine[32];
     ldn_my_friend_code(mine, sizeof mine);
     copy_row("friend.mine", "Your friend code", mine, "None",
@@ -1983,7 +1988,10 @@ void reset_section() {
         SDL_strlcpy(c.ldn_room_pass, f.ldn_room_pass, sizeof c.ldn_room_pass);
         SDL_strlcpy(c.ldn_room_nick, f.ldn_room_nick, sizeof c.ldn_room_nick);
         break;
-    case 4:
+    case FRIENDS_PAGE:  // (the friends list and code live in the save folder, not here: only the requests switch)
+        c.ldn_friend_requests = f.ldn_friend_requests;
+        break;
+    case MISC_PAGE:
         c.sync_small_monsters = f.sync_small_monsters;
         c.lag_compensation = f.lag_compensation;
         c.village_in_hub = f.village_in_hub;
@@ -2484,10 +2492,6 @@ std::vector<Row> main_rows() {
         hub_check(r);
         add_bool(r, "direct", "Direct connections", &c.ldn_direct, ini("Direct"));
         r.back().help = tr("In an internet hub, your game and the host's send their packets straight to each other when both routers let them, for a lower ping; else through the hub server. The other player's game then sees your IP address. Off: always through the hub server.");
-        header(r, "friends.header", tr("Friends and Session Codes"));
-        add_bool(r, "friend.requests", "Friend requests", &c.ldn_friend_requests, ini("FriendRequests"));
-        r.back().help = tr("Players can send you friend requests, and the other hunters in your hub see your friend code to add you. A request you reject stays rejected until the game restarts, unless you add that player yourself. Off: no requests, and your code isn't shared in hubs; you can still add friends by their code.");
-        friends_rows(r);
         // (all of them take effect at the next start: config.c marks them restart)
         header(r, "crossplay.header", tr("Emulator Crossplay"));
         add_bool(r, "ryu.serve", "Host for Ryujinx players", &c.ldn_ryu_serve, ini("RyuServe"));
@@ -2529,7 +2533,10 @@ std::vector<Row> main_rows() {
         add_bool(r, "discord", "Discord Rich Presence", &c.discord, ini("RichPresence"));
         add_bool(r, "discord.hunter", "Show hunter name and HR", &c.discord_hunter, ini("ShowHunter"));
         break;
-    case 4: {
+    case FRIENDS_PAGE:
+        friends_rows(r);
+        break;
+    case MISC_PAGE: {
         const char *per_quest =
             tr("HP multipliers for single quests, by their quest ID: in those quests they are used instead of the ones above.");
         header(r, "hub.header", tr("Hub"));
@@ -3508,7 +3515,8 @@ void settings_panel(bool *open) {
             first_page((s.page + 1) % PAGES);
         if (pressed(ImGuiKey_GamepadL1))
             first_page((s.page + PAGES - 1) % PAGES);
-        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Misc", "Mods", "Cheats", "Menu Options"
+        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Friends", "Misc", "Mods", "Cheats",
+                               "Menu Options"
 #ifdef __ANDROID__
                                , "Android"
 #endif
@@ -3520,7 +3528,7 @@ void settings_panel(bool *open) {
         ImGui::SetCursorScreenPos(tabs_start);
         float gutter = fw * 2.1f;
         float tabs_width = avail - gutter * 2;
-        int columns = tabs_width / fw < 50 ? 4 : PAGES;
+        int columns = tabs_width / fw < 50 ? (PAGES + 1) / 2 : PAGES;  // (narrow: two lines)
         float tabw = (tabs_width - ImGui::GetStyle().ItemSpacing.x * (columns - 1)) / columns;
         float tabh = fw * (columns == PAGES ? 2.7f : 2.1f);
         int lines = (PAGES + columns - 1) / columns;

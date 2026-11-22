@@ -352,7 +352,7 @@ Choose the "Local Wireless" multiplayer options, as this port pretends to be a l
 
 ### Session codes and friends
 
-These need a hub server that knows them (the default one does). In the F1 menu, Network page, under Friends and Session Codes:
+These need a hub server that knows them (the default one does). In the F1 menu, Friends page:
 
 - **Session code**: every hub you host gets a code like `ABCD-EFGH`. Share it, and others enter it in **Join by code**: the hub then comes first in Join Hub, with or without your matchmaking key. Confirm on the row copies the code.
 - **Friends**: in a hub, the other hunters are listed there: Confirm on one sends them a **friend request**, which they accept or reject on the same page (a notice tells them). You can also give your **friend code** (`ABCD-EFGH-JKMN-PQRS`) to anyone and add theirs with **Add a friend**. Once you've both added each other, you see whether they're online or in a hub, Confirm on a friend in a hub joins it the way a code does, and the game itself counts them as friends: a hub's passcode for "everyone but friends" lets them in. A notice tells you when a friend comes online or opens a hub.
