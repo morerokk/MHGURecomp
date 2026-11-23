@@ -439,6 +439,9 @@ static const char DEFAULT_INI[] =
     "; Pause/Suspend: the key that pauses the game and resumes it (Esc and Enter resume it too). Offline only: not in a\n"
     "; hub or with Hunter Search, and not while the game saves. A key's name as the settings menu shows it, or nothing\n"
     "; for none\n"
+#ifdef __APPLE__
+    "; Mac keyboards have no Pause key: pick another one, such as F13 on a keyboard that has it\n"
+#endif
     "; Default: Pause\n"
     "PauseKey = Pause\n"
     "\n"
@@ -531,8 +534,13 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "Direct = On\n"
     "\n"
+#ifdef __APPLE__
+    "; FriendRequests = On: players can send you friend requests (you accept or reject them in the F1 menu's Friends\n"
+    "; tab), and the other players in your hub see your friend code to add you. A request you reject stays rejected until the\n"
+#else
     "; FriendRequests = On: players can send you friend requests (you accept or reject them in the settings menu), and\n"
     "; the other players in your hub see your friend code to add you. A request you reject stays rejected until the\n"
+#endif
     "; game restarts, unless you add that player yourself. Off: no requests and your code isn't shared in hubs; you can\n"
     "; still add friends by their code. Your friend code and friends list are kept in the save folder, not here.\n"
     "; Default: On\n"
@@ -542,7 +550,12 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "FriendOnlineNotices = Off\n"
     "\n"
+#ifdef __APPLE__
+    "; FriendHubNotices = On: a notice when one of your friends opens a hub. The F1 menu's Friends tab still shows who is\n"
+    "; hosting.\n"
+#else
     "; FriendHubNotices = On: a notice when one of your friends opens a hub. The Friends tab still shows who is hosting.\n"
+#endif
     "; Default: Off\n"
     "FriendHubNotices = Off\n"
     "\n"
@@ -825,6 +838,7 @@ const SettingRow g_setting_rows[] = {
     {"Controls", "Controls", "MenuChord", "Plus + Minus Opens the F1 Menu", SETTING_CHOICE, ONOFF, NULL, true, false},
     {"Controls", "Controls", "TitleBackExit", "B on the Title Screen Asks to Quit", SETTING_CHOICE, ONOFF, NULL, true, false},
     {"Controls", "Controls", "ChatKey", "Chat Key", SETTING_VALUE, "/|T|Y|Return", NULL, true, false},
+    {"Controls", "Controls", "PauseKey", "Pause Key", SETTING_VALUE, "Pause|F13|F14|F15", NULL, true, false},
     {"Controls", "Mouse", "MouseSensitivity", "Mouse Sensitivity", SETTING_VALUE, "0.5|0.75|1.0|1.5|2.0|3.0", NULL, true, true},
     {"Controls", "Mouse", "MouseSensitivityY", "Vertical Sensitivity", SETTING_VALUE, "0.5|0.75|1.0|1.25|1.5|2.0", NULL, true,
      false},
@@ -861,6 +875,9 @@ const SettingRow g_setting_rows[] = {
     {"Multiplayer", "Multiplayer", "Server", "Hub Server", SETTING_TEXT, NULL, NULL, true, false},
     {"Multiplayer", "Multiplayer", "Key", "Matchmaking Key", SETTING_TEXT, NULL, NULL, true, false},
     {"Multiplayer", "Multiplayer", "Direct", "Direct Connections", SETTING_CHOICE, ONOFF, NULL, true, false},
+    {"Multiplayer", "Multiplayer", "FriendRequests", "Friend Requests", SETTING_CHOICE, ONOFF, NULL, true, false},
+    {"Multiplayer", "Multiplayer", "FriendOnlineNotices", "Friend Online Notices", SETTING_CHOICE, ONOFF, NULL, true, false},
+    {"Multiplayer", "Multiplayer", "FriendHubNotices", "Friend Hub Notices", SETTING_CHOICE, ONOFF, NULL, true, false},
     {"Multiplayer", "Multiplayer", "SyncSmallMonsters", "Sync Small Monsters", SETTING_CHOICE, ONOFF, NULL, false, true},
     {"Multiplayer", "Multiplayer", "LagCompensation", "Lag Compensation (Experimental)", SETTING_CHOICE, ONOFF, NULL, true,
      true},
