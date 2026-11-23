@@ -112,6 +112,7 @@
     .ldn_key = "",                                                                                  \
     .ldn_direct = 1,                                                                                \
     .ldn_friend_requests = 1,                                                                       \
+    .ldn_friend_online_notices = 0,                                                                 \
     .ldn_ryu_serve_port = 30456,                                                                    \
     .ldn_room_serve_port = 24872,                                                                   \
     .sync_small_monsters = 1,                                                                       \
@@ -496,6 +497,11 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "FriendRequests = On\n"
     "\n"
+    "; FriendOnlineNotices = On: a notice when one of your friends comes online. A notice when a friend opens a hub\n"
+    "; always comes.\n"
+    "; Default: Off\n"
+    "FriendOnlineNotices = Off\n"
+    "\n"
     "; Sync small monsters between players in multiplayer. Everyone in the hunt should use the same setting.\n"
     "; Default: On\n"
     "SyncSmallMonsters = On\n"
@@ -878,6 +884,7 @@ const ConfigSetting g_settings[] = {
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},
     ON_OFF("Multiplayer", "Direct", ldn_direct, false),
     ON_OFF("Multiplayer", "FriendRequests", ldn_friend_requests, false),
+    ON_OFF("Multiplayer", "FriendOnlineNotices", ldn_friend_online_notices, false),
     ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, false),
     ON_OFF("Multiplayer", "LagCompensation", lag_compensation, false),
     ON_OFF("Multiplayer", "ShareUrgentCredit", share_urgent, false),

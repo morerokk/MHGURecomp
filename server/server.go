@@ -74,7 +74,7 @@ const (
 	tPing   = 6 // keeps the connection alive (both ways)
 	// protocol 4 requests
 	tFind     = 7 // header, code[8] -> HUBS4 (0 or 1 hub)
-	tPresence = 8 // header, secret[32], u8 state, code[8], u8 n, n x friend[10] [, u8 len, name] -> FRIENDS
+	tPresence = 8 // header, secret[32], u8 state, code[8], u8 n, n x friend[10] [, u8 len, name [, u8 m, m x friend[10]]] -> FRIENDS
 	// answers
 	tHubs     = 16 // u32 count, count x (u64 hub id, NetworkInfo)
 	tHosted   = 17 // u64 hub id
@@ -83,7 +83,9 @@ const (
 	tError    = 20 // u32 code
 	tHubs4    = 21 // u32 count, count x (u64 hub id, u16 link protocol, code[8] (zeros: none), NetworkInfo)
 	tFriends  = 22 // u8 n, n x (friend[10], u8 state, code[8]): the listed friends online that list the asker back;
-	// then u8 r, r x (friend[10], u8 len, name): friend requests, the players online that list the asker unlisted
+	// then u8 r, r x (friend[10], u8 len, name): friend requests, the players online that list the asker unlisted;
+	// then, only when there are any, u8 g, g x friend[10]: the players the asker lists that removed it (they are online
+	// and have it in their removed list), for its game to drop them too
 
 	errNotFound  = 1 // no such hub (or not for this key / version)
 	errNoAnswer  = 2 // the host did not take the player
@@ -218,6 +220,7 @@ type ipState struct {
 // A player online, for its friends (PRESENCE): kept presenceTTL after its last request.
 type presence struct {
 	friends map[[friendLen]byte]bool // the friend codes it lists
+	removed map[[friendLen]byte]bool // the players it removed from its friends (told to them: they drop it too)
 	state   uint8
 	code    [codeLen]byte
 	name    string // the name it goes by (for its friend requests)
@@ -978,8 +981,11 @@ func cleanName(b []byte) string {
 // PRESENCE (protocol 4): the asker is online (doing state, in or hosting the hub with code), until presenceTTL after
 // this; the answer is which of the friends it lists are online and list it back, and what they do, then its friend
 // requests: the players online that list it while it doesn't list them, with the names they go by (the newest
-// maxRequests). Body: secret[32], u8 state, code[8] (zeros: none), u8 n, n x friend code[10], and optionally u8 len,
-// name[len]: the name its own requests show; anything after that is ignored. What a newer game may send more of is
+// maxRequests), then (only when there are any) the players it lists that removed it. Body: secret[32], u8 state,
+// code[8] (zeros: none), u8 n, n x friend code[10], and optionally u8 len, name[len]: the name its own requests show,
+// and after the name, optionally, u8 m, m x friend code[10]: the players it removed from its friends (its game keeps
+// that list and sends it each time; told to those players while both are online, so their games drop it too and its
+// old listing doesn't come back as a request); anything after that is ignored. What a newer game may send more of is
 // taken as far as this server goes rather than refused: the first maxFriends friends, the name cut to nameMax bytes (and
 // without control characters), a state it doesn't know as it came, and a code that isn't one as none.
 func (s *Server) presence(c *net.TCPConn, body []byte) {
@@ -996,9 +1002,18 @@ func (s *Server) presence(c *net.TCPConn, body []byte) {
 		return
 	}
 	var name string
+	removed := map[[friendLen]byte]bool{}
 	if len(body) > end { // (the name: optional; one that doesn't fit in the request is left out)
 		if nl := int(body[end]); len(body) >= end+1+nl {
 			name = cleanName(body[end+1 : end+1+nl])
+			if at := end + 1 + nl; len(body) > at { // (the removed players: optional, taken as far as they go)
+				m := min(int(body[at]), (len(body)-at-1)/friendLen, maxFriends)
+				for i := 0; i < m; i++ {
+					var f [friendLen]byte
+					copy(f[:], body[at+1+i*friendLen:])
+					removed[f] = true
+				}
+			}
 		}
 	}
 	if !codeOK(code) {
@@ -1007,7 +1022,7 @@ func (s *Server) presence(c *net.TCPConn, body []byte) {
 	n = min(n, maxFriends)
 	id := friendID(body[:secretLen])
 	now := time.Now()
-	me := &presence{friends: map[[friendLen]byte]bool{}, state: state, name: name, seen: now}
+	me := &presence{friends: map[[friendLen]byte]bool{}, removed: removed, state: state, name: name, seen: now}
 	copy(me.code[:], code)
 	for i := 0; i < n; i++ {
 		var f [friendLen]byte
@@ -1016,7 +1031,7 @@ func (s *Server) presence(c *net.TCPConn, body []byte) {
 			me.friends[f] = true
 		}
 	}
-	var out []byte
+	var out, gone []byte
 	count := 0
 	type request struct {
 		id    [friendLen]byte
@@ -1050,7 +1065,14 @@ func (s *Server) presence(c *net.TCPConn, body []byte) {
 	s.online[id] = me
 	for f := range me.friends {
 		o := s.online[f]
-		if o == nil || time.Since(o.seen) > presenceTTL || !o.friends[id] {
+		if o == nil || time.Since(o.seen) > presenceTTL {
+			continue
+		}
+		if o.removed[id] { // (it removed the asker: the asker's game drops it too)
+			gone = append(gone, f[:]...)
+			continue
+		}
+		if !o.friends[id] {
 			continue
 		}
 		out = append(out, f[:]...)
@@ -1075,6 +1097,10 @@ func (s *Server) presence(c *net.TCPConn, body []byte) {
 		tail = append(tail, r.id[:]...)
 		tail = append(tail, byte(len(r.name)))
 		tail = append(tail, r.name...)
+	}
+	if len(gone) > 0 {
+		tail = append(tail, byte(len(gone)/friendLen))
+		tail = append(tail, gone...)
 	}
 	writeFrame(c, frame(tFriends, []byte{byte(count)}, out, tail))
 }

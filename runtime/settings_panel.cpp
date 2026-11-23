@@ -937,6 +937,8 @@ void friends_rows(std::vector<Row> &rows) {
     header(rows, "friends.header", tr("Friends"));
     add_bool(rows, "friend.requests", "Friend requests", &s.draft.ldn_friend_requests, ini("FriendRequests"));
     rows.back().help = tr("Players can send you friend requests, and the other hunters in your hub see your friend code to add you. A request you reject stays rejected until the game restarts, unless you add that player yourself. Off: no requests, and your code isn't shared in hubs; you can still add friends by their code.");
+    add_bool(rows, "friend.online", "Friend online notices", &s.draft.ldn_friend_online_notices, ini("FriendOnlineNotices"));
+    rows.back().help = tr("A notice when one of your friends comes online. A notice when a friend opens a hub always comes.");
     char mine[32];
     ldn_my_friend_code(mine, sizeof mine);
     copy_row("friend.mine", "Your friend code", mine, "None",
@@ -2074,6 +2076,7 @@ void reset_section() {
         break;
     case FRIENDS_PAGE:  // (the friends list and code live in the save folder, not here: only the requests switch)
         c.ldn_friend_requests = f.ldn_friend_requests;
+        c.ldn_friend_online_notices = f.ldn_friend_online_notices;
         break;
     case MISC_PAGE:
         c.sync_small_monsters = f.sync_small_monsters;

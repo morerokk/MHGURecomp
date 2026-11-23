@@ -153,10 +153,14 @@ A game asking under 4 also gets:
 - **PRESENCE** (request 8, the friends list): header, the install's secret (32 bytes), its state (0 in the game, 1
   hosting, 2 in a hub; another value is passed on as it came), a code (its hub's, or zeros), the number of friends and
   their friend codes (10 bytes each: the first 64 count), and optionally a name length and the name (UTF-8: the hunter
-  name the player's friend requests show, cut to 32 bytes at a whole character, control characters left out). Answer FRIENDS (22): the count, then for each listed friend who is online and lists the
+  name the player's friend requests show, cut to 32 bytes at a whole character, control characters left out), and
+  after the name, optionally, the number of players it removed from its friends and their friend codes (its game keeps
+  that list and sends it every time). Answer FRIENDS (22): the count, then for each listed friend who is online and lists the
   asker back: its friend code, state and code; then the friend requests: their count, and for each player online
   who lists the asker while the asker doesn't list them (the newest 8): its friend code, name length and name.
-  Accepting a request is listing that player back. A friend code is the first 10 bytes of
+  Then, only when there are any, the players the asker lists that removed it: their count and friend codes (its
+  game drops them too, so an old listing doesn't come back as a request). Accepting a request is listing that player
+  back. A friend code is the first 10 bytes of
   SHA-256(`MHGURecomp friend:` + secret). The server keeps only who was online in the last 90 seconds, in memory.
   It never tells a player's state to anyone the player doesn't list.
 - Hunter Search networks are told from hubs by room for 2 and 0xFF at advertise byte 0x1C. The 8 bytes at 0x14 are

@@ -1744,6 +1744,7 @@ void ldn_join_from_secret(const char *secret) {
 #define FRIENDS_GAP_NS 5000000000ull  // (the least between two requests: a hosted or joined hub may change fast)
 #define HELLO_EVERY_NS 60000000000ull  // a hub's hellos also again this often (and whenever its players change)
 #define FRIEND_REQUESTS_MAX 8
+#define FRIENDS_REMOVED_MAX 64  // (the server takes this many in a PRESENCE; full: the oldest goes)
 #define HUNTERS_MAX (MAX_NODES - 1)
 #define FRIEND_MAGIC 0xE9u  // aux message (emsync.c 0xE5, hpscale.c 0xE6, hitsync.c 0xE7, partsync.c 0xE8)
 static pthread_mutex_t friends_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -1762,6 +1763,11 @@ static struct {
     int nrejected, ntold;
     uint8_t rejected[64][FRIEND_LEN], told[64][FRIEND_LEN];
     uint64_t told_ns[64];
+    // the players removed from the friends (friends.txt "removed" lines): their requests aren't shown until they are
+    // added again, and the hub server is told, so their games drop us too (an old listing of theirs is no request)
+    int nremoved;
+    uint8_t removed[FRIENDS_REMOVED_MAX][FRIEND_LEN];
+    char removed_names[FRIENDS_REMOVED_MAX][33];
     // the hub's hunters that said hello: by their address in the network
     int nhunters;
     struct { uint32_t ip; uint8_t id[FRIEND_LEN]; char name[33]; } hunters[HUNTERS_MAX];
@@ -1797,6 +1803,9 @@ static bool friend_request_noted(const uint8_t *id) {
     F.told_ns[F.ntold++] = now;
     return true;
 }
+static bool friend_removed_del(const uint8_t *id);
+static bool friend_drop_locked(const uint8_t *id);
+static void friends_save_locked(void);
 static void id_remove(uint8_t (*set)[FRIEND_LEN], int *n, const uint8_t *id) {
     for (int i = 0; i < *n; i++)
         if (!memcmp(set[i], id, FRIEND_LEN)) {
@@ -1860,6 +1869,12 @@ static void friends_save_locked(void) {
         friend_text(F.ids[i], t);
         fprintf(f, "%s %s\n", t, F.list[i].name);
     }
+    // ("removed" lines: players taken out of the friends; older games skip them, not being codes)
+    for (int i = 0; i < F.nremoved; i++) {
+        char t[17];
+        friend_text(F.removed[i], t);
+        fprintf(f, "removed %s %s\n", t, F.removed_names[i]);
+    }
     if (fclose(f) || (remove(path), rename(tmp, path))) LOG("[ldn] can't write %s\n", path);
 }
 
@@ -1896,14 +1911,24 @@ static void friends_load_locked(void) {
     friends_file(path, sizeof path, "friends.txt");
     if (!(f = fopen(path, "r"))) return;
     char line[256];
-    while (F.n < LDN_FRIENDS_MAX && fgets(line, sizeof line, f)) {
+    while (fgets(line, sizeof line, f)) {
         char *e = line + strlen(line);
         while (e > line && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ')) *--e = 0;
         char *sp = strchr(line, ' ');
         if (line[0] == '#' || !sp) continue;
         *sp = 0;
         uint8_t id[FRIEND_LEN];
-        if (!friend_parse(line, id) || !memcmp(id, F.id, FRIEND_LEN)) continue;
+        if (!strcmp(line, "removed")) {  // removed CODE name
+            char *code = sp + 1, *nsp = strchr(code, ' ');
+            if (nsp) *nsp = 0;
+            if (friend_parse(code, id) && memcmp(id, F.id, FRIEND_LEN) && F.nremoved < FRIENDS_REMOVED_MAX &&
+                !id_in((const uint8_t (*)[FRIEND_LEN])F.removed, F.nremoved, id)) {
+                snprintf(F.removed_names[F.nremoved], sizeof F.removed_names[0], "%s", nsp ? nsp + 1 : "");
+                memcpy(F.removed[F.nremoved++], id, FRIEND_LEN);
+            }
+            continue;
+        }
+        if (F.n >= LDN_FRIENDS_MAX || !friend_parse(line, id) || !memcmp(id, F.id, FRIEND_LEN)) continue;
         LdnFriend *fr = &F.list[F.n];
         memset(fr, 0, sizeof *fr);
         char t[17];
@@ -2041,9 +2066,11 @@ static void *friends_thread(void *arg) {
         }
         F.poked = false;
         int n = F.n;
-        uint8_t ids[LDN_FRIENDS_MAX][FRIEND_LEN], secret[FRIEND_SECRET];
+        uint8_t ids[LDN_FRIENDS_MAX][FRIEND_LEN], secret[FRIEND_SECRET], removed[FRIENDS_REMOVED_MAX][FRIEND_LEN];
         memcpy(ids, F.ids, sizeof ids);
         memcpy(secret, F.secret, sizeof secret);
+        int nremoved = F.nremoved;
+        memcpy(removed, F.removed, sizeof removed);
         pthread_mutex_unlock(&friends_mu);
         last = plat_now_ns();
         char srv[LOBBY_NAME];
@@ -2051,7 +2078,8 @@ static void *friends_thread(void *arg) {
         bool requests = config_live_friend_requests();
         if (!n && !requests) continue;  // (nobody to tell, nobody to hear from)
         if (!lobby_server(srv)) state = HUB_OFF;
-        uint8_t req[LOBBY_HEADER + FRIEND_SECRET + 1 + CODE_LEN + 1 + LDN_FRIENDS_MAX * FRIEND_LEN + 1 + 32], type;
+        uint8_t req[LOBBY_HEADER + FRIEND_SECRET + 1 + CODE_LEN + 1 + LDN_FRIENDS_MAX * FRIEND_LEN + 1 + 32 + 1 +
+                    FRIENDS_REMOVED_MAX * FRIEND_LEN], type;
         int got = -1;
         struct sockaddr_in addr;
         if (state != HUB_OFF) {
@@ -2068,7 +2096,11 @@ static void *friends_thread(void *arg) {
                     memcpy(p, ids, (size_t)n * FRIEND_LEN), p += n * FRIEND_LEN;
                     char name[33];
                     size_t nl = friends_my_name(name);  // (what our requests show the players we added)
-                    if (nl) *p++ = (uint8_t)nl, memcpy(p, name, nl), p += nl;
+                    if (nl || nremoved) *p++ = (uint8_t)nl, memcpy(p, name, nl), p += nl;
+                    if (nremoved) {  // (after the name: the players we removed; a server older than that ignores them)
+                        *p++ = (uint8_t)nremoved;
+                        memcpy(p, removed, (size_t)nremoved * FRIEND_LEN), p += nremoved * FRIEND_LEN;
+                    }
                     hset_timeout(s, 4000);
                     got = frame_send(s, S_PRESENCE, req, (uint32_t)(p - req), NULL, 0) ? frame_recv(s, &type, buf) : -1;
                     hclose(s);
@@ -2104,11 +2136,12 @@ static void *friends_thread(void *arg) {
                     fr->mutual = true;  // (the server tells only friends who list us back)
                 }
                 fr->state = now;
-                // A notice when a friend starts hosting, or comes online from offline; none from the first answer
-                // (it only learns who is online already) or for a friend still unknown.
+                // A notice when a friend starts hosting, or comes online from offline (with [Multiplayer]
+                // FriendOnlineNotices On); none from the first answer (it only learns who is online already) or for a
+                // friend still unknown.
                 bool hosting = now == LDN_FRIEND_HOSTING && was != LDN_FRIEND_HOSTING;
                 bool came = now != LDN_FRIEND_OFFLINE && was == LDN_FRIEND_OFFLINE;
-                if (F.polled && was != LDN_FRIEND_UNKNOWN && nn < 4 && (hosting || came))
+                if (F.polled && was != LDN_FRIEND_UNKNOWN && nn < 4 && (hosting || (came && config_live_friend_online_notices())))
                     snprintf(notes[nn++], sizeof notes[0], "%c%s", hosting ? 'H' : 'O', fr->name);
             }
             // the requests after the friends: u8 r, r x (friend[10], u8 len, name); rejected ones and those with
@@ -2118,13 +2151,15 @@ static void *friends_thread(void *arg) {
             memcpy(before, F.req_ids, sizeof before);
             F.nreq = 0;
             int at = 1 + count * entry;
-            int r = at < got ? buf[at++] : 0;
-            for (int k = 0; k < r && at + FRIEND_LEN + 1 <= got; k++) {
+            int r = at < got ? buf[at++] : 0, k = 0;
+            for (; k < r && at + FRIEND_LEN + 1 <= got; k++) {
                 const uint8_t *e = buf + at;
                 int nl = e[FRIEND_LEN];
                 if (nl > 32 || at + FRIEND_LEN + 1 + nl > got) break;
                 at += FRIEND_LEN + 1 + nl;
+                // (not shown: rejected this session, removed from the friends until added again, a friend already)
                 if (!requests || F.nreq == FRIEND_REQUESTS_MAX || id_in((const uint8_t (*)[FRIEND_LEN])F.rejected, F.nrejected, e) ||
+                    id_in((const uint8_t (*)[FRIEND_LEN])F.removed, F.nremoved, e) ||
                     id_in((const uint8_t (*)[FRIEND_LEN])F.ids, F.n, e) || !memcmp(e, F.id, FRIEND_LEN))
                     continue;
                 LdnRequest *q = &F.req[F.nreq];
@@ -2139,6 +2174,21 @@ static void *friends_thread(void *arg) {
                 memcpy(F.req_ids[F.nreq++], e, FRIEND_LEN);
                 if (!id_in((const uint8_t (*)[FRIEND_LEN])before, nbefore, e) && nn < 6 && friend_request_noted(e))
                     snprintf(notes[nn++], sizeof notes[0], "R%s", q->name);
+            }
+            // then (a server that knows removals, only when there are any) u8 g, g x friend[10]: friends that removed
+            // us. They go from the list too (not into the removed list: a request of theirs later is a new one).
+            if (k == r && at < got) {
+                int g = buf[at++];
+                bool changed = false;
+                for (int i = 0; i < g && at + FRIEND_LEN <= got; i++, at += FRIEND_LEN)
+                    for (int f = 0; f < F.n; f++)
+                        if (!memcmp(F.ids[f], buf + at, FRIEND_LEN)) {
+                            LOG("[ldn] friends: %s removed us: out of the friends list\n", F.list[f].name);
+                            friend_drop_locked(buf + at);
+                            changed = true;
+                            break;
+                        }
+                if (changed) friends_save_locked();
             }
             F.polled = true;
             for (int i = 0; i < F.n; i++) now_mutual += F.list[i].mutual && F.list[i].state != LDN_FRIEND_OFFLINE;
@@ -2220,6 +2270,7 @@ const char *ldn_friend_add(const char *typed) {
         snprintf(fr->name, sizeof fr->name, "%s", *name ? name : fr->code);
         fr->state = LDN_FRIEND_UNKNOWN;
         memcpy(F.ids[F.n++], id, FRIEND_LEN);
+        friend_removed_del(id);  // (a player we removed, added again: out of the removed list)
         friends_save_locked();
         // (adding a player we rejected takes them back; their request, if any, is answered by this)
         id_remove(F.rejected, &F.nrejected, id);
@@ -2236,15 +2287,51 @@ const char *ldn_friend_add(const char *typed) {
     return why;
 }
 
+// The removed list (friends_mu held): a player in (with the name they had; full: the oldest goes), or out
+static void friend_removed_add(const uint8_t *id, const char *name) {
+    for (int i = 0; i < F.nremoved; i++)
+        if (!memcmp(F.removed[i], id, FRIEND_LEN)) return;
+    if (F.nremoved == FRIENDS_REMOVED_MAX) {
+        memmove(F.removed[0], F.removed[1], (FRIENDS_REMOVED_MAX - 1) * FRIEND_LEN);
+        memmove(F.removed_names[0], F.removed_names[1], (FRIENDS_REMOVED_MAX - 1) * sizeof F.removed_names[0]);
+        F.nremoved--;
+    }
+    snprintf(F.removed_names[F.nremoved], sizeof F.removed_names[0], "%s", name);
+    memcpy(F.removed[F.nremoved++], id, FRIEND_LEN);
+}
+static bool friend_removed_del(const uint8_t *id) {
+    for (int i = 0; i < F.nremoved; i++)
+        if (!memcmp(F.removed[i], id, FRIEND_LEN)) {
+            memmove(F.removed[i], F.removed[i + 1], (size_t)(F.nremoved - i - 1) * FRIEND_LEN);
+            memmove(F.removed_names[i], F.removed_names[i + 1], (size_t)(F.nremoved - i - 1) * sizeof F.removed_names[0]);
+            F.nremoved--;
+            return true;
+        }
+    return false;
+}
+// friends_mu held: a friend out of the list (and saved); false: not in it
+static bool friend_drop_locked(const uint8_t *id) {
+    for (int i = 0; i < F.n; i++)
+        if (!memcmp(id, F.ids[i], FRIEND_LEN)) {
+            memmove(&F.list[i], &F.list[i + 1], (size_t)(F.n - i - 1) * sizeof F.list[0]);
+            memmove(F.ids[i], F.ids[i + 1], (size_t)(F.n - i - 1) * FRIEND_LEN);
+            F.n--;
+            return true;
+        }
+    return false;
+}
+
+// Removing a friend: out of the list, into the removed list (kept in friends.txt): their request is not shown again
+// (their game may still list us: that would come back as one) until we add them ourselves, and the hub server tells
+// their game, which drops us too.
 void ldn_friend_remove(const char *code) {
     uint8_t id[FRIEND_LEN];
     if (!friend_parse(code, id)) return;
     pthread_mutex_lock(&friends_mu);
     for (int i = 0; i < F.n; i++)
         if (!memcmp(id, F.ids[i], FRIEND_LEN)) {
-            memmove(&F.list[i], &F.list[i + 1], (size_t)(F.n - i - 1) * sizeof F.list[0]);
-            memmove(F.ids[i], F.ids[i + 1], (size_t)(F.n - i - 1) * FRIEND_LEN);
-            F.n--;
+            friend_removed_add(id, F.list[i].name);
+            friend_drop_locked(id);
             friends_save_locked();
             break;
         }
