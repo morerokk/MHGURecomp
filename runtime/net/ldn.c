@@ -2129,8 +2129,8 @@ static void *friends_thread(void *arg) {
             const char *title = notes[i][0] == 'H' ? UI_TEXT("%s is hosting a hub")
                               : notes[i][0] == 'R' ? UI_TEXT("%s wants to be friends")
                                                    : UI_TEXT("%s is online");
-            const char *text = notes[i][0] == 'H' ? UI_TEXT("Multiplayer settings: Friends, to join.")
-                             : notes[i][0] == 'R' ? UI_TEXT("Multiplayer settings: Friends, to accept or reject.")
+            const char *text = notes[i][0] == 'H' ? UI_TEXT("To join: settings menu, Friends tab.")
+                             : notes[i][0] == 'R' ? UI_TEXT("To accept or reject: settings menu, Friends tab.")
                                                   : UI_TEXT("Your friend is playing.");
             snprintf(line, sizeof line, settings_text(lang, title), notes[i] + 1);
             overlay_notice(line, settings_text(lang, text));
