@@ -262,7 +262,7 @@ Other useful keybinds:
 - F12: screenshot
 - Pause: pauses the game, with **PAUSED** over the dimmed picture; Pause, `ESC` or `ENTER` resumes it. Offline only:
   it does nothing in a Hub, with Hunter Search on, or while the game saves. Its key is **Pause/Suspend** in Controls,
-  Keybinds (`[Controls] PauseKey`)
+  Keybinds (`[Controls] PauseKey`). On a Mac, whose keyboards have no Pause key, it is `P` by default
 
 ## Settings
 

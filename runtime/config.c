@@ -34,6 +34,12 @@
 #define BOLD_TEXT_DEFAULT 0
 #define BOLD_TEXT_DEFAULT_INI "Off"
 #endif
+// [Controls] PauseKey: P on the Mac, whose keyboards have no Pause key (P is in none of the default keybinds)
+#ifdef __APPLE__
+#define PAUSE_KEY_DEFAULT "P"
+#else
+#define PAUSE_KEY_DEFAULT "Pause"
+#endif
 #define CONFIG_DEFAULT_VALUES                                                                       \
     /* [Display] */                                                                                 \
     .display_mode = DISPLAY_BORDERLESS,                                                             \
@@ -94,7 +100,7 @@
     .kbm_prompts = 1,                                                                               \
     .combo_window = COMBO_LENIENT,                                                                  \
     .chat_key = "/",                                                                                \
-    .pause_key = "Pause",                                                                           \
+    .pause_key = PAUSE_KEY_DEFAULT,                                                                 \
     .menu_chord = 1,                                                                                \
     .title_back_exit = 1,                                                                           \
     /* [Mouse] */                                                                                   \
@@ -440,10 +446,10 @@ static const char DEFAULT_INI[] =
     "; hub or with Hunter Search, and not while the game saves. A key's name as the settings menu shows it, or nothing\n"
     "; for none\n"
 #ifdef __APPLE__
-    "; Mac keyboards have no Pause key: pick another one, such as F13 on a keyboard that has it\n"
+    "; On the Mac it is P by default, as Mac keyboards have no Pause key\n"
 #endif
-    "; Default: Pause\n"
-    "PauseKey = Pause\n"
+    "; Default: " PAUSE_KEY_DEFAULT "\n"
+    "PauseKey = " PAUSE_KEY_DEFAULT "\n"
     "\n"
     "[Mouse]\n"
     "; Mouse sensitivity\n"
@@ -838,7 +844,7 @@ const SettingRow g_setting_rows[] = {
     {"Controls", "Controls", "MenuChord", "Plus + Minus Opens the F1 Menu", SETTING_CHOICE, ONOFF, NULL, true, false},
     {"Controls", "Controls", "TitleBackExit", "B on the Title Screen Asks to Quit", SETTING_CHOICE, ONOFF, NULL, true, false},
     {"Controls", "Controls", "ChatKey", "Chat Key", SETTING_VALUE, "/|T|Y|Return", NULL, true, false},
-    {"Controls", "Controls", "PauseKey", "Pause Key", SETTING_VALUE, "Pause|F13|F14|F15", NULL, true, false},
+    {"Controls", "Controls", "PauseKey", "Pause Key", SETTING_VALUE, "P|F5|F6|F13|Pause", NULL, true, false},
     {"Controls", "Mouse", "MouseSensitivity", "Mouse Sensitivity", SETTING_VALUE, "0.5|0.75|1.0|1.5|2.0|3.0", NULL, true, true},
     {"Controls", "Mouse", "MouseSensitivityY", "Vertical Sensitivity", SETTING_VALUE, "0.5|0.75|1.0|1.25|1.5|2.0", NULL, true,
      false},
