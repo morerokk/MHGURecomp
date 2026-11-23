@@ -84,6 +84,13 @@ func host(t *testing.T, s *Server, room byte, players byte) (*net.TCPConn, uint6
 func list(t *testing.T, s *Server, proto uint16, room byte) map[uint64][]byte {
 	c := dial(t, s)
 	send(t, c, tList, header(proto, room))
+	if proto >= protoSessions { // (HUBS4: server_v4_test.go)
+		out := map[uint64][]byte{}
+		for _, h := range readHubs4(t, c) {
+			out[h.id] = h.info
+		}
+		return out
+	}
 	p := expect(t, c, tHubs)
 	n := binary.LittleEndian.Uint32(p)
 	out := map[uint64][]byte{}
@@ -137,8 +144,11 @@ func TestMinProto(t *testing.T) {
 	if l := list(t, s, 3, 0); len(l) != 1 || l[id] == nil {
 		t.Fatalf("protocol 3 list %v", l)
 	}
-	if l := list(t, s, 4, 0); len(l) != 0 {
-		t.Fatal("protocol 4 sees a protocol 3 hub")
+	if l := list(t, s, 4, 0); len(l) != 1 || l[id] == nil { // (4 plays with 3: TestPool34)
+		t.Fatalf("protocol 4 list %v", l)
+	}
+	if l := list(t, s, 5, 0); len(l) != 0 {
+		t.Fatal("protocol 5 sees a protocol 3 hub")
 	}
 }
 
@@ -307,7 +317,7 @@ func TestApply(t *testing.T) {
 	if l := listIn(3, phoneRoom); len(l) != 1 || !l[phone3] {
 		t.Fatalf("apart again: phones see %v", l)
 	}
-	if got := s.Settings(); got != (Settings{3, 0, true}) {
+	if got := s.Settings(); got != (Settings{MinProto: 3, SeparatePhones: true}) {
 		t.Fatalf("Settings() = %+v", got)
 	}
 }
@@ -323,20 +333,31 @@ func TestReadSettings(t *testing.T) {
 	}
 	flags := Settings{MinProto: 2, SeparatePhones: true}
 	st, err := readSettings(write("# comment\n\nmin-proto = 3   # from Sunday\r\nSeparate-Phones=Off\n"), flags)
-	if err != nil || st != (Settings{3, 0, false}) {
+	if err != nil || st != (Settings{MinProto: 3}) {
 		t.Fatalf("%+v, %v", st, err)
 	}
-	if st, err = readSettings(write("separate-phones = on\n"), Settings{4, 100, false}); err != nil || st != (Settings{4, 100, true}) {
+	if st, err = readSettings(write("separate-phones = on\n"), Settings{MinProto: 4, MaxProto: 100, LinkPoolLow: 3, LinkPoolHigh: 4}); err != nil ||
+		st != (Settings{MinProto: 4, MaxProto: 100, LinkPoolLow: 3, LinkPoolHigh: 4, SeparatePhones: true}) {
 		t.Fatalf("a key left out keeps the flag's value: %+v, %v", st, err)
 	}
-	if st, err = readSettings(write("max-proto = 50\nmin-proto = 3\n"), Settings{0, 100, true}); err != nil || st != (Settings{3, 50, true}) {
+	if st, err = readSettings(write("max-proto = 50\nmin-proto = 3\n"), Settings{MaxProto: 100, SeparatePhones: true}); err != nil ||
+		st != (Settings{MinProto: 3, MaxProto: 50, SeparatePhones: true}) {
 		t.Fatalf("max-proto: %+v, %v", st, err)
 	}
-	if st, err = readSettings(write("max-proto = 0\n"), Settings{3, 100, true}); err != nil || st != (Settings{3, 0, true}) {
+	if st, err = readSettings(write("max-proto = 0\n"), Settings{MinProto: 3, MaxProto: 100, SeparatePhones: true}); err != nil ||
+		st != (Settings{MinProto: 3, SeparatePhones: true}) {
 		t.Fatalf("max-proto 0: %+v, %v", st, err)
 	}
+	pooled := Settings{MinProto: 3, LinkPoolLow: 3, LinkPoolHigh: 4}
+	if st, err = readSettings(write("link-pool = 4-5\n"), pooled); err != nil || st.LinkPoolLow != 4 || st.LinkPoolHigh != 5 {
+		t.Fatalf("link-pool 4-5: %+v, %v", st, err)
+	}
+	if st, err = readSettings(write("link-pool = off\n"), pooled); err != nil || st.LinkPoolLow != 0 || st.LinkPoolHigh != 0 {
+		t.Fatalf("link-pool off: %+v, %v", st, err)
+	}
 	for _, bad := range []string{"min-proto = three\n", "min-proto = 70000\n", "separate-phones = maybe\n", "min-proto\n", "port = 1\n",
-		"max-proto = -1\n", "max-proto = 70000\n", "max-proto = 1\n" /* below the flags' min-proto 2 */, "min-proto = 5\nmax-proto = 4\n"} {
+		"max-proto = -1\n", "max-proto = 70000\n", "max-proto = 1\n" /* below the flags' min-proto 2 */, "min-proto = 5\nmax-proto = 4\n",
+		"link-pool = 4\n", "link-pool = 5-4\n", "link-pool = 0-4\n", "link-pool = a-b\n", "link-pool\n"} {
 		if st, err := readSettings(write(bad), flags); err == nil || st != flags {
 			t.Errorf("%q: %+v, %v (want an error and the flags' values)", bad, st, err)
 		}
@@ -415,7 +436,8 @@ func testInfoCode(players byte, code uint16) []byte {
 }
 
 // testPairInfo: a NetworkInfo for 2 players with MHGU's advertise data, byte 0x1C = kind (0xFF: Hunter Search
-// network, 1: hub), as the game sends them (0x14: the constant 0x90abcdef 0x12345678).
+// network, 1: hub), as the game sends them (0x14: the host's account id, here the one every game had before
+// protocol 4).
 func testPairInfo(kind byte) []byte {
 	i := testInfoCode(1, 0xFFFF)
 	i[niNodeMax] = 2
@@ -425,10 +447,10 @@ func testPairInfo(kind byte) []byte {
 	return i
 }
 
-// What counts as a Hunter Search network: room for 2, MHGU's constant at 0x14, 0xFF at 0x1C.
+// What counts as a Hunter Search network: room for 2, 0xFF at 0x1C, whatever the host's account id at 0x14.
 func TestHuntSearch(t *testing.T) {
-	noMagic := testPairInfo(0xFF)
-	binary.LittleEndian.PutUint32(noMagic[niAdv+0x14:], 0)
+	otherID := testPairInfo(0xFF) // (protocol 4: each install's own account id)
+	binary.LittleEndian.PutUint64(otherID[niAdv+0x14:], 0x8123456789abcdef)
 	four := testPairInfo(0xFF)
 	four[niNodeMax] = 4
 	short := testPairInfo(0xFF)
@@ -438,7 +460,7 @@ func TestHuntSearch(t *testing.T) {
 		info []byte
 		want bool
 	}{{"Hunter Search", testPairInfo(0xFF), true}, {"2-player hub", testPairInfo(1), false},
-		{"no constant", noMagic, false}, {"room for 4", four, false}, {"short advertise data", short, false},
+		{"another account id", otherID, true}, {"room for 4", four, false}, {"short advertise data", short, false},
 		{"plain hub", testInfo(1), false}} {
 		if got := huntSearch(c.info); got != c.want {
 			t.Errorf("%s: huntSearch = %v, want %v", c.name, got, c.want)
@@ -458,12 +480,13 @@ func TestListHunterSearchApart(t *testing.T) {
 		return binary.LittleEndian.Uint64(expect(t, c, tHosted))
 	}
 	searches := map[uint64]bool{}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 4; i++ {
 		searches[hostInfo(testPairInfo(0xFF))] = true
 	}
-	noMagic := testPairInfo(0xFF) // 0xFF without MHGU's constant before it: not taken for a Hunter Search network
-	binary.LittleEndian.PutUint32(noMagic[niAdv+0x14:], 0)
-	hubs := map[uint64]bool{hostInfo(testPairInfo(1)): true, hostInfo(noMagic): true}
+	otherID := testPairInfo(0xFF) // (protocol 4: the host's own account id at 0x14: still a Hunter Search network)
+	binary.LittleEndian.PutUint64(otherID[niAdv+0x14:], 0x8123456789abcdef)
+	searches[hostInfo(otherID)] = true
+	hubs := map[uint64]bool{hostInfo(testPairInfo(1)): true}
 	for i := 0; i < 5; i++ {
 		hubs[hostInfo(testInfo(byte(1+i%3)))] = true
 	}

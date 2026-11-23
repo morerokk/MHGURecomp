@@ -36,7 +36,7 @@
 extern "C" const char *plat_utf8_path(const char *path, char *buf, size_t size);  // (runtime/platform.h)
 
 namespace {
-enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, Actions, Changelog };
+enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, Actions, Changelog, OfflineFriends };
 enum class Command { None, Save };
 struct Row {
     std::string id, title, value;
@@ -177,9 +177,10 @@ const Theme &theme() {
 ImVec4 vec(ImU32 c) { return ImGui::ColorConvertU32ToFloat4(c); }
 // The Mods tab: the mods folder's state (modorder.h), which is saved with the rest of the settings
 #ifdef __ANDROID__
-constexpr int PAGES = 9, MODS_PAGE = 5, CHEATS_PAGE = 6, APP_PAGE = 7, ANDROID_PAGE = 8;  // (Android: the tab for its own settings)
+constexpr int PAGES = 10, FRIENDS_PAGE = 4, MISC_PAGE = 5, MODS_PAGE = 6, CHEATS_PAGE = 7, APP_PAGE = 8,
+              ANDROID_PAGE = 9;  // (Android: the tab for its own settings)
 #else
-constexpr int PAGES = 8, MODS_PAGE = 5, CHEATS_PAGE = 6, APP_PAGE = 7;
+constexpr int PAGES = 9, FRIENDS_PAGE = 4, MISC_PAGE = 5, MODS_PAGE = 6, CHEATS_PAGE = 7, APP_PAGE = 8;
 #endif
 struct ScanResult {
     std::vector<std::string> names;  // (the order ModConflict's indexes are in)
@@ -834,6 +835,200 @@ void hub_check(std::vector<Row> &rows) {
     r.value = state;
     r.activate = []() { ldn_hub_check(s.draft.ldn_server, s.draft.ldn_key); };
     rows.push_back(std::move(r));
+}
+// Session codes and friends (runtime/net/ldn.c, link version 4): the code of the hub you're in and the friend code to
+// share (Confirm copies them), join by code, and the friends with what they're doing (Confirm on one in a hub joins
+// it the way a code does). Remove friends turns Confirm on a friend into removing it. Offline friends have a submenu of
+// their own (View::OfflineFriends), so a long list doesn't bury the ones you can play with.
+bool removing;  // (Remove friends: on the Friends tab and in Offline friends alike)
+// The session code of the hub you're in as the friends list has them (no dash), "" when none
+std::string my_hub_code() {
+    char code[32] = "";
+    if (!ldn_session_code(code, sizeof code)) return "";
+    std::string raw;
+    for (const char *c = code; *c; c++)
+        if (*c != '-') raw += *c;
+    return raw;
+}
+// A friend's row; after removing one the focus goes to the Remove friends row given (the removed row is gone). A friend
+// in the hub you're in has nothing to join.
+void friend_row(std::vector<Row> &rows, const LdnFriend &f, const char *remove_row, const std::string &my_hub) {
+    Row r;
+    r.id = std::string("friend.") + f.code;
+    r.title = f.name;
+    bool here = f.hub[0] && !SDL_strcasecmp(f.hub, my_hub.c_str());
+    bool hub = f.hub[0] && !here;
+    switch (f.state) {
+    case LDN_FRIEND_ONLINE: r.value = tr("Online"); break;
+    case LDN_FRIEND_HOSTING: r.value = hub ? tr("Hosting a hub (Confirm joins)") : tr("Hosting a hub"); break;
+    case LDN_FRIEND_IN_HUB: r.value = hub ? tr("In a hub (Confirm joins)") : tr("In a hub"); break;
+    case LDN_FRIEND_OFFLINE: r.value = tr("Offline"); break;
+    default: r.value = "..."; break;
+    }
+    if (here) r.value = tr("In your hub");
+    if (removing) r.value = tr("Confirm removes");
+    r.help = f.code;
+    std::string fc = f.code, hc = f.hub, after = remove_row;
+    r.enabled = removing || hub;
+    r.activate = [fc, hc, after]() {
+        if (removing) {
+            ldn_friend_remove(fc.c_str());
+            focus(after);
+        } else if (!hc.empty())
+            ldn_join_code(hc.c_str(), nullptr);
+    };
+    rows.push_back(std::move(r));
+}
+void remove_friends_row(std::vector<Row> &rows, const char *id) {
+    action(rows, id, tr(removing ? "Done removing" : "Remove friends"), []() { removing = !removing; });
+}
+// The Offline friends submenu: Remove friends first (the friends' rows are disabled unless removing), Back last
+void offline_friends_rows(std::vector<Row> &rows) {
+    static LdnFriend list[LDN_FRIENDS_MAX];
+    int n = ldn_friends(list, LDN_FRIENDS_MAX, nullptr);
+    remove_friends_row(rows, "offline.remove");
+    for (int i = 0; i < n; i++)
+        if (list[i].state == LDN_FRIEND_OFFLINE) friend_row(rows, list[i], "offline.remove", "");
+    action(rows, "offline.back", tr("Back"), []() { pop(); });
+}
+void friends_rows(std::vector<Row> &rows) {
+    static uint64_t copied_at;
+    static std::string copied;
+    auto copy_row = [&](const char *id, const char *title, const std::string &code, const char *none, const char *help) {
+        Row r;
+        r.id = id;
+        r.title = tr(title);
+        bool shown = !copied.empty() && copied == code && SDL_GetTicks() - copied_at < 2000;
+        r.value = code.empty() ? std::string(tr(none)) : shown ? std::string(tr("Copied")) : code;
+        r.help = tr(help);
+        r.enabled = !code.empty();
+        r.activate = [code]() {
+            if (code.empty()) return;
+            SDL_SetClipboardText(code.c_str());
+            copied = code, copied_at = SDL_GetTicks();
+        };
+        rows.push_back(std::move(r));
+    };
+    header(rows, "codes.header", tr("Session Codes"));
+    char code[32] = "";
+    copy_row("code.mine", "Session code", ldn_session_code(code, sizeof code) ? code : "", "No hub",
+             "The code of the hub you host or joined through the hub server. Others enter it in Join by code to find the hub, with or without your matchmaking key. Confirm copies it.");
+    Row j;
+    j.id = "code.join";
+    j.title = tr("Join by code");
+    switch (ldn_invite_state(code, sizeof code)) {
+    case LDN_INVITE_SEARCHING: j.value = tr("Searching..."); break;
+    case LDN_INVITE_READY: j.value = fmt("%s: in Join Hub", code); break;
+    case LDN_INVITE_NOT_FOUND: j.value = fmt("%s: no such hub", code); break;
+    case LDN_INVITE_OLD_SERVER: j.value = tr("The hub server is too old"); break;
+    case LDN_INVITE_FAILED: j.value = tr("No answer"); break;
+    default: j.value = tr("Enter a code"); break;
+    }
+    j.help = tr("Enter a hub's session code: the hub server finds the hub, and it comes first in Join Hub for the next 10 minutes. Then search for hubs in the game and pick it.");
+    j.activate = []() {
+        keyboard(tr("Join by code"), "", 12, [](const std::string &typed, std::string &error) {
+            if (ldn_join_code(typed.c_str(), nullptr)) return true;
+            error = tr("That is not a session code: 8 letters and digits.");
+            return false;
+        });
+    };
+    rows.push_back(std::move(j));
+
+    header(rows, "friends.header", tr("Friends"));
+    add_bool(rows, "friend.requests", "Friend requests", &s.draft.ldn_friend_requests, ini("FriendRequests"));
+    rows.back().help = tr("Players can send you friend requests, and the other hunters in your hub see your friend code to add you. A request you reject stays rejected until the game restarts, unless you add that player yourself. Off: no requests, and your code isn't shared in hubs; you can still add friends by their code.");
+    char mine[32];
+    ldn_my_friend_code(mine, sizeof mine);
+    copy_row("friend.mine", "Your friend code", mine, "None",
+             "Give this code to friends to add you. You see each other once both of you added the other. It is kept with your saves. Confirm copies it.");
+    action(rows, "friend.add", tr("Add a friend"), []() {
+        keyboard(tr("Friend code and name"), "", 60, [](const std::string &typed, std::string &error) {
+            if (const char *why = ldn_friend_add(typed.c_str())) {
+                error = tr(why);
+                return false;
+            }
+            return true;
+        });
+    });
+    rows.back().help = tr("Their friend code, then a space and the name you want to see for them (for example ABCD-EFGH-JKMN-PQRS Mia).");
+    // friend requests: Accept adds them, Reject keeps them out until the game restarts
+    LdnRequest reqs[8];
+    int nr = ldn_friend_requests(reqs, 8);
+    for (int i = 0; i < nr; i++) {
+        std::string code = reqs[i].code, name = reqs[i].name;
+        // (the request's rows go once answered: the focus moves to Add a friend, above the friends; a friend's own row
+        // can't take it while it has no hub to join, being disabled)
+        action(rows, "req.accept." + code, fmt("Accept %s", name.c_str()), [code]() {
+            ldn_friend_request_answer(code.c_str(), true);
+            focus("friend.add");
+        });
+        rows.back().help = tr("A friend request: they added you. Accept adds them to your friends list.");
+        action(rows, "req.reject." + code, fmt("Reject %s", name.c_str()), [code]() {
+            ldn_friend_request_answer(code.c_str(), false);
+            focus("friend.add");
+        });
+        rows.back().help = tr("Their request stays rejected until the game restarts, unless you add them yourself.");
+    }
+    // the other hunters in this hub (games that shared their friend code): Confirm adds one, which sends them a request.
+    // Friends among them are left to the friends list below.
+    LdnHunter hunters[8];
+    int nh = ldn_hub_hunters(hunters, 8);
+    bool hub_header = false;
+    for (int i = 0; i < nh; i++) {
+        if (hunters[i].state == LDN_HUNTER_FRIEND) continue;
+        if (!hub_header) header(rows, "hunters.header", tr("Hunters in your hub")), hub_header = true;
+        Row r;
+        r.id = std::string("hunter.") + hunters[i].code;
+        r.title = hunters[i].name;
+        r.value = hunters[i].state == LDN_HUNTER_ADDED ? tr("Request sent") : tr("Add friend");
+        r.help = tr("A hunter in your hub. Confirm adds them as a friend: they get a friend request, and once they accept you see each other.");
+        r.enabled = hunters[i].state == LDN_HUNTER_ADD;
+        std::string typed = std::string(hunters[i].code) + " " + hunters[i].name;
+        r.activate = [typed]() {  // (the row turns disabled once added: the focus to Add a friend)
+            ldn_friend_add(typed.c_str());
+            focus("friend.add");
+        };
+        rows.push_back(std::move(r));
+    }
+    // the friends list: the ones online (or not known yet) here, the offline ones in their own submenu
+    static LdnFriend list[LDN_FRIENDS_MAX];
+    int server = HUB_UNKNOWN;
+    int n = ldn_friends(list, LDN_FRIENDS_MAX, &server);
+    if (!n && !removing)
+        return;
+    header(rows, "friends.list.header", tr("Friends list"));
+    if (server != HUB_ONLINE && server != HUB_UNKNOWN) {
+        Row w;
+        w.id = "friend.server";
+        w.title = tr("Hub server");
+        w.value = server == HUB_OFF ? tr("No hub server") : server == HUB_VERSION ? tr("The hub server is too old")
+                                                                                 : tr("Hub server unreachable");
+        w.warn = true;
+        w.enabled = false;
+        rows.push_back(std::move(w));
+    }
+    int shown = 0, offline = 0;
+    std::string my_hub = my_hub_code();
+    for (int i = 0; i < n; i++) {
+        if (list[i].state == LDN_FRIEND_OFFLINE)
+            offline++;
+        else
+            friend_row(rows, list[i], "friend.remove", my_hub), shown++;
+    }
+    if (!shown && n) {
+        Row none;
+        none.id = "friend.none";
+        none.title = tr("No friends online");
+        none.enabled = false;
+        rows.push_back(std::move(none));
+    }
+    if (offline) {
+        action(rows, "friend.offline", std::string(tr("Offline friends")) + " (" + std::to_string(offline) + ")",
+               []() { push(View::OfflineFriends, "offline.remove"); });
+        rows.back().help = tr("Your friends who aren't playing online right now, and the ones who haven't added you back yet.");
+    }
+    if (shown || removing)
+        remove_friends_row(rows, "friend.remove");
 }
 // The keybinds' rows (config.h BIND_*): what each is called
 const char *const bind_titles[BINDS] = {"Move forward", "Move back", "Move left", "Move right", "Walk", "A", "B", "X",
@@ -1877,7 +2072,10 @@ void reset_section() {
         SDL_strlcpy(c.ldn_room_pass, f.ldn_room_pass, sizeof c.ldn_room_pass);
         SDL_strlcpy(c.ldn_room_nick, f.ldn_room_nick, sizeof c.ldn_room_nick);
         break;
-    case 4:
+    case FRIENDS_PAGE:  // (the friends list and code live in the save folder, not here: only the requests switch)
+        c.ldn_friend_requests = f.ldn_friend_requests;
+        break;
+    case MISC_PAGE:
         c.sync_small_monsters = f.sync_small_monsters;
         c.lag_compensation = f.lag_compensation;
         c.village_in_hub = f.village_in_hub;
@@ -2419,7 +2617,10 @@ std::vector<Row> main_rows() {
         add_bool(r, "discord", "Discord Rich Presence", &c.discord, ini("RichPresence"));
         add_bool(r, "discord.hunter", "Show hunter name and HR", &c.discord_hunter, ini("ShowHunter"));
         break;
-    case 4: {
+    case FRIENDS_PAGE:
+        friends_rows(r);
+        break;
+    case MISC_PAGE: {
         const char *per_quest =
             tr("HP multipliers for single quests, by their quest ID: in those quests they are used instead of the ones above.");
         header(r, "hub.header", tr("Hub"));
@@ -2760,6 +2961,8 @@ std::vector<Row> rows_for_view(bool *open) {
         action_rows(r);
     } else if (s.view == View::Changelog) {
         action(r, "changelog.back", tr("Back"), []() { pop(); });
+    } else if (s.view == View::OfflineFriends) {
+        offline_friends_rows(r);
     } else if (s.view == View::KeyCapture && acts().capture >= 0) {
         action_capture_rows(r);
     } else if (s.view == View::KeyCapture) {
@@ -3417,7 +3620,8 @@ void settings_panel(bool *open) {
             first_page((s.page + 1) % PAGES);
         if (pressed(ImGuiKey_GamepadL1))
             first_page((s.page + PAGES - 1) % PAGES);
-        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Misc", "Mods", "Cheats", "Menu Options"
+        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Friends", "Misc", "Mods", "Cheats",
+                               "Menu Options"
 #ifdef __ANDROID__
                                , "Android"
 #endif
@@ -3429,7 +3633,7 @@ void settings_panel(bool *open) {
         ImGui::SetCursorScreenPos(tabs_start);
         float gutter = fw * 2.1f;
         float tabs_width = avail - gutter * 2;
-        int columns = tabs_width / fw < 50 ? 4 : PAGES;
+        int columns = tabs_width / fw < 50 ? (PAGES + 1) / 2 : PAGES;  // (narrow: two lines)
         float tabw = (tabs_width - ImGui::GetStyle().ItemSpacing.x * (columns - 1)) / columns;
         float tabh = fw * (columns == PAGES ? 2.7f : 2.1f);
         int lines = (PAGES + columns - 1) / columns;
@@ -3520,6 +3724,7 @@ void settings_panel(bool *open) {
                                      : s.view == View::Reset      ? "Reset this tab?"
                                      : s.view == View::Move       ? "Move menu"
                                      : s.view == View::Conflicts  ? "Mod conflicts"
+                                     : s.view == View::OfflineFriends ? "Offline friends"
                                      : s.view == View::Keybinds   ? "Keybinds"
                                      : s.view == View::KeyCapture && s.capture_bind == CAPTURE_PAUSE
                                          ? "Press the key for Pause/Suspend (Esc: cancel)"

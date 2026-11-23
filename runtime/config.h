@@ -96,6 +96,7 @@ typedef struct {
     char ldn_key[64];         // [Multiplayer] Key: matchmaking key, hubs seen only by players with the same; "" public
     int ldn_direct;           // [Multiplayer] Direct: in an internet hub, game packets go straight between the players when
                               // their routers let them (hole punching; they see each other's IP address), else through the server
+    int ldn_friend_requests;  // [Multiplayer] FriendRequests: get friend requests and share the friend code in hubs (net/ldn.c)
     char chat_key[32];        // [Controls] ChatKey: the key that opens a line of chat (runtime/hle/chat.c), by SDL's
                               // name for it ("/", "Y"...); "" none
     char pause_key[32];       // [Controls] PauseKey: Pause/Suspend's key (runtime/pause.h), by SDL's name; "" none
@@ -286,6 +287,7 @@ int config_live_quest_hold_send(void);  // [Quest Rewards] HoldASend (hle/reward
 int config_live_ldn_port(void);         // [Multiplayer] Port: the next hub hosted and the next search (net/ldn.c)
 void config_live_ldn_join(char *join, size_t size);  // [Multiplayer] Join: the next search (net/ldn.c)
 int config_live_ldn_direct(void);  // [Multiplayer] Direct (net/ldn.c: for the next player link)
+int config_live_friend_requests(void);  // [Multiplayer] FriendRequests (net/ldn.c)
 int config_live_sync_small_monsters(void);  // [Multiplayer] SyncSmallMonsters (net/emsync.c)
 int config_live_lag_compensation(void);  // [Multiplayer] LagCompensation (net/hitsync.c)
 int config_live_save_backups(void);     // [Save Backups] BackupsKept while Backups is on, else 0 (services/fs.c)
