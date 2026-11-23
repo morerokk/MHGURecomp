@@ -1069,6 +1069,7 @@ void backend_present(NvnTexture *t) {
     }
     g_frames++;
     g_present_count = g_frames;
+    { void vk_latewrite_frame(void); vk_latewrite_frame(); }  // (debug) MHGU_LATE_WRITES (exec.c)
     {   // (debug) MHGU_CONTROL "dump": the next whole frame's passes (exec.c dump_pass)
         extern volatile int g_dump_active, g_dump_request;
         extern int g_dump_no, g_dump_frame;

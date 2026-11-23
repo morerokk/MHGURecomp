@@ -36,7 +36,7 @@
 extern "C" const char *plat_utf8_path(const char *path, char *buf, size_t size);  // (runtime/platform.h)
 
 namespace {
-enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, Actions, Changelog };
+enum class View { Main, Keyboard, CloseChanges, Exit, Restart, Reset, Move, Conflicts, KeyCapture, Keybinds, Actions, Changelog, OfflineFriends };
 enum class Command { None, Save };
 struct Row {
     std::string id, title, value;
@@ -100,7 +100,7 @@ struct State {
     bool dragged = false;  // (the press moved the menu: the tab under it is not chosen when it lets go)
     float header_bottom = 0;  // (the top part that moves the menu, from the window's top: last frame's)
     bool position_override = false;
-    int capture_bind = -1;     // the keybind (BIND_*) a key is being chosen for; -1: the chat key
+    int capture_bind = -1;     // the keybind (BIND_*) a key is being chosen for; -1: the chat key, -2 the pause key
     bool capture_add = false;  // the key chosen is that keybind's second, else its only one
     bool capture_from_actions = false;  // the keybind or chat key is being chosen from the Game actions screen (Keys)
 } s;
@@ -177,9 +177,10 @@ const Theme &theme() {
 ImVec4 vec(ImU32 c) { return ImGui::ColorConvertU32ToFloat4(c); }
 // The Mods tab: the mods folder's state (modorder.h), which is saved with the rest of the settings
 #ifdef __ANDROID__
-constexpr int PAGES = 9, MODS_PAGE = 5, CHEATS_PAGE = 6, APP_PAGE = 7, ANDROID_PAGE = 8;  // (Android: the tab for its own settings)
+constexpr int PAGES = 10, FRIENDS_PAGE = 4, MISC_PAGE = 5, MODS_PAGE = 6, CHEATS_PAGE = 7, APP_PAGE = 8,
+              ANDROID_PAGE = 9;  // (Android: the tab for its own settings)
 #else
-constexpr int PAGES = 8, MODS_PAGE = 5, CHEATS_PAGE = 6, APP_PAGE = 7;
+constexpr int PAGES = 9, FRIENDS_PAGE = 4, MISC_PAGE = 5, MODS_PAGE = 6, CHEATS_PAGE = 7, APP_PAGE = 8;
 #endif
 struct ScanResult {
     std::vector<std::string> names;  // (the order ModConflict's indexes are in)
@@ -441,7 +442,7 @@ bool equal(const Config &a, const Config &b) {
     if (memcmp(a.binds, b.binds, sizeof a.binds))
         return false;
     if (strcmp(a.ldn_join, b.ldn_join) || strcmp(a.ldn_server, b.ldn_server) || strcmp(a.ldn_key, b.ldn_key) ||
-        strcmp(a.chat_key, b.chat_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.save_location, b.save_location) || strcmp(a.backup_location, b.backup_location) || strcmp(a.game_dir, b.game_dir))
+        strcmp(a.chat_key, b.chat_key) || strcmp(a.pause_key, b.pause_key) || strcmp(a.save_dir, b.save_dir) || strcmp(a.save_location, b.save_location) || strcmp(a.backup_location, b.backup_location) || strcmp(a.game_dir, b.game_dir))
         return false;
     if (strcmp(a.ldn_ryu_servers, b.ldn_ryu_servers) || strcmp(a.ldn_ryu_host, b.ldn_ryu_host) ||
         strcmp(a.ldn_ryu_pass, b.ldn_ryu_pass) || strcmp(a.ldn_room_server, b.ldn_room_server) ||
@@ -836,13 +837,208 @@ void hub_check(std::vector<Row> &rows) {
     r.activate = []() { ldn_hub_check(s.draft.ldn_server, s.draft.ldn_key); };
     rows.push_back(std::move(r));
 }
+// Session codes and friends (runtime/net/ldn.c, link version 4): the code of the hub you're in and the friend code to
+// share (Confirm copies them), join by code, and the friends with what they're doing (Confirm on one in a hub joins
+// it the way a code does). Remove friends turns Confirm on a friend into removing it. Offline friends have a submenu of
+// their own (View::OfflineFriends), so a long list doesn't bury the ones you can play with.
+bool removing;  // (Remove friends: on the Friends tab and in Offline friends alike)
+// The session code of the hub you're in as the friends list has them (no dash), "" when none
+std::string my_hub_code() {
+    char code[32] = "";
+    if (!ldn_session_code(code, sizeof code)) return "";
+    std::string raw;
+    for (const char *c = code; *c; c++)
+        if (*c != '-') raw += *c;
+    return raw;
+}
+// A friend's row; after removing one the focus goes to the Remove friends row given (the removed row is gone). A friend
+// in the hub you're in has nothing to join.
+void friend_row(std::vector<Row> &rows, const LdnFriend &f, const char *remove_row, const std::string &my_hub) {
+    Row r;
+    r.id = std::string("friend.") + f.code;
+    r.title = f.name;
+    bool here = f.hub[0] && !SDL_strcasecmp(f.hub, my_hub.c_str());
+    bool hub = f.hub[0] && !here;
+    switch (f.state) {
+    case LDN_FRIEND_ONLINE: r.value = tr("Online"); break;
+    case LDN_FRIEND_HOSTING: r.value = hub ? tr("Hosting a hub (Confirm joins)") : tr("Hosting a hub"); break;
+    case LDN_FRIEND_IN_HUB: r.value = hub ? tr("In a hub (Confirm joins)") : tr("In a hub"); break;
+    case LDN_FRIEND_OFFLINE: r.value = tr("Offline"); break;
+    default: r.value = "..."; break;
+    }
+    if (here) r.value = tr("In your hub");
+    if (removing) r.value = tr("Confirm removes");
+    r.help = f.code;
+    std::string fc = f.code, hc = f.hub, after = remove_row;
+    r.enabled = removing || hub;
+    r.activate = [fc, hc, after]() {
+        if (removing) {
+            ldn_friend_remove(fc.c_str());
+            focus(after);
+        } else if (!hc.empty())
+            ldn_join_code(hc.c_str(), nullptr);
+    };
+    rows.push_back(std::move(r));
+}
+void remove_friends_row(std::vector<Row> &rows, const char *id) {
+    action(rows, id, tr(removing ? "Done removing" : "Remove friends"), []() { removing = !removing; });
+}
+// The Offline friends submenu: Remove friends first (the friends' rows are disabled unless removing), Back last
+void offline_friends_rows(std::vector<Row> &rows) {
+    static LdnFriend list[LDN_FRIENDS_MAX];
+    int n = ldn_friends(list, LDN_FRIENDS_MAX, nullptr);
+    remove_friends_row(rows, "offline.remove");
+    for (int i = 0; i < n; i++)
+        if (list[i].state == LDN_FRIEND_OFFLINE) friend_row(rows, list[i], "offline.remove", "");
+    action(rows, "offline.back", tr("Back"), []() { pop(); });
+}
+void friends_rows(std::vector<Row> &rows) {
+    static uint64_t copied_at;
+    static std::string copied;
+    auto copy_row = [&](const char *id, const char *title, const std::string &code, const char *none, const char *help) {
+        Row r;
+        r.id = id;
+        r.title = tr(title);
+        bool shown = !copied.empty() && copied == code && SDL_GetTicks() - copied_at < 2000;
+        r.value = code.empty() ? std::string(tr(none)) : shown ? std::string(tr("Copied")) : code;
+        r.help = tr(help);
+        r.enabled = !code.empty();
+        r.activate = [code]() {
+            if (code.empty()) return;
+            SDL_SetClipboardText(code.c_str());
+            copied = code, copied_at = SDL_GetTicks();
+        };
+        rows.push_back(std::move(r));
+    };
+    header(rows, "codes.header", tr("Session Codes"));
+    char code[32] = "";
+    copy_row("code.mine", "Session code", ldn_session_code(code, sizeof code) ? code : "", "No hub",
+             "The code of the hub you host or joined through the hub server. Others enter it in Join by code to find the hub, with or without your matchmaking key. Confirm copies it.");
+    Row j;
+    j.id = "code.join";
+    j.title = tr("Join by code");
+    switch (ldn_invite_state(code, sizeof code)) {
+    case LDN_INVITE_SEARCHING: j.value = tr("Searching..."); break;
+    case LDN_INVITE_READY: j.value = fmt("%s: in Join Hub", code); break;
+    case LDN_INVITE_NOT_FOUND: j.value = fmt("%s: no such hub", code); break;
+    case LDN_INVITE_OLD_SERVER: j.value = tr("The hub server is too old"); break;
+    case LDN_INVITE_FAILED: j.value = tr("No answer"); break;
+    default: j.value = tr("Enter a code"); break;
+    }
+    j.help = tr("Enter a hub's session code: the hub server finds the hub, and it comes first in Join Hub for the next 10 minutes. Then search for hubs in the game and pick it.");
+    j.activate = []() {
+        keyboard(tr("Join by code"), "", 12, [](const std::string &typed, std::string &error) {
+            if (ldn_join_code(typed.c_str(), nullptr)) return true;
+            error = tr("That is not a session code: 8 letters and digits.");
+            return false;
+        });
+    };
+    rows.push_back(std::move(j));
+
+    header(rows, "friends.header", tr("Friends"));
+    add_bool(rows, "friend.requests", "Friend requests", &s.draft.ldn_friend_requests, ini("FriendRequests"));
+    rows.back().help = tr("Players can send you friend requests, and the other hunters in your hub see your friend code to add you. A request you reject stays rejected until the game restarts, unless you add that player yourself. Off: no requests, and your code isn't shared in hubs; you can still add friends by their code.");
+    char mine[32];
+    ldn_my_friend_code(mine, sizeof mine);
+    copy_row("friend.mine", "Your friend code", mine, "None",
+             "Give this code to friends to add you. You see each other once both of you added the other. It is kept with your saves. Confirm copies it.");
+    action(rows, "friend.add", tr("Add a friend"), []() {
+        keyboard(tr("Friend code and name"), "", 60, [](const std::string &typed, std::string &error) {
+            if (const char *why = ldn_friend_add(typed.c_str())) {
+                error = tr(why);
+                return false;
+            }
+            return true;
+        });
+    });
+    rows.back().help = tr("Their friend code, then a space and the name you want to see for them (for example ABCD-EFGH-JKMN-PQRS Mia).");
+    // friend requests: Accept adds them, Reject keeps them out until the game restarts
+    LdnRequest reqs[8];
+    int nr = ldn_friend_requests(reqs, 8);
+    for (int i = 0; i < nr; i++) {
+        std::string code = reqs[i].code, name = reqs[i].name;
+        // (the request's rows go once answered: the focus moves to Add a friend, above the friends; a friend's own row
+        // can't take it while it has no hub to join, being disabled)
+        action(rows, "req.accept." + code, fmt("Accept %s", name.c_str()), [code]() {
+            ldn_friend_request_answer(code.c_str(), true);
+            focus("friend.add");
+        });
+        rows.back().help = tr("A friend request: they added you. Accept adds them to your friends list.");
+        action(rows, "req.reject." + code, fmt("Reject %s", name.c_str()), [code]() {
+            ldn_friend_request_answer(code.c_str(), false);
+            focus("friend.add");
+        });
+        rows.back().help = tr("Their request stays rejected until the game restarts, unless you add them yourself.");
+    }
+    // the other hunters in this hub (games that shared their friend code): Confirm adds one, which sends them a request.
+    // Friends among them are left to the friends list below.
+    LdnHunter hunters[8];
+    int nh = ldn_hub_hunters(hunters, 8);
+    bool hub_header = false;
+    for (int i = 0; i < nh; i++) {
+        if (hunters[i].state == LDN_HUNTER_FRIEND) continue;
+        if (!hub_header) header(rows, "hunters.header", tr("Hunters in your hub")), hub_header = true;
+        Row r;
+        r.id = std::string("hunter.") + hunters[i].code;
+        r.title = hunters[i].name;
+        r.value = hunters[i].state == LDN_HUNTER_ADDED ? tr("Request sent") : tr("Add friend");
+        r.help = tr("A hunter in your hub. Confirm adds them as a friend: they get a friend request, and once they accept you see each other.");
+        r.enabled = hunters[i].state == LDN_HUNTER_ADD;
+        std::string typed = std::string(hunters[i].code) + " " + hunters[i].name;
+        r.activate = [typed]() {  // (the row turns disabled once added: the focus to Add a friend)
+            ldn_friend_add(typed.c_str());
+            focus("friend.add");
+        };
+        rows.push_back(std::move(r));
+    }
+    // the friends list: the ones online (or not known yet) here, the offline ones in their own submenu
+    static LdnFriend list[LDN_FRIENDS_MAX];
+    int server = HUB_UNKNOWN;
+    int n = ldn_friends(list, LDN_FRIENDS_MAX, &server);
+    if (!n && !removing)
+        return;
+    header(rows, "friends.list.header", tr("Friends list"));
+    if (server != HUB_ONLINE && server != HUB_UNKNOWN) {
+        Row w;
+        w.id = "friend.server";
+        w.title = tr("Hub server");
+        w.value = server == HUB_OFF ? tr("No hub server") : server == HUB_VERSION ? tr("The hub server is too old")
+                                                                                 : tr("Hub server unreachable");
+        w.warn = true;
+        w.enabled = false;
+        rows.push_back(std::move(w));
+    }
+    int shown = 0, offline = 0;
+    std::string my_hub = my_hub_code();
+    for (int i = 0; i < n; i++) {
+        if (list[i].state == LDN_FRIEND_OFFLINE)
+            offline++;
+        else
+            friend_row(rows, list[i], "friend.remove", my_hub), shown++;
+    }
+    if (!shown && n) {
+        Row none;
+        none.id = "friend.none";
+        none.title = tr("No friends online");
+        none.enabled = false;
+        rows.push_back(std::move(none));
+    }
+    if (offline) {
+        action(rows, "friend.offline", std::string(tr("Offline friends")) + " (" + std::to_string(offline) + ")",
+               []() { push(View::OfflineFriends, "offline.remove"); });
+        rows.back().help = tr("Your friends who aren't playing online right now, and the ones who haven't added you back yet.");
+    }
+    if (shown || removing)
+        remove_friends_row(rows, "friend.remove");
+}
 // The keybinds' rows (config.h BIND_*): what each is called
 const char *const bind_titles[BINDS] = {"Move forward", "Move back", "Move left", "Move right", "Walk", "A", "B", "X",
                                         "Y", "L", "R", "ZL", "ZR", "Plus", "Minus", "D-pad up", "D-pad down",
                                         "D-pad left", "D-pad right", "Left stick click", "Right stick click",
                                         "Item left", "Item right"};
+const int CAPTURE_CHAT = -1, CAPTURE_PAUSE = -2;  // (s.capture_bind: the chat key, the pause key)
 // What else a key (or KEY_MOUSE + a mouse button) does: one of the recomp's own keys (keymap.h), a keybind other than
-// skip, or (for a keybind's) the chat key; nullptr: nothing
+// skip, the chat key or the pause key (but skip's own: CAPTURE_*); nullptr: nothing
 const char *key_use(int code, int skip) {
     if (const char *use = code < KEY_MOUSE ? key_reserved(code) : nullptr)
         return tr(use);
@@ -850,11 +1046,13 @@ const char *key_use(int code, int skip) {
         for (int k = 0; k < BIND_KEYS; k++)
             if (i != skip && (s.draft.binds[i][k] == code || (config_mod_bound(i) && config_live_bind(i, k) == code)))
                 return tr(bind_titles[i]);
-    if (skip >= 0 && code == (int)SDL_GetScancodeFromName(s.draft.chat_key))
+    if (skip != CAPTURE_CHAT && code == (int)SDL_GetScancodeFromName(s.draft.chat_key))
         return tr("Chat key");
+    if (skip != CAPTURE_PAUSE && code == (int)SDL_GetScancodeFromName(s.draft.pause_key))
+        return tr("Pause/Suspend");
     return nullptr;
 }
-// Choosing a key: for a keybind (BIND_*, add: its second key) or the chat key (-1)
+// Choosing a key: for a keybind (BIND_*, add: its second key), the chat key or the pause key (CAPTURE_*)
 void capture(int bind, bool add) {
     acts().capture = -1;
     s.capture_bind = bind;
@@ -875,7 +1073,22 @@ void chat_key_row(std::vector<Row> &rows) {
         r.value += std::string(" (") + tr("in use:") + " " + use + ")";
         r.warn = true;
     }
-    r.activate = []() { capture(-1, false); };
+    r.activate = []() { capture(CAPTURE_CHAT, false); };
+    rows.push_back(std::move(r));
+}
+// Pause/Suspend's key (runtime/pause.h); red when something else already uses it
+void pause_key_row(std::vector<Row> &rows) {
+    Row r;
+    r.id = "pause.key";
+    r.title = tr("Pause/Suspend");
+    keyed(r, ini("PauseKey"));
+    SDL_Scancode key = SDL_GetScancodeFromName(s.draft.pause_key);
+    r.value = key != SDL_SCANCODE_UNKNOWN ? s.draft.pause_key : tr("None");
+    if (const char *use = key != SDL_SCANCODE_UNKNOWN ? key_use((int)key, CAPTURE_PAUSE) : nullptr) {
+        r.value += std::string(" (") + tr("in use:") + " " + use + ")";
+        r.warn = true;
+    }
+    r.activate = []() { capture(CAPTURE_PAUSE, false); };
     rows.push_back(std::move(r));
 }
 // One keybind as a row (the Keybinds submenu's, and the Keys of the Game actions screen)
@@ -934,10 +1147,13 @@ void keybind_rows(std::vector<Row> &r) {
     }
     header(r, "bind.other", tr("Chat"));
     chat_key_row(r);
+    header(r, "bind.pause", tr("Pause/Suspend"));
+    pause_key_row(r);
     action(r, "bind.reset", tr("Reset keybinds"), []() {
         Config f = config_defaults();
         memcpy(s.draft.binds, f.binds, sizeof f.binds);
         SDL_strlcpy(s.draft.chat_key, f.chat_key, sizeof s.draft.chat_key);
+        SDL_strlcpy(s.draft.pause_key, f.pause_key, sizeof s.draft.pause_key);
     });
     action(r, "bind.back", tr("Back"), []() { pop(); });
 }
@@ -1180,6 +1396,8 @@ void key_rows(std::vector<Row> &r) {
         r.push_back(bind_row(i, "key." + std::to_string(i)));
     header(r, "key.h.chat", tr("Chat"));
     chat_key_row(r);
+    header(r, "key.h.pause", tr("Pause/Suspend"));
+    pause_key_row(r);
     if (!simple) {
         header(r, "key.h.buttons", tr("Buttons"));
         for (int i = BIND_A; i <= BIND_RSTICK; i++)
@@ -1414,6 +1632,7 @@ void action_rows(std::vector<Row> &r) {
 // What the focused row (or the one being set) reads is lit on it with an arrow to its label; the row under the pointer is
 // ringed; every input down right now glows; an input clicked on it goes to the row being set.
 const int BV_KEY_CHAT = 999;  // (the chat key's id among the keys of the Keys tab)
+const int BV_KEY_PAUSE = 998;  // (the pause key's)
 bool g_bv_pointing;           // the pointer is on the drawing: a click there is the drawing's, not a button chosen
 std::string g_bv_help;        // the help of the row focused or pointed at, under the drawing
 std::string short_label(const std::string &full) {
@@ -1462,7 +1681,7 @@ void default_inputs(int id, int dev, std::vector<int> &out) {
 }
 // What a row of the list is: an action (Advanced), a merged row (Simple), a keybind or the chat key (Keys)
 struct FocusTarget {
-    int kind;  // 0 none, 1 action, 2 merged row, 3 keybind, 4 chat key
+    int kind;  // 0 none, 1 action, 2 merged row, 3 keybind, 4 chat key, 5 pause key
     int key;
 };
 FocusTarget focus_target(const std::string &id) {
@@ -1478,12 +1697,14 @@ FocusTarget focus_target(const std::string &id) {
         return {3, atoi(id.c_str() + 4)};
     else if (id == "chat.key")
         return {4, BV_KEY_CHAT};
+    else if (id == "pause.key")
+        return {5, BV_KEY_PAUSE};
     return {0, -1};
 }
 int key_of(const std::string &id, int kind) {
     FocusTarget t = focus_target(id);
     if (kind == TAB_KEYS)
-        return t.kind == 3 || t.kind == 4 ? t.key : -1;
+        return t.kind == 3 || t.kind == 4 || t.kind == 5 ? t.key : -1;
     if (acts().layout == ACT_LAYOUT_SIMPLE)
         return t.kind == 2 ? t.key : -1;
     return t.kind == 1 ? t.key : -1;
@@ -1493,7 +1714,7 @@ int selected_key(int kind) {
     if (s.view == View::KeyCapture) {
         if (a.capture >= 0)
             return a.capture_row >= 0 ? a.capture_row : a.capture;
-        return s.capture_bind >= 0 ? s.capture_bind : BV_KEY_CHAT;
+        return s.capture_bind >= 0 ? s.capture_bind : s.capture_bind == CAPTURE_PAUSE ? BV_KEY_PAUSE : BV_KEY_CHAT;
     }
     return key_of(s.focus, kind);
 }
@@ -1501,7 +1722,7 @@ std::string key_label(int key, int kind) {
     if (key < 0)
         return "";
     if (kind == TAB_KEYS)
-        return key == BV_KEY_CHAT ? tr("Chat key") : tr(bind_titles[key]);
+        return key == BV_KEY_CHAT ? tr("Chat key") : key == BV_KEY_PAUSE ? tr("Pause/Suspend") : tr(bind_titles[key]);
     if (acts().layout == ACT_LAYOUT_SIMPLE)
         return short_label(tr(act_row(key)->label));
     return short_label(tr(act_label(key)));
@@ -1543,6 +1764,9 @@ void bv_collect(BvStore &st, int kind, int sel_key) {
         SDL_Scancode chat = SDL_GetScancodeFromName(s.draft.chat_key);
         if (chat != SDL_SCANCODE_UNKNOWN)
             add((int)chat, BV_KEY_CHAT, tr("Chat key"), BV_KEY_CHAT);
+        SDL_Scancode pause = SDL_GetScancodeFromName(s.draft.pause_key);
+        if (pause != SDL_SCANCODE_UNKNOWN)
+            add((int)pause, BV_KEY_PAUSE, tr("Pause/Suspend"), BV_KEY_PAUSE);
     } else {
         struct Item {
             int key, from;
@@ -1649,8 +1873,8 @@ void bv_click(int code) {
         action_take(code);
         a.capture = -1;
         a.capture_row = -1;
-    } else if (t.kind == 3 || t.kind == 4) {
-        s.capture_bind = t.kind == 3 ? t.key : -1;
+    } else if (t.kind == 3 || t.kind == 4 || t.kind == 5) {
+        s.capture_bind = t.kind == 3 ? t.key : t.kind == 5 ? CAPTURE_PAUSE : CAPTURE_CHAT;
         s.capture_add = false;
         bind_take(code);
         s.capture_bind = -1;
@@ -1829,6 +2053,7 @@ void reset_section() {
         c.mouse_capture = f.mouse_capture;
         c.menu_mouse = f.menu_mouse;
         SDL_strlcpy(c.chat_key, f.chat_key, sizeof c.chat_key);
+        SDL_strlcpy(c.pause_key, f.pause_key, sizeof c.pause_key);
         memcpy(c.binds, f.binds, sizeof c.binds);
         break;
     case 3:
@@ -1849,7 +2074,10 @@ void reset_section() {
         SDL_strlcpy(c.ldn_room_pass, f.ldn_room_pass, sizeof c.ldn_room_pass);
         SDL_strlcpy(c.ldn_room_nick, f.ldn_room_nick, sizeof c.ldn_room_nick);
         break;
-    case 4:
+    case FRIENDS_PAGE:  // (the friends list and code live in the save folder, not here: only the requests switch)
+        c.ldn_friend_requests = f.ldn_friend_requests;
+        break;
+    case MISC_PAGE:
         c.sync_small_monsters = f.sync_small_monsters;
         c.lag_compensation = f.lag_compensation;
         c.village_in_hub = f.village_in_hub;
@@ -2394,7 +2622,10 @@ std::vector<Row> main_rows() {
         add_bool(r, "discord", "Discord Rich Presence", &c.discord, ini("RichPresence"));
         add_bool(r, "discord.hunter", "Show hunter name and HR", &c.discord_hunter, ini("ShowHunter"));
         break;
-    case 4: {
+    case FRIENDS_PAGE:
+        friends_rows(r);
+        break;
+    case MISC_PAGE: {
         const char *per_quest =
             tr("HP multipliers for single quests, by their quest ID: in those quests they are used instead of the ones above.");
         header(r, "hub.header", tr("Hub"));
@@ -2651,7 +2882,8 @@ bool save() {
     }
     return true;
 }
-// Takes a key (or a mouse button) for the keybind (s.capture_bind) or the chat key (-1) being chosen. false: refused
+// Takes a key (or a mouse button) for the keybind (s.capture_bind), the chat key or the pause key (CAPTURE_*) being
+// chosen. false: refused
 bool bind_take(int key) {
     const char *name = key > 0 && key < KEY_MOUSE ? SDL_GetScancodeName((SDL_Scancode)key) : "";
     const char *reserved = key > 0 && key < KEY_MOUSE ? key_reserved(key) : nullptr;
@@ -2670,6 +2902,22 @@ bool bind_take(int key) {
         else if (keys[0] != key)
             keys[1] = key;
         return true;
+    }
+    if (s.capture_bind == CAPTURE_PAUSE && key > 0) {
+        if (reserved) {
+            s.error = fmt("That key is the recomp's own (%s).", tr(reserved));
+            return false;
+        }
+        if (key == SDL_SCANCODE_RETURN || key == SDL_SCANCODE_KP_ENTER) {  // (Enter resumes, as Esc does)
+            s.error = tr("That key can't be used.");
+            return false;
+        }
+        if (*name && strlen(name) < sizeof s.draft.pause_key && !strpbrk(name, ";#")) {
+            SDL_strlcpy(s.draft.pause_key, name, sizeof s.draft.pause_key);
+            return true;
+        }
+        s.error = tr("That key can't be used.");
+        return false;
     }
     if (key > 0 && *name && strlen(name) < sizeof s.draft.chat_key && !strpbrk(name, ";#")) {
         SDL_strlcpy(s.draft.chat_key, name, sizeof s.draft.chat_key);
@@ -2718,6 +2966,8 @@ std::vector<Row> rows_for_view(bool *open) {
         action_rows(r);
     } else if (s.view == View::Changelog) {
         action(r, "changelog.back", tr("Back"), []() { pop(); });
+    } else if (s.view == View::OfflineFriends) {
+        offline_friends_rows(r);
     } else if (s.view == View::KeyCapture && acts().capture >= 0) {
         action_capture_rows(r);
     } else if (s.view == View::KeyCapture) {
@@ -2730,6 +2980,8 @@ std::vector<Row> rows_for_view(bool *open) {
             action(r, "capture.none", tr("None"), []() {
                 if (s.capture_bind >= 0)
                     s.draft.binds[s.capture_bind][0] = s.draft.binds[s.capture_bind][1] = 0;
+                else if (s.capture_bind == CAPTURE_PAUSE)
+                    s.draft.pause_key[0] = 0;
                 else
                     s.draft.chat_key[0] = 0;
                 pop();
@@ -3375,7 +3627,8 @@ void settings_panel(bool *open) {
             first_page((s.page + 1) % PAGES);
         if (pressed(ImGuiKey_GamepadL1))
             first_page((s.page + PAGES - 1) % PAGES);
-        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Misc", "Mods", "Cheats", "Menu Options"
+        const char *pages[] = {"Display", "Graphics & Audio", "Controls", "Network", "Friends", "Misc", "Mods", "Cheats",
+                               "Menu Options"
 #ifdef __ANDROID__
                                , "Android"
 #endif
@@ -3387,7 +3640,7 @@ void settings_panel(bool *open) {
         ImGui::SetCursorScreenPos(tabs_start);
         float gutter = fw * 2.1f;
         float tabs_width = avail - gutter * 2;
-        int columns = tabs_width / fw < 50 ? 4 : PAGES;
+        int columns = tabs_width / fw < 50 ? (PAGES + 1) / 2 : PAGES;  // (narrow: two lines)
         float tabw = (tabs_width - ImGui::GetStyle().ItemSpacing.x * (columns - 1)) / columns;
         float tabh = fw * (columns == PAGES ? 2.7f : 2.1f);
         int lines = (PAGES + columns - 1) / columns;
@@ -3478,7 +3731,10 @@ void settings_panel(bool *open) {
                                      : s.view == View::Reset      ? "Reset this tab?"
                                      : s.view == View::Move       ? "Move menu"
                                      : s.view == View::Conflicts  ? "Mod conflicts"
+                                     : s.view == View::OfflineFriends ? "Offline friends"
                                      : s.view == View::Keybinds   ? "Keybinds"
+                                     : s.view == View::KeyCapture && s.capture_bind == CAPTURE_PAUSE
+                                         ? "Press the key for Pause/Suspend (Esc: cancel)"
                                      : s.view == View::KeyCapture ? "Press the key for chat (Esc: cancel)"
                                                                   : "Unsaved changes");
         ImGui::TextWrapped("%s", title.c_str());

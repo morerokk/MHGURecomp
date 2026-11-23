@@ -51,7 +51,9 @@ static void acc_manager(Service *s, IpcReq *req, IpcResp *resp) {
     (void)s;
     switch (req->cmd) {
     case 0: break;  // CheckAvailability
-    case 1: OUT(uint64_t, 0) = 0x1234567890abcdefull; resp_size(resp, 8); break;  // GetAccountId
+    // GetAccountId: the network service account id, this install's own (from its friend code, runtime/net/ldn.c),
+    // so the game can tell its friends apart; every game had 0x1234567890abcdef before link version 4
+    case 1: { uint64_t ldn_account_id(void); OUT(uint64_t, 0) = ldn_account_id(); resp_size(resp, 8); break; }
     default: LOG("[acc] IManagerForApplication cmd %u (ok)\n", req->cmd); resp_size(resp, 0x10);
     }
 }

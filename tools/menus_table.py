@@ -13,7 +13,8 @@ import argparse
 import os
 import sys
 
-BUILTIN = {0x86F8EC, 0x87D824, 0x880798, 0x5E29A0, 0x87F8A0, 0x8874CC, 0x931D1C, 0x9839B8, 0x984314, 0x981F1C, 0x993D04, 0x967514, 0x5890A8, 0x3B6278, 0x3B4420, 0x3B8514}  # (menuptr.c builtin[]: the pause menu, the front end's)
+BUILTIN = {0x86F8EC, 0x87D824, 0x880798, 0x5E29A0, 0x87F8A0, 0x8874CC, 0x931D1C, 0x9839B8, 0x984314, 0x981F1C, 0x993D04, 0x967514, 0x5890A8, 0x3B6278, 0x3B4420, 0x3B8514, 0x980040}  # (menuptr.c builtin[]: the pause menu, the front end's)
+NOT_MENUS = {0x980064}  # (menuptr.c CALL_BOARD_DETAILS: the Quest Board's details pages, no menu of their own)
 MAX_VARIANTS = 4
 ROWS = 16
 
@@ -93,7 +94,7 @@ def read(table, lines):  # (menuptr.c geoms_load)
             v = list(map(float, t[1:]))
         except ValueError:
             continue
-        if len(v) not in (6, 11, 13, 14, 15) or lr in BUILTIN:
+        if len(v) not in (6, 11, 13, 14, 15) or lr in BUILTIN or lr in NOT_MENUS:
             continue
         v += [0.0] * (15 - len(v))
         put(table, Geom(lr, *v))

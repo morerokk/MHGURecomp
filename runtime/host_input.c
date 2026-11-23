@@ -8,6 +8,7 @@
 //   hunt, one item per press or notch without holding L, runtime/hle/itembar.c). While the
 //   game shows a text entry (names, chat) the keyboard types instead
 //   (runtime/textinput.c). / ([Controls] ChatKey) opens a line of chat, Enter sends it, also in a quest (runtime/hle/chat.c).
+//   Pause ([Controls] PauseKey) pauses the game offline and resumes it, as Esc and Enter do then (runtime/pause.h).
 //   F11 switches windowed <-> full screen, F12 saves a screenshot, Shift+F12 the next 8
 //   frames (exact rendered pixels, run\shots\), F10 dumps every render pass of the next 2 frames (debug, slow), F9 toggles how colour clears are done (debug).
 // Gamepad (SDL): face buttons by position as on a Switch controller (the bottom one is B), or by their labels
@@ -38,6 +39,7 @@
 #include "keymap.h"
 #include "mods.h"
 #include "overlay.h"
+#include "pause.h"
 #include "settings_panel.h"
 #include "rt.h"
 #include "textinput.h"
@@ -921,6 +923,12 @@ void host_input_event(const SDL_Event *e) {
                 keys[e->key.scancode] = false;  // (Alt+Enter: windowed <-> full screen, not a button press)
                 keys[SDL_SCANCODE_LALT] = keys[SDL_SCANCODE_RALT] = false;
                 ui_toggle_fullscreen();
+            } else if ((int)e->key.scancode == config_live_pause_key() && config_live_pause_key()) {
+                keys[e->key.scancode] = false;
+                pause_toggle();  // (Pause/Suspend: runtime/pause.h)
+            } else if ((e->key.scancode == SDL_SCANCODE_ESCAPE || e->key.scancode == SDL_SCANCODE_RETURN ||
+                        e->key.scancode == SDL_SCANCODE_KP_ENTER) && pause_wanted() && pause_resume()) {
+                keys[e->key.scancode] = false;  // (Esc and Enter resume a pause, and do nothing else)
             } else if ((int)e->key.scancode == config_live_chat_key() && config_live_chat_key()) {
                 keys[e->key.scancode] = false;
                 chat_open();  // (a line to type, sent as chat: runtime/hle/chat.c)

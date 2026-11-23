@@ -331,6 +331,9 @@ Fixed 2026-11-04: small monsters ignored players with sync on: it forced flag 0x
 them and left followers running their own AI. Jaggi and Rhenoplos now target and attack both hunters, the same on both games.
 Fixed 2026-11-03: players dropping in some zones (Volcanic Hollow zone 7): uEms100 restarts its first action every update,
 and a master's copy would send each restart. Such a monster is now left out of the sync.
+2026-11-23: flood cap. After a new report of drops on area entry in Volcanic Hollow (not reproduced; uEms100 turned out to be the
+map's breakable rock), any small monster sending more than 20 actions a second, or whose actions arrive faster than that, is
+dropped from the sync for that zone visit on every game, so a looping monster can no longer take the link down whatever triggers it.
 
 ## Text entry (2026-10-21)
 
@@ -718,6 +721,19 @@ in with MHGU_START_AREA, only after an area change. MHGU_EMTRACE_ZAKO=2, acts.py
 curve.py (height every 100 ms of the leap). Finding the code: the zako set lists (quest\zako\emSetList, "ESD" blocks per
 area, species byte = ems number) gave 0x28 for Volcano / Volcanic Hollow only; interpwatch on status +0x44 with the
 class's vtable entries (0x1a15944) as the function list showed the writers.
+
+Running with the Moofy (2026-11-22): fixed. Reported: in Bherna, carrying the Moofy and running (R held) is far too
+fast at 240 fps; walking with it is right. The carry run (action function 0x494200, motions 0xc91 / 0xc92) moves the
+hunter by the animation (cModel root motion, 0xb55aa0, step-based) and in its state 1, every update the stick is held,
+also pushes them along their facing: 0x494308, `pos += (sin, 0, cos) * 2.5` (angle = player +0xfec x 2pi / 65536), no
+frame step: 75 units a second at 30 fps, 600 at 240. Walking has no push. Fix (runtime/hle/plcarry.c, gen.py PATCHES
+0x49430c, the `vmov.f32 s6, #2.5`): 2.5 x the player's step +0x1c / 2; the same at 30 fps. 0x49028c is the same code
+with motion 0x138f (not identified), patched the same (0x490380). MHGU_NO_PLCARRY=1: the original. Measured (one game,
+fps switched live, the test save; the user picked the Moofy up): 405 units/s at 30, 60, 120 and 240 fps (the original
+at 240: ~930). A scan of the player code (0x470000-0x4d0000) for `pos += ...` stores without the step found only these
+two per-update pushes (0x4ae390, 0x4be178, 0x4c89dc are one-off placements). Found with interpwatch on player +0x40
+(the town hunter, r0 of 0x48d1f0) with the player's vtable entries (0x1948534) as the function list. Not checked: the
+0x138f twin in game, eggs carried in a hunt.
 
 Monster turns and the frame rate (2026-11-21): Duramboros fixed, Deviljho not reproduced. Reported: one of Duramboros'
 spinning attacks far too fast at high frame rates; a Deviljho bite (calm, not enraged; not confirmed by the reporter).
@@ -1461,6 +1477,49 @@ old way while on.
   exec.c draw_aniso: a draw without a depth test (HUD, menus, loading screen) keeps the game's own anisotropy; the same
   sampler still gets the setting on 3D draws (MHGU_SAMPLER_LOG: "used 1" in the loading screen, "used 16" in town).
   Checked with frames shot every 0.12 s at 16x: before, 3 of 5 loading frames had a seam; after, 0 of 16.
+
+## Pause/Suspend: [Controls] PauseKey (2026-11-22)
+
+- runtime/pause.c: the key (Pause by default; Esc and Enter also resume) holds the game's render thread in
+  nvnQueuePresentTexture after its present. The main thread then waits for it within a frame: a player-update fntrace
+  sent while paused fired only after the resume. The held thread presents the same image again at 60 Hz and builds the
+  overlay's frames itself (overlay_frame with its cpu), so the F1 menu and Forge's work meanwhile; the plugins'
+  forge_onNvnRender is not called for those (they would draw into the image again). PAUSED over a dimmed picture:
+  overlay.cpp draw_paused, on ImGui's background list (under the menus).
+- The guest's clock stops: rt_ticks reads pause_clock_ns (a seqlock over the paused time; now is read inside it, so a
+  time is never earlier than the stop). Checked: the game's frame step (Forge's dt, app +0x68) was 0.25 right after a
+  5.4 s pause at 240 fps. The audio mixer renders nothing while held (voices keep their place; the game's audio thread
+  still gets its events): the mixer's frame counter did not advance over a 6.9 s pause in quest 101.
+- Refused (a notice says why): ldn_offline false - a network in any state past Initialize, and for 15 s after one
+  closes, since Hunter Search closes its network for each scan and opens it again - or fs_writing (files open for
+  writing, a save mount with uncommitted changes, a commit and its backup). Checked: refused with Hunter Search on (12
+  presses over 24 s), allowed 16 s after turning it off; a press during Quit Game's save was refused, the next one after
+  it paused. Not checked: in an online Hub (same ldn state check), a movie, an area load.
+- Settings: the Pause/Suspend row in Keybinds and in Game actions' Keys (capture view CAPTURE_PAUSE = -2; Esc, Enter,
+  mouse buttons and the recomp's keys refused), shown on the keyboard drawing, red when the chat key or a keybind has
+  the same key. Forge's setKeybind refuses it as it does the chat key. Not on a controller (by design).
+- tests/test_settings_panel.cpp stops at its "fps" focus assertion; it does so on HEAD before this change too.
+
+## Android: CPU and GPU work not overlapping on an Adreno 725 (issue #444, 2026-11-22, open)
+
+- Report: POCO F5 (Turnip fork PurpleVK on KGSL), 37.7 fps in the village while the GPU is 69% busy and the submitting
+  thread waits in the GPU fence wait 67% of the time. CPU clocks barely change the frame rate.
+- Measured here (scratch-subs rig, town, MHGU_VK_STATS plus temporary counters, since removed): the game makes 2
+  submissions a frame (its command list, then our present), so the 8-slot submission ring (exec.c SUBS) is 4 frames
+  deep and never waited. Its one nvnSyncWait a frame comes right after submitting frame N and waits for frame N-1's
+  present submission: one frame of overlap, as on the Switch. With a temporary CPU spin and GPU buffer fills in
+  backend_execute, 10 ms CPU + 11 ms GPU ran at 89 fps (11 ms alone: 89), and 6 ms + ~17 ms at 58.7 fps at the 60
+  cap: frame time is max(CPU, GPU) here, and no snapping to 30 fps. A thread blocked 67% in the fence wait is also
+  what an overlapped GPU-bound frame looks like. What doesn't fit is the 31% of the phone's GPU time that is idle.
+- Mesa's Turnip on KGSL emulates timeline semaphores, which puts its queue in deferred submit mode; deferral only
+  holds submissions that wait on a timeline, and ours wait on nothing but the acquire semaphore, so nothing there
+  explains it either (read, not run).
+- MHGU_CONTROL `gpuprof` now covers two frames and every submission: a top-of-pipe timestamp where each main command
+  buffer begins ("GPU idle: waiting for this submission", shown when it's 0.5 µs or more), the end of each submission
+  and of the present's, per-frame "GPU busy / idle", and the CPU's submit times and its GPU waits in that time.
+  Frame 2's idle time before the game's work is the number that says whether the CPU keeps the GPU fed; idle before
+  the present submission points at the acquire semaphore (the display) instead. At the 60 cap on the desktop: 15.4 ms
+  idle before the game's work, as expected for 1.1 ms of GPU work. Next: that output from the reporter's phone.
 
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game

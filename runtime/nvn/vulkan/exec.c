@@ -178,11 +178,14 @@ static void begin_cb(VkCommandBuffer *cb, bool *begun) {
     *begun = true;
 }
 
+static void gp_submission(int kind);  // (debug) MHGU_CONTROL "gpuprof": where each submission begins and ends
+
 VkCommandBuffer vk_cmd(void) {
     Sub *s = sub();
     if (!s->main_begun) {
         begin_cb(&s->main, &s->main_begun);
         ss_forget();
+        gp_submission(1);
     }
     return s->main;
 }
@@ -225,6 +228,7 @@ void vk_submit_extra(VkSemaphore wait, VkSemaphore signal) {
         cbs[n++] = s->upload;
     }
     vk_cmd();  // (an empty main buffer still carries the semaphores)
+    gp_submission(signal ? 3 : 2);
     VK_CHECK(vkEndCommandBuffer(s->main));
     cbs[n++] = s->main;
     VkSemaphore sig[2] = {g_vk.timeline, signal};
@@ -257,6 +261,7 @@ void vk_submit_extra(VkSemaphore wait, VkSemaphore signal) {
         si.pSignalSemaphores = &signal;
     }
     VK_CHECK(vkQueueSubmit(g_vk.queue, 1, &si, fence));
+    gp_submission(signal ? 5 : 4);
     if (g_vk.fences) {
         pthread_mutex_lock(&fence_lock);
         fence_last = submit_seq + 1;
@@ -439,6 +444,55 @@ static VkSpan guest_copy_vertex(uint64_t addr, uint64_t size) {
 }
 
 static bool guest_range_ok(uint64_t addr, uint64_t size) { return addr && addr < GUEST_SPACE && size <= GUEST_SPACE - addr; }
+
+// ---- (debug) MHGU_LATE_WRITES=1: the vertices a small draw reads (immediate quads: at most 512 bytes), as copied for
+// it, compared with guest memory again when the frame is presented (vk_latewrite_frame). A difference means the game
+// wrote them after the copy: a Switch GPU reads them when it runs the commands, later than this submit-time copy.
+// (The Deck's shadow cascades cleared to 0 in a rectangle: is the clear quad's data copied before the game wrote it?)
+#define LW_TAB 4096
+static struct { uint64_t addr, vs; uint32_t len, stride, count; float vp_y; uint8_t depth_only, snap[512]; } lw[LW_TAB];
+static uint32_t lw_n, lw_frames, lw_checked, lw_changed, lw_logged, lw_quads;
+static bool latewrite_on(void) {
+    static int on = -1;
+    if (on < 0) on = getenv("MHGU_LATE_WRITES") && atoi(getenv("MHGU_LATE_WRITES"));
+    return on;
+}
+static void latewrite_note(uint64_t addr, const void *copied, uint32_t len, uint32_t stride, uint32_t count, uint64_t vs,
+                           bool depth_only, float vp_y) {
+    if (!len || len > sizeof lw[0].snap || lw_n >= LW_TAB || !guest_range_ok(addr, len)) return;
+    lw[lw_n].addr = addr, lw[lw_n].len = len, lw[lw_n].stride = stride, lw[lw_n].count = count, lw[lw_n].vs = vs;
+    lw[lw_n].depth_only = depth_only, lw[lw_n].vp_y = vp_y;
+    memcpy(lw[lw_n].snap, copied ? copied : G2H((uint32_t)addr), len);
+    lw_n++;
+}
+void vk_latewrite_frame(void) {
+    if (!latewrite_on()) return;
+    uint32_t changed = 0;
+    for (uint32_t i = 0; i < lw_n; i++) {
+        lw_quads += lw[i].depth_only && lw[i].count == 4;  // (the shadow cascades' clear quads among them)
+        if (!memcmp(lw[i].snap, G2H((uint32_t)lw[i].addr), lw[i].len)) continue;
+        changed++;
+        if (lw_logged >= 300) continue;
+        lw_logged++;
+        char cp[200] = "", now[200] = "";
+        int a = 0, b = 0;
+        for (uint32_t v = 0; v < lw[i].count && v < 4 && (v + 1) * lw[i].stride <= lw[i].len && lw[i].stride >= 12; v++) {
+            float f[3], g[3];
+            memcpy(f, lw[i].snap + v * lw[i].stride, 12);
+            memcpy(g, G2H((uint32_t)(lw[i].addr + v * lw[i].stride)), 12);
+            a += snprintf(cp + a, sizeof cp - a, " (%.3g %.3g %.3g)", f[0], f[1], f[2]);
+            b += snprintf(now + b, sizeof now - b, " (%.3g %.3g %.3g)", g[0], g[1], g[2]);
+        }
+        LOG("[latew] present %llu: vs %llx %s vp y %.0f, %u vertices at %llx (%u bytes) changed after the copy\n"
+            "[latew]   copied:%s\n[latew]   now:   %s\n", (unsigned long long)vk_frame_counter(), (unsigned long long)lw[i].vs,
+            lw[i].depth_only ? "depth-only" : "colour", lw[i].vp_y, lw[i].count, (unsigned long long)lw[i].addr, lw[i].len, cp, now);
+    }
+    lw_checked += lw_n, lw_changed += changed, lw_frames++;
+    if (lw_frames % 600 == 0)
+        LOG("[latew] %u frames: %u small vertex ranges checked (%u depth-only 4-vertex), %u changed after their copy\n", lw_frames,
+            lw_checked, lw_quads, lw_changed);
+    lw_n = 0;
+}
 
 // ---- vertex cache: device-local copies of bound vertex ranges, kept across submissions and refreshed only when the
 // CPU wrote their pages since (page write tracking, textures.c vk_pages_changed). The copy goes into the submission's
@@ -1326,43 +1380,100 @@ static void dump_pass(void) {
 }
 
 // ================================================================== (debug) GPU profile: MHGU_CONTROL "gpuprof"
-// GPU timestamps between the passes (and MSAA resolves) of the next frame, logged in milliseconds by vk_gpuprof_frame.
+// GPU timestamps between the passes (and MSAA resolves) of the next two frames, logged in milliseconds by
+// vk_gpuprof_frame. Also where each submission begins (a top-of-pipe timestamp: when the GPU got to it) and ends, so
+// the log shows the time the GPU sat idle waiting for the next submission (the CPU not done with it yet, or a
+// semaphore the present waits for), and when the CPU submitted each one. Two frames: the gap after the first frame's
+// present is the one that says whether the CPU keeps the GPU fed.
+#define GP_MAX 512
 volatile int g_gpuprof_request;
-static int gp_active, gp_n, gp_pass;
+static int gp_active, gp_n, gp_pass, gp_frames, gp_ncpu;
 static VkQueryPool gp_pool;
-static char gp_label[256][64];
+static char gp_label[GP_MAX][64];
+static uint8_t gp_kind[GP_MAX];  // 0 a pass mark, 1 a submission begins (top of pipe), 2 / 3 it ends (3: the present's)
+static uint64_t gp_cpu[16], gp_wait0;  // CPU: when each submission went to the queue; stat_wait_ns at the start
+static bool gp_cpu_present[16];
 static const char *gp_pass_note = "", *gp_next_note = "";  // what this pass and the next one are, when known (FXAA)
 
-static void gp_mark(const char *label) {
-    if (!gp_active || gp_n >= 256) return;
-    vkCmdWriteTimestamp(vk_cmd(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gp_pool, (uint32_t)gp_n);
-    snprintf(gp_label[gp_n++], sizeof gp_label[0], "%s", label);
+static void gp_mark_kind(const char *label, int kind) {
+    if (!gp_active || gp_n >= GP_MAX - 1) return;
+    VkCommandBuffer cb = vk_cmd();  // (first: it may begin a command buffer, which marks its own beginning)
+    int i = gp_n++;
+    vkCmdWriteTimestamp(cb, kind == 1 ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gp_pool,
+                        (uint32_t)i);
+    snprintf(gp_label[i], sizeof gp_label[0], "%s", label);
+    gp_kind[i] = (uint8_t)kind;
+}
+static void gp_mark(const char *label) { gp_mark_kind(label, 0); }
+
+// 1: a main command buffer begins, 2 / 3: the submission (3: the present's) is about to end, 4 / 5: it was submitted
+static void gp_submission(int kind) {
+    if (!gp_active) return;
+    if (kind == 1) gp_mark_kind("(GPU idle: waiting for this submission)", 1);
+    else if (kind <= 3) gp_mark_kind(kind == 3 ? "end of the present submission (window picture, overlay)" : "end of a submission", kind);
+    else if (gp_ncpu < 16) gp_cpu_present[gp_ncpu] = kind == 5, gp_cpu[gp_ncpu++] = plat_now_ns();
+}
+
+static void gp_log(const uint64_t *t) {
+    double per = g_vk.props.limits.timestampPeriod / 1e6;
+    // A submission's top-of-pipe time can come before the end of the one ahead of it (the GPU overlapped them): no gap
+    // then. Everything else follows in order.
+    uint64_t cur = t[0];
+    bool ok = true;
+    for (int i = 1; i < gp_n; i++) {
+        if (gp_kind[i] == 1) { if (t[i] > cur) cur = t[i]; continue; }
+        ok = ok && t[i] >= cur;
+        cur = t[i];
+    }
+    if (!ok || cur <= t[0]) { LOG("[gpuprof] no usable timestamps these frames: ask again\n"); return; }
+    uint64_t fstart = t[0];
+    double idle = 0, all_idle = 0;
+    int frame = 1;
+    cur = t[0];
+    LOG("[gpuprof] -- frame 1\n");
+    for (int i = 1; i < gp_n; i++) {
+        if (gp_kind[i] == 1) {
+            double gap = t[i] > cur ? (t[i] - cur) * per : 0.0;
+            if (t[i] > cur) cur = t[i];
+            idle += gap;
+            if (gap >= 0.0005) LOG("[gpuprof] %7.3f ms  %s\n", gap, gp_label[i]);
+            continue;
+        }
+        LOG("[gpuprof] %7.3f ms  %s\n", (t[i] - cur) * per, gp_label[i]);
+        cur = t[i];
+        if (gp_kind[i] == 3) {
+            double ft = (t[i] - fstart) * per;
+            LOG("[gpuprof] %7.3f ms  frame (GPU busy %.3f ms, idle %.3f ms)\n", ft, ft - idle, idle);
+            fstart = t[i], all_idle += idle, idle = 0;
+            if (i < gp_n - 1) LOG("[gpuprof] -- frame %d\n", ++frame);
+        }
+    }
+    char cpu[400];
+    int o = 0;
+    for (int i = 0; i < gp_ncpu && o < (int)sizeof cpu - 40; i++)
+        o += snprintf(cpu + o, sizeof cpu - o, "%s%.1f%s", i ? ", " : "", (gp_cpu[i] - gp_cpu[0]) / 1e6, gp_cpu_present[i] ? " (present)" : "");
+    LOG("[gpuprof] GPU idle %.3f ms in %d frames | CPU: submitted at %s ms, and waited for the GPU %.1f ms meanwhile\n",
+        all_idle, frame, gp_ncpu ? cpu : "-", (stat_wait_ns - gp_wait0) / 1e6);
 }
 
 void vk_gpuprof_frame(void) {  // (device.c, after each presented frame's submission)
-    if (gp_active) {
+    if (gp_active && ++gp_frames == 2) {
         gp_active = 0;
-        uint64_t t[256];
+        uint64_t t[GP_MAX];
         if (gp_n > 1 && vkGetQueryPoolResults(g_vk.dev, gp_pool, 0, (uint32_t)gp_n, sizeof t, t, 8,
-                                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS) {
-            double per = g_vk.props.limits.timestampPeriod / 1e6;
-            bool ok = t[gp_n - 1] > t[0];
-            for (int i = 1; i < gp_n; i++) ok = ok && t[i] >= t[i - 1];
-            if (!ok) LOG("[gpuprof] no usable timestamps this frame: ask again\n");
-            for (int i = 1; ok && i < gp_n; i++) LOG("[gpuprof] %7.3f ms  %s\n", (t[i] - t[i - 1]) * per, gp_label[i]);
-            if (ok) LOG("[gpuprof] %7.3f ms  frame\n", (t[gp_n - 1] - t[0]) * per);
-        }
+                                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS)
+            gp_log(t);
     }
-    if (g_gpuprof_request) {
+    if (g_gpuprof_request && !gp_active) {
         g_gpuprof_request = 0;
         if (!gp_pool) {
             VkQueryPoolCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, .queryType = VK_QUERY_TYPE_TIMESTAMP,
-                                        .queryCount = 256};
+                                        .queryCount = GP_MAX};
             VK_CHECK(vkCreateQueryPool(g_vk.dev, &qi, NULL, &gp_pool));
         }
-        vkCmdResetQueryPool(vk_cmd(), gp_pool, 0, 256);
-        gp_active = 1, gp_n = 0, gp_pass = 0;
-        gp_mark("start");
+        vkCmdResetQueryPool(vk_cmd(), gp_pool, 0, GP_MAX);
+        gp_active = 1, gp_n = 0, gp_pass = 0, gp_frames = 0, gp_ncpu = 0, gp_wait0 = stat_wait_ns;
+        gp_mark("start");  // (in the next submission: the idle time before it shows from frame 2 on)
     }
 }
 
@@ -4696,6 +4807,12 @@ static void draw(CmdRec *r, bool indexed) {
                 sp = (VkSpan){cached, 0, NULL};
                 vtail_put(v.addr, v.size, sp);
             } else sp = guest_copy_vertex(v.addr, need ? need : 16);
+            if (latewrite_on() && v.addr && stride && max_index && (uint64_t)max_index * stride <= 512) {  // (debug)
+                uint32_t lo = indexed ? 0 : first, len = (max_index - lo) * (uint32_t)stride;
+                latewrite_note(v.addr + (uint64_t)lo * stride, sp.ptr ? (const uint8_t *)sp.ptr + (uint64_t)lo * stride : NULL,
+                               len, (uint32_t)stride, max_index - lo, st.program->stages[0].code_addr, !st.rt.ncolor,
+                               st.viewport[0][1]);
+            }
         }
         VkDeviceSize off = sp.off;
         if ((ss.vb_known >> s & 1) && ss.vb[s] == sp.buf && ss.vo[s] == off) continue;

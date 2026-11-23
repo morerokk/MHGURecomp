@@ -260,6 +260,9 @@ Other useful keybinds:
 - Alt+Enter (Option+Enter on a Mac) or F11: switches between windowed and full screen
 - F7: Cycle MSAA
 - F12: screenshot
+- Pause: pauses the game, with **PAUSED** over the dimmed picture; Pause, `ESC` or `ENTER` resumes it. Offline only:
+  it does nothing in a Hub, with Hunter Search on, or while the game saves. Its key is **Pause/Suspend** in Controls,
+  Keybinds (`[Controls] PauseKey`)
 
 ## Settings
 
@@ -349,6 +352,16 @@ See [server/README.md](server/README.md) if you want to host your own LDN server
 You can also play multiplayer without an LDN server if you want to play with your friends. The host needs to forward the right port (39500 TCP/UDP by default), and all clients need to configure the host's IP address in their .ini file. (`Join = xxx.xxx.xxx.xxx`)
 
 Choose the "Local Wireless" multiplayer options, as this port pretends to be a local nearby Switch with a wireless connection. The online options are unavailable and are unnecessary.
+
+### Session codes and friends
+
+These need a hub server that knows them (the default one does). In the F1 menu, Friends page:
+
+- **Session code**: every hub you host gets a code like `ABCD-EFGH`. Share it, and others enter it in **Join by code**: the hub then comes first in Join Hub, with or without your matchmaking key. Confirm on the row copies the code.
+- **Friends**: in a hub, the other hunters are listed there: Confirm on one sends them a **friend request**, which they accept or reject on the same page (a notice tells them). You can also give your **friend code** (`ABCD-EFGH-JKMN-PQRS`) to anyone and add theirs with **Add a friend**. Once you've both added each other, you see whether they're online or in a hub, Confirm on a friend in a hub joins it the way a code does, and the game itself counts them as friends: a hub's passcode for "everyone but friends" lets them in. A notice tells you when a friend comes online or opens a hub.
+- **Friend requests** (On by default): a request you reject stays rejected until you restart the game, unless you add that player yourself. Turn it off to get no requests at all; your friend code is then not shared in hubs either, and you can still add others by code.
+- **Discord**: with Rich Presence on, friends on Discord can use "Join" on your profile while you're in a hub with room left.
+- Your friend code and friends list are kept in the save folder (`friends-id.bin`, `friends.txt`), not in `mhgurecomp.ini`, so sharing your settings never shares them. Keep `friends-id.bin` when you move your saves to keep your friend code.
 
 ### Crossplay with emulators (experimental)
 

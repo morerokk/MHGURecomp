@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -54,6 +55,7 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #include "forge.h"
 #include "menu_confirm.h"
 #include "overlay.h"
+#include "pause.h"
 #include "hle/chat.h"
 #include "settings_locale.h"
 #include "settings_panel.h"
@@ -701,24 +703,32 @@ void overlay_tick(void) {
 }
 
 // ------------------------------------------------------------------ notices (any thread -> game thread)
-// A few seconds at the top of the screen, menus open or not (runtime/net/ldn.c: the hub server's failures). Drawn on
-// the foreground draw list: over every window, taking no input or focus.
+// A few seconds at the top of the screen, menus open or not (runtime/net/ldn.c: the hub server's failures, friends).
+// Drawn on the foreground draw list: over every window, taking no input or focus. They queue: one at a time, each its
+// NOTICE_NS from when it is first drawn (a loading screen doesn't use its time up), the same one not twice in the queue,
+// at most NOTICES_MAX waiting (the oldest waiting one goes).
+struct Notice {
+    std::string title, text;
+    uint64_t shown;  // when it was first drawn (SDL_GetTicksNS); 0: not yet
+};
 static std::mutex g_notice_lock;
-static std::string g_notice_title, g_notice_text;
-static uint64_t g_notice_ns;  // when it came (SDL_GetTicksNS); 0: none
+static std::deque<Notice> g_notices;
 static const uint64_t NOTICE_NS = 7000000000ull;
+static const size_t NOTICES_MAX = 6;
 
 void overlay_notice(const char *title, const char *text) {
     std::lock_guard<std::mutex> l(g_notice_lock);
-    g_notice_title = title ? title : "";
-    g_notice_text = text ? text : "";
-    g_notice_ns = std::max<uint64_t>(SDL_GetTicksNS(), 1);
+    Notice n{title ? title : "", text ? text : "", 0};
+    for (const Notice &q : g_notices)
+        if (q.title == n.title && q.text == n.text) return;
+    if (g_notices.size() >= NOTICES_MAX) g_notices.erase(g_notices.begin() + 1);  // (not the one on screen)
+    g_notices.push_back(std::move(n));
 }
 
 static bool notice_due(uint64_t now) {
     std::lock_guard<std::mutex> l(g_notice_lock);
-    if (g_notice_ns && now - g_notice_ns >= NOTICE_NS) g_notice_ns = 0;
-    return g_notice_ns != 0;
+    if (!g_notices.empty() && g_notices.front().shown && now - g_notices.front().shown >= NOTICE_NS) g_notices.pop_front();
+    return !g_notices.empty();
 }
 
 static void draw_notice(uint64_t now, float scale) {
@@ -726,8 +736,10 @@ static void draw_notice(uint64_t now, float scale) {
     uint64_t at;
     {
         std::lock_guard<std::mutex> l(g_notice_lock);
-        if (!g_notice_ns) return;
-        title = g_notice_title, text = g_notice_text, at = g_notice_ns;
+        if (g_notices.empty()) return;
+        Notice &n = g_notices.front();
+        if (!n.shown) n.shown = std::max<uint64_t>(now, 1);
+        title = n.title, text = n.text, at = n.shown;
     }
     float age = (now - at) / 1e9f, alpha = std::clamp(std::min(age / .15f, (NOTICE_NS / 1e9f - age) / .5f), 0.f, 1.f);
     auto color = [alpha](float r, float g, float b, float a) {
@@ -931,6 +943,23 @@ static float loading_alpha(uint64_t now) {  // (the game's frames)
     return std::max(a, 0.0f);
 }
 
+// Pause/Suspend (runtime/pause.h): the held picture dimmed, PAUSED in the middle. Behind every window (the settings
+// menu, Forge's), which stay usable meanwhile.
+static void draw_paused() {
+    ImGuiViewport *vp = ImGui::GetMainViewport();
+    ImDrawList *dl = ImGui::GetBackgroundDrawList();
+    ImVec2 p0 = vp->Pos, p1(vp->Pos.x + vp->Size.x, vp->Pos.y + vp->Size.y);
+    dl->AddRectFilled(p0, p1, IM_COL32(0, 0, 0, 140));
+    const char *text = settings_text(config_language(), "PAUSED");
+    ImFont *font = ImGui::GetFont();
+    float size = std::max(vp->Size.y * .075f, 24.f);  // (a fixed share of the window's height)
+    ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0, text);
+    ImVec2 at(p0.x + (vp->Size.x - ts.x) * .5f, p0.y + (vp->Size.y - ts.y) * .5f);
+    float sh = std::max(size * .05f, 1.f);
+    dl->AddText(font, size, ImVec2(at.x + sh, at.y + sh), IM_COL32(0, 0, 0, 200), text);
+    dl->AddText(font, size, at, IM_COL32(255, 255, 255, 255), text);
+}
+
 static void draw_loading(uint64_t now, float scale, float alpha) {
     auto color = [alpha](float r, float g, float b, float a) {
         return ImGui::ColorConvertFloat4ToU32(ImVec4(r, g, b, a * alpha));
@@ -1070,7 +1099,8 @@ void overlay_frame(void *cpu) {
 #else
     bool hdr_stats = false;
 #endif
-    if (!open && !free_render && !notice && !chat && !fps && !loading && !hdr_stats) {  // (nothing to draw)
+    bool paused = pause_held();
+    if (!open && !free_render && !notice && !chat && !fps && !loading && !hdr_stats && !paused) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
         apply_input(io);  // (keep the queue short)
@@ -1137,6 +1167,7 @@ void overlay_frame(void *cpu) {
         if (!keep) set_open(false);
     }
     if (cpu) forge_imgui_run(cpu, FORGE_IMGUI_FREE_RENDER);
+    if (paused) draw_paused();
     if (notice) draw_notice(now, scale);
     if (chat) draw_chat(line, now, scale);
     if (fps) draw_fps(now);

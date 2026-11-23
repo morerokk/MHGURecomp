@@ -35,6 +35,7 @@
 #include "../config.h"
 #include "../platform.h"
 #include "../hle.h"
+#include "net.h"
 
 #define CLIENT_ID     "1566091085493571724"  // Discord application "Monster Hunter GU Recomp"
 #define RETRY_NS      15000000000ull
@@ -178,7 +179,20 @@ static bool connect_discord(void) {
     }
     g_connected = true;
     LOG("[discord] connected\n");
+    // someone's "Join" on our activity comes as an ACTIVITY_JOIN event with its join secret (the hub's session code)
+    frame_send(OP_FRAME, "{\"cmd\":\"SUBSCRIBE\",\"evt\":\"ACTIVITY_JOIN\",\"args\":{},\"nonce\":\"join\"}");
     return true;
+}
+
+// ACTIVITY_JOIN's "secret":"..." into out; false: none.
+static bool join_secret_of(const char *json, char *out, size_t size) {
+    const char *p = strstr(json, "\"secret\"");
+    if (!p || !(p = strchr(p + 8, '"'))) return false;
+    p++;
+    size_t n = 0;
+    for (; *p && *p != '"' && n + 1 < size; p++) out[n++] = *p;
+    out[n] = 0;
+    return *p == '"' && n > 0;
 }
 
 // Discord's frames since the last look: pings answered, errors logged. false: the connection is gone.
@@ -193,6 +207,12 @@ static bool drain(void) {
         if (op == OP_PING && !frame_send(OP_PONG, buf)) return false;
         if (op == OP_CLOSE) { LOG("[discord] closed by Discord: %.200s\n", buf); return false; }
         if (op == OP_FRAME && strstr(buf, "\"ERROR\"")) LOG("[discord] %.300s\n", buf);
+        char secret[200];
+        if (op == OP_FRAME && strstr(buf, "\"ACTIVITY_JOIN\"") && strstr(buf, "\"DISPATCH\"") &&
+            join_secret_of(buf, secret, sizeof secret)) {
+            LOG("[discord] join from Discord\n");
+            ldn_join_from_secret(secret);
+        }
     }
 }
 
@@ -293,6 +313,12 @@ void discord_set_activity(const DiscordActivity *a) {
             char t[48];
             snprintf(t, sizeof t, ",\"size\":[%d,%d]}", a->party, a->party_max);
             put(&p, end, t), c = true;
+            if (*a->join_secret) {  // (Discord's "Join" / "Ask to Join": needs the party above)
+                bool cs = false;
+                put(&p, end, ",\"secrets\":{");
+                put_string(&p, end, "join", a->join_secret, &cs);
+                put(&p, end, "}");
+            }
         }
         put(&p, end, "}");
     }
