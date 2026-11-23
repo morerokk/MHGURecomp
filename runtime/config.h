@@ -99,6 +99,8 @@ typedef struct {
     int ldn_direct;           // [Multiplayer] Direct: in an internet hub, game packets go straight between the players when
                               // their routers let them (hole punching; they see each other's IP address), else through the server
     int ldn_friend_requests;  // [Multiplayer] FriendRequests: get friend requests and share the friend code in hubs (net/ldn.c)
+    int ldn_friend_online_notices;  // [Multiplayer] FriendOnlineNotices: a notice when a friend comes online (net/ldn.c)
+    int ldn_friend_hub_notices;     // [Multiplayer] FriendHubNotices: a notice when a friend opens a hub (net/ldn.c)
     char chat_key[32];        // [Controls] ChatKey: the key that opens a line of chat (runtime/hle/chat.c), by SDL's
                               // name for it ("/", "Y"...); "" none
     char pause_key[32];       // [Controls] PauseKey: Pause/Suspend's key (runtime/pause.h), by SDL's name; "" none
@@ -290,6 +292,8 @@ int config_live_ldn_port(void);         // [Multiplayer] Port: the next hub host
 void config_live_ldn_join(char *join, size_t size);  // [Multiplayer] Join: the next search (net/ldn.c)
 int config_live_ldn_direct(void);  // [Multiplayer] Direct (net/ldn.c: for the next player link)
 int config_live_friend_requests(void);  // [Multiplayer] FriendRequests (net/ldn.c)
+int config_live_friend_online_notices(void);  // [Multiplayer] FriendOnlineNotices (net/ldn.c)
+int config_live_friend_hub_notices(void);     // [Multiplayer] FriendHubNotices (net/ldn.c)
 int config_live_sync_small_monsters(void);  // [Multiplayer] SyncSmallMonsters (net/emsync.c)
 int config_live_lag_compensation(void);  // [Multiplayer] LagCompensation (net/hitsync.c)
 int config_live_save_backups(void);     // [Save Backups] BackupsKept while Backups is on, else 0 (services/fs.c)

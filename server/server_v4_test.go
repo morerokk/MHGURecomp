@@ -359,7 +359,7 @@ func askPresence2(t *testing.T, s *Server, body []byte) (map[[friendLen]byte]fri
 		reqs = append(reqs, friendRequest{f, string(r[at+friendLen+1 : at+friendLen+1+nl])})
 		at += friendLen + 1 + nl
 	}
-	if at != len(r) {
+	if at != len(r) && (at+1 > len(r) || len(r) != at+1+int(r[at])*friendLen) { // (the removed-you list, when any)
 		t.Fatalf("FRIENDS: %d bytes after the requests", len(r)-at)
 	}
 	return out, reqs
@@ -510,4 +510,87 @@ func TestPresenceFull(t *testing.T) {
 		t.Fatal("a third player taken")
 	}
 	askPresence(t, s, presenceBody(1, stateOnline, ""))
+}
+
+// askGone: the players the answer says removed the asker (after the requests; none: no bytes there).
+func askGone(t *testing.T, s *Server, body []byte) [][friendLen]byte {
+	t.Helper()
+	c := dial(t, s)
+	send(t, c, tPresence, header4(4, [16]byte{}), body)
+	p := expect(t, c, tFriends)
+	at := 1 + int(p[0])*(friendLen+1+codeLen)
+	n := int(p[at])
+	at++
+	for i := 0; i < n; i++ {
+		at += friendLen + 1 + int(p[at+friendLen])
+	}
+	if at == len(p) {
+		return nil
+	}
+	g := int(p[at])
+	if len(p) != at+1+g*friendLen {
+		t.Fatalf("FRIENDS: %d bytes for %d removed", len(p)-at-1, g)
+	}
+	var out [][friendLen]byte
+	for i := 0; i < g; i++ {
+		var f [friendLen]byte
+		copy(f[:], p[at+1+i*friendLen:])
+		out = append(out, f)
+	}
+	return out
+}
+
+// withRemoved: a body with the name field (empty unless given) and the removed players after it.
+func withRemoved(body []byte, name string, removed ...[friendLen]byte) []byte {
+	b := named(body, name)
+	b = append(b, byte(len(removed)))
+	for _, r := range removed {
+		b = append(b, r[:]...)
+	}
+	return b
+}
+
+// Removing a friend: a removes b (stops listing b, sends b in its removed list). b, still listing a, is told a removed it
+// (and gets no state for a), while a gets no request from b's old listing ... as long as a keeps b in its removed list.
+// Only players b lists are told; a removed list with nobody online in it is no news; an older game (no removed list) and
+// a removed list cut short are fine.
+func TestFriendRemoved(t *testing.T) {
+	s := start(t, func(c *Config) { c.ReqRate, c.ReqBurst = 1000, 1000 })
+	a, b := idOf(1), idOf(2)
+	askPresence(t, s, presenceBody(1, stateOnline, "", b))
+	if got := askPresence(t, s, presenceBody(2, stateOnline, "", a)); len(got) != 1 {
+		t.Fatalf("not friends first: %v", got)
+	}
+	if g := askGone(t, s, presenceBody(2, stateOnline, "", a)); g != nil {
+		t.Fatalf("removed before anyone removed anyone: %x", g)
+	}
+	askPresence(t, s, withRemoved(presenceBody(1, stateOnline, ""), "A", b)) // a removes b
+	if g := askGone(t, s, presenceBody(3, stateOnline, "", a)); g != nil {   // (a third player a didn't remove: no news)
+		t.Fatalf("a third player told it was removed: %x", g)
+	}
+	askPresence(t, s, presenceBody(3, stateOnline, "")) // (and it stops listing a: no request from it)
+	if g := askGone(t, s, presenceBody(2, stateOnline, "", a)); len(g) != 1 || g[0] != a {
+		t.Fatalf("b isn't told a removed it: %x", g)
+	}
+	if fr := askPresence(t, s, presenceBody(2, stateOnline, "", a)); len(fr) != 0 {
+		t.Fatalf("b still sees a: %v", fr)
+	}
+	// b's listing of a is still a request to a (a's game hides it: a keeps b in its removed list); b drops a: no more
+	if _, reqs := askPresence2(t, s, withRemoved(presenceBody(1, stateOnline, ""), "A", b)); len(reqs) != 1 || reqs[0].id != b {
+		t.Fatalf("a's requests while b still lists it: %v", reqs)
+	}
+	askPresence(t, s, presenceBody(2, stateOnline, ""))
+	if _, reqs := askPresence2(t, s, withRemoved(presenceBody(1, stateOnline, ""), "A", b)); len(reqs) != 0 {
+		t.Fatalf("a's requests after b dropped it: %v", reqs)
+	}
+	// a adds b again (out of its removed list): b gets a fresh request
+	askPresence(t, s, named(presenceBody(1, stateOnline, "", b), "A"))
+	if _, reqs := askPresence2(t, s, presenceBody(2, stateOnline, "")); len(reqs) != 1 || reqs[0].id != a {
+		t.Fatalf("b's requests after a added it again: %v", reqs)
+	}
+	// a removed list cut short: taken as far as it goes
+	body := withRemoved(presenceBody(4, stateOnline, ""), "", idOf(5), idOf(6))
+	if got := askPresence(t, s, body[:len(body)-3]); got == nil {
+		t.Fatal("a cut-short removed list refused")
+	}
 }
