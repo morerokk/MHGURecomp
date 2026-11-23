@@ -120,6 +120,11 @@ PATCHES = {
     # (r4 = the player) is scaled by the frame step; 0x49430c the Moofy's run, 0x490380 its twin (motion 0x138f)
     ('main', 0x49430c): (0xEEB03A04, '{ extern float plcarry_push(uint32_t); c->v.f[6] = plcarry_push(c->r[4]); }'),
     ('main', 0x490380): (0xEEB03A04, '{ extern float plcarry_push(uint32_t); c->v.f[6] = plcarry_push(c->r[4]); }'),
+    # A hunter's equipment piece that fails its check (runtime/hle/equipcheck.c): f_46e964 swaps it for an empty one of
+    # its kind and calls itself again; an empty one that fails as well recursed forever (a crash when another hunter
+    # with such a piece joins). The swap's `add r6, sp, #4` returns instead when the piece is already empty
+    ('main', 0x46e998): (0xE28D6004, '{ extern int equipcheck_swap(Cpu *); if (equipcheck_swap(c)) goto L_46ea80; '
+                         'c->r[6] = c->r[13] + 0x4u; }'),
 }
 
 # Monster jump physics (runtime/hle/emjump.c): the stores of `pos += vel; vel += acc; acc.y += -0.2`, done once per
