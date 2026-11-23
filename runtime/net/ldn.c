@@ -1754,12 +1754,14 @@ static struct {
     int n, server_state;
     LdnFriend list[LDN_FRIENDS_MAX];
     uint8_t ids[LDN_FRIENDS_MAX][FRIEND_LEN];
-    // requests now (from the last answer), and the ones rejected or already told this session
+    // requests now (from the last answer), the ones rejected this session, and when each player's request last got a
+    // notice (friend_request_noted)
     int nreq;
     LdnRequest req[FRIEND_REQUESTS_MAX];
     uint8_t req_ids[FRIEND_REQUESTS_MAX][FRIEND_LEN];
     int nrejected, ntold;
     uint8_t rejected[64][FRIEND_LEN], told[64][FRIEND_LEN];
+    uint64_t told_ns[64];
     // the hub's hunters that said hello: by their address in the network
     int nhunters;
     struct { uint32_t ip; uint8_t id[FRIEND_LEN]; char name[33]; } hunters[HUNTERS_MAX];
@@ -1774,6 +1776,26 @@ static void id_add(uint8_t (*set)[FRIEND_LEN], int *n, int max, const uint8_t *i
     if (id_in((const uint8_t (*)[FRIEND_LEN])set, *n, id)) return;
     if (*n == max) memmove(set[0], set[1], (size_t)(max - 1) * FRIEND_LEN), (*n)--;
     memcpy(set[(*n)++], id, FRIEND_LEN);
+}
+// A notice for a friend request: when it is new since the last answer (sent, sent again, or its sender back online),
+// but not twice within FRIEND_NOTE_AGAIN_NS from the same player, so nobody can fill the screen with them (friends_mu held)
+#define FRIEND_NOTE_AGAIN_NS 600000000000ull
+static bool friend_request_noted(const uint8_t *id) {
+    uint64_t now = plat_now_ns();
+    for (int i = 0; i < F.ntold; i++)
+        if (!memcmp(F.told[i], id, FRIEND_LEN)) {
+            if (now - F.told_ns[i] < FRIEND_NOTE_AGAIN_NS) return false;
+            F.told_ns[i] = now;
+            return true;
+        }
+    if (F.ntold == 64) {  // (full: the oldest goes)
+        memmove(F.told[0], F.told[1], 63 * FRIEND_LEN);
+        memmove(&F.told_ns[0], &F.told_ns[1], 63 * sizeof F.told_ns[0]);
+        F.ntold--;
+    }
+    memcpy(F.told[F.ntold], id, FRIEND_LEN);
+    F.told_ns[F.ntold++] = now;
+    return true;
 }
 static void id_remove(uint8_t (*set)[FRIEND_LEN], int *n, const uint8_t *id) {
     for (int i = 0; i < *n; i++)
@@ -2090,7 +2112,10 @@ static void *friends_thread(void *arg) {
                     snprintf(notes[nn++], sizeof notes[0], "%c%s", hosting ? 'H' : 'O', fr->name);
             }
             // the requests after the friends: u8 r, r x (friend[10], u8 len, name); rejected ones and those with
-            // FriendRequests Off are left out. A new one this session gets a notice.
+            // FriendRequests Off are left out. One that wasn't in the last answer gets a notice (friend_request_noted).
+            uint8_t before[FRIEND_REQUESTS_MAX][FRIEND_LEN];
+            int nbefore = F.nreq;
+            memcpy(before, F.req_ids, sizeof before);
             F.nreq = 0;
             int at = 1 + count * entry;
             int r = at < got ? buf[at++] : 0;
@@ -2112,10 +2137,8 @@ static void *friends_thread(void *arg) {
                 q->name[w] = 0;
                 if (!w) snprintf(q->name, sizeof q->name, "%s", q->code);
                 memcpy(F.req_ids[F.nreq++], e, FRIEND_LEN);
-                if (!id_in((const uint8_t (*)[FRIEND_LEN])F.told, F.ntold, e)) {
-                    id_add(F.told, &F.ntold, 64, e);
-                    if (nn < 6) snprintf(notes[nn++], sizeof notes[0], "R%s", q->name);
-                }
+                if (!id_in((const uint8_t (*)[FRIEND_LEN])before, nbefore, e) && nn < 6 && friend_request_noted(e))
+                    snprintf(notes[nn++], sizeof notes[0], "R%s", q->name);
             }
             F.polled = true;
             for (int i = 0; i < F.n; i++) now_mutual += F.list[i].mutual && F.list[i].state != LDN_FRIEND_OFFLINE;
