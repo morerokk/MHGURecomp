@@ -68,6 +68,7 @@ static SDL_AtomicInt live_lagcomp;
 static SDL_AtomicInt live_ldn_direct;
 static SDL_AtomicInt live_friend_requests;
 static SDL_AtomicInt live_friend_online_notices;
+static SDL_AtomicInt live_friend_hub_notices;
 static SDL_AtomicInt live_share_urgent;
 // [Monster HP, Village Quests]
 static SDL_AtomicInt live_village;
@@ -176,6 +177,8 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->ldn_friend_requests != saved.ldn_friend_requests) SDL_SetAtomicInt(&live_friend_requests, c->ldn_friend_requests);
     if (all || c->ldn_friend_online_notices != saved.ldn_friend_online_notices)
         SDL_SetAtomicInt(&live_friend_online_notices, c->ldn_friend_online_notices);
+    if (all || c->ldn_friend_hub_notices != saved.ldn_friend_hub_notices)
+        SDL_SetAtomicInt(&live_friend_hub_notices, c->ldn_friend_hub_notices);
     if (all || c->bonus_content != saved.bonus_content) SDL_SetAtomicInt(&live_bonus, c->bonus_content);
     if (all || c->save_backups != saved.save_backups || c->backups_on != saved.backups_on)
         SDL_SetAtomicInt(&live_backups, c->backups_on ? c->save_backups : 0);
@@ -262,6 +265,7 @@ int config_live_lag_compensation(void) { return SDL_GetAtomicInt(&live_lagcomp);
 int config_live_ldn_direct(void) { return SDL_GetAtomicInt(&live_ldn_direct); }
 int config_live_friend_requests(void) { return SDL_GetAtomicInt(&live_friend_requests); }
 int config_live_friend_online_notices(void) { return SDL_GetAtomicInt(&live_friend_online_notices); }
+int config_live_friend_hub_notices(void) { return SDL_GetAtomicInt(&live_friend_hub_notices); }
 int config_live_bonus_content(void) { return SDL_GetAtomicInt(&live_bonus); }
 int config_live_save_backups(void) { return SDL_GetAtomicInt(&live_backups); }
 void config_live_ldn_join(char *join, size_t size) {
@@ -352,7 +356,7 @@ bool config_validate(const Config *c, char *error, size_t size) {
 
 // What config_save writes: a setting of the table (setting) or a Quest<number> entry (setting NULL)
 typedef struct { const ConfigSetting *setting; const char *section; char key[64], value[256]; bool seen; } Entry;
-#define ENTRY_MAX (HP_QUESTS_MAX + 128)  // (every setting of g_settings, 67 now, and the quests set apart)
+#define ENTRY_MAX (HP_QUESTS_MAX + 256)  // (every setting of g_settings, 129 now, and the quests set apart)
 static void normalize(const char *s, char *out, size_t size) {
     size_t n = 0;
     for (; *s && n + 1 < size; s++)

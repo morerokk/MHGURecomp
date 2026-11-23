@@ -2136,12 +2136,12 @@ static void *friends_thread(void *arg) {
                     fr->mutual = true;  // (the server tells only friends who list us back)
                 }
                 fr->state = now;
-                // A notice when a friend starts hosting, or comes online from offline (with [Multiplayer]
-                // FriendOnlineNotices On); none from the first answer (it only learns who is online already) or for a
-                // friend still unknown.
+                // A notice when a friend starts hosting ([Multiplayer] FriendHubNotices On), or comes online from
+                // offline (FriendOnlineNotices On); none from the first answer (it only learns who is online already)
+                // or for a friend still unknown.
                 bool hosting = now == LDN_FRIEND_HOSTING && was != LDN_FRIEND_HOSTING;
                 bool came = now != LDN_FRIEND_OFFLINE && was == LDN_FRIEND_OFFLINE;
-                if (F.polled && was != LDN_FRIEND_UNKNOWN && nn < 4 && (hosting || (came && config_live_friend_online_notices())))
+                if (F.polled && was != LDN_FRIEND_UNKNOWN && nn < 4 && ((hosting && config_live_friend_hub_notices()) || (came && config_live_friend_online_notices())))
                     snprintf(notes[nn++], sizeof notes[0], "%c%s", hosting ? 'H' : 'O', fr->name);
             }
             // the requests after the friends: u8 r, r x (friend[10], u8 len, name); rejected ones and those with
