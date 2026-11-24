@@ -35,3 +35,5 @@ inline int ffx_mingw_swprintf_s(wchar_t* destination, std::size_t destinationSiz
 }
 #define swprintf_s ffx_mingw_swprintf_s
 #endif
+
+#include "ffx_error_site.hpp"

@@ -21,6 +21,8 @@
 #endif
 #include <FidelityFX/host/ffx_fsr3upscaler.h>
 
+#include <atomic>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cwchar>
@@ -74,6 +76,7 @@ static FfxErrorCode trackedCreateBackendContext(
 
 static FfxVkPortableResult fromFfxResult(FfxErrorCode result)
 {
+    if (result != FFX_OK) ffxVkPortableLogf("FidelityFX call failed: error 0x%08x", static_cast<uint32_t>(result));
     switch (static_cast<uint32_t>(result)) {
     case FFX_OK:
         return FFX_VK_PORTABLE_OK;
@@ -172,12 +175,41 @@ static FfxBackbufferTransferFunction toFfxTransferFunction(
 }
 #endif /* FFX_VK_PORTABLE_HAS_FSR3_FRAMEGEN */
 
+// (MHGU Recomp) Diagnostics go to the application's log (ffxVkPortableSetLog). FidelityFX's messages used to be
+// fwprintf'd to stderr, which never reaches an Android log and is lost on a byte-oriented stderr anyway.
+static std::atomic<FfxVkPortableLogFn> logFn{nullptr};
+static std::atomic<int> logLines{0};
+
+extern "C" void ffxVkPortableSetLog(FfxVkPortableLogFn fn) { logFn.store(fn); }
+
+extern "C" void ffxVkPortableLogf(const char* format, ...)
+{
+    FfxVkPortableLogFn fn = logFn.load();
+    if (!fn || logLines.fetch_add(1) >= 64) return;  // (a failure repeated every frame would fill the log)
+    char line[512];
+    va_list ap;
+    va_start(ap, format);
+    std::vsnprintf(line, sizeof line, format, ap);
+    va_end(ap);
+    fn(line);
+}
+
+extern "C" void ffxVkPortableNoteError(const char* file, int line)
+{
+    const char* base = file;
+    for (const char* p = file; *p; p++)
+        if (*p == '/' || *p == '\\') base = p + 1;
+    ffxVkPortableLogf("FidelityFX backend error at %s:%d", base, line);
+}
+
 static void ffxMessage(FfxMsgType type, const wchar_t* message)
 {
-    const wchar_t* prefix = type == FFX_MESSAGE_TYPE_ERROR
-        ? L"portable FSR3 error: "
-        : L"portable FSR3 warning: ";
-    std::fwprintf(stderr, L"%ls%ls\n", prefix, message ? message : L"(no message)");
+    char narrow[480];
+    size_t n = 0;
+    for (const wchar_t* p = message ? message : L"(no message)"; *p && n < sizeof narrow - 1; p++)
+        narrow[n++] = *p < 0x80 ? (char)*p : '?';
+    narrow[n] = 0;
+    ffxVkPortableLogf("FidelityFX %s: %s", type == FFX_MESSAGE_TYPE_ERROR ? "error" : "warning", narrow);
 }
 
 static uint32_t findMemoryType(

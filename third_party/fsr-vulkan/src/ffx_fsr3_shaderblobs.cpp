@@ -217,8 +217,11 @@ const Entry* get(FfxFsr3UpscalerPass pass, uint32_t options)
         uint32_t* plain = vk_glsl_to_spirv_ex(src, length, (name + " (names)").c_str(), defPtrs.data(), (int)defPtrs.size(), include,
                                               ffxFsr3GlslHash(), 0, &plainWords);
         ok = e->spv && plain && reflect(*e, plain, plainWords);
+        if (e->spv && plain && !ok) ffxVkPortableLogf("%s: its resources could not be read from the SPIR-V", name.c_str());
         free(plain);
         if (ok) fillBlob(*e);
+    } else {
+        ffxVkPortableLogf("%s: no GLSL source", name.c_str());
     }
     lock.lock();
     e->state = ok ? 1 : 2;

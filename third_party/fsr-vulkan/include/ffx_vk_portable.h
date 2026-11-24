@@ -27,6 +27,12 @@ typedef enum FfxVkPortableResult {
     FFX_VK_PORTABLE_ERROR_BACKEND = -7
 } FfxVkPortableResult;
 
+/* (MHGU Recomp) Where the wrapper's diagnostics go: FidelityFX's own messages (FFX_VK_PORTABLE_CONTEXT_DEBUG_CHECKING),
+ * the source file and line of each FFX_ERROR_BACKEND_API_ERROR, the FidelityFX error code behind a failed call, a pass
+ * shader that could not be built. NULL (the default): nowhere. Called from any thread (shaders build on their own). */
+typedef void (*FfxVkPortableLogFn)(const char* message);
+void ffxVkPortableSetLog(FfxVkPortableLogFn fn);
+
 typedef struct FfxVkPortableUpscaleContext FfxVkPortableUpscaleContext;
 typedef struct FfxVkPortableFrameGenerationContext FfxVkPortableFrameGenerationContext;
 

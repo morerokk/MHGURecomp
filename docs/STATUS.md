@@ -1517,7 +1517,7 @@ old way while on.
   the same key. Forge's setKeybind refuses it as it does the chat key. Not on a controller (by design).
 - tests/test_settings_panel.cpp stops at its "fps" focus assertion; it does so on HEAD before this change too.
 
-## Android: CPU and GPU work not overlapping on an Adreno 725 (issue #444, 2026-11-22, open)
+## Android: CPU and GPU work not overlapping on an Adreno 725 (issue #444, 2026-11-22; workaround 2026-11-24)
 
 - Report: POCO F5 (Turnip fork PurpleVK on KGSL), 37.7 fps in the village while the GPU is 69% busy and the submitting
   thread waits in the GPU fence wait 67% of the time. CPU clocks barely change the frame rate.
@@ -1537,6 +1537,28 @@ old way while on.
   Frame 2's idle time before the game's work is the number that says whether the CPU keeps the GPU fed; idle before
   the present submission points at the acquire semaphore (the display) instead. At the 60 cap on the desktop: 15.4 ms
   idle before the game's work, as expected for 1.1 ms of GPU work. Next: that output from the reporter's phone.
+- Cause (the reporter, 2026-11-23, frame-pointer simpleperf on 0.18.3): a Turnip driver bug. On KGSL, Turnip emulates
+  timeline semaphores, and vkGetSemaphoreCounterValue checks each pending point with a 0 timeout, which the kernel
+  takes as "wait forever" until Mesa e984ef29 (26.3.0). PurpleVK 26.3.0-devel (git-62ac221a33) lacks it, and so do the
+  newest public purple-turnip (T30) and AdrenoToolsDrivers (v26.0.0 R8). Our vk_collect_dead check after each
+  submission waited there for the GPU: 66% of the submitting thread. With a Turnip that has the fix: 59.8-60.0 fps
+  at 2400x1080 (35.3 before), CPU game submit -> present submit 0.3 ms (19.7), kgsl busy 95%.
+- Workaround (g_vk.no_poll, exec.c "No status polls"): on Turnip on Android (driverID MESA_TURNIP), or with
+  MHGU_VK_NO_POLL=1, no completion check reaches the driver. Fences per submission (the Vulkan 1.1 path), and a
+  thread waits for them in order and moves fence_done; vk_completed_seq only reads it. Not the timeline: Mesa's
+  vkWaitSemaphores checks every pending point the same way before it waits (read in vk_sync_timeline.c, not run),
+  and vkGetFenceStatus does too. Checked on the desktop with MHGU_VK_NO_POLL=1: town at 60 (gpuprof as before), a hunt
+  at 240 fps with memory flat over a minute (the transient memory and dead objects are freed). Not checked: a phone
+  with the old driver (the reporter can), the game's own quit with the thread waiting (it exits by _exit after
+  vkDeviceWaitIdle; the thread doesn't wait once vk_exiting).
+- PurpleVK's timestampPeriod is 33.11 ns where its counter runs at 19.2 MHz (52.08 ns): gpuprof reads 1.57x too low
+  there. A driver bug; nothing for us to do.
+- FSR 3.1 fails with -7 on both drivers (FFX_VK_PORTABLE_ERROR_BACKEND: every FidelityFX code the wrapper doesn't
+  list). Now logged: each FFX_ERROR_BACKEND_API_ERROR's file:line (third_party/fsr-vulkan/src/ffx_error_site.hpp, a
+  macro over the enum value, -include'd into every FSR C++ source), the raw FidelityFX code, a pass shader whose
+  resources couldn't be reflected, and FidelityFX's own messages (MHGU_FSR_DEBUG=1), which went to stderr with
+  fwprintf before and so never reached log.txt or logcat. The Makefile now rebuilds the FSR C++ objects when those
+  forced headers change (header dependencies aren't tracked). Next: that log from the reporter.
 
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
