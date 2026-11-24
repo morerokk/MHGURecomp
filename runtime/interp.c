@@ -1555,16 +1555,17 @@ static void stats_add(uint32_t entry, uint64_t n, bool top, uint64_t ns) {
     pthread_mutex_unlock(&stats_lock);
 }
 
+static void run_inner(Cpu *c);  // (the JIT's run, or interp_run_inner)
 void interp_run(Cpu *c) {
     if (stats_on < 0) stats_on = getenv("MHGU_INTERP_STATS") != NULL;
     if (!stats_on) {
-        interp_run_inner(c);
+        run_inner(c);
     } else {
         uint32_t entry = c->pc;
         if (code_word(entry) == 0xE51FF004u) entry = LD32(entry + 4);  // (dispatch_interpret's stub: its function)
         uint64_t before = t_insns, t0 = plat_now_ns();
         t_depth++;
-        interp_run_inner(c);
+        run_inner(c);
         t_depth--;
         stats_add(entry, t_insns - before, t_depth == 0, plat_now_ns() - t0);
     }
@@ -1994,4 +1995,20 @@ static void interp_run_inner(Cpu *c) {
         pc = lr;
     }
     if (stats_on > 0) t_insns += n;
+}
+
+// ================================================================ JIT (x86-64 hosts: runtime/interp_jit.h)
+#include "interp_jit.h"
+
+static void run_inner(Cpu *c) {
+#ifdef HAVE_JIT
+    if (!(g_interp_watch | read_hi) && jit_enabled()) {
+        JitTls *t = jit_tls();
+        if (t) {
+            jit_run(c, t);
+            return;
+        }
+    }
+#endif
+    interp_run_inner(c);
 }

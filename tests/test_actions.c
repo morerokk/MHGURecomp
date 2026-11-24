@@ -975,25 +975,9 @@ static void test_crouch_attack_a(void) {
     #undef VIEW
 }
 
-// The Hunter Arts on keys of their own: each Control Type's buttons for each Art (found in a hunt, 2026-11-18), the
-// switch in the ini, the keyboard's defaults, and an Art's input never shared in Simple
+// The Hunter Arts on keys of their own: the switch in the ini, the keyboard's defaults, and an Art's input never shared
+// in Simple (a press asks the game for the Art itself: hle/input_view.c, tested in a hunt)
 static void test_hunter_arts(void) {
-    enum { A = 0x2000, B = 0x4000, X = 0x1000, L = 0x100, R = 0x200, ZL = 0x400, ZR = 0x800 };
-    const uint32_t up = 0x10, right = 0x20, down = 0x40, rs_up = 0x100000, rs_right = 0x200000, rs_down = 0x400000;
-    struct { int type; bool swap, alt; uint32_t want[3]; } cases[] = {
-        {0, false, false, {up, right, down}},          {0, true, false, {up, right, down}},
-        {0, false, true, {rs_up, rs_right, rs_down}},  {3, false, false, {rs_up, rs_right, rs_down}},
-        {3, false, true, {up, right, down}},           {1, false, false, {R | A | B, ZL, ZR}},
-        {1, true, false, {ZR | A | B, L, R}},          {2, false, false, {ZL | X, ZL | A, ZL | B}},
-        {2, true, false, {L | X, L | A, L | B}},
-    };
-    for (unsigned i = 0; i < sizeof cases / sizeof *cases; i++)
-        for (int n = 0; n < 3; n++) {
-            uint32_t got = act_art_bits(n, cases[i].type, cases[i].swap, cases[i].alt);
-            CHECK(got == cases[i].want[n], "type %d swap %d alt %d Art %d: %x, want %x", cases[i].type, cases[i].swap,
-                  cases[i].alt, n + 1, got, cases[i].want[n]);
-        }
-    CHECK(act_art_bits(0, 7, false, false) == 0 && act_art_bits(3, 2, false, false) == 0, "an unknown type or Art: nothing");
     CHECK(act_find("HunterArt2") == ACT_ART2 && act_view_of(ACT_ART1) == ACT_VIEW_MB1, "registered, in the hunt");
     CHECK(act_ew_bits(ACT_ART1, false) == 0, "no button of its own");
     ActProfile p = parse("[Actions]\nEnable=1\n");

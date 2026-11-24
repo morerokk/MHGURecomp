@@ -191,3 +191,5 @@ using std::floor;
 using std::log2;
 
 #endif
+
+#include "ffx_error_site.hpp"

@@ -829,6 +829,8 @@ HLE_FUNC("forge_graphics_isMenuOpen", f_gfx_menu) { RET(overlay_menu_open()); }
 
 // ------------------------------------------------------------------ save data
 static uint32_t str_savedata;
+static _Thread_local char fs_call[512];  // (the Forge call this thread is in, for the abort log: below)
+static const char *caller_plugin(Cpu *c, char *buf, size_t n);
 
 // The sSavedata singleton, found by its name the same way for both calls
 static uint32_t save_singleton(Cpu *c) { return singleton(c, mt_id("sSavedata")); }
@@ -848,7 +850,11 @@ HLE_FUNC("forge_fs_unmountSaveData", f_unmount_save) {
     uint32_t save = save_singleton(c);
     if (!save || !LD32(save + 0xF1C)) return;  // not mounted
     if (!save_symbols(&commit, &unmount, &lock, &unlock)) return;  // (the mount count stays as it is)
+    char who[200];
+    snprintf(fs_call, sizeof fs_call, "forge_fs_unmountSaveData() (its commit) from plugin %s",
+             caller_plugin(c, who, sizeof who));
     gcall(c, commit, str_savedata, 0, 0, 0);
+    fs_call[0] = 0;
     bool thread_safe = job_safe || LD8(save + 0x18);
     if (thread_safe) gcall(c, lock, save + 4, 0, 0, 0);
     uint32_t n = LD32(save + 0xF1C) - 1;
@@ -901,8 +907,7 @@ HLE_FUNC("forge_fs_fileExists", f_file_exists) {
 // plugin, so these say which. The paths of the files plugins opened, by handle, and the call running on each thread
 // (forge_abort_context, printed by runtime/hle/abort.c when the game aborts inside it).
 #define MAX_OPEN_FILES 64
-static struct { uint32_t handle; char path[200]; } open_files[MAX_OPEN_FILES];
-static _Thread_local char fs_call[512];
+static struct { uint32_t handle, mode; char path[200], who[200]; } open_files[MAX_OPEN_FILES];
 
 static const char *open_file_path(uint32_t handle, char *buf, size_t n) {
     snprintf(buf, n, "a file not opened with forge_fs_openFile (handle %08x)", handle);
@@ -930,6 +935,42 @@ static const char *caller_plugin(Cpu *c, char *buf, size_t n) {
 
 const char *forge_abort_context(void) { return fs_call[0] ? fs_call : NULL; }
 
+// Plugins' code on a guest stack: " file.nro+offset ..." for the words from sp up that point just past a BL / BLX in a
+// plugin (the stack lines of kernel.c leave out everything outside the game and its SDK, so a plugin that called the
+// SDK is invisible there). The count; 0 and an empty line for none.
+int forge_stack_plugins(uint32_t sp, char *line, size_t size) {
+    int n = 0, k = 0;
+    line[0] = 0;
+    if (!nplugins) return 0;
+    for (uint32_t a = sp; a < sp + 0x2000 && k < 6 && n < (int)size - 80; a += 4) {
+        if (!kernel_mapped(a, 4)) break;
+        uint32_t v = LD32(a);
+        for (int i = 0; i < nplugins; i++) {
+            const Module *m = plugins[i].m;
+            if (v < m->base + 4 || v >= m->base + m->size || (v & 3)) continue;
+            uint32_t ins = LD32(v - 4);
+            if ((ins & 0x0F000000u) != 0x0B000000u && (ins & 0xFE000000u) != 0xFA000000u &&
+                (ins & 0x0FFFFFF0u) != 0x012FFF30u)
+                continue;
+            n += snprintf(line + n, size - n, " %s+%x", plugins[i].name, v - m->base);
+            k++;
+            break;
+        }
+    }
+    return k;
+}
+
+int forge_log_open_files(const char *tag) {
+    int n = 0;
+    pthread_mutex_lock(&forge_lock);
+    for (int i = 0; i < MAX_OPEN_FILES; i++)
+        if (open_files[i].path[0])
+            LOG("%s: %s (mode %u%s) from plugin %s\n", tag, open_files[i].path, open_files[i].mode,
+                open_files[i].mode & 6 ? ", writing" : "", open_files[i].who), n++;
+    pthread_mutex_unlock(&forge_lock);
+    return n;
+}
+
 HLE_FUNC("forge_fs_openFile", f_open_file) {  // (const char *path, ForgeOpenMode mode, u32 *outHandle)
     uint32_t path = ARG(0), mode = ARG(1), out = ARG(2), sp = c->r[13], fn = gsym(SYM_FS_OPEN);
     if (!fn || !kernel_mapped(out, 4)) {
@@ -953,7 +994,11 @@ HLE_FUNC("forge_fs_openFile", f_open_file) {  // (const char *path, ForgeOpenMod
         int free_at = -1;
         for (int i = 0; i < MAX_OPEN_FILES; i++)
             if (!open_files[i].path[0] || open_files[i].handle == h) { free_at = i; if (open_files[i].handle == h) break; }
-        if (free_at >= 0) open_files[free_at].handle = h, snprintf(open_files[free_at].path, sizeof open_files[free_at].path, "%s", name);
+        if (free_at >= 0) {
+            open_files[free_at].handle = h, open_files[free_at].mode = mode;
+            snprintf(open_files[free_at].path, sizeof open_files[free_at].path, "%s", name);
+            snprintf(open_files[free_at].who, sizeof open_files[free_at].who, "%s", who);
+        }
         pthread_mutex_unlock(&forge_lock);
     }
     RET(r == 0);

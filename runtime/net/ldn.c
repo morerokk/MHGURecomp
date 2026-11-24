@@ -1231,6 +1231,15 @@ static void *lobby_thread(void *arg) {
         }
         bool keyed = lobby_header(req, NULL);
         pthread_mutex_lock(&L.mu);
+        // (the network may have closed while we connected - Hunter Search closes one every ~10 s: lobby_host_stop
+        // moves lobby_gen on before it clears the code under L.mu, so this sees one or the other. A listing of a closed
+        // network, or one without its code, is never sent: the server takes a protocol 4 listing without a code for a
+        // game that only claims 4.)
+        if (lobby_gen != gen || (with_code && !L.code[0])) {
+            pthread_mutex_unlock(&L.mu);
+            hclose(s);
+            break;
+        }
         memcpy(req + LOBBY_HEADER, L.info, NETINFO_SIZE);
         memcpy(req + LOBBY_HEADER + NETINFO_SIZE, L.code, CODE_LEN);
         bool coded = with_code && L.code[0];
@@ -1915,8 +1924,9 @@ static void friends_load_locked(void) {
         char *e = line + strlen(line);
         while (e > line && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ')) *--e = 0;
         char *sp = strchr(line, ' ');
-        if (line[0] == '#' || !sp) continue;
-        *sp = 0;
+        if (line[0] == '#' || !line[0]) continue;
+        if (sp) *sp = 0;
+        else sp = e - 1;  // (a code without a name: sp + 1 is the empty string at the end)
         uint8_t id[FRIEND_LEN];
         if (!strcmp(line, "removed")) {  // removed CODE name
             char *code = sp + 1, *nsp = strchr(code, ' ');
@@ -1934,7 +1944,7 @@ static void friends_load_locked(void) {
         char t[17];
         friend_text(id, t);
         friend_shown(t, fr->code, sizeof fr->code);
-        snprintf(fr->name, sizeof fr->name, "%s", sp + 1);
+        snprintf(fr->name, sizeof fr->name, "%s", sp[1] ? sp + 1 : fr->code);  // (no name: the code, as when added)
         fr->state = LDN_FRIEND_UNKNOWN;
         memcpy(F.ids[F.n++], id, FRIEND_LEN);
     }
@@ -2042,6 +2052,23 @@ void friends_aux_received(const void *data, uint32_t len) {
             for (size_t j = 0; j < m[2]; j++)
                 if (m[8 + FRIEND_LEN + j] >= 0x20 && m[8 + FRIEND_LEN + j] != 0x7F) F.hunters[i].name[k++] = (char)m[8 + FRIEND_LEN + j];
             F.hunters[i].name[k] = 0;
+        }
+        // A friend in our list with no name of their own (added by code alone, which names them with the code; or a
+        // friends.txt line without a name) takes the hunter name their game goes by (a name the player typed stays).
+        uint8_t was[FRIEND_LEN];
+        char shown[33] = "";
+        size_t k = 0;
+        for (size_t j = 0; j < m[2]; j++)
+            if (m[8 + FRIEND_LEN + j] >= 0x20 && m[8 + FRIEND_LEN + j] != 0x7F) shown[k++] = (char)m[8 + FRIEND_LEN + j];
+        shown[k] = 0;
+        for (int f = 0; k && f < F.n; f++) {
+            LdnFriend *fr = &F.list[f];
+            if (memcmp(F.ids[f], m + 8, FRIEND_LEN) || (fr->name[0] && !(friend_parse(fr->name, was) && !memcmp(was, F.ids[f], FRIEND_LEN))))
+                continue;
+            snprintf(fr->name, sizeof fr->name, "%s", shown);
+            LOG("[ldn] friends: %s is named %s from the hub\n", fr->code, fr->name);
+            friends_save_locked();
+            break;
         }
     }
     pthread_mutex_unlock(&friends_mu);

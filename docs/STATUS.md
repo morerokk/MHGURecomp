@@ -1287,6 +1287,23 @@ at 30 and 120 fps: 500 counts = 40.1 degrees aiming and charging, as out of aimi
 within 3 units of the aim while turning; pitch stops at +-56 degrees. Not tried by hand with a real mouse, nor with
 the Bowguns' aim (other modes; mode 1's pitch is +0x2714 instead), nor the aim invert settings.
 
+Aiming on the move (2026-11-24, report: with the mouse, LBG / HBG aim turned left and right while walking but not up
+and down; the stick did both): walking aimed (bowguns 0002:016, the Bow's R 0002:000) runs 0x4a1738 and then the
+camera's stick handler 0x2255cc in each update, so 0x4a1738's hook stood aside and the mouse went to the camera. Its
+yaw stays (the hunter follows the camera), but the aim camera 0x226e84 (r0 = the camera) still runs after them and puts
++0x9e8 back from the hunter's aim pitch, so the mouse's pitch was lost. 0x226e84 is hooked too: when it ran for the
+camera since the stick handler's last run, the stick handler's hook gives the mouse's pitch to the aim (as 0x4a1738's
+hook does, mode from its last call, the aim invert option) and the yaw to the camera as before. The Bow charging on the
+move (X held, 0010:002 / 0010:013) also runs both, but not the aim camera: its pitch is the camera's own and stays on
+the camera path. The yaw in that state went only to the camera, and the hunter's yaw and the eye's (+0x9dc) eased
+toward it over 10+ updates, still turning after the mouse stopped (the user: "floaty", like the stick); it now goes
+to both straight away too (traced per update in ttest.sh: the eye matches the camera's yaw every update and stops with
+the mouse; the hunter keeps the game's own small offset while walking). The user checked it by hand: feels right.
+Tested (scratch-hbg mtest.sh / ltest.sh / btest.sh, `MHGU_MOUSECAM_LOG=1`, W held + mousemove 0 -400):
+HBG walking aimed, camera pitch 0439 -> 1683 (was stuck at 0442 before); LBG (control `weapon 6 1` in town, then
+`depart 101`) 0445 -> 1688, mode 0 as the HBG; Bow R walking 043a -> 167a (was stuck too); Bow charging walk still on
+the camera path; standing aim unchanged. Not tested: the aim invert settings, a real mouse by hand.
+
 ## Mouse wheel on the item bar (2026-10-31)
 
 The captured mouse's wheel turns the item bar directly (runtime/hle/itembar.c): up the item to the left, down to the
@@ -1411,6 +1428,44 @@ old way while on.
   tail-call threaded ops (each handler jumping to the next) might give another ~1.5x; matching an emulator would take a
   JIT (AArch32 -> x86-64 and -> AArch64), a project of its own.
 
+## Interpreter: JIT on x86-64 (2026-11-24)
+
+Report: every loading screen slow with MHGU Definitive Edition 3.1.0 (MH4U Port renamed; now 15 monster entries).
+Its quest_group_fix hook (quest_group_rename, module/quest.c, the quest list loader step 0x3b7de8: every list entry
+against every monster's 12 slots, ~2 M instructions a call, ~1000 calls a town load, ~2.2 G instructions in all) made
+the town's load (title -> town, quickhunt) 18.6 s without the mod -> 23.5 s with it, 18.9 s with only that patch
+taken out of the IPS. A fix is the mod's (slot pairs made once, an ID range check first: a PR to its author). Since
+bigger code mods will come, the interpreted code now runs as x86-64 code (runtime/interp_jit.h, included by interp.c;
+runtime/jit_mem.c the executable memory):
+- Blocks are interp.c's (block_build's rules, the same decode_op), translated: data processing (every shift form;
+  register-specified shifts unless their carry is needed), MOVW / MOVT, every LDR / STR / LDRB / STRB / LDRH / STRH /
+  LDRSB / LDRSH / LDRD / STRD addressing mode, LDM / STM, B / BL / BX / BLX, MUL / MLA / MLS / UMULL / SMULL / UMLAL /
+  SMLAL, CLZ, SXTB / SXTH / UXTB / UXTH (+ add), REV, UBFX / SBFX / BFI / BFC, conditions. Anything else (VFP, NEON,
+  SVC, exclusives, MRS / MSR ...) is a call from the block to the interpreter's own op for it. All state stays in the
+  Cpu (registers, 0 / 1 flag words) as before, so the two mix freely. Baseline x86-64 only (no LZCNT / BMI).
+- jit_run is interp_run_inner's loop around them. A direct branch's exit is patched into a jump to its target's block
+  once the loop has found the target interpreted (chaining), after a check of the run's return address (it ends the
+  run, as in the interpreter) and, going backward, of g_code_gen; indirect branches go back to the loop. Each block
+  compares its guest words on entry (as each op did) and is rebuilt when one changed; the old one jumps to the new.
+- Per thread: an 8 MiB arena (freed at thread exit), started over when full or for a new code generation, but only
+  while none of the thread's blocks is running (a nested run then uses the interpreter). Windows: the arena has a
+  function table entry (one frame layout), so ExitThread's longjmp unwinds through a block (tested: without it, a
+  crash).
+- Bad accesses: gchk's checks with g_ip_pc set, except for sp-based ones; g_ip_last is the block's first instruction.
+  Flags are read back a byte at a time: a dword load of a byte SETcc just stored stalls (no store forwarding), which
+  first made it only 2.3x the interpreter, then 5.4x after that change.
+- Measured (Ryzen 7 9800X3D, testsave/save_0, quickhunt, two runs each): title -> town 18.6 s without the mod, 23.5 s
+  with it interpreted, 19.2 s with the JIT. The quest list thread 21 -> 1.1 Gcycles (~0.5 cycles an instruction). In a
+  hunt with the Stygian Zinogre quest (1023) the mod's code 82 -> 36 ms a second (callees included), the same
+  instruction counts. Forge plugins (KatLib, KatSmithy in the second plugin region, KatEquipmentBox, Ninja Style,
+  key-quest-markers, better-inputs, NoFlinch) together with the mod: no faults, plugin logs the same.
+- Checked: tools/test_lift.py --jit (each instruction as a block of its own) against Unicorn, 4000-instruction runs on
+  four seeds of main: none different (a planted ADD -> SUB was caught at once); a JIT vs interpreter-op comparison on
+  random states, Windows and Linux (archlinux WSL, the System V calls), 18000 runs: none different.
+- MHGU_JIT=0: the interpreter alone. MHGU_JIT_DUMP=<file>: every block's code (for a disassembler, with MHGU_SAMPLE).
+- Not done: an AArch64 back end (Android, a Mac), so phones still interpret; registers kept in host registers across
+  a block (the next big step if a mod needs it); not tried on a laptop CPU or by hand in a fight.
+
 ## Even letter spacing in the game's text: [Graphics] FixKerning (2026-11-07)
 
 - The UI text (cGUI, font_festa.gfd) looked unevenly spaced, on the console too. Three causes, all fixed with
@@ -1500,7 +1555,7 @@ old way while on.
   the same key. Forge's setKeybind refuses it as it does the chat key. Not on a controller (by design).
 - tests/test_settings_panel.cpp stops at its "fps" focus assertion; it does so on HEAD before this change too.
 
-## Android: CPU and GPU work not overlapping on an Adreno 725 (issue #444, 2026-11-22, open)
+## Android: CPU and GPU work not overlapping on an Adreno 725 (issue #444, 2026-11-22; workaround 2026-11-24)
 
 - Report: POCO F5 (Turnip fork PurpleVK on KGSL), 37.7 fps in the village while the GPU is 69% busy and the submitting
   thread waits in the GPU fence wait 67% of the time. CPU clocks barely change the frame rate.
@@ -1520,6 +1575,28 @@ old way while on.
   Frame 2's idle time before the game's work is the number that says whether the CPU keeps the GPU fed; idle before
   the present submission points at the acquire semaphore (the display) instead. At the 60 cap on the desktop: 15.4 ms
   idle before the game's work, as expected for 1.1 ms of GPU work. Next: that output from the reporter's phone.
+- Cause (the reporter, 2026-11-23, frame-pointer simpleperf on 0.18.3): a Turnip driver bug. On KGSL, Turnip emulates
+  timeline semaphores, and vkGetSemaphoreCounterValue checks each pending point with a 0 timeout, which the kernel
+  takes as "wait forever" until Mesa e984ef29 (26.3.0). PurpleVK 26.3.0-devel (git-62ac221a33) lacks it, and so do the
+  newest public purple-turnip (T30) and AdrenoToolsDrivers (v26.0.0 R8). Our vk_collect_dead check after each
+  submission waited there for the GPU: 66% of the submitting thread. With a Turnip that has the fix: 59.8-60.0 fps
+  at 2400x1080 (35.3 before), CPU game submit -> present submit 0.3 ms (19.7), kgsl busy 95%.
+- Workaround (g_vk.no_poll, exec.c "No status polls"): on Turnip on Android (driverID MESA_TURNIP), or with
+  MHGU_VK_NO_POLL=1, no completion check reaches the driver. Fences per submission (the Vulkan 1.1 path), and a
+  thread waits for them in order and moves fence_done; vk_completed_seq only reads it. Not the timeline: Mesa's
+  vkWaitSemaphores checks every pending point the same way before it waits (read in vk_sync_timeline.c, not run),
+  and vkGetFenceStatus does too. Checked on the desktop with MHGU_VK_NO_POLL=1: town at 60 (gpuprof as before), a hunt
+  at 240 fps with memory flat over a minute (the transient memory and dead objects are freed). Not checked: a phone
+  with the old driver (the reporter can), the game's own quit with the thread waiting (it exits by _exit after
+  vkDeviceWaitIdle; the thread doesn't wait once vk_exiting).
+- PurpleVK's timestampPeriod is 33.11 ns where its counter runs at 19.2 MHz (52.08 ns): gpuprof reads 1.57x too low
+  there. A driver bug; nothing for us to do.
+- FSR 3.1 fails with -7 on both drivers (FFX_VK_PORTABLE_ERROR_BACKEND: every FidelityFX code the wrapper doesn't
+  list). Now logged: each FFX_ERROR_BACKEND_API_ERROR's file:line (third_party/fsr-vulkan/src/ffx_error_site.hpp, a
+  macro over the enum value, -include'd into every FSR C++ source), the raw FidelityFX code, a pass shader whose
+  resources couldn't be reflected, and FidelityFX's own messages (MHGU_FSR_DEBUG=1), which went to stderr with
+  fwprintf before and so never reached log.txt or logcat. The Makefile now rebuilds the FSR C++ objects when those
+  forced headers change (header dependencies aren't tracked). Next: that log from the reporter.
 
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
@@ -1592,7 +1669,8 @@ old way while on.
    (the bowgun's reticle, lock-on markers) is not stretched and scales about the centre; the bowgun's ammo list (layer 103, right side below y 300; above it the HP and stamina bars' end pieces, at x 1062 when full) goes with the item
    bar; a window's pieces up to 470 apart are one group (the Weapon Controls sheet's back parchment, 436 high), and a window stacked right on another of its layer
    that went the other way takes the pair's anchor with it (the chat log's "Chat" label over its box)
-   (the Palico Scout's "Rotate" prompt). MHGU_CONTROL `hudtrace` logs a frame's HUD quads and their anchors. Left: the HUD's layout elsewhere (title, town, quest board, item box) unverified; at Edges
+   (the Palico Scout's "Rotate" prompt); text of layer 94 drawn on a 97 window right after it, inside it, is part of
+   that window (the Hub Info's Canteen rows went Centre, out of their Top box at 16:10, 2026-11-24). MHGU_CONTROL `hudtrace` logs a frame's HUD quads and their anchors. Left: the HUD's layout elsewhere (title, town, quest board, item box) unverified; at Edges
    the Hunter Arts prompt goes right with its layer; whether an off-screen 3D view (equipment box preview, guild
    card) uses one of the three cameras (they are left alone unless 16:9).
 10. Keyboard remapping: an ini [Keyboard] section, one line per Switch button (`A = Mouse2`, `B = Space`; SDL key
@@ -1744,6 +1822,18 @@ being a submodule there is 1.92.8 by its header only).
 Extras beyond Fexty's exported.txt, kept as harmless: forge_log_trace(format, ...) (printed at any level, as [DEBUG]), forge_graphics_isInitialized, forge_graphics_isMenuOpen. MHGU_FORGE_LOG=debug|info|warn|error (default info; overrides the file when it names a level). Install = the mod's folder in mods\ (Forge itself is not needed). Log: "[forge] plugin ...",
 the plugin's own messages as "[forge] [INFO] ..." (Forge's tags). Plugins are built -mfloat-abi=softfp, as
 Forge is: floats in core registers (forge_onUpdate's dt in r0; until 2026-10-23 it went in s0 only).
+
+Save commits from plugins (2026-11-24): nn::fs aborts a commit while any file of the save is open for writing (2002-6457,
+WriteModeFileNotClosed). Plugins commit the save on the main thread (forge_fs_unmountSaveData always commits, as Forge's
+does; plugins that keep settings in the save also call CommitSaveData themselves, some every few seconds), and the game
+writes its save on another thread: a player with 15 plugins had the game close at the end of a hunt. Reproduced with a
+plugin committing every frame and the game saving (Quit Game > Save). FileSystemAccessor::Commit now has a host layer
+(services/fs.c, commit_guard) that waits, up to 10 s, until no other thread has a save file open for writing (by the
+SDK's own open-file list and the host's), and save files opened for writing by other threads wait while it commits; a
+thread's own open file is not waited for (nn::fs aborts as on the console). A wait is logged ("[fs] a save commit ...
+waited N ms ..."; 17-19 ms in the test). MHGU_NO_COMMIT_GUARD=1 turns it off. Every abort also logs the files open for
+writing and those closed in the last 5 s (path, guest thread, the game's and plugins' calls that opened them), plugins'
+files from forge_fs_openFile still open, and Forge plugins' code on the stack.
 
 Forge 2.0.0 (2026-11-19; was 1.5.1, the same API plus what 2.0.0 adds): the port reports 2.0.0, so plugins asking for 2.0
 start (1.x ones still do). Files: forge_fs_openFile(path, mode, u32 *handle) / getFileSize / readFile(handle, s64 offset, buf,

@@ -7,6 +7,7 @@
 // (MHGU_QUICKHUNT, MHGU_NO_BC...) come from env.txt in that folder: one NAME=value per line, # for comments.
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -376,4 +377,61 @@ void android_first_start(void) {
         LOG("[android] files folder at the start: %s\n", android_home());
         return;
     }
+}
+
+// ------------------------------------------------------------------ [Performance] ShowTemperature
+// The device's temperature for the FPS counter (overlay.cpp): the battery's, which every phone tells (the sticky
+// BATTERY_CHANGED intent's "temperature", in tenths of a degree). Read every 2 s on a thread of its own while the
+// overlay asks: it goes through Java, not for the game's frames to wait on.
+static SDL_AtomicInt temp_battery = {INT_MIN};  // (tenths of a degree C)
+static SDL_AtomicInt temp_asked, temp_started;  // (SDL_GetTicks() in seconds when the overlay last asked; the thread)
+
+// Android's battery intent, asked for with no receiver: the last one sent, at once. Tenths of a degree, or INT_MIN.
+static int battery_temp(JNIEnv *env) {
+    if (!env || (*env)->PushLocalFrame(env, 16) < 0) return INT_MIN;
+    int t = INT_MIN;
+    jobject act = (jobject)SDL_GetAndroidActivity();
+    jclass fc = (*env)->FindClass(env, "android/content/IntentFilter");  // (a system class: found from any thread)
+    jmethodID init = fc ? (*env)->GetMethodID(env, fc, "<init>", "(Ljava/lang/String;)V") : NULL;
+    jobject filter = init ? (*env)->NewObject(env, fc, init, (*env)->NewStringUTF(env, "android.intent.action.BATTERY_CHANGED")) : NULL;
+    jclass ac = act ? (*env)->GetObjectClass(env, act) : NULL;
+    jmethodID reg = ac ? (*env)->GetMethodID(env, ac, "registerReceiver",
+                                             "(Landroid/content/BroadcastReceiver;Landroid/content/IntentFilter;)Landroid/content/Intent;") : NULL;
+    jobject intent = filter && reg ? (*env)->CallObjectMethod(env, act, reg, NULL, filter) : NULL;
+    if (intent && !(*env)->ExceptionCheck(env)) {
+        jclass ic = (*env)->GetObjectClass(env, intent);
+        jmethodID get = (*env)->GetMethodID(env, ic, "getIntExtra", "(Ljava/lang/String;I)I");
+        jint v = get ? (*env)->CallIntMethod(env, intent, get, (*env)->NewStringUTF(env, "temperature"), (jint)INT_MIN) : INT_MIN;
+        if (!(*env)->ExceptionCheck(env) && v != INT_MIN && v > -400 && v < 1500) t = v;
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    (*env)->PopLocalFrame(env, NULL);  // (this thread never returns to Java: its local references go here)
+    return t;
+}
+
+static int temp_thread(void *unused) {
+    (void)unused;
+    JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();  // (attaches this thread to Java)
+    bool logged = false;
+    for (;;) {
+        if ((int)(SDL_GetTicks() / 1000) - SDL_GetAtomicInt(&temp_asked) <= 5) {
+            int t = battery_temp(env);
+            SDL_SetAtomicInt(&temp_battery, t);
+            if (!logged) {
+                logged = true;
+                LOG("[android] temperature: %s\n", t != INT_MIN ? "the battery's" : "not told");
+            }
+        }
+        SDL_Delay(2000);
+    }
+    return 0;
+}
+
+int android_temperature(void) {
+    SDL_SetAtomicInt(&temp_asked, (int)(SDL_GetTicks() / 1000));
+    if (SDL_CompareAndSwapAtomicInt(&temp_started, 0, 1)) {
+        SDL_Thread *t = SDL_CreateThread(temp_thread, "temperature", NULL);
+        if (t) SDL_DetachThread(t);
+    }
+    return SDL_GetAtomicInt(&temp_battery);
 }

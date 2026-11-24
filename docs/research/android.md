@@ -187,6 +187,33 @@ Tested on the Shield: the banner; a saved GameFolder, the game running from the 
 the message for a folder that isn't there; the picker opening on the drive, using a remote's keys. Not tested end to end:
 returning from the picker and Android's "All files access" page, which need "Don't keep activities" off.
 
+## Dual-screen bottom screen (2026-11-24, issue #437)
+
+MHXX's bottom screen on a second display ([Dual Screen] SecondDisplay, Android tab, off by default; greyed out without a
+second display). runtime/nvn/vulkan/bottom_hud.c (from cerroverb's aarch64 fork, which shows it on Linux through a DRM
+lease) draws the HUD pieces of the chosen panels a second time into a picture of the panel's size and copies it to host
+memory; second_display_android.c puts that on the Surface of a Presentation (android/java/.../DualScreen.java) with
+ANativeWindow_lock, and the view's touches go back to bottom_hud_touch. The Presentation's window is FLAG_NOT_FOCUSABLE, so
+the controller stays with the game. On, off, a display plugged in or out: all while the game runs.
+
+Testing on the emulator (AVD "mhgu"): `adb emu multidisplay add 1 1080 1240 320 0` adds a display the size of the AYN
+Thor's bottom screen while it runs (`multidisplay del 1` removes it). `screencap` can't read that display (a virtual one):
+look at the emulator's window, or capture it with PrintWindow. `adb shell input -d 2 tap|swipe ...` touches it (the
+display id is in `dumpsys display`). `bottomtouch <u> <v>` / `bottomtouch up` in the MHGU_CONTROL file does the same from
+the runtime's side, and MHGU_BOTTOM_HUD_TEST=<w>x<h> saves the picture in shots/ without a display.
+Tested 2026-11-24 in a quest: the panels and their pieces leave the main screen, the map shows once taken from the supply
+box, a held finger lights the Hunter Art panel, turning it off and on and unplugging and plugging the display. Not tested:
+a real dual-screen device (which screen Android calls external: the Thor's top one), the Vulkan 1.1 path (fence counts
+instead of the timeline), the D-pad panel's camera.
+
+On PC (same day) the same picture goes into an SDL window of its own on another monitor than the game's
+(second_display_desktop.c; Display tab, greyed out with one monitor): borderless over that monitor (Wayland: full screen
+on it), SDL_WINDOW_NOT_FOCUSABLE, touches and left clicks press the panels, all on the UI thread (ui.c). Its events never
+reach the game; closing the game's window while it is open is taken as the quit SDL no longer sends. With one monitor,
+MHGU_SECOND_DISPLAY_WINDOW=640x480 opens it as an ordinary window instead. Tested on Windows with that window: the panels,
+a touch (control file), closing either window. Not tested: a real second monitor (placement, Wayland's full screen),
+real touch and real clicks (a click posted as a window message carries no position SDL uses), Linux beyond compiling.
+
 ## Open questions
 
 - Minimum device: arm64; Android 10+, Vulkan 1.1 with shaderInt64; a Shield TV (3 GB RAM) runs it; other devices roughly Snapdragon 865 /

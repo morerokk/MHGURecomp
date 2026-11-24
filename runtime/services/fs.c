@@ -10,7 +10,9 @@
 
 #include "../config.h"
 #include "../hle.h"
+#include "../forge.h"
 #include "../ipc.h"
+#include "../kernel.h"
 #include "../mods.h"
 #include "../romfs.h"
 
@@ -70,13 +72,170 @@ static Service *open_romfs_storage(void) {
 #define MAX_PENDING 16
 typedef struct { char path[1100]; bool deleted, created; } Pending;  // created: the new content is in path + TMP_EXT
 typedef struct { char root[1024]; bool journal; int npending; Pending pending[MAX_PENDING]; } HostFs;
-typedef struct { int fd; bool writes; char path[1100]; } HostFile;
+typedef struct HostFile {
+    int fd;
+    bool writes, save;       // save: on a save mount (one with commits)
+    char path[1100];
+    struct HostFile *wnext;  // (g_wfiles: open for writing)
+    double opened, closed;   // (ms, now_ms)
+    uint64_t thread;         // the guest thread that opened it
+    char callers[160];       // the game's calls that opened it (kernel_game_callers)
+    char plugins[200];       // and Forge plugins' (forge_stack_plugins)
+} HostFile;
 
 // Writing now (Pause/Suspend waits for it: runtime/pause.h): files open for writing, save mounts with changes not
 // committed yet (a save deletes, creates and writes its files, then commits), a commit with its backup
 static int g_writing;
 static void writing(int d) { __atomic_add_fetch(&g_writing, d, __ATOMIC_ACQ_REL); }
 bool fs_writing(void) { return __atomic_load_n(&g_writing, __ATOMIC_ACQUIRE) > 0; }
+
+static double now_ms(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec * 1e3 + t.tv_nsec / 1e6;
+}
+
+static uint64_t cur_thread(void) {
+    KThread *t = kernel_current_thread();
+    return t ? t->id : 0;
+}
+
+static void wait_ms(pthread_cond_t *cv, pthread_mutex_t *mu, long ms) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_nsec += ms * 1000000;
+    while (ts.tv_nsec >= 1000000000) ts.tv_sec++, ts.tv_nsec -= 1000000000;
+    pthread_cond_timedwait(cv, mu, &ts);
+}
+
+// The files open for writing now, and the last few closed: nn::fs aborts a save's commit while one is still open
+// (2002-6457, WriteModeFileNotClosed, checked in the game's own SDK before the commit reaches here), its own message
+// names no file, and the thread that has it open goes on while the abort is logged (often closing it). Each one keeps
+// who opened it and when (fs_log_open_writes, runtime/hle/abort.c). g_wfiles_cond: a file closed, a commit done.
+static pthread_mutex_t g_wfiles_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_wfiles_cond = PTHREAD_COND_INITIALIZER;
+static HostFile *g_wfiles;
+#define RECENT_CLOSED 4
+static HostFile g_closed[RECENT_CLOSED];  // (copies; the newest at (g_nclosed - 1) % RECENT_CLOSED)
+static unsigned g_nclosed;
+static uint64_t g_committer;  // the guest thread committing a save now (commit_guard), 0: none
+
+static void wfile_add(HostFile *f) {
+    Cpu *c = kernel_current_cpu();
+    f->thread = cur_thread();
+    if (c) {
+        kernel_game_callers(c->r[13], f->callers, sizeof f->callers);
+        forge_stack_plugins(c->r[13], f->plugins, sizeof f->plugins);
+    }
+    pthread_mutex_lock(&g_wfiles_lock);
+    // Opened for writing on a save while another thread commits it: wait for the commit (commit_guard checked that
+    // nothing was open for writing, and nn::fs checks it again after)
+    for (double t0 = now_ms(); f->save && g_committer && g_committer != f->thread && now_ms() - t0 < 10000;)
+        wait_ms(&g_wfiles_cond, &g_wfiles_lock, 5);
+    f->opened = now_ms();
+    f->wnext = g_wfiles;
+    g_wfiles = f;
+    pthread_mutex_unlock(&g_wfiles_lock);
+}
+
+static void wfile_remove(HostFile *f) {
+    pthread_mutex_lock(&g_wfiles_lock);
+    for (HostFile **p = &g_wfiles; *p; p = &(*p)->wnext)
+        if (*p == f) { *p = f->wnext; break; }
+    f->closed = now_ms();
+    g_closed[g_nclosed++ % RECENT_CLOSED] = *f;
+    pthread_cond_broadcast(&g_wfiles_cond);
+    pthread_mutex_unlock(&g_wfiles_lock);
+}
+
+static void log_wfile(const char *tag, const HostFile *f, double now) {
+    char closed[48] = "";
+    if (f->closed) snprintf(closed, sizeof closed, ", closed %.0f ms ago", now - f->closed);
+    LOG("%s: %s, opened %.0f ms ago%s by guest thread %llu, the game's calls:%s%s%s\n", tag, f->path, now - f->opened,
+        closed, (unsigned long long)f->thread, f->callers[0] ? f->callers : " (none found)",
+        f->plugins[0] ? ", Forge plugins' calls:" : "", f->plugins);
+}
+
+int fs_log_open_writes(const char *tag) {
+    int n = 0;
+    double now = now_ms();
+    char ctag[160];
+    snprintf(ctag, sizeof ctag, "%s (closed since)", tag);
+    pthread_mutex_lock(&g_wfiles_lock);  // (an abort: the lock is never held long, and never across a guest call)
+    for (HostFile *f = g_wfiles; f; f = f->wnext, n++) log_wfile(tag, f, now);
+    for (unsigned i = 0; i < RECENT_CLOSED && i < g_nclosed; i++) {  // (the newest first, the last 5 s)
+        const HostFile *f = &g_closed[(g_nclosed - 1 - i) % RECENT_CLOSED];
+        if (now - f->closed < 5000) log_wfile(ctag, f, now), n++;
+    }
+    if (n) LOG("%s: (this thread is guest thread %llu)\n", tag, (unsigned long long)cur_thread());
+    pthread_mutex_unlock(&g_wfiles_lock);
+    return n;
+}
+
+// ------------------------------------------------------------------ commits wait for other threads' writes
+// nn::fs's FileSystemAccessor::Commit aborts (2002-6457) when any file of the mount is open for writing. On the console
+// the game commits its save from the thread that writes it. Forge plugins commit it too, from the main thread
+// (forge_fs_unmountSaveData always commits; a plugin re-reading its settings every few seconds commits every few
+// seconds), while the game's save writes `system` on another thread: the game closed at the end of a hunt (2026-11-24,
+// a player with 15 plugins; reproduced with a plugin committing every frame and the game saving). So a commit waits
+// (COMMIT_WAIT_MS at most, then nn::fs decides) until no other thread has a file of the mount open for writing, by the
+// SDK's own list (the one it checks: a file closed here is in it a moment longer) and by the host's (a file still
+// being opened is not in the SDK's yet); while it runs, other threads' save files opened for writing wait
+// (wfile_add). This thread's own open file is not waited for (it would never close): nn::fs aborts as on the console.
+#define COMMIT_WAIT_MS 10000
+#define ACC_COMMIT_SYM "_ZN2nn2fs6detail18FileSystemAccessor6CommitEv"
+#define ACC_FILES      0x20  // FileSystemAccessor: its open files, an intrusive list (the sentinel here; next at +4)
+#define FILE_OPEN_MODE 0x18  // FileAccessor: its nn::fs::OpenMode (2: write; the bit Commit checks)
+static uint32_t g_acc_commit;
+
+static bool sdk_writes_open(uint32_t acc) {  // (read without the SDK's lock: the walk is bounded, and checked again)
+    uint32_t head = acc + ACC_FILES, f = LD32(head + 4);
+    for (int n = 0; f != head && n < 256 && kernel_mapped(f, FILE_OPEN_MODE + 4); n++, f = LD32(f + 4))
+        if (LD32(f + FILE_OPEN_MODE) & 2) return true;
+    return false;
+}
+
+static int save_writers(uint64_t me, bool mine) {  // (g_wfiles_lock held)
+    int n = 0;
+    for (HostFile *f = g_wfiles; f; f = f->wnext) n += f->save && (f->thread == me) == mine;
+    return n;
+}
+
+static void commit_guard(Cpu *c) {
+    uint32_t acc = c->r[0];
+    uint64_t me = cur_thread();
+    double t0 = now_ms();
+    bool waited = false;
+    pthread_mutex_lock(&g_wfiles_lock);
+    for (;;) {
+        bool busy = g_committer && g_committer != me;
+        if (!busy && (save_writers(me, true) || (!save_writers(me, false) && !sdk_writes_open(acc)))) break;
+        if (now_ms() - t0 >= COMMIT_WAIT_MS) {
+            LOG("[fs] a save commit waited %d ms for other threads' files open for writing: going ahead\n",
+                COMMIT_WAIT_MS);
+            break;
+        }
+        waited = true;
+        wait_ms(&g_wfiles_cond, &g_wfiles_lock, 2);  // (the SDK's list changes without a signal here)
+    }
+    if (waited) LOG("[fs] a save commit (guest thread %llu) waited %.0f ms for another thread's save file to close\n",
+                    (unsigned long long)me, now_ms() - t0);
+    uint64_t outer = g_committer;  // (this thread's own commit inside its commit: none known, kept anyway)
+    g_committer = me;
+    pthread_mutex_unlock(&g_wfiles_lock);
+    fnhook_call_next(c, g_acc_commit);
+    pthread_mutex_lock(&g_wfiles_lock);
+    g_committer = outer;
+    pthread_cond_broadcast(&g_wfiles_cond);
+    pthread_mutex_unlock(&g_wfiles_lock);
+}
+
+void fs_commit_guard_init(void) {
+    if (getenv("MHGU_NO_COMMIT_GUARD")) return;  // (A/B: commits as on the console)
+    g_acc_commit = loader_find_symbol(ACC_COMMIT_SYM);
+    if (!g_acc_commit || !fnhook_set_outer(g_acc_commit, hle_register("fs:commit_guard", commit_guard)))
+        LOG("[fs] %s not hooked: save commits do not wait for other threads' writes\n", ACC_COMMIT_SYM);
+}
 typedef struct { DIR *d; char path[1024]; int mode; } HostDir;
 
 static const char *in_path(IpcReq *req, int i) {
@@ -427,7 +586,7 @@ static void file(Service *s, IpcReq *req, IpcResp *resp) {
 static void file_close(Service *s) {
     HostFile *f = s->state;
     if (f->fd >= 0) close(f->fd);
-    if (f->writes) writing(-1);
+    if (f->writes) writing(-1), wfile_remove(f);
     free(f);
 }
 
@@ -559,8 +718,9 @@ static void filesystem(Service *s, IpcReq *req, IpcResp *resp) {
         if (fd < 0) { resp->result = errno_result(); break; }
         HostFile *f = calloc(1, sizeof *f);
         f->fd = fd;
-        if ((f->writes = (mode & 6) != 0)) writing(1);  // (Write, Append)
         strlcpy(f->path, p, sizeof f->path);
+        f->save = fs->journal;
+        if ((f->writes = (mode & 6) != 0)) writing(1), wfile_add(f);  // (Write, Append)
         Service *fsvc = service_new("IFile", file, f);
         fsvc->on_close = file_close;
         ipc_return_object(resp, fsvc);

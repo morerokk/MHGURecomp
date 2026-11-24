@@ -25,6 +25,9 @@
 #include <climits>
 #include <cstring>
 #include <deque>
+#ifdef MHGU_DUAL_SCREEN
+#include <dirent.h>  // (the bottom screen's wallpapers folder)
+#endif
 #include <functional>
 #include <map>
 #include <memory>
@@ -435,6 +438,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(menu_chord);
     SAME(title_back_exit);
     SAME(show_battery);
+    SAME(show_temperature);
     SAME(updates);
     SAME(hp.village);
     SAME(hp.quests);
@@ -449,6 +453,11 @@ bool equal(const Config &a, const Config &b) {
         strcmp(a.ldn_room_pass, b.ldn_room_pass) || strcmp(a.ldn_room_nick, b.ldn_room_nick) ||
         strcmp(a.audio_device, b.audio_device))
         return false;
+#ifdef MHGU_DUAL_SCREEN
+    if (a.second_display != b.second_display || strcmp(a.bottom_panels, b.bottom_panels) || a.bottom_background != b.bottom_background ||
+        strcmp(a.bottom_wallpaper, b.bottom_wallpaper))
+        return false;
+#endif
     for (int n = 0; n < 4; ++n)
         if (a.hp.scale[n] != b.hp.scale[n])
             return false;
@@ -1581,7 +1590,7 @@ void action_rows(std::vector<Row> &r) {
     }
     if (kind == TAB_HUNT)
         toggle("act.arts", "Hunter Art keys", &p.art_keys,
-               "On: each Hunter Art has an input of its own (keyboard: 1, 2 and 3 unless rebound below), whatever buttons the game's Control Type gives them; those keep working too. With a Control Type that puts the Arts on the D-pad, the HUD shows these keys for them on keyboard and mouse.");
+               "On: each Hunter Art has an input of its own (keyboard: 1, 2 and 3 unless rebound below), whatever buttons the game's Control Type gives them; those keep working too. On keyboard and mouse the HUD shows these keys for them, whatever the Control Type.");
     if (kind == TAB_HUNT) {
         // the categories OpenTalk is for: a comma list, read off log.txt with Target log on
         char list[160];
@@ -1999,6 +2008,12 @@ void reset_section() {
         c.aspect_ratio = f.aspect_ratio;
         c.fov = f.fov;
         c.ui_anchor = f.ui_anchor;
+#if defined(MHGU_DUAL_SCREEN) && !defined(__ANDROID__)  // (Android: on its own tab)
+        c.second_display = f.second_display;
+        SDL_strlcpy(c.bottom_panels, f.bottom_panels, sizeof c.bottom_panels);
+        c.bottom_background = f.bottom_background;
+        SDL_strlcpy(c.bottom_wallpaper, f.bottom_wallpaper, sizeof c.bottom_wallpaper);
+#endif
         break;
     case 1:
         c.fsr = f.fsr;
@@ -2010,6 +2025,7 @@ void reset_section() {
         c.fsr_metalfx = f.fsr_metalfx;
         c.show_fps = f.show_fps;
         c.show_battery = f.show_battery;
+        c.show_temperature = f.show_temperature;
         c.fps = f.fps;
         c.vsync = f.vsync;
         c.shader_prewarm = f.shader_prewarm;
@@ -2108,6 +2124,12 @@ void reset_section() {
         c.backups_on = f.backups_on;
         c.save_backups = f.save_backups;
         SDL_strlcpy(c.game_dir, f.game_dir, sizeof c.game_dir);
+#ifdef MHGU_DUAL_SCREEN
+        c.second_display = f.second_display;
+        SDL_strlcpy(c.bottom_panels, f.bottom_panels, sizeof c.bottom_panels);
+        c.bottom_background = f.bottom_background;
+        SDL_strlcpy(c.bottom_wallpaper, f.bottom_wallpaper, sizeof c.bottom_wallpaper);
+#endif
         break;
 #endif
     case APP_PAGE:
@@ -2366,6 +2388,99 @@ std::vector<std::string> playback_devices() {
     SDL_free(ids);
     return list;
 }
+#ifdef MHGU_DUAL_SCREEN
+// The Dual Screen rows (Android tab; PC: Display tab): on / off, and the bottom screen's panels from a list of MHXX-style layouts
+// (bottom_hud.c). A list in the ini that is none of these shows as "Custom" and is kept until another is picked.
+struct BottomLayout {
+    const char *name, *panels;
+};
+const BottomLayout bottom_layouts[] = {
+    {"MHXX: item, map, Hunter Arts right", BOTTOM_PANELS_DEFAULT},
+    {"Map, target camera, Hunter Arts right", "map@0,0 target@0,2 arts3v@2,0"},
+    {"Hunter Arts left, map, target camera", "arts3v@0,0 map@2,0 target@2,2"},
+    {"Hunter Arts in a row, map, item bar, target", "arts3h@0,0 map@0,1 itembar@2,1 target@2,2"},
+    {"Status, item bar, target, map", "status@0,0 itembar@0,1 target@0,2 map@2,1"},
+    {"Status, Hunter Arts in a row, item bar, target", "status@0,0 arts3h@0,1 itembar@0,2 target@2,2"},
+    {"MHXX default: Hunter Arts, D-pad, target", "arts3v@0,0 dpad@2,0 target@2,2"},
+};
+// The BMPs in wallpapers/ in the app's files (second_display_android.c loads the chosen one from there), sorted by name;
+// looked up once a second (the rows are rebuilt every frame).
+std::vector<std::string> wallpaper_files() {
+    static std::vector<std::string> files;
+    static Uint64 when;
+    if (when && SDL_GetTicks() - when < 1000)
+        return files;
+    when = SDL_GetTicks();
+    files.clear();
+    if (DIR *d = opendir("wallpapers")) {
+        while (struct dirent *e = readdir(d)) {
+            size_t n = strlen(e->d_name);
+            if (n > 4 && n < sizeof s.draft.bottom_wallpaper && !strcasecmp(e->d_name + n - 4, ".bmp"))
+                files.push_back(e->d_name);
+        }
+        closedir(d);
+    }
+    std::sort(files.begin(), files.end());
+    return files;
+}
+void dual_screen_rows(std::vector<Row> &r) {
+    Config &c = s.draft;
+    header(r, "dual.header", tr("Dual screen"));
+    bool there = config_second_display_available();
+#ifdef __ANDROID__
+    add_bool(r, "dual", "Bottom screen (dual-screen handheld)", &c.second_display, ini("SecondDisplay"));
+    r.back().help = tr("MHXX's bottom screen on this device's second screen: the item bar, the map, the Hunter Arts and the other panels you pick leave the main screen and show there, and touching them works like on the 3DS (use a Hunter Art, the item, switch the target). For dual-screen handhelds such as the AYN Thor; needs a device with a second screen.");
+#else
+    add_bool(r, "dual", "Bottom screen (second monitor)", &c.second_display, ini("SecondDisplay"));
+    r.back().help = tr("MHXX's bottom screen on another monitor than the game's: the item bar, the map, the Hunter Arts and the other panels you pick leave the game's window and fill that monitor, and touching or clicking them works like on the 3DS (use a Hunter Art, the item, switch the target). For a small touch screen or a dual-screen handheld's second panel; needs a second monitor.");
+#endif
+    if (!there) {  // (no second display: greyed out, the setting kept as it is)
+        r.back().enabled = false;
+#ifdef __ANDROID__
+        r.back().value = tr("No second screen");
+#else
+        r.back().value = tr("No second monitor");
+#endif
+        return;
+    }
+    if (!c.second_display) return;  // (its options only while it is on)
+    constexpr int n = (int)(sizeof bottom_layouts / sizeof bottom_layouts[0]);
+    std::vector<std::string> names;
+    int now = n;
+    for (int i = 0; i < n; i++) {
+        names.push_back(tr(bottom_layouts[i].name));
+        if (!strcmp(c.bottom_panels, bottom_layouts[i].panels)) now = i;
+    }
+    if (now == n) names.push_back(tr("Custom (from mhgurecomp.ini)"));
+    add_choice(
+        r, "dual.panels", "Bottom screen panels", now, names,
+        [](int v) {
+            constexpr int count = (int)(sizeof bottom_layouts / sizeof bottom_layouts[0]);
+            if (v < count) SDL_strlcpy(s.draft.bottom_panels, bottom_layouts[v].panels, sizeof s.draft.bottom_panels);
+        },
+        ini("Panels"));
+    add_choice(
+        r, "dual.background", "Bottom screen background", c.bottom_background, {tr("Wallpaper"), tr("Dark"), tr("Black (OLED: off)")},
+        [](int v) { s.draft.bottom_background = v; }, ini("Background"));
+    if (c.bottom_background != BOTTOM_BG_WALLPAPER) return;
+    std::vector<std::string> files = wallpaper_files();
+    files.insert(files.begin(), "");
+    auto at = std::find(files.begin(), files.end(), std::string(c.bottom_wallpaper));
+    if (at == files.end()) at = files.insert(files.end(), c.bottom_wallpaper);
+    std::vector<std::string> shown;
+    for (const std::string &f : files)
+        shown.push_back(f.empty() ? tr("Change every 30 seconds") : f.size() > 4 ? f.substr(0, f.size() - 4) : f);
+    add_choice(
+        r, "dual.wallpaper", "Bottom screen wallpaper", (int)(at - files.begin()), shown,
+        [files](int v) { SDL_strlcpy(s.draft.bottom_wallpaper, files[(size_t)v].c_str(), sizeof s.draft.bottom_wallpaper); },
+        ini("Wallpaper"));
+#ifdef __ANDROID__
+    r.back().help = tr("Your own pictures: put 24-bit BMP files in the wallpapers folder in the app's files (Files folder above lets you reach it). They are scaled to cover the bottom screen.");
+#else
+    r.back().help = tr("Your own pictures: put 24-bit BMP files in the wallpapers folder beside the game. They are scaled to cover the bottom screen.");
+#endif
+}
+#endif
 std::vector<Row> main_rows() {
     std::vector<Row> r;
     Config &c = s.draft;
@@ -2407,6 +2522,9 @@ std::vector<Row> main_rows() {
         add_choice(
             r, "anchor", "HUD anchor", c.ui_anchor - 1, {"16:9", "21:9", "32:9", tr("Edges")},
             [](int v) { c.ui_anchor = v + 1; }, ini("UIAnchor"));
+#if defined(MHGU_DUAL_SCREEN) && !defined(__ANDROID__)  // (Android: on its own tab)
+        dual_screen_rows(r);
+#endif
         break;
     case 1:
         header(r, "audio.header", tr("Audio"));
@@ -2441,6 +2559,9 @@ std::vector<Row> main_rows() {
         add_choice(r, "show.battery", "Battery indicator", c.show_battery, {tr("Off"), tr("With FPS counter"), tr("By itself")},
                    [](int v) { c.show_battery = v; }, ini("ShowBattery"));
         r.back().help = tr("The battery's charge, in the FPS counter's box or in a box of its own (drag it like the FPS counter).");
+        add_choice(r, "show.temperature", "Temperature", c.show_temperature, {tr("Off"), tr("Celsius"), tr("Fahrenheit")},
+                   [](int v) { c.show_temperature = v; }, ini("ShowTemperature"));
+        r.back().help = tr("The device's temperature (its battery's) under the FPS counter, or in a box of its own when the FPS counter is off.");
 #endif
         number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, ini("FPS"));
         {  // left / right: one frame per second more or less; Confirm: the common ones
@@ -2579,11 +2700,7 @@ std::vector<Row> main_rows() {
              !*c.ldn_server ? std::string(tr("Default")) + (*LDN_DEFAULT_SERVER ? " (" LDN_DEFAULT_SERVER ")" : "")
                             : c.ldn_server,
              ini("Server"));
-#ifdef __ANDROID__
-        text(r, "key", "Matchmaking key", c.ldn_key, sizeof c.ldn_key, *c.ldn_key ? c.ldn_key : tr("Public (Android players only)"), ini("Key"));
-#else
         text(r, "key", "Matchmaking key", c.ldn_key, sizeof c.ldn_key, *c.ldn_key ? c.ldn_key : tr("Public"), ini("Key"));
-#endif
         hub_check(r);
         add_bool(r, "direct", "Direct connections", &c.ldn_direct, ini("Direct"));
         r.back().help = tr("In an internet hub, your game and the host's send their packets straight to each other when both routers let them, for a lower ping; else through the hub server. The other player's game then sees your IP address. Off: always through the hub server.");
@@ -2810,6 +2927,9 @@ std::vector<Row> main_rows() {
         r.back().help = tr("Adds a mod from a folder anywhere on this device. The app checks the folder's layout and offers to fix it if the game couldn't find the mod's files. Close and reopen the app to load it.");
         action(r, "import.game", tr("Import game files"), []() { ui_request_import(1); });
         r.back().help = tr("Copies the exefs and romfs folders into the app from any folder on this device, replacing the game files it has, and uses them from now on. The app closes afterwards.");
+#ifdef MHGU_DUAL_SCREEN
+        dual_screen_rows(r);
+#endif
         break;
     }
 #endif
@@ -2872,6 +2992,14 @@ bool save() {
         acts().saved = acts().draft;
     }
     s.saved = s.draft;
+#ifdef MHGU_DUAL_SCREEN
+    // (the bottom screen's settings apply at once: bottom_hud.c and second_display_android.c read them from g_config)
+    g_config.second_display = s.draft.second_display;
+    SDL_strlcpy(g_config.bottom_panels, s.draft.bottom_panels, sizeof g_config.bottom_panels);
+    g_config.bottom_background = s.draft.bottom_background;
+    SDL_strlcpy(g_config.bottom_wallpaper, s.draft.bottom_wallpaper, sizeof g_config.bottom_wallpaper);
+    config_second_display_request();  // (applied by the UI thread: nvn/vulkan/second_display*.c)
+#endif
     s.saved_notice = true;
     s.error.clear();
     if (acts().layout == ACT_LAYOUT_SIMPLE && acts().draft.enable) {  // (saved all the same: the player may mean it)

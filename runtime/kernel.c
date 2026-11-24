@@ -536,6 +536,24 @@ int kernel_stack_callers(uint32_t sp, char *line, size_t size) {
     return k;
 }
 
+// The same, but only the game's own code (main), further up: below an IPC call the SDK's frames take the room
+// (fs.c, which game function opened a file)
+int kernel_game_callers(uint32_t sp, char *line, size_t size) {
+    int n = 0, k = 0;
+    line[0] = 0;
+    for (uint32_t a = sp; a < sp + 0x1000 && k < 8 && n < (int)size - 12; a += 4) {
+        if (!kernel_mapped(a, 4)) break;
+        uint32_t v = LD32(a);
+        if (v < MAIN_BASE + 4 || v >= SDK_BASE || (v & 3)) continue;
+        uint32_t ins = LD32(v - 4);
+        if ((ins & 0x0F000000u) != 0x0B000000u && (ins & 0xFE000000u) != 0xFA000000u && (ins & 0x0FFFFFF0u) != 0x012FFF30u)
+            continue;
+        n += snprintf(line + n, size - n, " %x", v);
+        k++;
+    }
+    return k;
+}
+
 // Where the game is: its last return address (with the symbol it is in, when known) and its callers
 void kernel_log_guest_stack(const char *tag, const Cpu *c) {
     char line[400];

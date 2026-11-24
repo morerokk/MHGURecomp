@@ -44,6 +44,7 @@ static SDL_AtomicInt live_hdr_saturation = {0x42480000}, live_hdr_highlight_satu
 // [Performance]
 static SDL_AtomicInt show_fps;
 static SDL_AtomicInt show_battery;
+static SDL_AtomicInt show_temperature;
 static SDL_AtomicInt live_fps;
 static SDL_AtomicInt live_vsync = {1};
 // [Controls]
@@ -202,6 +203,7 @@ void config_store_loaded(const Config *c) {
     SDL_SetAtomicInt(&menu_chord, c->menu_chord);
     SDL_SetAtomicInt(&title_back_exit, c->title_back_exit);
     SDL_SetAtomicInt(&show_battery, c->show_battery);
+    SDL_SetAtomicInt(&show_temperature, c->show_temperature);
 }
 void config_runtime_init(const Config *effective) {
     startup = saved; runtime_ready = true; runtime_fsr = effective->fsr != 0;
@@ -231,6 +233,12 @@ int config_live_menu_confirm(void) { return SDL_GetAtomicInt(&live_menu_confirm)
 int config_live_face_buttons(void) { return SDL_GetAtomicInt(&live_face); }
 int config_live_kbm_prompts(void) { return SDL_GetAtomicInt(&live_kbm_prompts); }
 int config_live_background_input(void) { return SDL_GetAtomicInt(&live_background); }
+// [Dual Screen] (nvn/vulkan/second_display*.c): kept here so the settings menu needs nothing of the renderer
+static SDL_AtomicInt second_display_there, second_display_changed;
+int config_second_display_available(void) { return SDL_GetAtomicInt(&second_display_there); }
+void config_set_second_display_available(int yes) { SDL_SetAtomicInt(&second_display_there, yes != 0); }
+void config_second_display_request(void) { SDL_SetAtomicInt(&second_display_changed, 1); }
+int config_second_display_take_request(void) { return SDL_SetAtomicInt(&second_display_changed, 0); }
 int config_live_combo_window(void) { return SDL_GetAtomicInt(&live_combo); }
 int config_live_chat_key(void) { return SDL_GetAtomicInt(&live_chat_key); }
 int config_live_pause_key(void) { return SDL_GetAtomicInt(&live_pause_key); }
@@ -327,6 +335,7 @@ bool config_confirm_exit(void) { return SDL_GetAtomicInt(&confirm_exit) != 0; }
 bool config_menu_chord(void) { return SDL_GetAtomicInt(&menu_chord) != 0; }
 bool config_title_back_exit(void) { return SDL_GetAtomicInt(&title_back_exit) != 0; }
 int config_show_battery(void) { return SDL_GetAtomicInt(&show_battery); }
+int config_show_temperature(void) { return SDL_GetAtomicInt(&show_temperature); }
 bool config_show_fps(void) { return SDL_GetAtomicInt(&show_fps) != 0; }
 bool config_restart_required(const Config *c) {
     if (!runtime_ready) return false;

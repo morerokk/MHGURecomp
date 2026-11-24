@@ -4,7 +4,7 @@ register, flag, VFP register and the scratch memory are compared.
 
 Usage: test_lift.py <nso> <base> [--tests N] [--vectors K] [--seed S] [--only REGEX] [--interp | --interp-ops]
 --interp runs the same instructions through the interpreter (runtime/interp.c) instead; --interp-ops through the
-pre-decoded ops its runs use (interp_exec_op).
+pre-decoded ops its runs use (interp_exec_op); --jit as the JIT's x86-64 code (interp_exec_jit: runtime/interp_jit.h).
 Needs clang on PATH (MSYS2 UCRT64). Exit status 0 when everything matches.
 """
 import argparse
@@ -165,8 +165,9 @@ def main():
     ap.add_argument('--keep', action='store_true')
     ap.add_argument('--interp', action='store_true', help='test runtime/interp.c instead of the lifted C')
     ap.add_argument('--interp-ops', action='store_true', help='test the interpreter\'s pre-decoded ops')
+    ap.add_argument('--jit', action='store_true', help='test the interpreter\'s JIT (x86-64 code)')
     args = ap.parse_args()
-    interp_fn = 'interp_exec_op' if args.interp_ops else 'interp_exec' if args.interp else None
+    interp_fn = 'interp_exec_jit' if args.jit else 'interp_exec_op' if args.interp_ops else 'interp_exec' if args.interp else None
     rng = random.Random(args.seed)
 
     m = Module('t', args.nso, args.base)
@@ -236,7 +237,8 @@ def main():
     cmd = ['clang', '-O1', '-fno-strict-aliasing', '-ffp-contract=off', arch, '-w',
            f'-I{os.path.join(ROOT, "runtime")}', '-o', exe, os.path.join(HERE, 'test_harness.c'),
            os.path.join(work, 'tests.c'), os.path.join(ROOT, 'runtime', 'simd_int.c'),
-           os.path.join(ROOT, 'runtime', 'neon.c')] + ([os.path.join(ROOT, 'runtime', 'interp.c')] if interp_fn else [])
+           os.path.join(ROOT, 'runtime', 'neon.c')] + ([os.path.join(ROOT, 'runtime', 'interp.c')] if interp_fn else []) + \
+          ([os.path.join(ROOT, 'runtime', 'jit_mem.c')] if args.jit else [])
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode:
         print(r.stderr[:6000], file=sys.stderr)

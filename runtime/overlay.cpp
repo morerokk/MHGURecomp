@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cfloat>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -51,6 +52,9 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #endif
 
 #include "config.h"
+#ifdef __ANDROID__
+#include "android_files.h"
+#endif
 #include "hdr_stats.h"
 #include "forge.h"
 #include "menu_confirm.h"
@@ -817,9 +821,22 @@ static bool battery_text(uint64_t now, char *out, size_t size) {
     return true;
 }
 
+#ifdef __ANDROID__
+// The device's temperature ([Performance] ShowTemperature), "36°C": the battery's (runtime/platform/android.c), the
+// number and unit only. false while it isn't known.
+static bool temperature_text(int unit, char *out, size_t size) {
+    int tenths = android_temperature();
+    if (tenths == INT_MIN) return false;
+    if (unit == TEMP_FAHRENHEIT) snprintf(out, size, "%.0f\xC2\xB0" "F", tenths * 0.18f + 32);
+    else snprintf(out, size, "%.0f\xC2\xB0" "C", tenths * 0.1f);
+    return true;
+}
+#endif
+
 // The frame rate ([Performance] ShowFPS): frames the game presented, counted over half a second. An ImGui window of
 // its own, so it can be dragged while the settings menu (which gets the mouse) is open; ImGui keeps where it was put in
-// forge_imgui.ini. With ShowBattery = WithFPS the battery's charge is in it; ByItself: a window of its own.
+// forge_imgui.ini. With ShowBattery = WithFPS the battery's charge is in it; ByItself: a window of its own. Android's
+// ShowTemperature: a line under the frame rate, or a window of its own with the frame rate off.
 static void draw_fps(uint64_t now) {
     static uint64_t t0, f0;
     static float fps, ms;
@@ -833,8 +850,18 @@ static void draw_fps(uint64_t now) {
     }
 #if defined(__ANDROID__) || defined(__APPLE__)  // (a phone's or a Mac laptop's battery)
     int battery = config_show_battery();
+#ifdef __ANDROID__  // (the temperature: an Android-only setting)
+    int unit = config_show_temperature();
+    char temps[16];
+    bool have_temps = unit != TEMP_OFF && temperature_text(unit, temps, sizeof temps);
+#else
+    char temps[1] = "";
+    bool have_temps = false;
+#endif
 #else
     int battery = BATTERY_OFF;
+    char temps[1] = "";
+    bool have_temps = false;
 #endif
     char charge[32];
     bool have_charge = battery != BATTERY_OFF && battery_text(now, charge, sizeof charge);
@@ -846,7 +873,13 @@ static void draw_fps(uint64_t now) {
         if (ImGui::Begin("FPS##counter", nullptr, flags)) {
             if (have_charge && battery == BATTERY_WITH_FPS) ImGui::Text("%.0f FPS  %.1f ms  %s", fps, ms, charge);
             else ImGui::Text("%.0f FPS  %.1f ms", fps, ms);
+            if (have_temps) ImGui::TextUnformatted(temps);
         }
+        ImGui::End();
+    } else if (have_temps) {
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.6f);
+        if (ImGui::Begin("Temperature##counter", nullptr, flags)) ImGui::TextUnformatted(temps);
         ImGui::End();
     }
     if (have_charge && battery == BATTERY_ALONE) {
@@ -1089,7 +1122,7 @@ void overlay_frame(void *cpu) {
     ImGuiIO &io = ImGui::GetIO();
     g_wants_text = open && io.WantTextInput;  // (as of the last frame; the window side reads it: runtime/textinput.c)
 #ifdef __ANDROID__
-    bool fps = config_show_fps() || config_show_battery() == BATTERY_ALONE;
+    bool fps = config_show_fps() || config_show_battery() == BATTERY_ALONE || config_show_temperature() != TEMP_OFF;
 #else
     bool fps = config_show_fps();
 #endif

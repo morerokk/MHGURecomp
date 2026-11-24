@@ -3,11 +3,12 @@
 //   MHGU_GPU=<index>       which Vulkan device (default: the first discrete GPU)
 //   MHGU_VSYNC=0|1         0: no vsync (tearing possible, lowest latency), 1: classic vsync (FIFO). Default: the
 //                          settings' VSync - On: mailbox (no tearing; the game paces itself), FIFO where there is
-//                          none (the R9's driver), Off: immediate. MHGU_VK_PRESENT=fifo|mailbox|immediate picks the present mode directly.
+//                          none (the R9's driver), Off: immediate (mailbox where there is none, as in gamescope). MHGU_VK_PRESENT=fifo|mailbox|immediate picks the present mode directly.
 //   MHGU_SHOT_AT=<frame>[,<frame>...]   save the window image at those presented frames as shots/frame_N.png
 //   MHGU_FPS=1             frames per second in the log every 2 s
 //   MHGU_NO_BC=1           act as if the GPU had no BC textures, as phone GPUs (they are decoded on the CPU then)
 //   MHGU_VK11=1            take the path for Vulkan 1.1 devices on any device (g_vk.api11), to test it on a PC
+//   MHGU_VK_NO_POLL=1|0    no driver completion checks (fences waited for by a thread: on by itself for Turnip on Android)
 //   MHGU_NO_LOADING_SCREEN=1   no loading indicator before the game's first frame (a black window, as before)
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -24,6 +25,10 @@
 #include "vk.h"
 #ifdef __APPLE__
 #include <vulkan/vulkan_metal.h>  // (VK_EXT_metal_objects: MetalFX, metalfx.m)
+#endif
+#ifdef MHGU_DUAL_SCREEN
+#include "bottom_hud.h"
+#include "second_display.h"
 #endif
 
 VkG g_vk;
@@ -252,6 +257,21 @@ static void create_device(void) {
                                       .pNext = g_vk.api11 ? (void *)&s16_have : (void *)&f11_have};
     vkGetPhysicalDeviceFeatures2(g_vk.phys, &have);
     g_vk.fences = !f12_have.timelineSemaphore;
+    // Turnip (Mesa's Adreno driver) on Android's KGSL: a completion check can wait for the GPU there, so none are made
+    // (exec.c "No status polls", issue #444). MHGU_VK_NO_POLL=1 / 0 turns that on / off on any device.
+#ifdef __ANDROID__
+    if (!g_vk.api11) {
+        VkPhysicalDeviceDriverProperties dp = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+        VkPhysicalDeviceProperties2 p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &dp};
+        vkGetPhysicalDeviceProperties2(g_vk.phys, &p2);
+        g_vk.no_poll = dp.driverID == VK_DRIVER_ID_MESA_TURNIP;
+    }
+#endif
+    if (getenv("MHGU_VK_NO_POLL")) g_vk.no_poll = atoi(getenv("MHGU_VK_NO_POLL")) != 0;
+    if (g_vk.no_poll) {
+        g_vk.fences = true;
+        LOG("[vk] no completion checks: a fence per submission, waited for by a thread of its own\n");
+    }
     g_vk.divisor = g_vk.divisor && div_have.vertexAttributeInstanceRateDivisor;
     g_vk.custom_border = g_vk.custom_border && cbc_have.customBorderColors && cbc_have.customBorderColorWithoutFormat;
 
@@ -426,6 +446,11 @@ void vk_set_msaa(uint32_t n) {
 static int swapchain_vsync = -1;
 static int configured_msaa = -1;
 static const char *present_name = "?";  // the swapchain's present mode, for the log
+static bool offers_present_mode(const VkPresentModeKHR *modes, uint32_t n, VkPresentModeKHR mode) {
+    for (uint32_t i = 0; i < n; i++)
+        if (modes[i] == mode) return true;
+    return false;
+}
 static VkPresentModeKHR present_mode(void) {
     swapchain_vsync = config_live_vsync();
     // MAILBOX by default: no tearing, and the game paces itself (its own 30 fps vsync waits); with FIFO the game's frames
@@ -440,11 +465,17 @@ static VkPresentModeKHR present_mode(void) {
     VkPresentModeKHR m[16];
     if (n > 16) n = 16;
     vkGetPhysicalDeviceSurfacePresentModesKHR(g_vk.phys, g_vk.surface, &n, m);
-    for (uint32_t i = 0; i < n; i++)
-        if (m[i] == want) {
-            present_name = want == VK_PRESENT_MODE_FIFO_KHR ? "fifo" : want == VK_PRESENT_MODE_IMMEDIATE_KHR ? "immediate" : "mailbox";
-            return want;
-        }
+    if (offers_present_mode(m, n, want)) {
+        present_name = want == VK_PRESENT_MODE_FIFO_KHR ? "fifo" : want == VK_PRESENT_MODE_IMMEDIATE_KHR ? "immediate" : "mailbox";
+        return want;
+    }
+    // Without vsync, MAILBOX before FIFO: gamescope offers no IMMEDIATE (Mesa's Wayland WSI has it only with the
+    // compositor's tearing-control protocol) and treats MAILBOX as a mode that may tear when tearing is allowed.
+    if (want == VK_PRESENT_MODE_IMMEDIATE_KHR && offers_present_mode(m, n, VK_PRESENT_MODE_MAILBOX_KHR)) {
+        LOG("[vk] present mode immediate not available: mailbox\n");
+        present_name = "mailbox";
+        return VK_PRESENT_MODE_MAILBOX_KHR;
+    }
     LOG("[vk] present mode %s not available: FIFO (vsync)\n", e);
     present_name = "fifo";
     return VK_PRESENT_MODE_FIFO_KHR;
@@ -1222,6 +1253,11 @@ void backend_init(void) {
     vk_shaders_init();
     vk_fsr_init();  // ([Upscaler] FSR: fsr.c)
     create_swapchain();
+#ifdef MHGU_DUAL_SCREEN
+    // ([Dual Screen] SecondDisplay: the bottom screen on Android's second display, second_display_android.c; or, test,
+    // MHGU_BOTTOM_HUD_TEST: its picture saved in shots/ without one)
+    if (!bottom_hud_test_init()) second_display_apply();
+#endif
     atexit(exit_handler);
     backend_ready = true;
     pthread_t watch;

@@ -19,6 +19,14 @@
 // parameters 0x1d up and 0x1e down, degrees), and steps +0x9d8 / +0x9dc straight toward them. So 0x4a1738 is hooked
 // too, with the invert option for aiming (options byte +0x66), adding to the eye's angles as well (no lag).
 //
+// Walking while aimed with a bowgun (action 0002:016) runs both each update: 0x4a1738, then the stick handler, so the
+// mouse goes to the camera. The yaw sticks (the hunter follows the camera), but the aim camera, still running, puts
+// +0x9e8 back from the hunter's aim pitch, so the mouse couldn't aim up or down. So the aim camera is hooked as well:
+// when it ran for this camera since the stick handler last did, its pitch follows the aim, and the mouse's pitch
+// goes to the aim as in 0x4a1738's hook. Its yaw goes to the camera and also straight to the hunter's yaw and the
+// eye's, which otherwise ease toward the camera's over many updates (it felt like the stick). (The Bow charging on the move runs both too, but not the aim camera: there
+// the camera's own pitch is the aim, and stays the mouse's.)
+//
 // Where neither runs (villages, whose camera doesn't turn, or other cameras) host_input.c gives the mouse to the
 // right stick as before (mousecam_active).
 #include <math.h>
@@ -31,6 +39,7 @@
 #define FN_CAMERA_STICK 0x2255ccu  // uQuestCamera's right stick handler: r0 = the camera, r1 = the invert bits
 #define FN_AIM_TURN     0x4a1738u  // the hunter's turn while aiming: r0 = the player, r1 = the mode
 #define FN_CAM_PARAM    0x21eadcu  // (camera, parameter): s0 = the camera's parameter
+#define FN_AIM_CAMERA   0x226e84u  // the aim camera's update: r0 = the camera
 #define G_OPTIONS       0x1a8ca48u  // the game's options object *
 #define OPT_AIM_INVERT  0x66u      // options byte: the invert bits while aiming
 #define QC_PLAYER       0x85cu
@@ -62,6 +71,8 @@ static int g_log_on = -1;               // MHGU_MOUSECAM_LOG=1: every turn appli
 static bool g_last_aim;                 // (the last turn went to the aiming hunter)
 static uint32_t g_cam;             // (the game's thread) the camera the stick handler last had
 static uint32_t g_stick_runs;      // (the game's thread) how many times it ran
+static uint32_t g_aimcam_cam, g_aimcam_runs;  // (the game's thread) the camera the aim camera last ran for, at which g_stick_runs
+static uint32_t g_aim_mode;        // (the game's thread) the mode 0x4a1738 last had
 
 static bool sane(uint32_t a) { return a >= 0x08000000u && a < 0xF0000000u && !(a & 3); }
 
@@ -125,8 +136,11 @@ void mousecam_status(void) {
         LD32(cam + QC_PITCH_NOW) & 0xffffu, g_last_aim);
 }
 
+static int aim_pitch_turn(Cpu *c, uint32_t cam, uint32_t pl, uint32_t mode, int ip);
+
 static void camera_stick(Cpu *c) {
     uint32_t cam = c->r[0], invert = c->r[1];
+    bool aim_cam = cam == g_aimcam_cam && g_aimcam_runs == g_stick_runs;  // (the aim camera ran since the last time)
     fnhook_call_original(c, FN_CAMERA_STICK);
     g_cam = cam, g_stick_runs++;
     int iy, ip;
@@ -136,6 +150,21 @@ static void camera_stick(Cpu *c) {
     if (iy) {
         ST32(cam + QC_YAW_TO, (LD32(cam + QC_YAW_TO) + (uint32_t)iy) & 0xffffu);
         ST32(cam + QC_YAW_NOW, (LD32(cam + QC_YAW_NOW) + (uint32_t)iy) & 0xffffu);
+    }
+    uint32_t pl = LD32(cam + QC_PLAYER);
+    if (aim_cam && sane(pl)) {  // (the eye follows the hunter's aim: turn the hunter and the eye too, without their easing)
+        if (iy) {
+            ST32(pl + PL_AIM_YAW, (LD32(pl + PL_AIM_YAW) + (uint32_t)iy) & 0xffffu);
+            ST32(cam + QC_EYE_YAW, (LD32(cam + QC_EYE_YAW) + (uint32_t)iy) & 0xffffu);
+        }
+        if (!ip) {
+            if (g_log_on == 1) LOG("[mousecam] camera turn yaw %+d units (aiming); camera yaw %04x -> %04x\n", iy, yaw0, LD32(cam + QC_YAW_TO) & 0xffffu);
+            return;
+        }
+        if ((LD8(LD32(G_OPTIONS) + OPT_AIM_INVERT) ^ invert) & 1) ip = -ip;  // (the aim's invert option; the fraction left stays the camera's way)
+        int moved = aim_pitch_turn(c, cam, pl, g_aim_mode, ip);
+        if (g_log_on == 1) LOG("[mousecam] camera turn yaw %+d units, aim pitch %+d units (moved %+d, mode %u); camera yaw %04x -> %04x\n", iy, ip, moved, g_aim_mode, yaw0, LD32(cam + QC_YAW_TO) & 0xffffu);
+        return;
     }
     if (ip) {
         int to = (int16_t)LD32(cam + QC_PITCH_TO), next = clamp_pitch(to + ip);
@@ -168,9 +197,22 @@ static int aim_pitch(Cpu *c, uint32_t cam, uint32_t pl, int ip) {
     return (int)((aim - was) * units_per_aim);
 }
 
+// The aiming hunter's pitch moved by ip camera units, the eye's with it: the units the eye moved.
+static int aim_pitch_turn(Cpu *c, uint32_t cam, uint32_t pl, uint32_t mode, int ip) {
+    if (mode == 1) {
+        int lean = (int16_t)LD16(pl + PL_AIM_LEAN) + ip;
+        ST16(pl + PL_AIM_LEAN, lean < -AIM_LEAN_MAX ? -AIM_LEAN_MAX : lean > AIM_LEAN_MAX ? AIM_LEAN_MAX : lean);
+        return 0;
+    }
+    int moved = aim_pitch(c, cam, pl, ip);
+    ST32(cam + QC_EYE_PITCH, (LD32(cam + QC_EYE_PITCH) + (uint32_t)moved) & 0xffffu);
+    return moved;
+}
+
 static void aim_turn(Cpu *c) {
     uint32_t pl = c->r[0], mode = c->r[1], cam = g_cam;
     fnhook_call_original(c, FN_AIM_TURN);
+    g_aim_mode = mode;
     static uint32_t last_runs;
     bool stick_ran = g_stick_runs != last_runs;  // (some options keep the stick on the camera while aiming)
     last_runs = g_stick_runs;
@@ -184,18 +226,19 @@ static void aim_turn(Cpu *c) {
         ST32(cam + QC_EYE_YAW, (LD32(cam + QC_EYE_YAW) + (uint32_t)iy) & 0xffffu);
     }
     if (!ip) return;
-    if (mode == 1) {
-        int lean = (int16_t)LD16(pl + PL_AIM_LEAN) + ip;
-        ST16(pl + PL_AIM_LEAN, lean < -AIM_LEAN_MAX ? -AIM_LEAN_MAX : lean > AIM_LEAN_MAX ? AIM_LEAN_MAX : lean);
-    } else {
-        int moved = aim_pitch(c, cam, pl, ip);
-        ST32(cam + QC_EYE_PITCH, (LD32(cam + QC_EYE_PITCH) + (uint32_t)moved) & 0xffffu);
-    }
+    aim_pitch_turn(c, cam, pl, mode, ip);
     if (g_log_on == 1) LOG("[mousecam] aim turn yaw %+d pitch %+d units; hunter yaw %04x -> %04x, eye pitch %04x -> %04x (mode %u)\n", iy, ip, yaw0, LD32(pl + PL_AIM_YAW) & 0xffffu, pitch0, LD32(cam + QC_EYE_PITCH) & 0xffffu, mode);
+}
+
+static void aim_camera(Cpu *c) {
+    uint32_t cam = c->r[0];
+    fnhook_call_original(c, FN_AIM_CAMERA);
+    g_aimcam_cam = cam, g_aimcam_runs = g_stick_runs;
 }
 
 void mousecam_init(void) {
     g_log_on = getenv("MHGU_MOUSECAM_LOG") != NULL;
     fnhook_set(FN_CAMERA_STICK, hle_register("mousecam:camera_stick", camera_stick));
     fnhook_set(FN_AIM_TURN, hle_register("mousecam:aim_turn", aim_turn));
+    fnhook_set(FN_AIM_CAMERA, hle_register("mousecam:aim_camera", aim_camera));
 }

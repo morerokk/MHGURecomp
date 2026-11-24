@@ -426,7 +426,9 @@ $(O)/fsr/%.c.o: $(FSR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c11 $(FSRFLAGS) -c $< -o $@
 
-$(O)/fsr/%.cpp.o: $(FSR)/%.cpp
+# (no header dependencies are tracked: the -include'd headers go into every FSR C++ object)
+FSR_FORCED := $(addprefix $(FSR)/src/,ffx_1_1_4_portability.hpp ffx_mingw_portability.hpp ffx_error_site.hpp)
+$(O)/fsr/%.cpp.o: $(FSR)/%.cpp $(FSR_FORCED) $(FSR)/include/ffx_vk_portable.h
 	@mkdir -p $(dir $@)
 	$(CXX) -std=c++17 $(FSRFLAGS) -include $(FSR)/src/$(if $(filter windows,$(PLATFORM)),ffx_mingw_portability.hpp,ffx_1_1_4_portability.hpp) -c $< -o $@
 

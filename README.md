@@ -222,8 +222,8 @@ There is no Restart in the menu on Android (the app can't start itself again): u
 contents of `%APPDATA%\MHGURecomp\save\save_0\` (Linux: `~/.local/share/MHGURecomp/save/save_0/`). From a Switch,
 use the same files you'd use on PC. Copy `save/save_0/` back to your PC now and then as a backup.
 
-Public internet hubs on Android are shared with other Android players only. To play with friends on PC, all enter the
-same matchmaking key (settings menu, Network tab).
+Public internet hubs on Android are shared with PC players on the default hub server. A matchmaking key (settings
+menu, Network tab) still keeps a group of friends to itself.
 
 To update, install the newer APK over the old one: your game files, saves and settings stay. **Don't uninstall it
 first.** Uninstalling deletes the whole `files` folder, game files and saves included. Android may offer to keep the
@@ -309,7 +309,7 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
 - `[Mouse]`: `MouseSensitivity` (1 = default, 0.1 to 10)
 - `[Multiplayer]`: `Port`, `Join` (addresses of hosts outside your LAN), `Server` (hub server for internet hubs:
   empty = the default, `Off` = none, or `host[:port]`), `Key` (matchmaking key: only players with the same key see
-  each other's hubs; empty = public, on Android public among Android players only), `SyncSmallMonsters`,
+  each other's hubs; empty = public), `SyncSmallMonsters`,
   `ShareUrgentCredit` (default On: an Urgent quest someone else posted counts for you too when you clear it, if you
   have unlocked it yourself)
 - `[Monster HP]`: factors on monster HP and part HP (flinches, breaks, severs) for 1 to 4 hunters in Hub quests, and per-quest exceptions (default: all 1, the

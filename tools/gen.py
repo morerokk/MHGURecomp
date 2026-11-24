@@ -120,6 +120,15 @@ PATCHES = {
     # (r4 = the player) is scaled by the frame step; 0x49430c the Moofy's run, 0x490380 its twin (motion 0x138f)
     ('main', 0x49430c): (0xEEB03A04, '{ extern float plcarry_push(uint32_t); c->v.f[6] = plcarry_push(c->r[4]); }'),
     ('main', 0x490380): (0xEEB03A04, '{ extern float plcarry_push(uint32_t); c->v.f[6] = plcarry_push(c->r[4]); }'),
+    # Another hunter's equipment this game can't use, as a mod's new weapon type (runtime/hle/equipcheck.c): f_46e964
+    # swaps a piece failing its check for an empty one of its kind and calls itself again; an empty one that fails as
+    # well recursed forever (a crash when that hunter joins). The swap's `add r6, sp, #4`: an empty weapon that fails
+    # becomes a Great Sword and is put on, anything else that's already empty is left off
+    ('main', 0x46e998): (0xE28D6004, '{ extern int equipcheck_swap(Cpu *); int k = equipcheck_swap(c); '
+                         'if (k == 1) goto L_46ea80; if (k == 2) goto L_46e9ec; c->r[6] = c->r[13] + 0x4u; }'),
+    # ... and f_475a68 makes no quest object for a weapon class without an entry in its table (class 5), so the quest
+    # crashed on load: `ldrb r0, [r8, #0x4d4]`, that hunter is a Great Sword user instead
+    ('main', 0x475afc): (0xE5D804D4, '{ extern uint32_t equipcheck_class(uint32_t); c->r[0] = equipcheck_class(c->r[8]); }'),
 }
 
 # Monster jump physics (runtime/hle/emjump.c): the stores of `pos += vel; vel += acc; acc.y += -0.2`, done once per

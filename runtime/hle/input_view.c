@@ -43,9 +43,6 @@
 #define G_SPAD         0x1a3cbfcu // GOT entry: **sPad
 #define G_OPTIONS      0x1a97f78u // options object *
 #define OPT_DASH_ROLE  0x446eu    // byte: 0 R is the dash button, else ZR
-#define OPT_CONTROL_TYPE 0x446cu  // byte: the Control Type, 0..3 (where the Hunter Arts are: actions.c act_art_bits)
-#define OPT_ROLE_SWAP  OPT_DASH_ROLE
-#define OPT_STICK_SWAP 0x446fu    // byte: D-pad and right stick swapped (the Hunter Arts of types 0 and 3)
 #define MB1_OFF        0x6b98u    // button objects inside sPad
 #define MB2_OFF        0x6bf0u
 #define PAD_STRIDE     0xb50u
@@ -63,6 +60,19 @@
                                   // (actions.c ConfirmTargets, the confirm key)
 #define VF_BAR_OPEN    0x25cu     // vfunc (player, 1) 1: the item bar is open (L held; hle/itembar.c)
 #define PL_LOCAL_FLAG  0x13ccu    // u8: bit 0 the local player's (hle/combowin.c)
+// The Hunter Arts (pl_no_input): the hunter's update f_4a79cc copies the gameplay word's cur / trig into the player
+// (+0x13f4...), then f_47eccc (at 0x4a7b7c) wipes that copy while the game takes no hunt input (a menu open, the map...;
+// it also clears request 6, `bl 0x485ec4` returning to 0x47ee08), then a switch on the Control Type turns the Art's
+// buttons into a request: f_485ea0(pl, 0x40 + n) at 0x4a7cfc, bit n of +0x143c, which the Art's code takes up if the Art
+// can be used. Before all that, with the quest in state 5 (f_5a5ed0(quest, 5), quest +0x50), the input and the
+// requests are cleared.
+#define PL_ART_REQ     0x143cu    // u32: bits 0..2, Hunter Art 1..3 asked for
+#define FN_PL_NO_INPUT 0x47ecccu  // (player) the copy wiped while the hunt takes no input
+#define PL_NO_INPUT_LR 0x4a7b80u  // (its call in the hunter's update)
+#define FN_REQ_CLEAR   0x485ec4u  // (player, request) clear a request bit
+#define REQ_CLEAR_WIPE_LR 0x47ee08u  // (the one in the wipe)
+#define FN_QUEST_STATE 0x5a5ed0u  // (quest, kind) 1: the quest's state +0x50 is of that kind
+#define G_QUEST        0x1a38d28u // GOT entry: *quest (as the update reads it)
 #define CLS_PROWLER    14        // (no weapon to put away: its A button attacks and gathers)
 
 // The callers of the R-role getter (return addresses; f_XXXXXX = main + 0x200000) that are the weapon's R-action
@@ -91,6 +101,7 @@ static uint32_t g_target_class;      // the interactable's category, held a few 
 static uint64_t g_target_frame;
 static uint32_t g_bar_raw;
 static bool g_bar;              // the item bar was open at the hunter's last update
+static uint32_t g_arts;         // the Hunter Art actions held at the hunter's last update (bits 0..2)
 static int g_view;              // the context the gameplay word was last built for
 static bool g_log;
 static uint32_t g_in[2], g_out[2];  // the words last given to / from the translators of each view
@@ -165,6 +176,29 @@ static void player_update(Cpu *c) {
         g_bar = (g_bar_raw & 0xff) != 0;
     }
     fnhook_call_next(c, FN_PLAYER);
+}
+// The Arts' own keys (HunterArtKeys): a new press asks for that Art as the Control Type's buttons do, by its request
+// bit, where the update has just decided whether the hunt takes input (wiped: a menu open...; or the quest's state 5
+// check: then the press is dropped, as the buttons would be). No button is pressed, so an Art that can't be used now
+// does nothing (the buttons did: A alone attacked or rolled). Checked in quest 101 with types 0-3: each key starts its
+// Art, nothing with an empty gauge or with the start menu open (2026-11-24)
+static uint32_t g_wiped;  // the player whose input the wipe cleared, this call
+static void req_clear(Cpu *c) {
+    if (c->r[14] == REQ_CLEAR_WIPE_LR) g_wiped = c->r[0];
+    fnhook_call_next(c, FN_REQ_CLEAR);
+}
+static void pl_no_input(Cpu *c) {
+    uint32_t pl = c->r[0];
+    bool ours = c->r[14] == PL_NO_INPUT_LR && pl == g_player && g_pl_frame == g_frame && act_art_keys();
+    g_wiped = 0;
+    fnhook_call_next(c, FN_PL_NO_INPUT);
+    if (!ours) return;
+    uint32_t arts = (uint32_t)((g_snap.hold[g_var] | g_snap.pulse[g_var]) >> ACT_ART1) & 7u, fresh = arts & ~g_arts;
+    g_arts = arts;
+    if (!fresh || g_wiped == pl) return;
+    uint32_t q = LD32(G_QUEST);
+    if (q && sane(LD32(q)) && call(c, FN_QUEST_STATE, LD32(q), 5, 0) == 1) return;
+    ST32(pl + PL_ART_REQ, LD32(pl + PL_ART_REQ) | fresh);
 }
 static void town_update(Cpu *c) {
     g_town_frame = g_frame;
@@ -246,16 +280,7 @@ static void tr_view(Cpu *c, int view, int slot, uint32_t fn) {
             active = act_gate(&gate, active, share, changed, g_frame, act_shared_frames());
         }
     }
-    uint32_t out = act_view(view, in, active, g_dash_zr);
-    int base = view & ~ACT_VIEW_BAR;
-    if (base != ACT_VIEW_MB2 && base != ACT_VIEW_TOWN && (active >> ACT_ART1 & 7) && act_art_keys()) {
-        // (a Hunter Art's own input: the buttons the game's Control Type takes for that Art, as if pressed together)
-        uint32_t opt = LD32(G_OPTIONS);
-        if (opt)
-            for (int n = 0; n < 3; n++)
-                if (active >> (ACT_ART1 + n) & 1)
-                    out |= act_art_bits(n, LD8(opt + OPT_CONTROL_TYPE), LD8(opt + OPT_ROLE_SWAP) != 0, LD8(opt + OPT_STICK_SWAP) != 0);
-    }
+    uint32_t out = act_view(view, in, active, g_dash_zr);  // (the Hunter Arts' keys press nothing: pl_no_input)
     g_in[slot] = in, g_out[slot] = out;
     c->r[1] = out;
     fnhook_call_next(c, fn);
@@ -388,6 +413,8 @@ void input_view_apply(void) {
     fnhook_set_outer(FN_TR_MB2, hle_register("inputview:tr_mb2", tr_mb2));
     fnhook_set_outer(FN_PLAYER, hle_register("inputview:player", player_update));
     fnhook_set_outer(FN_TOWN, hle_register("inputview:town", town_update));
+    fnhook_set_outer(FN_PL_NO_INPUT, hle_register("inputview:pl_no_input", pl_no_input));
+    fnhook_set_outer(FN_REQ_CLEAR, hle_register("inputview:req_clear", req_clear));
     for (int i = 0; i < ACT_WEAPONS; i++) {
         char name[32];
         snprintf(name, sizeof name, "inputview:mapper%d", i);

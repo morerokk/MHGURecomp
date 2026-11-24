@@ -137,6 +137,7 @@ typedef struct {
     int title_back_exit;      // [Controls] TitleBackExit: B on the title screen's Main Menu asks to quit (runtime/hle/title_exit.c)
     int kbm_prompts;          // [Controls] KeyboardPrompts: the game's button glyphs show keys and mouse buttons (hle/prompts.c)
     int show_battery;         // [Performance] ShowBattery: BATTERY_*, the battery's charge beside the frame rate or alone
+    int show_temperature;     // [Performance] ShowTemperature (Android): TEMP_*, the device's temperatures under the frame rate
     char save_location[256];  // [Application] SaveLocation (PC): the folder holding the save (save_0/), "" the default
                               // (%APPDATA%\MHGURecomp\save, ~/.local/share/MHGURecomp/save: main.c)
     int backups_on;           // [Save Backups] Backups: a copy of the save at each save (services/fs.c)
@@ -155,7 +156,20 @@ typedef struct {
     int ldn_ryu_serve_port;   // [Multiplayer] RyuServePort: its port; 0 = 30456, the LdnServer default
     int ldn_room_serve;       // [Multiplayer] RoomServe: this game runs a suyu-style room itself (runtime/net/roomsrv.c): the pseudo room for suyu-family players
     int ldn_room_serve_port;  // [Multiplayer] RoomServePort: its port; 0 = 24872, the rooms' default
+    // (MHGU_DUAL_SCREEN: MHXX's bottom screen on a second display; nvn/vulkan/bottom_hud.c, second_display*.c)
+    int second_display;       // [Dual Screen] SecondDisplay: on when the device has a second display to show it on
+    char bottom_panels[256];  // [Dual Screen] Panels: the bottom screen's panels and their cells (bottom_hud.c)
+    int bottom_background;    // [Dual Screen] Background: BOTTOM_BG_*, under the panels
+    char bottom_wallpaper[64]; // [Dual Screen] Wallpaper: a BMP in the wallpapers folder, "" each in turn
 } Config;
+// The dual-screen bottom screen: in every build with the Vulkan renderer. The second display is Android's (a
+// Presentation: android/java/.../DualScreen.java, second_display_android.c), or on PC another monitor (an SDL window:
+// second_display_desktop.c).
+#ifndef MHGU_NULL_BACKEND
+#define MHGU_DUAL_SCREEN 1
+#endif
+enum { BOTTOM_BG_WALLPAPER, BOTTOM_BG_DARK, BOTTOM_BG_BLACK };
+#define BOTTOM_PANELS_DEFAULT "itembar@0,0 map@0,1 arts3v@2,0"  // (MHXX's quest screen: item, map below, Hunter Arts right)
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
 // Cloud VM; a DuckDNS name, so it can move without a release). "" = no default.
 // Note: the below server address should ideally only be used by MHGURecomp, or any forks that intend to be fully network-compatible with it.
@@ -167,6 +181,7 @@ enum { HDR_GAMMA_OFF, HDR_GAMMA_22, HDR_GAMMA_24 };                   // [HDR] G
 enum { HDR_TONEMAP_VANILLA, HDR_TONEMAP_NONE, HDR_TONEMAP_RENODRT };  // [HDR] ToneMapper
 enum { HDR_FORMAT_AUTO, HDR_FORMAT_HDR10, HDR_FORMAT_SCRGB };  // [HDR] HDRFormat
 enum { BATTERY_OFF, BATTERY_WITH_FPS, BATTERY_ALONE };
+enum { TEMP_OFF, TEMP_CELSIUS, TEMP_FAHRENHEIT };  // [Performance] ShowTemperature
 enum { THEME_GOLD, THEME_BLUE, THEME_HUNTER };  // [Application] Theme
 enum { UI_CENTER = 1, UI_21_9, UI_32_9, UI_EDGES };  // the middle 16:9, 21:9, 32:9, the picture's sides
 enum { FSR_NATIVE, FSR_QUALITY, FSR_BALANCED, FSR_PERFORMANCE, FSR_ULTRA_PERFORMANCE };  // output / render: 1, 1.5, 1.7, 2, 3
@@ -249,6 +264,13 @@ int config_live_face_buttons(void);
 int config_live_kbm_prompts(void);  // [Controls] KeyboardPrompts (any thread)
 int config_live_menu_confirm(void);
 int config_live_background_input(void);
+// [Dual Screen]: is there a display for the bottom screen (the backend tells, nvn/vulkan/second_display*.c; the settings
+// menu greys the row out without one), and SecondDisplay / its options changed in g_config (the settings menu's Save):
+// the UI thread applies it at its next turn (second_display_tick). Any thread.
+int config_second_display_available(void);
+void config_set_second_display_available(int yes);
+void config_second_display_request(void);
+int config_second_display_take_request(void);  // (1 once per request)
 int config_live_combo_window(void);
 int config_live_chat_key(void);  // [Controls] ChatKey as an SDL scancode (0: none)
 int config_live_pause_key(void);  // [Controls] PauseKey as an SDL scancode (0: none)
@@ -312,6 +334,7 @@ bool config_confirm_exit(void); // atomic, safe on the host main thread
 bool config_menu_chord(void);   // [Controls] MenuChord as saved, atomic (the input is read on another thread)
 bool config_title_back_exit(void);  // [Controls] TitleBackExit as saved, atomic (the game's thread reads it)
 int config_show_battery(void);  // [Performance] ShowBattery as saved, atomic
+int config_show_temperature(void);  // [Performance] ShowTemperature as saved (TEMP_*), atomic
 bool config_show_fps(void);     // [Performance] ShowFPS as saved, atomic (the game's thread draws it)
 
 // The macOS Settings window (runtime/platform/darwin_settings.m) and Settings menu (runtime/platform/darwin_menu.m):

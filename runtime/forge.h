@@ -28,6 +28,8 @@ void forge_nvn_window_textures(uint32_t textures, int n);
 void forge_nvn_present(struct Cpu *c, uint32_t queue, uint32_t window, int index);
 // runtime/hle/abort.c: the Forge file call this thread is in, with its plugin and file (NULL: none)
 const char *forge_abort_context(void);
+int forge_stack_plugins(uint32_t sp, char *line, size_t size);  // " file.nro+off ...": plugins' calls on a guest stack
+int forge_log_open_files(const char *tag);  // plugins' files still open (forge_fs_openFile, not closed): logged, the count
 
 // forge_imgui.c, for the overlay (on the game's thread, cpu: its Cpu)
 void forge_imgui_init(void *cpu);  // (after the ImGui context exists: plugins get it)

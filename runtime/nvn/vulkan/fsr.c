@@ -1195,9 +1195,12 @@ static FfxVkPortableUpscaleContext *ctx;
 static FfxVkPortableUpscaleCreateInfo ctx_ci;
 static bool ctx_failed;
 
+static void ffx_log(const char *msg) { LOG("[fsr] %s\n", msg); }  // (any thread: FFX's shaders build on their own)
+
 static bool ctx_make(void) {
     if (ctx) return true;
     if (ctx_failed) return false;
+    ffxVkPortableSetLog(ffx_log);  // (FFX's messages, and where a failed creation failed: issue #444's -7)
     FfxVkPortableDeviceInfo di = {.structSize = sizeof di, .instance = g_vk.inst, .physicalDevice = g_vk.phys,
                                   .device = g_vk.dev, .getDeviceProcAddr = vkGetDeviceProcAddr, .queue = g_vk.queue,
                                   .queueFamilyIndex = g_vk.qfam, .shaderFloat16Enabled = g_vk.fsr_fp16,
