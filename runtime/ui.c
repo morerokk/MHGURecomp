@@ -528,6 +528,10 @@ void ui_setting_changed(const char *key) {
         if (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) set_fullscreen(false);  // (Borderless <-> Fullscreen too)
         if (g_config.display_mode != DISPLAY_WINDOWED) set_fullscreen(true);
     }
+#ifdef MHGU_DUAL_SCREEN
+    if (!strcmp(key, "SecondDisplay") || !strcmp(key, "Panels") || !strcmp(key, "Background") || !strcmp(key, "Wallpaper"))
+        config_second_display_request();  // (the bottom screen's window opens, closes or redraws: nvn/vulkan/second_display_desktop.c)
+#endif
 }
 
 // Alt+Enter: windowed <-> the full-screen mode of the settings (Windowed in the settings: borderless).

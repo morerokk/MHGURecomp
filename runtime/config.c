@@ -779,8 +779,14 @@ static const char DEFAULT_INI[] =
 #ifdef MHGU_DUAL_SCREEN
     "\n"
     "[Dual Screen]\n"
+#ifdef __APPLE__
+    "; MHXX's bottom screen on a second monitor: the item bar, the map, the Hunter Arts and the other panels leave the\n"
+    "; game's window and fill that monitor (a small touch screen, say), where touching or clicking them works like on the 3DS.\n"
+    "; Needs a second monitor.\n"
+#else
     "; Enable MHXX-style dual screen support for certain HUD elements and Hunter Arts, useful for the AYN Thor.\n"
     "; Can be a bit finicky on PC setups.\n"
+#endif
     "; Default: Off\n"
     "SecondDisplay = Off\n"
     "\n"
@@ -798,8 +804,13 @@ static const char DEFAULT_INI[] =
     "; Default: Dark\n"
     "Background = Dark\n"
     "\n"
+#ifdef __APPLE__
+    "; The wallpaper: a 24-bit BMP you put in the wallpapers folder (in ~/Library/Application Support/MHGURecomp), scaled\n"
+    "; to cover the screen.\n"
+#else
     "; The wallpaper: a 24-bit BMP you put in the wallpapers folder (beside the game; Android: in the app's files), scaled\n"
     "; to cover the screen.\n"
+#endif
     "; Empty: each BMP of the folder in turn, 30 seconds each\n"
     "; Default: (empty)\n"
     "Wallpaper =\n"
@@ -807,8 +818,9 @@ static const char DEFAULT_INI[] =
     ;
 
 // The macOS Settings window's and menu's rows (config.h SettingRow): every setting of the file but the per-quest
-// Quest<number> entries, in file order. Values are written into the file as given here. Left out: [Android] (Android
-// only) and Updates (there is no mhgurecomp-updater on the Mac).
+// Quest<number> entries, in file order (the Dual Screen rows, in the Display tab, last). Values are written into the
+// file as given here. Left out: [Android] and ShowTemperature (Android only) and Updates (there is no mhgurecomp-updater
+// on the Mac).
 #define ONOFF "On|Off"
 #define KEYBIND(key, title) {"Keybinds", "Keybinds", key, title, SETTING_TEXT, NULL, NULL, true, false}
 const SettingRow g_setting_rows[] = {
@@ -960,6 +972,19 @@ const SettingRow g_setting_rows[] = {
     {"Extras", "Save Backups", "Backups", "Save Backups", SETTING_CHOICE, ONOFF, NULL, true, false},
     {"Extras", "Save Backups", "BackupsKept", "Backups Kept", SETTING_VALUE, "5|10|20|50|100", NULL, true, false},
     {"Extras", "Save Backups", "BackupLocation", "Backup Folder", SETTING_TEXT, NULL, NULL, false, false},
+#ifdef MHGU_DUAL_SCREEN
+    {"Display", "Dual Screen", "SecondDisplay", "Bottom Screen on a Second Monitor", SETTING_CHOICE, ONOFF, NULL, true, false},
+    {"Display", "Dual Screen", "Panels", "Bottom Screen Panels", SETTING_CHOICE,
+     BOTTOM_PANELS_DEFAULT "|map@0,0 target@0,2 arts3v@2,0|arts3v@0,0 map@2,0 target@2,2|arts3h@0,0 map@0,1 itembar@2,1 target@2,2|"
+     "status@0,0 itembar@0,1 target@0,2 map@2,1|status@0,0 arts3h@0,1 itembar@0,2 target@2,2|arts3v@0,0 dpad@2,0 target@2,2",
+     "MHXX: Item, Map, Hunter Arts Right|Map, Target Camera, Hunter Arts Right|Hunter Arts Left, Map, Target Camera|"
+     "Hunter Arts in a Row, Map, Item Bar, Target|Status, Item Bar, Target, Map|Status, Hunter Arts in a Row, Item Bar, Target|"
+     "MHXX Default: Hunter Arts, D-pad, Target",
+     true, false},
+    {"Display", "Dual Screen", "Background", "Bottom Screen Background", SETTING_CHOICE, "Dark|Black|Wallpaper",
+     "Dark|Black (OLED: Off)|Wallpaper", true, false},
+    {"Display", "Dual Screen", "Wallpaper", "Bottom Screen Wallpaper", SETTING_TEXT, NULL, NULL, true, false},
+#endif
 };
 const int g_nsetting_rows = (int)(sizeof g_setting_rows / sizeof g_setting_rows[0]);
 // The per-quest Monster HP entries (Quest<number> = factors): set, listed and removed through config_set / config_quests
