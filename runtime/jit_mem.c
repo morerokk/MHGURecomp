@@ -1,8 +1,8 @@
 // Executable memory for the interpreter's JIT (runtime/interp_jit.h): one arena per thread that runs interpreted
 // code, readable, writable and executable (its blocks are patched as they get linked). On Windows the arena's code
 // also gets a function table entry (one frame layout for all of it), so a longjmp out of guest code that runs in it
-// (ExitThread, runtime/kernel.c) can unwind through its frame.
-#if defined(__x86_64__) && !defined(MHGU_NO_JIT)
+// (ExitThread, runtime/kernel.c) can unwind through its frame. (AArch64 hosts: Android, Linux; not Apple's, which want MAP_JIT.)
+#if (defined(__x86_64__) || defined(__aarch64__)) && !defined(__APPLE__) && !defined(MHGU_NO_JIT)
 #include <stddef.h>
 #include <stdint.h>
 

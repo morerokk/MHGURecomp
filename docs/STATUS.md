@@ -1428,7 +1428,7 @@ old way while on.
   tail-call threaded ops (each handler jumping to the next) might give another ~1.5x; matching an emulator would take a
   JIT (AArch32 -> x86-64 and -> AArch64), a project of its own.
 
-## Interpreter: JIT on x86-64 (2026-11-24)
+## Interpreter: JIT on x86-64 and AArch64 (2026-11-24)
 
 Report: every loading screen slow with MHGU Definitive Edition 3.1.0 (MH4U Port renamed; now 15 monster entries).
 Its quest_group_fix hook (quest_group_rename, module/quest.c, the quest list loader step 0x3b7de8: every list entry
@@ -1463,8 +1463,28 @@ runtime/jit_mem.c the executable memory):
   four seeds of main: none different (a planted ADD -> SUB was caught at once); a JIT vs interpreter-op comparison on
   random states, Windows and Linux (archlinux WSL, the System V calls), 18000 runs: none different.
 - MHGU_JIT=0: the interpreter alone. MHGU_JIT_DUMP=<file>: every block's code (for a disassembler, with MHGU_SAMPLE).
-- Not done: an AArch64 back end (Android, a Mac), so phones still interpret; registers kept in host registers across
-  a block (the next big step if a mod needs it); not tried on a laptop CPU or by hand in a fight.
+- Not done: registers kept in host registers across a block (the next big step if a mod needs it); not tried on a
+  laptop CPU or by hand in a fight.
+
+AArch64 back end (2026-11-24, same day): Android phones (and AArch64 Linux) get the JIT too. interp_jit.h is now the
+shared part (arena, blocks, run loop); interp_jit_x64.h and interp_jit_a64.h emit the code, the same translations
+one for one. AArch64 notes: AArch32's condition codes and carry are AArch64's, so ADDS / SUBS / ADCS / SBCS leave the
+guest's NZCV in the host's flags (CSET stores them, a byte each); guest memory is [x20, wN, uxtw]; a block's words
+are checked against a literal pool after it, two at a time; written or patched code gets an instruction cache flush;
+x18 is left alone. Not on Apple hosts (MAP_JIT and write protection per thread: for the Mac port); a device that
+refuses RWX memory keeps the interpreter (jit_tls, logged).
+- Also fixed in both: LDM / STM / LDRD / STRD stepped their addresses in 64 bits (a block near the top of the 4 GB
+  window ran past it); each word's address now wraps at 32 bits as the guest's.
+- Checked: tools/test_jit.py (new: tools/test_jit.c), the JIT against the interpreter: `words`, instruction words of
+  main as blocks of their own on random states (registers, flags, VFP, memory), and `prog`, whole runs from main's
+  function entries on random registers and memory, forked, once interpreted and once JITted, results compared (Linux).
+  --a64 cross-builds with clang + the aarch64-linux-gnu sysroot and runs under qemu-aarch64; --wsl archlinux from
+  here (pacman: aarch64-linux-gnu-gcc, qemu-user). AArch64: 18000 word runs and 700 whole runs, none different (a
+  planted ADD -> SUB gave 1991 differences); x86-64 (Windows, Linux): the same, and 1100 whole runs with one
+  difference, explained: random pointers had a loop store into its own block (the interpreter checks each word before
+  it runs, a block its words on entry). Android x86_64 in the emulator: the JIT runs (Definitive Edition, town and
+  quest 1023). The arm64 APK can't be tried there: the emulator's arm64 translation (berberis) aborts on the game's
+  first SIGSEGV with or without the JIT ("Cannot process signal 11"), so a real phone is the open check.
 
 ## Even letter spacing in the game's text: [Graphics] FixKerning (2026-11-07)
 
