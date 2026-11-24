@@ -985,15 +985,21 @@ static void ui_group_hend(int n) {
     float x0 = ui_group.xmin, x1 = ui_group.xmax, cut = INFINITY, asp = g_render_aspect;
     int h = ui_group_hside(x0, x1), h2 = h;
     // Across the middle, not centred, with nothing of it over a quarter of the canvas: two things side by side on one
-    // row (the smithy's title at the top left and its page counter at the top right), each placed by its own side
-    if (h != 2 && x0 < 640.0f && x1 > 640.0f) {
+    // row (the smithy's title at the top left and its page counter at the top right), each placed by its own side.
+    // Centred too when the empty quarter is the middle and each side is a window of its own (wider than 160): Set
+    // Decorations' details window (x 26..402) and Equipment Box (870..1254) mirror about x 640 and went Centre as one
+    // dialog, but on an empty slot the box is drawn alone and went Right: it jumped sideways with Edges / 21:9. (A
+    // frame drawn as its corners only has nothing between its sides either, but no width on each side.)
+    if (x0 < 640.0f && x1 > 640.0f) {
         static float xs[UI_GROUP_MAX];
         for (int i = 0; i < n; i++) xs[i] = ui_group.p[i].pos_x;
         qsort(xs, (size_t)n, sizeof xs[0], ui_float_cmp);
         int k = 0;
         for (int i = 1; i < n; i++)
             if (xs[i] - xs[i - 1] > (k ? xs[k] - xs[k - 1] : 0.0f)) k = i;
-        if (k && xs[k] - xs[k - 1] > 320.0f) cut = xs[k], h = ui_group_hside(x0, xs[k - 1]), h2 = ui_group_hside(xs[k], x1);
+        bool apart = k && xs[k] - xs[k - 1] > 320.0f;
+        if (h == 2) apart = apart && xs[k - 1] < 640.0f && xs[k] > 640.0f && xs[k - 1] - x0 > 160.0f && x1 - xs[k] > 160.0f;
+        if (apart) cut = xs[k], h = ui_group_hside(x0, xs[k - 1]), h2 = ui_group_hside(xs[k], x1);
     }
     float s = (16.0f / 9.0f) / asp, anchor = g_ui_anchor_aspect < asp ? g_ui_anchor_aspect : asp;
     float left = 640.0f * (1.0f - anchor / asp);
