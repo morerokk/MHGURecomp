@@ -3,7 +3,7 @@
 //   MHGU_GPU=<index>       which Vulkan device (default: the first discrete GPU)
 //   MHGU_VSYNC=0|1         0: no vsync (tearing possible, lowest latency), 1: classic vsync (FIFO). Default: the
 //                          settings' VSync - On: mailbox (no tearing; the game paces itself), FIFO where there is
-//                          none (the R9's driver), Off: immediate. MHGU_VK_PRESENT=fifo|mailbox|immediate picks the present mode directly.
+//                          none (the R9's driver), Off: immediate (mailbox where there is none, as in gamescope). MHGU_VK_PRESENT=fifo|mailbox|immediate picks the present mode directly.
 //   MHGU_SHOT_AT=<frame>[,<frame>...]   save the window image at those presented frames as shots/frame_N.png
 //   MHGU_FPS=1             frames per second in the log every 2 s
 //   MHGU_NO_BC=1           act as if the GPU had no BC textures, as phone GPUs (they are decoded on the CPU then)
@@ -412,6 +412,11 @@ void vk_set_msaa(uint32_t n) {
 static int swapchain_vsync = -1;
 static int configured_msaa = -1;
 static const char *present_name = "?";  // the swapchain's present mode, for the log
+static bool offers_present_mode(const VkPresentModeKHR *modes, uint32_t n, VkPresentModeKHR mode) {
+    for (uint32_t i = 0; i < n; i++)
+        if (modes[i] == mode) return true;
+    return false;
+}
 static VkPresentModeKHR present_mode(void) {
     swapchain_vsync = config_live_vsync();
     // MAILBOX by default: no tearing, and the game paces itself (its own 30 fps vsync waits); with FIFO the game's frames
@@ -426,11 +431,17 @@ static VkPresentModeKHR present_mode(void) {
     VkPresentModeKHR m[16];
     if (n > 16) n = 16;
     vkGetPhysicalDeviceSurfacePresentModesKHR(g_vk.phys, g_vk.surface, &n, m);
-    for (uint32_t i = 0; i < n; i++)
-        if (m[i] == want) {
-            present_name = want == VK_PRESENT_MODE_FIFO_KHR ? "fifo" : want == VK_PRESENT_MODE_IMMEDIATE_KHR ? "immediate" : "mailbox";
-            return want;
-        }
+    if (offers_present_mode(m, n, want)) {
+        present_name = want == VK_PRESENT_MODE_FIFO_KHR ? "fifo" : want == VK_PRESENT_MODE_IMMEDIATE_KHR ? "immediate" : "mailbox";
+        return want;
+    }
+    // Without vsync, MAILBOX before FIFO: gamescope offers no IMMEDIATE (Mesa's Wayland WSI has it only with the
+    // compositor's tearing-control protocol) and treats MAILBOX as a mode that may tear when tearing is allowed.
+    if (want == VK_PRESENT_MODE_IMMEDIATE_KHR && offers_present_mode(m, n, VK_PRESENT_MODE_MAILBOX_KHR)) {
+        LOG("[vk] present mode immediate not available: mailbox\n");
+        present_name = "mailbox";
+        return VK_PRESENT_MODE_MAILBOX_KHR;
+    }
     LOG("[vk] present mode %s not available: FIFO (vsync)\n", e);
     present_name = "fifo";
     return VK_PRESENT_MODE_FIFO_KHR;
