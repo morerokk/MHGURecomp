@@ -1295,7 +1295,11 @@ yaw stays (the hunter follows the camera), but the aim camera 0x226e84 (r0 = the
 camera since the stick handler's last run, the stick handler's hook gives the mouse's pitch to the aim (as 0x4a1738's
 hook does, mode from its last call, the aim invert option) and the yaw to the camera as before. The Bow charging on the
 move (X held, 0010:002 / 0010:013) also runs both, but not the aim camera: its pitch is the camera's own and stays on
-the camera path. Tested (scratch-hbg mtest.sh / ltest.sh / btest.sh, `MHGU_MOUSECAM_LOG=1`, W held + mousemove 0 -400):
+the camera path. The yaw in that state went only to the camera, and the hunter's yaw and the eye's (+0x9dc) eased
+toward it over 10+ updates, still turning after the mouse stopped (the user: "floaty", like the stick); it now goes
+to both straight away too (traced per update in ttest.sh: the eye matches the camera's yaw every update and stops with
+the mouse; the hunter keeps the game's own small offset while walking). The user checked it by hand: feels right.
+Tested (scratch-hbg mtest.sh / ltest.sh / btest.sh, `MHGU_MOUSECAM_LOG=1`, W held + mousemove 0 -400):
 HBG walking aimed, camera pitch 0439 -> 1683 (was stuck at 0442 before); LBG (control `weapon 6 1` in town, then
 `depart 101`) 0445 -> 1688, mode 0 as the HBG; Bow R walking 043a -> 167a (was stuck too); Bow charging walk still on
 the camera path; standing aim unchanged. Not tested: the aim invert settings, a real mouse by hand.

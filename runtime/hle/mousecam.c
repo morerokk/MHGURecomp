@@ -23,7 +23,8 @@
 // mouse goes to the camera. The yaw sticks (the hunter follows the camera), but the aim camera, still running, puts
 // +0x9e8 back from the hunter's aim pitch, so the mouse couldn't aim up or down. So the aim camera is hooked as well:
 // when it ran for this camera since the stick handler last did, its pitch follows the aim, and the mouse's pitch
-// goes to the aim as in 0x4a1738's hook. (The Bow charging on the move runs both too, but not the aim camera: there
+// goes to the aim as in 0x4a1738's hook. Its yaw goes to the camera and also straight to the hunter's yaw and the
+// eye's, which otherwise ease toward the camera's over many updates (it felt like the stick). (The Bow charging on the move runs both too, but not the aim camera: there
 // the camera's own pitch is the aim, and stays the mouse's.)
 //
 // Where neither runs (villages, whose camera doesn't turn, or other cameras) host_input.c gives the mouse to the
@@ -151,8 +152,16 @@ static void camera_stick(Cpu *c) {
         ST32(cam + QC_YAW_NOW, (LD32(cam + QC_YAW_NOW) + (uint32_t)iy) & 0xffffu);
     }
     uint32_t pl = LD32(cam + QC_PLAYER);
-    if (ip && aim_cam && sane(pl)) {  // (the pitch follows the hunter's aim: aim with it, by the aim's invert option)
-        if ((LD8(LD32(G_OPTIONS) + OPT_AIM_INVERT) ^ invert) & 1) ip = -ip;  // (the fraction left stays the camera's way)
+    if (aim_cam && sane(pl)) {  // (the eye follows the hunter's aim: turn the hunter and the eye too, without their easing)
+        if (iy) {
+            ST32(pl + PL_AIM_YAW, (LD32(pl + PL_AIM_YAW) + (uint32_t)iy) & 0xffffu);
+            ST32(cam + QC_EYE_YAW, (LD32(cam + QC_EYE_YAW) + (uint32_t)iy) & 0xffffu);
+        }
+        if (!ip) {
+            if (g_log_on == 1) LOG("[mousecam] camera turn yaw %+d units (aiming); camera yaw %04x -> %04x\n", iy, yaw0, LD32(cam + QC_YAW_TO) & 0xffffu);
+            return;
+        }
+        if ((LD8(LD32(G_OPTIONS) + OPT_AIM_INVERT) ^ invert) & 1) ip = -ip;  // (the aim's invert option; the fraction left stays the camera's way)
         int moved = aim_pitch_turn(c, cam, pl, g_aim_mode, ip);
         if (g_log_on == 1) LOG("[mousecam] camera turn yaw %+d units, aim pitch %+d units (moved %+d, mode %u); camera yaw %04x -> %04x\n", iy, ip, moved, g_aim_mode, yaw0, LD32(cam + QC_YAW_TO) & 0xffffu);
         return;
