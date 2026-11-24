@@ -95,9 +95,42 @@ static VkFence seq_fence_take(uint64_t seq) {
     return f;
 }
 
+// No status polls (g_vk.no_poll: Turnip on Android's KGSL, issue #444). There, before Mesa 26.3 (e984ef29; forks such
+// as PurpleVK 26.3.0-devel still lack it), a check with no timeout waits until the GPU has finished everything
+// submitted: vk_collect_dead's check after each submission made the CPU and GPU take turns (35 fps where 60 hold with
+// the fix). vkGetSemaphoreCounterValue and vkGetFenceStatus both do it, and so does vkWaitSemaphores (the emulated
+// timeline checks each pending point before it waits). So: a fence per submission, and fence_thread waits for them in
+// order (a wait with a timeout waits for that fence only) and moves fence_done along; vk_completed_seq only reads it.
+static pthread_cond_t fence_cond = PTHREAD_COND_INITIALIZER;  // (no_poll) a new submission for fence_thread
+static bool fence_thread_on;
+
+static void *fence_thread(void *arg) {
+    (void)arg;
+    pthread_mutex_lock(&fence_lock);
+    for (;;) {
+        while (fence_done >= fence_last) pthread_cond_wait(&fence_cond, &fence_lock);
+        uint64_t seq = fence_done + 1;
+        int i = (int)(seq % SEQ_FENCES);
+        VkFence f = seq_fence[i].fence;
+        seq_fence[i].waiters++;
+        pthread_mutex_unlock(&fence_lock);
+        // (exit in progress: never reach the driver; the 1 s timeout brings the check round again)
+        VkResult r = vk_exiting() ? VK_TIMEOUT : vkWaitForFences(g_vk.dev, 1, &f, VK_TRUE, 1000000000ull);
+        pthread_mutex_lock(&fence_lock);
+        seq_fence[i].waiters--;
+        if (r == VK_SUCCESS && fence_done < seq) fence_done = seq;
+        if ((r != VK_SUCCESS && r != VK_TIMEOUT) || vk_exiting()) {
+            if (!vk_exiting()) LOG("[vk] fence thread: vkWaitForFences %d (device lost?): stops\n", r);
+            pthread_mutex_unlock(&fence_lock);
+            return NULL;
+        }
+    }
+}
+
 static uint64_t fence_completed(void) {
     pthread_mutex_lock(&fence_lock);
-    while (fence_done < fence_last && vkGetFenceStatus(g_vk.dev, seq_fence[(fence_done + 1) % SEQ_FENCES].fence) == VK_SUCCESS)
+    while (!g_vk.no_poll && fence_done < fence_last &&
+           vkGetFenceStatus(g_vk.dev, seq_fence[(fence_done + 1) % SEQ_FENCES].fence) == VK_SUCCESS)
         fence_done++;
     uint64_t v = fence_done;
     pthread_mutex_unlock(&fence_lock);
@@ -238,6 +271,15 @@ void vk_submit_extra(VkSemaphore wait, VkSemaphore signal) {
     if (g_vk.fences) {
         pthread_mutex_lock(&fence_lock);
         fence_last = submit_seq + 1;
+        if (g_vk.no_poll) {
+            if (!fence_thread_on) {
+                pthread_t th;
+                fence_thread_on = pthread_create(&th, NULL, fence_thread, NULL) == 0;
+                if (fence_thread_on) pthread_detach(th);
+                else FATAL("[vk] the fence thread could not be started\n");
+            }
+            pthread_cond_signal(&fence_cond);
+        }
         pthread_mutex_unlock(&fence_lock);
     }
     pthread_mutex_lock(&seq_lock);

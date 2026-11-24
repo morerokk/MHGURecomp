@@ -8,6 +8,7 @@
 //   MHGU_FPS=1             frames per second in the log every 2 s
 //   MHGU_NO_BC=1           act as if the GPU had no BC textures, as phone GPUs (they are decoded on the CPU then)
 //   MHGU_VK11=1            take the path for Vulkan 1.1 devices on any device (g_vk.api11), to test it on a PC
+//   MHGU_VK_NO_POLL=1|0    no driver completion checks (fences waited for by a thread: on by itself for Turnip on Android)
 //   MHGU_NO_LOADING_SCREEN=1   no loading indicator before the game's first frame (a black window, as before)
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -234,6 +235,21 @@ static void create_device(void) {
                                       .pNext = g_vk.api11 ? (void *)&s16_have : (void *)&f11_have};
     vkGetPhysicalDeviceFeatures2(g_vk.phys, &have);
     g_vk.fences = !f12_have.timelineSemaphore;
+    // Turnip (Mesa's Adreno driver) on Android's KGSL: a completion check can wait for the GPU there, so none are made
+    // (exec.c "No status polls", issue #444). MHGU_VK_NO_POLL=1 / 0 turns that on / off on any device.
+#ifdef __ANDROID__
+    if (!g_vk.api11) {
+        VkPhysicalDeviceDriverProperties dp = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+        VkPhysicalDeviceProperties2 p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &dp};
+        vkGetPhysicalDeviceProperties2(g_vk.phys, &p2);
+        g_vk.no_poll = dp.driverID == VK_DRIVER_ID_MESA_TURNIP;
+    }
+#endif
+    if (getenv("MHGU_VK_NO_POLL")) g_vk.no_poll = atoi(getenv("MHGU_VK_NO_POLL")) != 0;
+    if (g_vk.no_poll) {
+        g_vk.fences = true;
+        LOG("[vk] no completion checks: a fence per submission, waited for by a thread of its own\n");
+    }
     g_vk.divisor = g_vk.divisor && div_have.vertexAttributeInstanceRateDivisor;
     g_vk.custom_border = g_vk.custom_border && cbc_have.customBorderColors && cbc_have.customBorderColorWithoutFormat;
 

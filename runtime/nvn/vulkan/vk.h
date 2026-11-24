@@ -46,6 +46,7 @@ typedef struct {
     PFN_vkWaitSemaphores wait_semaphores;
     bool api11;                // a device below Vulkan 1.2 (or MHGU_VK11=1): no 1.2 structures, SPIR-V 1.3, no FSR
     bool fences;               // no timeline semaphores (always with api11): exec.c numbers submissions with fences
+    bool no_poll;              // (with fences) never ask the driver whether work is done: a thread waits (exec.c)
     bool no_mirror_clamp;      // api11 without VK_KHR_sampler_mirror_clamp_to_edge: textures.c mirrors and repeats
     VkCommandPool pool;        // render thread only
     bool divisor, demote, custom_border, depth_clamp, stencil_export, sample_shading;
