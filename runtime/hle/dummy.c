@@ -28,6 +28,13 @@ static uint32_t g_dummy;  // the monster held, 0 none
 static int g_slot = -1;
 static bool g_face;
 static float g_turn = 180.0f;  // (degrees added to the hunter's heading; the control file's "dummy <cm> <degrees>")
+// MHGU_DUMMY_SCALE=<x>: the held monster's model scale (object +0x60, x y z) set to x every update, so its size doesn't
+// depend on the quest's random size roll. The scale it had is logged once.
+static float g_scale;
+// MHGU_DUMMY_AIM=<pitch>: our hunter's aim pitch (player +0x14b8 and its copy +0x14bc, -100..100) set every update, so
+// shots fly along the same line in every run. The hits log the pitch either way.
+static bool g_aim_set;
+static float g_aim;
 
 static uint32_t local_player(void) {
     uint32_t gc = LD32(G_GAMECONTROL), sp = LD32(G_SPLAYER);
@@ -53,6 +60,13 @@ static void hold(Cpu *c) {
         if (info && LD16(info + 0x1b6) < 10000) en = e;
     }
     if (!en) return;
+    static uint32_t logged;
+    if (logged != en) {
+        logged = en;
+        LOG("[dummy] holding %08x: scale %.4f %.4f %.4f\n", en, (double)LDF(en + 0x60), (double)LDF(en + 0x64), (double)LDF(en + 0x68));
+    }
+    if (g_scale > 0) STF(en + 0x60, g_scale), STF(en + 0x64, g_scale), STF(en + 0x68, g_scale);
+    if (g_aim_set && pl == local_player()) STF(pl + 0x14b8, g_aim), STF(pl + 0x14bc, g_aim);
     // After a "dummy" control command our own hunter, when it is the one held for, stays where it was then (combos walk
     // it onto slopes, where blows meet another part) with its HP topped up.
     if (g_pin_state && pl == local_player()) {
@@ -144,7 +158,10 @@ static void keep_hp(void) {
     }
 }
 
+static uint32_t g_updates;  // collision updates so far (the hit log's clock)
+
 static void collision(Cpu *c) {
+    g_updates++;
     if (g_summon > 0) {
         uint32_t pl = local_player();
         if (pl) ST16(pl + 0x13d6, 5000), ST16(pl + 0x13da, 5000);  // (the hunter's HP and its red part, above any one hit: it lasts as long as the test)
@@ -188,7 +205,9 @@ static void collision(Cpu *c) {
 
 static void damage(Cpu *c) {
     if (c->r[0] == g_dummy) {
-        LOG("[dummy] hit: part %u, damage %d, kind %u\n", c->r[1], (int)c->r[2], c->r[3]);
+        uint32_t pl = local_player();
+        LOG("[dummy] hit: part %u, damage %d, kind %u, update %u, %.1f ms, aim %.2f, scale %.3f\n", c->r[1], (int)c->r[2], c->r[3],
+            g_updates, (double)(plat_now_ns() / 100000ull) / 10.0, pl ? (double)LDF(pl + 0x14b8) : 0.0, (double)LDF(g_dummy + 0x60));
         c->r[2] = 1;
     }
     fnhook_call_original(c, FN_EN_DAMAGE);
@@ -219,6 +238,10 @@ void dummy_init(void) {
     if (s && *s) g_slot = atoi(s) & 3;
     s = getenv("MHGU_DUMMY_FACE");
     g_face = s && *s && atoi(s);
+    s = getenv("MHGU_DUMMY_SCALE");
+    g_scale = s && *s ? strtof(s, NULL) : 0;
+    s = getenv("MHGU_DUMMY_AIM");
+    g_aim_set = s && *s, g_aim = g_aim_set ? strtof(s, NULL) : 0;
     fnhook_set(FN_COLLISION, hle_register("dummy:collision", collision));
     fnhook_set(FN_EN_DAMAGE, hle_register("dummy:damage", damage));
     LOG("[dummy] the zone's large monster stands %.0f cm in front of the hunter, outside the camp\n", (double)g_dist);
