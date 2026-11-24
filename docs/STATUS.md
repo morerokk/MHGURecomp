@@ -1785,6 +1785,18 @@ Extras beyond Fexty's exported.txt, kept as harmless: forge_log_trace(format, ..
 the plugin's own messages as "[forge] [INFO] ..." (Forge's tags). Plugins are built -mfloat-abi=softfp, as
 Forge is: floats in core registers (forge_onUpdate's dt in r0; until 2026-10-23 it went in s0 only).
 
+Save commits from plugins (2026-11-24): nn::fs aborts a commit while any file of the save is open for writing (2002-6457,
+WriteModeFileNotClosed). Plugins commit the save on the main thread (forge_fs_unmountSaveData always commits, as Forge's
+does; plugins that keep settings in the save also call CommitSaveData themselves, some every few seconds), and the game
+writes its save on another thread: a player with 15 plugins had the game close at the end of a hunt. Reproduced with a
+plugin committing every frame and the game saving (Quit Game > Save). FileSystemAccessor::Commit now has a host layer
+(services/fs.c, commit_guard) that waits, up to 10 s, until no other thread has a save file open for writing (by the
+SDK's own open-file list and the host's), and save files opened for writing by other threads wait while it commits; a
+thread's own open file is not waited for (nn::fs aborts as on the console). A wait is logged ("[fs] a save commit ...
+waited N ms ..."; 17-19 ms in the test). MHGU_NO_COMMIT_GUARD=1 turns it off. Every abort also logs the files open for
+writing and those closed in the last 5 s (path, guest thread, the game's and plugins' calls that opened them), plugins'
+files from forge_fs_openFile still open, and Forge plugins' code on the stack.
+
 Forge 2.0.0 (2026-11-19; was 1.5.1, the same API plus what 2.0.0 adds): the port reports 2.0.0, so plugins asking for 2.0
 start (1.x ones still do). Files: forge_fs_openFile(path, mode, u32 *handle) / getFileSize / readFile(handle, s64 offset, buf,
 size) / closeFile are the game's own nn::fs OpenFile / GetFileSize / ReadFile / CloseFile (any mount the game has: "app:/"
