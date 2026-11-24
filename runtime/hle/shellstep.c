@@ -1,28 +1,53 @@
-// Bowgun Pierce shots at high frame rates. A bowgun shell (uShellPlw04_000; its update is vtable slot 9, 0x66c880) that
-// hits a monster stands still for the update that takes the hit, counts it (+0x15d8) and starts a 4-frame timer
-// (+0x15d4, counted down by the step) after which it slows to 0.7 of its speed; the next hit can land 6 frames (0.1 s)
-// later. All of that runs on the step except the stop: it lasts one update, which on the Switch's 30 updates a second
-// is 2 frames of 60 fps, but 1 at 60 fps and 1/4 at 240 fps. So between two hits the shell flew 4 frames' worth on the
-// Switch and 5 or 5.75 here, about a quarter further, and a Pierce shot's later hits left a small part sooner: on a
-// Tigrex shot from the front, 3 hits in the head at 30 fps, the third in the neck at 60 fps (reported 2026-11-24;
-// measured: 253 units from the first hit to the second at 30 fps, 311 at 60).
-// Here the stop lasts 2 frames whatever the frame rate: after the update that took the hit, the shell keeps still for
-// the rest of the 2 frames (its movement in each update cut by the part of its step that is still inside the stop), so
-// it is where the 30 fps game has it at each hit. At 30 fps and below the original. MHGU_NO_SHELLSTEP=1: the original
-// (for comparing). MHGU_LOG_SHELLSTEP=1: each update of a held shell logged; 2: every update of every bowgun shell.
+// Pierce shots at high frame rates: hits spaced along a shot as on the Switch (30 updates a second).
+//
+// Bowguns. A bowgun shell (uShellPlw04_000; its update is vtable slot 9, 0x66c880) that hits a monster stands still for
+// the update that takes the hit, counts it (+0x15d8) and starts a 4-frame timer (+0x15d4, counted down by the step)
+// after which it slows to 0.7 of its speed; the next hit can land 6 frames (0.1 s) later. All of that runs on the step
+// except the stop: it lasts one update, which on the Switch is 2 frames of 60 fps, but 1 at 60 fps and 1/4 at 240 fps.
+// So between two hits the shell flew 4 frames' worth on the Switch and 5 or 5.75 here, about a quarter further, and a
+// Pierce shot's later hits left a small part sooner: on a Tigrex shot from the front, 3 hits in the head at 30 fps,
+// the third in the neck at 60 fps (reported 2026-11-24; measured: 253 units from the first hit to the second at 30
+// fps, 311 at 60). Here the stop lasts 2 frames whatever the frame rate: after the update that took the hit, the shell
+// keeps still for the rest of the 2 frames (its movement in each update cut by the part of its step still inside it).
+//
+// The Bow. Its arrows (uShellPlw10_000, update 0x67957c) don't stop on a hit. A hit sets a timer (+0x15ec, from the
+// shot's data: 4 frames for the Pierce arrows measured, stored as 4 minus the step by the update that takes the hit)
+// counted down by the step; the update in which it runs out moves the arrow slower (its velocity +0x1010, per frame,
+// times a factor from the data: 0.7 measured), and the next hit lands after that, on the Switch and at 60 fps in the
+// next update. On the Switch the update that empties the timer covers frames 2 to 4 after the hit, so the arrow flew
+// slow for half of each gap (2 + 2 x 0.7 = 3.4 frames' worth); at 60 fps only for the last frame (3.7); at 240 fps the
+// last quarter, and the next hit came 3 updates later still (something outside the arrow waits another 0.75 frame;
+// not found), so 4.45 frames' worth. Here an arrow is slowed from where the 30 fps game slows it (frame 2 for a 4-frame
+// timer) by the factor last seen; when the game's timer runs out (the factor is read then, from the velocity) what was
+// let through beyond it is taken back; and from where the 30 fps game's next hit lands (frame 4) the arrow keeps still
+// until it does, at most 1 frame. So it is where the 30 fps game has it at each hit; the hits come when the game lets
+// them (at 240 fps 0.75 frame later than on the Switch, as without this).
+//
+// At 30 fps and below the original. MHGU_NO_SHELLSTEP=1: the original for both (for comparing). MHGU_LOG_SHELLSTEP=1:
+// what each does; 2: every update of every bowgun shell and arrow too.
 #include <math.h>
 #include <stdlib.h>
 
 #include "../hle.h"
 
 #define FN_W04_UPDATE 0x66c880u  // (shell): a bowgun shell's update (uShellPlw04_000, vtable 0x1960820 slot 9)
+#define FN_W10_UPDATE 0x67957cu  // (shell): a Bow arrow's update (uShellPlw10_000, vtable 0x1961870 slot 9)
 #define SH_STEP       0x1cu      // shell: its step (f32, 60 fps frames)
 #define SH_POS        0x40u      // shell: its position
-#define SH_HITS       0x15d8u    // shell: u16, the monster hits it has taken (the u16 after it is something else)
+#define SH_HITS       0x15d8u    // bowgun shell: u16, the monster hits it has taken (the u16 after it is something else)
+#define AR_VEL        0x1010u    // arrow: its velocity, per frame of 60 fps
+#define AR_SLOW       0x15ecu    // arrow: f32, the timer a hit starts; the update it runs out in slows the arrow
 #define STOP_FRAMES   2.0f       // how long the 30 fps game holds a shell on a hit: one update, step 2.0
+#define SWITCH_STEP   2.0f
+#define MAX_WAIT      1.0f       // frames an arrow is held at most for its next hit
 #define MAX_HELD      16
 
 static struct { uint32_t shell; float left; } g_held[MAX_HELD];  // shells still inside a stop, and how much of it is left
+// Arrows since a hit: frames since it (at the end of the last update), the frame the 30 fps game slows the arrow from
+// and the one its next hit lands at, of the frames after the slow-down so far all of them and those weighted by the
+// factor they were slowed by here, and whether the game's timer has run out.
+static struct { uint32_t shell; float since, slow_from, hit_at, after, after_slowed; bool slowed; } g_arrow[MAX_HELD];
+static float g_factor = 1.0f;  // the slow-down factor last seen (1 before any: nothing slowed early, all taken back)
 static int g_log;
 
 static int held_slot(uint32_t s) {
@@ -61,10 +86,82 @@ static void update(Cpu *c) {
     }
 }
 
+static int arrow_slot(uint32_t s) {
+    for (int i = 0; i < MAX_HELD; i++)
+        if (g_arrow[i].shell == s) return i;
+    return -1;
+}
+
+static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+static void arrow_update(Cpu *c) {
+    uint32_t s = c->r[0];
+    float step = LDF(s + SH_STEP), timer0 = LDF(s + AR_SLOW);
+    float p0[3] = {LDF(s + SH_POS), LDF(s + SH_POS + 4), LDF(s + SH_POS + 8)};
+    float v0[3] = {LDF(s + AR_VEL), LDF(s + AR_VEL + 4), LDF(s + AR_VEL + 8)};
+    fnhook_call_original(c, FN_W10_UPDATE);
+    float timer = LDF(s + AR_SLOW);
+    int k = arrow_slot(s);
+    if (step > 0.0f && step < SWITCH_STEP && timer > timer0 + 0.001f) {
+        // (a hit started the timer: its length is what is left plus this update's step; the 30 fps game's update that
+        // empties it starts at the last whole update before its end, and its next hit lands when that update ends)
+        float len = timer + step, from = SWITCH_STEP * ceilf((len - SWITCH_STEP) / SWITCH_STEP - 0.001f);
+        if (k < 0) k = arrow_slot(0);
+        if (k < 0) k = 0;  // (more than MAX_HELD arrows at once: the oldest entry gives way)
+        g_arrow[k].shell = s, g_arrow[k].since = step, g_arrow[k].slow_from = from > 0.0f ? from : 0.0f;
+        g_arrow[k].hit_at = g_arrow[k].slow_from + SWITCH_STEP;
+        g_arrow[k].after = g_arrow[k].after_slowed = 0.0f, g_arrow[k].slowed = false;
+        if (g_log) LOG("[shellstep] arrow %08x hit: timer %.3f frames, slowed from frame %.3f, next hit at %.3f\n", s, (double)len,
+                       (double)g_arrow[k].slow_from, (double)g_arrow[k].hit_at);
+    } else if (k >= 0) {
+        float t0 = g_arrow[k].since, t1 = t0 + step;
+        g_arrow[k].since = t1;
+        // (the parts of this update after the 30 fps game's slow-down, and after its next hit, until that hit is due)
+        float slow = clampf(fminf(t1, g_arrow[k].hit_at) - fmaxf(t0, g_arrow[k].slow_from), 0.0f, step);
+        float wait = clampf(t1 - fmaxf(t0, g_arrow[k].hit_at), 0.0f, step);
+        float keep = 1.0f, over = 0.0f;
+        if (!g_arrow[k].slowed && timer0 > 0.0f && !(timer > 0.0f)) {
+            // (the game slowed it in this update: the factor, and what this run let through after the 30 fps game's
+            // slow-down beyond that factor, taken back along the velocity it had)
+            float n0 = sqrtf(v0[0] * v0[0] + v0[1] * v0[1] + v0[2] * v0[2]);
+            float n1 = sqrtf(LDF(s + AR_VEL) * LDF(s + AR_VEL) + LDF(s + AR_VEL + 4) * LDF(s + AR_VEL + 4) +
+                             LDF(s + AR_VEL + 8) * LDF(s + AR_VEL + 8));
+            float f = n0 > 0.0f ? n1 / n0 : 1.0f;
+            over = g_arrow[k].after_slowed - f * g_arrow[k].after;
+            if (f > 0.0f && f < 1.0f) g_factor = f;
+            g_arrow[k].slowed = true;
+            if (g_log) LOG("[shellstep] arrow %08x slowed at frame %.3f: factor %.3f, took back %.3f frames\n", s, (double)t0, (double)f, (double)over);
+        } else if (!g_arrow[k].slowed && !(timer > 0.0f)) {
+            g_arrow[k].shell = 0;  // (the timer ended some other way)
+        } else if (!g_arrow[k].slowed && slow > 0.0f) {
+            keep -= slow * (1.0f - g_factor) / step;
+            g_arrow[k].after += slow, g_arrow[k].after_slowed += slow * g_factor;
+        }
+        if (g_arrow[k].shell) {
+            keep -= wait / step;  // (past the 30 fps game's next hit: held until it lands)
+            if (keep < 0.0f) keep = 0.0f;
+            for (int i = 0; i < 3; i++) {
+                float a = LDF(s + SH_POS + 4u * (uint32_t)i);
+                STF(s + SH_POS + 4u * (uint32_t)i, p0[i] + (a - p0[i]) * keep - v0[i] * over);
+            }
+            if (g_log && (keep < 1.0f || over != 0.0f))
+                LOG("[shellstep] arrow %08x frame %.3f: moved %.3f of its step %.3f\n", s, (double)t0, (double)keep, (double)step);
+            if (t0 >= g_arrow[k].hit_at + MAX_WAIT) g_arrow[k].shell = 0;  // (no next hit: it flies on)
+        }
+    }
+    if (g_log >= 2) {
+        float dx = LDF(s + SH_POS) - p0[0], dy = LDF(s + SH_POS + 4) - p0[1], dz = LDF(s + SH_POS + 8) - p0[2];
+        LOG("[shellstep] arrow %08x at %.1f %.1f %.1f, moved %.2f, step %.3f, timer %.3f\n", s, (double)LDF(s + SH_POS),
+            (double)LDF(s + SH_POS + 4), (double)LDF(s + SH_POS + 8), (double)sqrtf(dx * dx + dy * dy + dz * dz), (double)step,
+            (double)timer);
+    }
+}
+
 void shellstep_init(void) {
     const char *e = getenv("MHGU_LOG_SHELLSTEP");
     g_log = e && *e ? atoi(e) : 0;
     e = getenv("MHGU_NO_SHELLSTEP");
     if (e && *e == '1') return;
     fnhook_set(FN_W04_UPDATE, hle_register("shellstep:update", update));
+    fnhook_set(FN_W10_UPDATE, hle_register("shellstep:arrow", arrow_update));
 }

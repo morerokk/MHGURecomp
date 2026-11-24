@@ -609,8 +609,20 @@ the stop). Checked, hit 1 to hit 2 = 3.4 x the shell's speed per frame at 30, 60
 without it 311 at 60 and 386 at 144. MHGU_NO_SHELLSTEP=1 turns it off, MHGU_LOG_SHELLSTEP=1/2 logs it. A shell's speed
 varies about 2% from shot to shot at any rate (70.0 to 71.8 a frame), and the first hit's place by a few dozen units, so
 one shot's hit list is noisy; the spacing isn't. Not covered: the w04_100 / _101 shell classes (other bowgun ammo,
-their own updates 0x67262c / 0x673930), the Bow's pierce arrows (uShellPlw10_*, update 0x67957c), a 3-head-hit line
-reproduced (aims -7.55 / -4 / -1 gave head, head, neck or head, wing at 30 fps too). The rig (outside the repo):
+their own updates 0x67262c / 0x673930), a 3-head-hit line reproduced (aims -7.55 / -4 / -1 gave head, head, neck or
+head, wing at 30 fps too).
+The Bow's Pierce arrows (uShellPlw10_000, update 0x67957c; a Pierce-only bow, uncharged shots) had the same kind of
+bug by another way: no stop on a hit, but a hit sets a timer (+0x15ec, 4 frames from the data, stored as 4 minus the
+step) and the update it runs out in moves the arrow at 0.7 of its velocity (+0x1010, per frame), the next hit coming
+after it. On the Switch that update covers frames 2-4 after the hit, so hit to hit = 2 + 2 x 0.7 = 3.4 frames of the
+arrow's speed (measured 3.405); at 60 fps 3.7; at 240 fps the next hit also came 3 updates after the timer ran out (at
+30 and 60 fps the next update; nothing in the arrow +0x1380..+0x1800 counts it), so ~4.5 (258-262 units). Fixed in the
+same file: slowed from frame 2 by the factor last seen, the rest taken back when the game's timer runs out, and held
+from frame 4 until the next hit (at most 1 frame). Measured 3.40 at 60, 144 and 240 fps, the next gap x0.70 as at 30.
+At 240 fps the hits still come 0.75 frame later than on the Switch (the wait found above); after an arrow's last hit
+it can stand still up to 1 frame. Not covered: uShellPlw10_001 (update 0x67bf88), charged shots, Bow Hunter Arts. Rig:
+scratch-pierce\brun.sh (the Bow save: X draws, R taps fire; NOHOLD=1 FIRE=10 CHARGE=0.1), gaps.sh prints hit-to-hit
+distance over the arrow's speed. The rig (outside the repo):
 C:\MHGURecompile\scratch-pierce\run.sh <tag> <fps>: quest 605 (Tigrex by the Tail) area 1, MHGU_DUMMY=1200 facing,
 MHGU_DUMMY_SCALE=1.0 (the quest's size roll, 0.82-0.96 seen, at object +0x60), MHGU_DUMMY_AIM (aim pitch, player
 +0x14b8), MHGU_LOG_SHOTPOS (hitsync.c); a Heavy Bowgun: L + X selects Pierce S Lv1, R held aims, X reloads, A fires.
