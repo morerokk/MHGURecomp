@@ -512,24 +512,54 @@ static void melody_toggle(Cpu *c) {
     g_pause_menu = c->r[0];
     fnhook_call_original(c, FN_MELODY_TOGGLE);
 }
+// The Hunter Arts' panel on the HUD: a row per Art (0x84cfc0 its update, r0 the row, +0x88 the Art 0..2) shows that
+// Art's buttons by the Control Type (options +0x446c, 0..3) and the swaps (+0x446e R / ZR roles, +0x446f D-pad and
+// right stick): "ZL + X", "R + A + B", "ZL", a right stick or a D-pad direction. The row keeps the three bytes it was
+// laid out for (+0xd4..d6) and, when they change, plays the GUI sequence for its [type][Art] from one of four tables
+// (by the swaps; 0x183dfc8...), `bl 0x76e538` at 0x84d2a0 (row, its object +0xd0, sequence). Type 0 unswapped has a
+// picture each, D-pad up / right / down: 0xf42ad + the Art, in all four tables.
+// With the Arts on keys of their own (actions.c HunterArtKeys) shown for the keyboard, each row plays that D-pad
+// sequence whatever the type, and those three cells of the HUD's sheet carry the Arts' keys (prompts_frame): one key a
+// row. A row is laid out again when that changes (its +0xd4 made stale).
+#define FN_ART_ROW      0x84cfc0u
+#define FN_ROW_SEQ      0x76e538u
+#define ART_ROW_SEQ_LR  0x84d2a4u  // (the return address of the row's layout call)
+#define ROW_ART         0x88u
+#define ROW_TYPE_SEEN   0xd4u
+#define SEQ_DPAD        0xf42adu
+static volatile bool g_art_rows;  // the rows show the Arts' keys (prompts_frame, render thread; read on the game thread)
+static struct { uint32_t row; bool keys; } g_rows[8];  // (game thread) each row seen and how it was laid out last
+static int g_nrows;
+static int row_slot(uint32_t row) {
+    for (int i = 0; i < g_nrows; i++)
+        if (g_rows[i].row == row) return i;
+    return -1;
+}
+static void art_row(Cpu *c) {
+    uint32_t row = c->r[0];
+    int i = row_slot(row);
+    if (row && (i < 0 || g_rows[i].keys != g_art_rows)) ST8(row + ROW_TYPE_SEEN, 0xff);  // (no type: laid out again)
+    fnhook_call_next(c, FN_ART_ROW);
+}
+static void row_seq(Cpu *c) {
+    if (c->r[14] == ART_ROW_SEQ_LR) {
+        uint32_t row = c->r[0], art = LD32(row + ROW_ART);
+        bool keys = g_art_rows && art < 3;
+        if (keys) c->r[2] = SEQ_DPAD + art;
+        int i = row_slot(row);
+        if (i < 0) {  // (the HUD makes its rows anew for each hunt: the oldest one seen goes)
+            if (g_nrows < 8) i = g_nrows++;
+            else memmove(g_rows, g_rows + 1, sizeof g_rows[0] * 7), i = 7;
+            g_rows[i].row = row;
+        }
+        g_rows[i].keys = keys;
+    }
+    fnhook_call_next(c, FN_ROW_SEQ);
+}
 void prompts_init(void) {
     if (!fnhook_get(FN_MELODY_TOGGLE)) fnhook_set(FN_MELODY_TOGGLE, hle_register("prompts:melody_toggle", melody_toggle));
-}
-// The Hunter Arts' panel on the HUD shows each Art's buttons by the Control Type (options +0x446c; +0x446f swaps the
-// D-pad and the right stick): "ZL + X", "R + A + B" / "ZL", a right stick direction, or a D-pad direction - type 0, or
-// type 3 swapped: one picture a row, D-pad up, right, down. With the Arts on keys of their own (actions.c HunterArtKeys)
-// those three cells of the HUD's sheet carry the Arts' keys instead (prompts_frame). The other types keep the game's
-// pictures (their buttons, which still work): the code that lays the panel out by type isn't found yet - not in the
-// unit update (a read watch on the option bytes there sees only the controls' reads).
-#define G_OPTIONS       0x1a97f78u
-#define OPT_TYPE        0x446cu
-#define OPT_STICK_SWAP  0x446fu
-static bool art_panel_dpad(void) {
-    uint32_t opt = LD32(G_OPTIONS);
-    if (!opt) return false;
-    int type = LD8(opt + OPT_TYPE);
-    bool swap = LD8(opt + OPT_STICK_SWAP) != 0;
-    return (type == 0 && !swap) || (type == 3 && swap);
+    fnhook_set_outer(FN_ART_ROW, hle_register("prompts:art_row", art_row));
+    fnhook_set_outer(FN_ROW_SEQ, hle_register("prompts:row_seq", row_seq));
 }
 static bool melody_shown(void) {
     uint32_t pm = g_pause_menu;
@@ -787,7 +817,7 @@ void prompts_frame(void) {
         act_get_profile(&p);
         view = view_now();
         for (int b = 0; b < 16; b++) want[b] = input_for(&p, view, b);
-        if (act_art_keys() && art_panel_dpad())  // (the Arts' own keys: the HUD's Art panel shows them, by its D-pad cells)
+        if (act_art_keys())  // (the Arts' own keys: the HUD's Art panel shows them, by its D-pad cells: art_row)
             for (int n = 0; n < 3; n++) {
                 const ActBinding *b = act_effective(&p, 1, ACT_ART1 + n, 0, NULL);
                 if (!b) b = act_default_binding(ACT_ART1 + n, 1);
@@ -795,6 +825,7 @@ void prompts_frame(void) {
             }
     }
     bool art_hud = kbm && (want[16] || want[17] || want[18]);
+    g_art_rows = art_hud;
     if (view != shown_view && kbm) {
         static int logged_views;
         if (logged_views++ < 200)

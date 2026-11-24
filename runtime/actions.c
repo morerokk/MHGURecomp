@@ -108,7 +108,7 @@ static const ActDef defs[ACT_COUNT] = {
     [ACT_TOWN_R3] = {"TownR3", ACT_VIEW_TOWN, S_RSTICK, 0, S_RSTICK, NOFB, "Right stick click in town (R3)", ""},
     [ACT_TOWN_PLUS] = {"TownPlus", ACT_VIEW_TOWN, S_PLUS, 0, S_PLUS, NOFB, "Start menu in town (+)", ""},
     [ACT_TOWN_MINUS] = {"TownMinus", ACT_VIEW_TOWN, S_MINUS, 0, S_MINUS, NOFB, "Minus button in town (-)", ""},
-    // the Hunter Arts: no button of their own, what the Control Type wants is added by the hunt's view (act_art_bits)
+    // the Hunter Arts: no button of their own, a press asks for the Art itself (hle/input_view.c pl_no_input)
     [ACT_ART1] = {"HunterArt1", ACT_VIEW_MB1, ROLE_VIRTUAL, 0, -1, NOFB, "Hunter Art 1", ""},
     [ACT_ART2] = {"HunterArt2", ACT_VIEW_MB1, ROLE_VIRTUAL, 0, -1, NOFB, "Hunter Art 2", ""},
     [ACT_ART3] = {"HunterArt3", ACT_VIEW_MB1, ROLE_VIRTUAL, 0, -1, NOFB, "Hunter Art 3", ""},
@@ -817,25 +817,6 @@ static bool target_is_confirm(void) {
     if (!atomic_load(&open_talk_bound)) return false;  // (OpenTalk unbound: no split, Interact as it always was)
     int c = atomic_load(&target_category);
     return c > 0 && (atomic_load(&confirm_mask_now) >> c & 1);
-}
-// (engine-word bits, as ew_of_btn; the right stick's directions past half way are 0xf00000 as the left one's 0xf0000:
-// up, right, down, left. Found in a hunt by pressing each type's inputs, 2026-11-18)
-uint32_t act_art_bits(int n, int type, bool swap, bool alt) {
-    enum { A = 0x2000, B = 0x4000, X = 0x1000, L = 0x100, R = 0x200, ZL = 0x400, ZR = 0x800 };
-    static const uint32_t dpad[3] = {0x10, 0x20, 0x40}, rstick[3] = {0x100000, 0x200000, 0x400000};
-    if (n < 0 || n > 2) return 0;
-    switch (type) {
-    case 0: case 3: return (type == 3) != alt ? rstick[n] : dpad[n];
-    case 1: {
-        const uint32_t t1[3] = {(swap ? ZR : R) | A | B, swap ? L : ZL, swap ? R : ZR};
-        return t1[n];
-    }
-    case 2: {
-        static const uint32_t face[3] = {X, A, B};
-        return (swap ? L : ZL) | face[n];
-    }
-    default: return 0;
-    }
 }
 void act_get_profile(ActProfile *out) {
     lock();

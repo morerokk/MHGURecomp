@@ -42,8 +42,8 @@ typedef enum {
     // a town or the Hub (the gameplay view while the town avatar plays)
     ACT_TOWN_INTERACT, ACT_TOWN_CANCEL, ACT_TOWN_X, ACT_TOWN_Y, ACT_TOWN_L, ACT_TOWN_RUN, ACT_TOWN_ZL, ACT_TOWN_ZR,
     ACT_TOWN_UP, ACT_TOWN_DOWN, ACT_TOWN_LEFT, ACT_TOWN_RIGHT, ACT_TOWN_L3, ACT_TOWN_R3, ACT_TOWN_PLUS, ACT_TOWN_MINUS,
-    // a hunt: the three Hunter Arts, each on an input of its own (HunterArtKeys): what the game's Control Type wants for
-    // that Art (act_art_bits) is delivered
+    // a hunt: the three Hunter Arts, each on an input of its own (HunterArtKeys): a press asks the game for that Art
+    // directly (hle/input_view.c pl_no_input), whatever the Control Type
     ACT_ART1, ACT_ART2, ACT_ART3,
     // a hunt: the confirm key (ConfirmTargets), apart from Interact: A while the hunter stands by a box, a bed or an NPC.
     // What the hunter stands by is the interactable's category (player+0x32B4, act_set_target); Interact itself is the
@@ -88,11 +88,6 @@ bool act_crouch_split_in(const struct ActProfile *p);
 uint32_t act_virtual_bits(uint64_t active);  // the virtual bits the gameplay word gets (any thread): 0 unless split
 // The Hunter Arts on inputs of their own (HunterArtKeys on, the layer on)
 bool act_art_keys(void);
-// The engine-word bits the game's Control Type takes for Hunter Art n (0..2): type = options +0x446c (0..3), swap =
-// +0x446e (R and ZR's roles swapped), alt = +0x446f (D-pad and right stick swapped). 0: a type not known.
-//   type 0: D-pad (right stick with alt) up / right / down     type 3: right stick (D-pad with alt) up / right / down
-//   type 1: R+A+B / ZL / ZR (swap: ZR+A+B / L / R)              type 2: ZL+X / ZL+A / ZL+B (swap: L+...)
-uint32_t act_art_bits(int n, int type, bool swap, bool alt);
 // The category of the interactable the hunter stands by (player+0x32B4, hle/input_view.c), 0: none. The game thread
 // sets it every player update and the view reads it (ST_CONFIRM): with a category in ConfirmTargets, OpenTalk
 // delivers A and Dodge / Crouch are silent; elsewhere OpenTalk is silent, so A stays the roll.

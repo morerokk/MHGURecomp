@@ -1580,7 +1580,7 @@ void action_rows(std::vector<Row> &r) {
     }
     if (kind == TAB_HUNT)
         toggle("act.arts", "Hunter Art keys", &p.art_keys,
-               "On: each Hunter Art has an input of its own (keyboard: 1, 2 and 3 unless rebound below), whatever buttons the game's Control Type gives them; those keep working too. With a Control Type that puts the Arts on the D-pad, the HUD shows these keys for them on keyboard and mouse.");
+               "On: each Hunter Art has an input of its own (keyboard: 1, 2 and 3 unless rebound below), whatever buttons the game's Control Type gives them; those keep working too. On keyboard and mouse the HUD shows these keys for them, whatever the Control Type.");
     if (kind == TAB_HUNT) {
         // the categories OpenTalk is for: a comma list, read off log.txt with Target log on
         char list[160];
