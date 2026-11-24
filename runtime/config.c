@@ -491,7 +491,6 @@ static const char DEFAULT_INI[] =
     "\n"
     "; Matchmaking key: hubs are only seen by players with the same key, so friends who all enter the same key\n"
     "; only see each other's hubs. Empty: public, your hubs are seen by (and you see) everyone without a key.\n"
-    "; On Android, empty means public among Android players only: to play with friends on PC, all enter the same key.\n"
     "; Default:\n"
     "Key =\n"
     "\n"

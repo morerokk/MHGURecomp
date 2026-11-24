@@ -234,8 +234,8 @@ nuevo. Desde la versión de PC, copia el contenido de `%APPDATA%\MHGURecomp\save
 `~/.local/share/MHGURecomp/save/save_0/`). Desde una Switch, usa los mismos archivos que usarías en PC. De vez en
 cuando, copia `save/save_0/` a tu PC como copia de seguridad.
 
-Las salas públicas por internet en Android se comparten solo con otros jugadores de Android. Para jugar con amigos en
-PC, poned todos la misma clave de emparejamiento (menú de ajustes, pestaña Red).
+Las salas públicas por internet en Android se comparten con los jugadores de PC en el servidor de salas por defecto.
+Una clave de emparejamiento (menú de ajustes, pestaña Red) sigue reservando las salas a un grupo de amigos.
 
 Para actualizar, instala el APK nuevo encima del antiguo: tus archivos del juego, partidas y ajustes se conservan.
 **No lo desinstales antes.** Desinstalar borra toda la carpeta `files`, incluidos los archivos del juego y las
@@ -330,8 +330,7 @@ Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
 - `[Mouse]`: `MouseSensitivity` (1 = por defecto, de 0.1 a 10)
 - `[Multiplayer]`: `Port`, `Join` (direcciones de anfitriones fuera de tu LAN), `Server` (servidor de salas por
   internet: vacío = el predeterminado, `Off` = ninguno, o `host[:puerto]`), `Key` (clave de emparejamiento: solo los
-  jugadores con la misma clave ven las salas de los demás; vacío = públicas, en Android públicas solo entre jugadores
-  de Android), `SyncSmallMonsters`, `ShareUrgentCredit` (On por defecto: una misión Urgente que publicó otra persona
+  jugadores con la misma clave ven las salas de los demás; vacío = públicas), `SyncSmallMonsters`, `ShareUrgentCredit` (On por defecto: una misión Urgente que publicó otra persona
   también cuenta para ti al completarla, si la tienes desbloqueada)
 - `[Monster HP]`: factores de vida de los monstruos y de sus partes (retrocesos, roturas, cortes) para 1 a 4 cazadores en las misiones de la Sala, y excepciones por misión (por
   defecto: todos 1, como el juego original)
