@@ -379,12 +379,14 @@ static const char DEFAULT_INI[] =
     "; Default: Off\n"
     "ShowBattery = Off\n"
     "\n"
+#ifndef __APPLE__
     "; Android only: show the device's temperature (its battery's) under the frame rate, or in a box of its own when the\n"
     "; frame rate is off\n"
     "; Off, Celsius, Fahrenheit\n"
     "; Default: Off\n"
     "ShowTemperature = Off\n"
     "\n"
+#endif
     "; Framerate cap\n"
     "; Between 30 and 240\n"
     "; Default: 60\n"
@@ -727,12 +729,14 @@ static const char DEFAULT_INI[] =
     "; Default: 100\n"
     "MenuScale = 100\n"
     "\n"
+#ifndef __APPLE__
     "; What mhgurecomp-updater does when it is started: check GitHub for a newer release and ask before installing it,\n"
     "; install it without asking, or only start the game. Starting mhgurecomp itself never checks or updates.\n"
     "; Ask, Auto, Off\n"
     "; Default: Ask\n"
     "Updates = Ask\n"
     "\n"
+#endif
 #ifdef __APPLE__
     "; The folder the save is kept in (the one that holds save_0), for example in iCloud Drive or on another drive.\n"
     "; Use Choose... in the Settings window, or write the path as it is (spaces and ~ included, no backslashes).\n"
@@ -765,6 +769,7 @@ static const char DEFAULT_INI[] =
 #endif
     "; Takes effect at the next start\n"
     "BackupLocation =\n"
+#ifndef __APPLE__
     "\n"
     "[Android]\n"
     "; Android only. The folder the save is kept in, so syncing software can keep it in step: the one that holds save_0. Empty: the app's own\n"
@@ -776,6 +781,7 @@ static const char DEFAULT_INI[] =
     "; card), so they don't have to fit in the app's own folder. Empty: the data folder in the app's own folder. Set it with\n"
     "; Game files folder in the settings menu (Android tab): the app needs Android's \"All files access\". Takes effect at the next start\n"
     "GameFolder =\n"
+#endif
 #ifdef MHGU_DUAL_SCREEN
     "\n"
     "[Dual Screen]\n"
