@@ -595,16 +595,37 @@ falls back to FIFO and waits for the 60 Hz monitor. With VSync = Off (immediate 
 village at 640x360 runs ~138 fps at a 144 target on the R9 (CPU-bound there). Walking speed checked at 30, 60 and
 ~133 fps (player position 2 s apart: ~355 units each time): normal game speed.
 
-Theory, not tested: Pierce ammo hitting more often at high frame rates. Anything the game counts per update rather
-than by the step behaves differently above 60 (and at 30 the other way). Two likely ways for a piercing shot: (1) a
-per-target hit cooldown counted in updates: at 144 fps it would run out 2.4x sooner in real time, so the shot can
-hit the same hit zones again as it passes through; (2) collision is tested once per update at the shot's new
-position: smaller steps sample its path more finely, so fewer hits are skipped on thin parts. Both mean more hits per
-shot, but only up to the ammo's hit count, so damage would rise towards the most a shot can do rather than without
-bound. Other per-update counters (multi-hit attacks, status ticks) could act the same way. To check later: a save
-with a bowgun and Pierce ammo, the same shots into a still monster at 60 and at 144 fps, and count hits (a hook on
-the damage function, or the damage numbers); the shell data (shell\pl\pl_w<weapon>_<n>\..._hit<n> files,
-rBowgunShellData) would show which field holds the interval. A fix would scale that counter by the step.
+Pierce shots and the frame rate (2026-11-24): fixed. Reported: a Grimclaw Tigrex shot from the front takes 3 Pierce S
+Lv1 hits in its small head at 30 fps (3 x 47), never at 60 fps (47, 47, 31) unless the monster is scaled to 150%. The
+earlier theory here (hits sooner, or sampled more finely, at high rates) was wrong: the hits spread further apart along
+the shot. Measured (scratch-pierce rig, below): the shell (uShellPlw04_000, update 0x66c880) hits every 6 frames of
+60 fps (0.1 s) at any rate, and after each hit a 4-frame timer (+0x15d4, run by the step) slows it to 0.7 of its speed;
+but the update that takes the hit (hit count u16 +0x15d8) holds the shell still for that one update: 2 frames on the
+Switch, 1 at 60 fps, 0.25 at 240. From one hit to the next it flew 2 + 2 x 0.7 frames' worth at 30 fps, 3 + 2 x 0.7 at
+60: 253 against 311 units, so the third hit left the head. Fix (runtime/hle/shellstep.c, runtime only): after that
+update the shell stays still for the rest of the 2 frames (the last update's movement cut by the part of it still in
+the stop). Checked, hit 1 to hit 2 = 3.4 x the shell's speed per frame at 30, 60, 144 and 240 fps (237.9 / 247.9 /
+258.7 / 241.8 units for shells of 70.0 / 72.9 / ~71 / 71.1; 144 lands 1 frame of 0.42 late on the 6-frame gate);
+without it 311 at 60 and 386 at 144. MHGU_NO_SHELLSTEP=1 turns it off, MHGU_LOG_SHELLSTEP=1/2 logs it. A shell's speed
+varies about 2% from shot to shot at any rate (70.0 to 71.8 a frame), and the first hit's place by a few dozen units, so
+one shot's hit list is noisy; the spacing isn't. Not covered: the w04_100 / _101 shell classes (other bowgun ammo,
+their own updates 0x67262c / 0x673930), a 3-head-hit line reproduced (aims -7.55 / -4 / -1 gave head, head, neck or
+head, wing at 30 fps too).
+The Bow's Pierce arrows (uShellPlw10_000, update 0x67957c; a Pierce-only bow, uncharged shots) had the same kind of
+bug by another way: no stop on a hit, but a hit sets a timer (+0x15ec, 4 frames from the data, stored as 4 minus the
+step) and the update it runs out in moves the arrow at 0.7 of its velocity (+0x1010, per frame), the next hit coming
+after it. On the Switch that update covers frames 2-4 after the hit, so hit to hit = 2 + 2 x 0.7 = 3.4 frames of the
+arrow's speed (measured 3.405); at 60 fps 3.7; at 240 fps the next hit also came 3 updates after the timer ran out (at
+30 and 60 fps the next update; nothing in the arrow +0x1380..+0x1800 counts it), so ~4.5 (258-262 units). Fixed in the
+same file: slowed from frame 2 by the factor last seen, the rest taken back when the game's timer runs out, and held
+from frame 4 until the next hit (at most 1 frame). Measured 3.40 at 60, 144 and 240 fps, the next gap x0.70 as at 30.
+At 240 fps the hits still come 0.75 frame later than on the Switch (the wait found above); after an arrow's last hit
+it can stand still up to 1 frame. Not covered: uShellPlw10_001 (update 0x67bf88), charged shots, Bow Hunter Arts. Rig:
+scratch-pierce\brun.sh (the Bow save: X draws, R taps fire; NOHOLD=1 FIRE=10 CHARGE=0.1), gaps.sh prints hit-to-hit
+distance over the arrow's speed. The rig (outside the repo):
+C:\MHGURecompile\scratch-pierce\run.sh <tag> <fps>: quest 605 (Tigrex by the Tail) area 1, MHGU_DUMMY=1200 facing,
+MHGU_DUMMY_SCALE=1.0 (the quest's size roll, 0.82-0.96 seen, at object +0x60), MHGU_DUMMY_AIM (aim pitch, player
++0x14b8), MHGU_LOG_SHOTPOS (hitsync.c); a Heavy Bowgun: L + X selects Pierce S Lv1, R held aims, X reloads, A fires.
 
 Monster AI and the frame rate (2026-10-25): measured, no difference. f_276154(monster, group, index, flag) starts an
 enemy's new action (stores it at monster +0x73e0, sends it to the other players) for small and large monsters alike;

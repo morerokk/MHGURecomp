@@ -37,6 +37,7 @@ void villagehub_tick(struct Cpu *c);  // game thread, each frame: drops the Vill
 void urgentcredit_init(void);  // Urgent quests count for all who clear them (runtime/hle/urgentcredit.c)
 void mashrate_init(void);  // mashing out of a stun at the Switch's rate at high frame rates (runtime/hle/mashrate.c)
 void hatestep_init(void);  // monsters' attention scores and noticing meters as at 30 fps at high frame rates (runtime/hle/hatestep.c)
+void shellstep_init(void);  // bowgun shells held as long on a monster hit as at 30 fps (Pierce's hit spacing) (runtime/hle/shellstep.c)
 void inflate_init(void);  // zlib's inflate_fast as host code: archives decompress faster (runtime/hle/inflate.c)
 void fastload_init(void);  // shorter transitions when not in a network session (runtime/hle/fastload.c)
 void movelog_init(void);  // (debug) MHGU_LOG_MOVES: the player's command table changes (runtime/hle/movelog.c)
