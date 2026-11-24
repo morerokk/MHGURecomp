@@ -145,6 +145,10 @@
     .backups_on = 1,                                                                                \
     .save_backups = 10,                                                                             \
     .backup_location = "",                                                                          \
+    .second_display = 0,                                                                            \
+    .bottom_panels = BOTTOM_PANELS_DEFAULT,                                                         \
+    .bottom_background = BOTTOM_BG_DARK,                                                            \
+    .bottom_wallpaper = "",                                                                         \
 
 Config g_config = {CONFIG_DEFAULT_VALUES};
 Config config_defaults(void) { Config c = {CONFIG_DEFAULT_VALUES}; return c; }
@@ -690,7 +694,36 @@ static const char DEFAULT_INI[] =
     "; Android only. The folder holding the game's exefs and romfs folders, used where it is (for example on a USB drive or SD\n"
     "; card), so they don't have to fit in the app's own folder. Empty: the data folder in the app's own folder. Set it with\n"
     "; Game files folder in the settings menu (Android tab): the app needs Android's \"All files access\". Takes effect at the next start\n"
-    "GameFolder =\n";
+    "GameFolder =\n"
+#ifdef MHGU_DUAL_SCREEN
+    "\n"
+    "[Dual Screen]\n"
+    "; Android only. MHXX's bottom screen on the device's second display (a dual-screen handheld such as the AYN Thor):\n"
+    "; the panels below show the game's own HUD parts there (they leave the main screen) and take touch. Only on a\n"
+    "; device with a second display; turn it off to have the HUD back on the main screen\n"
+    "; Default: Off\n"
+    "SecondDisplay = Off\n"
+    "\n"
+    "; The bottom screen's panels, as MHXX's Panel Customize places them on its 4 x 3 grid: name@column,row, columns 0..3\n"
+    "; from the left, rows 0..2 from the top. A panel covers its size from there; a later panel replaces what it covers.\n"
+    "; arts3v 2x3 (three Hunter Arts, stacked: touch one to use it), arts3h 4x1 (the same in a row), map 2x2 (the game's\n"
+    "; minimap: touch to switch the zoomed and the whole map), itembar 2x1 (touch the middle to use the item, the sides\n"
+    "; to change it), status 4x1 (clock, health, stamina, sharpness), palico 4x1, target 2x1 (touch to switch the\n"
+    "; target), dpad 2x2 (touch to turn the camera)\n"
+    "; Default: " BOTTOM_PANELS_DEFAULT "\n"
+    "Panels = " BOTTOM_PANELS_DEFAULT "\n"
+    "\n"
+    "; What the bottom screen shows under its panels, and alone out of a quest: Dark (MHXX's grey), Black (an OLED\n"
+    "; screen's pixels stay off), Wallpaper (a picture of your own: below)\n"
+    "; Default: Dark\n"
+    "Background = Dark\n"
+    "\n"
+    "; The wallpaper: a 24-bit BMP you put in the wallpapers folder (in the app's files), scaled to cover the screen.\n"
+    "; Empty: each BMP of the folder in turn, 30 seconds each\n"
+    "; Default: (empty)\n"
+    "Wallpaper =\n"
+#endif
+    ;
 
 void config_path(char *buf, size_t size) {
     const char *e = getenv("MHGU_CONFIG");
@@ -801,6 +834,8 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_BACKUPS "Backups to keep must be 1-100."
 #define ERR_BACKUP_FOLDER "Invalid backup folder (one line, no ';' or '#')."
 #define ERR_GAME_FOLDER "Invalid game files folder (one line, no ';' or '#')."
+#define ERR_PANELS "Invalid bottom screen panel list (one line, no ';' or '#')."
+#define ERR_WALLPAPER "Invalid wallpaper file name (one line, no ';' or '#')."
 #define ERR_HP "HP factors must be 0.05-20."
 #define ERR_VILLAGE "Invalid village HP or quest override count."
 #define ERR_MOUSE "Mouse sensitivity must be 0.1-10 and smoothing 0-0.9."
@@ -891,6 +926,12 @@ const ConfigSetting g_settings[] = {
     {"Multiplayer", "Port", SET_INT, F(ldn_port), 0, 1, 65535, NULL, NULL, false, ERR_NET},
     {"Android", "SaveFolder", SET_TEXT, F(save_dir), sizeof g_config.save_dir, 0, 0, NULL, NULL, true, ERR_FOLDER},
     {"Android", "GameFolder", SET_TEXT, F(game_dir), sizeof g_config.game_dir, 0, 0, NULL, NULL, true, ERR_GAME_FOLDER},
+#ifdef MHGU_DUAL_SCREEN
+    ON_OFF("Dual Screen", "SecondDisplay", second_display, false),
+    {"Dual Screen", "Panels", SET_TEXT, F(bottom_panels), sizeof g_config.bottom_panels, 0, 0, NULL, NULL, false, ERR_PANELS},
+    {"Dual Screen", "Background", SET_CHOICE, F(bottom_background), 0, 0, 0, "Wallpaper,Dark,Black", NULL, false, ERR_MISC},
+    {"Dual Screen", "Wallpaper", SET_TEXT, F(bottom_wallpaper), sizeof g_config.bottom_wallpaper, 0, 0, NULL, NULL, false, ERR_WALLPAPER},
+#endif
     {"Multiplayer", "Join", SET_TEXT, F(ldn_join), sizeof g_config.ldn_join, 0, 0, NULL, NULL, false, ERR_NET},
     {"Multiplayer", "Server", SET_TEXT, F(ldn_server), sizeof g_config.ldn_server, 0, 0, NULL, NULL, false, ERR_SERVER},
     {"Multiplayer", "Key", SET_TEXT, F(ldn_key), sizeof g_config.ldn_key, 0, 0, NULL, NULL, false, ERR_SERVER},

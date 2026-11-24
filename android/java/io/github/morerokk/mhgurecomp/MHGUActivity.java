@@ -37,6 +37,13 @@ public class MHGUActivity extends SDLActivity {
         super.onCreate(saved);
         hideBars();
         hideBarsSoon();
+        DualScreen.init(this);  // (the bottom screen's display, when the device has one: after SDL loaded the runtime)
+    }
+
+    @Override
+    protected void onPause() {
+        DualScreen.resumed(false);
+        super.onPause();
     }
 
     // The last run stopped on an error (runtime/platform/android.c left the marker): keep its log as crash-log.txt and
@@ -131,6 +138,7 @@ public class MHGUActivity extends SDLActivity {
     protected void onResume() {
         super.onResume();
         hideBars();
+        DualScreen.resumed(true);
     }
 
     // Some devices (handhelds with their own Android builds) show the bar again a moment after the window appears, after the

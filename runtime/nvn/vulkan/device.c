@@ -23,6 +23,10 @@
 #include "fsr.h"
 #include "hdr.h"
 #include "vk.h"
+#ifdef MHGU_DUAL_SCREEN
+#include "bottom_hud.h"
+#include "second_display.h"
+#endif
 
 VkG g_vk;
 static VkDebugUtilsMessengerEXT messenger;
@@ -1154,6 +1158,11 @@ void backend_init(void) {
     vk_shaders_init();
     vk_fsr_init();  // ([Upscaler] FSR: fsr.c)
     create_swapchain();
+#ifdef MHGU_DUAL_SCREEN
+    // ([Dual Screen] SecondDisplay: the bottom screen on Android's second display, second_display_android.c; or, test,
+    // MHGU_BOTTOM_HUD_TEST: its picture saved in shots/ without one)
+    if (!bottom_hud_test_init()) second_display_apply();
+#endif
     atexit(exit_handler);
     pthread_t watch;
     if (pthread_create(&watch, NULL, stall_watch, NULL) == 0) pthread_detach(watch);

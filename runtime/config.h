@@ -154,7 +154,19 @@ typedef struct {
     int ldn_ryu_serve_port;   // [Multiplayer] RyuServePort: its port; 0 = 30456, the LdnServer default
     int ldn_room_serve;       // [Multiplayer] RoomServe: this game runs a suyu-style room itself (runtime/net/roomsrv.c): the pseudo room for suyu-family players
     int ldn_room_serve_port;  // [Multiplayer] RoomServePort: its port; 0 = 24872, the rooms' default
+    // (Android, MHGU_DUAL_SCREEN: MHXX's bottom screen on a second display; nvn/vulkan/bottom_hud.c, second_display_android.c)
+    int second_display;       // [Dual Screen] SecondDisplay: on when the device has a second display to show it on
+    char bottom_panels[256];  // [Dual Screen] Panels: the bottom screen's panels and their cells (bottom_hud.c)
+    int bottom_background;    // [Dual Screen] Background: BOTTOM_BG_*, under the panels
+    char bottom_wallpaper[64]; // [Dual Screen] Wallpaper: a BMP in the wallpapers folder, "" each in turn
 } Config;
+// The dual-screen bottom screen is built into the Android version only (the second display comes from Android's
+// DisplayManager: android/java/.../DualScreen.java).
+#ifdef __ANDROID__
+#define MHGU_DUAL_SCREEN 1
+#endif
+enum { BOTTOM_BG_WALLPAPER, BOTTOM_BG_DARK, BOTTOM_BG_BLACK };
+#define BOTTOM_PANELS_DEFAULT "itembar@0,0 map@0,1 arts3v@2,0"  // (MHXX's quest screen: item, map below, Hunter Arts right)
 // The hub server used when ini Server is empty (runtime/net/ldn.c, server/): the project's public one (an Oracle
 // Cloud VM; a DuckDNS name, so it can move without a release). "" = no default.
 // Note: the below server address should ideally only be used by MHGURecomp, or any forks that intend to be fully network-compatible with it.
