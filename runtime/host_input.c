@@ -1447,9 +1447,13 @@ void host_input_update(void) {
         else if (down & B(cancel)) textinput_key(TI_CANCEL);
         b &= ~(B(BTN_PLUS) | B(cancel));
     }
-    act_update(b, script_b, menu || (typing && !chat_active()));
 #ifdef MHGU_DUAL_SCREEN
-    if (g_bottom_hud_on) bottom_hud_touch_input(&b, &rx, &ry);  // (the bottom screen's touch: bottom_hud.c)
+    if (g_bottom_hud_on) {  // (the bottom screen's touch: bottom_hud.c)
+        uint64_t untouched = b;
+        bottom_hud_touch_input(&b, &rx, &ry);
+        script_b |= b & ~untouched;  // (its presses have no key behind them: the actions take them as scripted input)
+    }
 #endif
+    act_update(b, script_b, menu || (typing && !chat_active()));
     input_set(b, clamp_axis(lx), clamp_axis(ly), clamp_axis(rx), clamp_axis(ry));
 }
