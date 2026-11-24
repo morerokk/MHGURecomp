@@ -3616,6 +3616,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 float new_pos_x = pos_x, new_pos_y = pos_y;
                 bool grouped = false;
                 int vgroup = 1;
+                float zgroup = pos_z;  // (the layer its group is on: a menu window's text, 94, joins the window's 97)
 
                 if (is_3d_overlay && g_hudtrace_active)
                     LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f: 3D overlay, not moved\n", pos_z, pos_x, pos_y, m[0], m[1], m[4], m[5]);
@@ -3623,6 +3624,13 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     enum { ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_CENTER } anchor = ANCHOR_CENTER;
                     // vertically one anchor per layer (or per part of one), so a window drawn in pieces stays together
                     enum { V_TOP, V_BOTTOM, V_CENTER } vanchor = V_CENTER;
+                    // Text of layer 94 drawn on a layer 97 window right after its pieces, inside them: the Hub Info's
+                    // Canteen panel (frame x 508..942, y 300..470; its skill rows at x 598 / 610, y 350..431). By the
+                    // banners' rule it went Centre, ~40 px below its Top-anchored frame at 16:10 (out of the box), and
+                    // stayed in the middle wider than 16:9 while the frame went to its side. It is part of the window:
+                    // the menus' rule and group.
+                    bool menu_text = pos_z < 95.0f && ui_group.n && fabsf(ui_group.z - 97.0f) < 0.5f && pos_x >= ui_group.xmin &&
+                                     pos_x <= ui_group.xmax && pos_y >= ui_group.ymin && pos_y <= ui_group.ymax;
 
                     // Title screen: its layout (layer 108) is placed at the canvas centre and carries the copyright line at
                     // its bottom (y ~698), which the centre anchor moved up into "PRESS A" (layer 100, y 653 / 671, bottom
@@ -3637,7 +3645,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // "Summary" header landed on the text. All of it scales about the center instead.
                         anchor = ANCHOR_CENTER;
                         vanchor = V_CENTER;
-                    } else if (pos_z < 95.0f) {
+                    } else if (pos_z < 95.0f && !menu_text) {
                         // 94.0: Central notifications & banners ("Time limit: 50 min.")
                         // 60.0: the Guild Card's name plate (top right, under its page counter): by which third it is in
                         anchor = ANCHOR_CENTER;
@@ -3647,7 +3655,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                         // left and right)
                         anchor = pos_x >= 650.0f ? ANCHOR_RIGHT : ANCHOR_LEFT;
                         vanchor = pos_y < 360.0f ? V_TOP : V_BOTTOM;
-                    } else if (fabsf(pos_z - 97.0f) < 0.5f || fabsf(pos_z - 98.0f) < 0.5f) {
+                    } else if (fabsf(pos_z - 97.0f) < 0.5f || fabsf(pos_z - 98.0f) < 0.5f || menu_text) {
                         // 97.0: Menus and Submenus
                         // 98.0: text drawn over them (the Qty. label of the quantity box): it used the generic rule, which
                         // centered it 36 px below its top-anchored box
@@ -3773,11 +3781,12 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                     // right): the item box's Manage Equipment submenu (x 333..563) lost its body and right corners to the
                     // right, its Rotate / Camera prompts (100, x 18..98, under the menu) and the Multiplayer dialog (over
                     // the middle) went right. Not on the screens placed whole above, nor the bars that belong to an edge.
-                    if (s < 1.0f && (fabsf(pos_z - 97.0f) < 0.5f || fabsf(pos_z - 98.0f) < 0.5f || fabsf(pos_z - 100.0f) < 0.5f) &&
+                    if (s < 1.0f && (fabsf(pos_z - 97.0f) < 0.5f || fabsf(pos_z - 98.0f) < 0.5f || fabsf(pos_z - 100.0f) < 0.5f || menu_text) &&
                         !ui_frontend_pass && !ui_title_pass && !ui_loading_pass && !ui_stamp_pass && !ui_results_pass &&
                         !ui_results_last && !ui_meownster_pass && pos_y >= 10.0f && pos_y <= 712.0f)
                         grouped = true;
                     vgroup = v;
+                    if (menu_text) zgroup = 97.0f;
                     if (g_hudtrace_active)
                         LOG("[hud] z %.1f pos %.1f,%.1f m %.2f %.2f %.2f %.2f -> %c%c %.1f,%.1f%s sc %d,%d %dx%d\n", pos_z, pos_x, pos_y, m[0], m[1], m[4],
                             m[5], "LRC"[anchor], "TBC"[vanchor], new_pos_x, new_pos_y, ui_menu_pass ? " menu" : "", st.scissor[0][0],
@@ -3791,7 +3800,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
 
                 VkSpan sp = vk_transient_copy(G2H((uint32_t)r.addr), size, 256);  // (all of it, the matrix changed)
                 memcpy(sp.ptr, m, 64);
-                if (grouped) ui_group_add((float *)sp.ptr, pos_z, pos_x, pos_y, vgroup);
+                if (grouped) ui_group_add((float *)sp.ptr, zgroup, pos_x, pos_y, vgroup);
                 {   // (where the piece ends up: read at the frame's end, once its group has its anchor - runtime/menulearn.c)
                     void menulearn_piece_final(const float *m);
                     menulearn_piece_final((const float *)sp.ptr);

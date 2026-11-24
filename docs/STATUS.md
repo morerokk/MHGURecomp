@@ -1631,7 +1631,8 @@ old way while on.
    (the bowgun's reticle, lock-on markers) is not stretched and scales about the centre; the bowgun's ammo list (layer 103, right side below y 300; above it the HP and stamina bars' end pieces, at x 1062 when full) goes with the item
    bar; a window's pieces up to 470 apart are one group (the Weapon Controls sheet's back parchment, 436 high), and a window stacked right on another of its layer
    that went the other way takes the pair's anchor with it (the chat log's "Chat" label over its box)
-   (the Palico Scout's "Rotate" prompt). MHGU_CONTROL `hudtrace` logs a frame's HUD quads and their anchors. Left: the HUD's layout elsewhere (title, town, quest board, item box) unverified; at Edges
+   (the Palico Scout's "Rotate" prompt); text of layer 94 drawn on a 97 window right after it, inside it, is part of
+   that window (the Hub Info's Canteen rows went Centre, out of their Top box at 16:10, 2026-11-24). MHGU_CONTROL `hudtrace` logs a frame's HUD quads and their anchors. Left: the HUD's layout elsewhere (title, town, quest board, item box) unverified; at Edges
    the Hunter Arts prompt goes right with its layer; whether an off-screen 3D view (equipment box preview, guild
    card) uses one of the three cameras (they are left alone unless 16:9).
 10. Keyboard remapping: an ini [Keyboard] section, one line per Switch button (`A = Mouse2`, `B = Space`; SDL key
