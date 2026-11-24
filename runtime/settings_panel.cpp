@@ -2007,6 +2007,12 @@ void reset_section() {
         c.aspect_ratio = f.aspect_ratio;
         c.fov = f.fov;
         c.ui_anchor = f.ui_anchor;
+#if defined(MHGU_DUAL_SCREEN) && !defined(__ANDROID__)  // (Android: on its own tab)
+        c.second_display = f.second_display;
+        SDL_strlcpy(c.bottom_panels, f.bottom_panels, sizeof c.bottom_panels);
+        c.bottom_background = f.bottom_background;
+        SDL_strlcpy(c.bottom_wallpaper, f.bottom_wallpaper, sizeof c.bottom_wallpaper);
+#endif
         break;
     case 1:
         c.fsr = f.fsr;
@@ -2381,9 +2387,7 @@ std::vector<std::string> playback_devices() {
     return list;
 }
 #ifdef MHGU_DUAL_SCREEN
-extern "C" bool second_display_available(void);  // (runtime/nvn/vulkan/second_display.h)
-extern "C" void second_display_apply(void);
-// The Dual Screen rows (Android tab): on / off, and the bottom screen's panels from a list of MHXX-style layouts
+// The Dual Screen rows (Android tab; PC: Display tab): on / off, and the bottom screen's panels from a list of MHXX-style layouts
 // (bottom_hud.c). A list in the ini that is none of these shows as "Custom" and is kept until another is picked.
 struct BottomLayout {
     const char *name, *panels;
@@ -2420,12 +2424,21 @@ std::vector<std::string> wallpaper_files() {
 void dual_screen_rows(std::vector<Row> &r) {
     Config &c = s.draft;
     header(r, "dual.header", tr("Dual screen"));
-    bool there = second_display_available();
+    bool there = config_second_display_available();
+#ifdef __ANDROID__
     add_bool(r, "dual", "Bottom screen (dual-screen handheld)", &c.second_display, ini("SecondDisplay"));
     r.back().help = tr("MHXX's bottom screen on this device's second screen: the item bar, the map, the Hunter Arts and the other panels you pick leave the main screen and show there, and touching them works like on the 3DS (use a Hunter Art, the item, switch the target). For dual-screen handhelds such as the AYN Thor; needs a device with a second screen.");
+#else
+    add_bool(r, "dual", "Bottom screen (second monitor)", &c.second_display, ini("SecondDisplay"));
+    r.back().help = tr("MHXX's bottom screen on another monitor than the game's: the item bar, the map, the Hunter Arts and the other panels you pick leave the game's window and fill that monitor, and touching or clicking them works like on the 3DS (use a Hunter Art, the item, switch the target). For a small touch screen or a dual-screen handheld's second panel; needs a second monitor.");
+#endif
     if (!there) {  // (no second display: greyed out, the setting kept as it is)
         r.back().enabled = false;
+#ifdef __ANDROID__
         r.back().value = tr("No second screen");
+#else
+        r.back().value = tr("No second monitor");
+#endif
         return;
     }
     if (!c.second_display) return;  // (its options only while it is on)
@@ -2459,7 +2472,11 @@ void dual_screen_rows(std::vector<Row> &r) {
         r, "dual.wallpaper", "Bottom screen wallpaper", (int)(at - files.begin()), shown,
         [files](int v) { SDL_strlcpy(s.draft.bottom_wallpaper, files[(size_t)v].c_str(), sizeof s.draft.bottom_wallpaper); },
         ini("Wallpaper"));
+#ifdef __ANDROID__
     r.back().help = tr("Your own pictures: put 24-bit BMP files in the wallpapers folder in the app's files (Files folder above lets you reach it). They are scaled to cover the bottom screen.");
+#else
+    r.back().help = tr("Your own pictures: put 24-bit BMP files in the wallpapers folder beside the game. They are scaled to cover the bottom screen.");
+#endif
 }
 #endif
 std::vector<Row> main_rows() {
@@ -2503,6 +2520,9 @@ std::vector<Row> main_rows() {
         add_choice(
             r, "anchor", "HUD anchor", c.ui_anchor - 1, {"16:9", "21:9", "32:9", tr("Edges")},
             [](int v) { c.ui_anchor = v + 1; }, ini("UIAnchor"));
+#if defined(MHGU_DUAL_SCREEN) && !defined(__ANDROID__)  // (Android: on its own tab)
+        dual_screen_rows(r);
+#endif
         break;
     case 1:
         header(r, "audio.header", tr("Audio"));
@@ -2977,7 +2997,7 @@ bool save() {
     SDL_strlcpy(g_config.bottom_panels, s.draft.bottom_panels, sizeof g_config.bottom_panels);
     g_config.bottom_background = s.draft.bottom_background;
     SDL_strlcpy(g_config.bottom_wallpaper, s.draft.bottom_wallpaper, sizeof g_config.bottom_wallpaper);
-    second_display_apply();
+    config_second_display_request();  // (applied by the UI thread: nvn/vulkan/second_display*.c)
 #endif
     s.saved_notice = true;
     s.error.clear();

@@ -13,6 +13,9 @@
 #include "mods.h"
 #include "kernel.h"
 #include "rt.h"
+#ifdef MHGU_DUAL_SCREEN
+#include "nvn/vulkan/second_display.h"
+#endif
 
 void ldn_log_state(void);  // (net/net.h)
 
@@ -464,6 +467,12 @@ int ui_run(void) {
         SDL_Event e;
         if (SDL_WaitEventTimeout(&e, 4)) {
             do {
+#ifdef MHGU_DUAL_SCREEN
+                if (second_display_event(&e)) continue;  // (the bottom screen window's own: never the game's)
+                // (with the bottom screen's window open, closing the game's sends no SDL_EVENT_QUIT: that comes with the last)
+                if (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && second_display_window_open() && SDL_GetWindowFromEvent(&e) == window)
+                    e.type = SDL_EVENT_QUIT;
+#endif
                 if (e.type == SDL_EVENT_QUIT) {
                     // A game that hung is closed this way: what its threads wait on, into the log for the report
                     ldn_log_state();
@@ -513,5 +522,8 @@ int ui_run(void) {
 #endif
         host_input_update();
         cheats_frame();
+#ifdef MHGU_DUAL_SCREEN
+        second_display_tick();  // ([Dual Screen]: the bottom screen's window on PC, the Presentation asked for on Android)
+#endif
     }
 }

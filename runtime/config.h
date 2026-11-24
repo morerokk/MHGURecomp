@@ -154,15 +154,16 @@ typedef struct {
     int ldn_ryu_serve_port;   // [Multiplayer] RyuServePort: its port; 0 = 30456, the LdnServer default
     int ldn_room_serve;       // [Multiplayer] RoomServe: this game runs a suyu-style room itself (runtime/net/roomsrv.c): the pseudo room for suyu-family players
     int ldn_room_serve_port;  // [Multiplayer] RoomServePort: its port; 0 = 24872, the rooms' default
-    // (Android, MHGU_DUAL_SCREEN: MHXX's bottom screen on a second display; nvn/vulkan/bottom_hud.c, second_display_android.c)
+    // (MHGU_DUAL_SCREEN: MHXX's bottom screen on a second display; nvn/vulkan/bottom_hud.c, second_display*.c)
     int second_display;       // [Dual Screen] SecondDisplay: on when the device has a second display to show it on
     char bottom_panels[256];  // [Dual Screen] Panels: the bottom screen's panels and their cells (bottom_hud.c)
     int bottom_background;    // [Dual Screen] Background: BOTTOM_BG_*, under the panels
     char bottom_wallpaper[64]; // [Dual Screen] Wallpaper: a BMP in the wallpapers folder, "" each in turn
 } Config;
-// The dual-screen bottom screen is built into the Android version only (the second display comes from Android's
-// DisplayManager: android/java/.../DualScreen.java).
-#ifdef __ANDROID__
+// The dual-screen bottom screen: in every build with the Vulkan renderer. The second display is Android's (a
+// Presentation: android/java/.../DualScreen.java, second_display_android.c), or on PC another monitor (an SDL window:
+// second_display_desktop.c).
+#ifndef MHGU_NULL_BACKEND
 #define MHGU_DUAL_SCREEN 1
 #endif
 enum { BOTTOM_BG_WALLPAPER, BOTTOM_BG_DARK, BOTTOM_BG_BLACK };
@@ -261,6 +262,13 @@ int config_live_face_buttons(void);
 int config_live_kbm_prompts(void);  // [Controls] KeyboardPrompts (any thread)
 int config_live_menu_confirm(void);
 int config_live_background_input(void);
+// [Dual Screen]: is there a display for the bottom screen (the backend tells, nvn/vulkan/second_display*.c; the settings
+// menu greys the row out without one), and SecondDisplay / its options changed in g_config (the settings menu's Save):
+// the UI thread applies it at its next turn (second_display_tick). Any thread.
+int config_second_display_available(void);
+void config_set_second_display_available(int yes);
+void config_second_display_request(void);
+int config_second_display_take_request(void);  // (1 once per request)
 int config_live_combo_window(void);
 int config_live_chat_key(void);  // [Controls] ChatKey as an SDL scancode (0: none)
 int config_live_pause_key(void);  // [Controls] PauseKey as an SDL scancode (0: none)

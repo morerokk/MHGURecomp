@@ -206,6 +206,14 @@ box, a held finger lights the Hunter Art panel, turning it off and on and unplug
 a real dual-screen device (which screen Android calls external: the Thor's top one), the Vulkan 1.1 path (fence counts
 instead of the timeline), the D-pad panel's camera.
 
+On PC (same day) the same picture goes into an SDL window of its own on another monitor than the game's
+(second_display_desktop.c; Display tab, greyed out with one monitor): borderless over that monitor (Wayland: full screen
+on it), SDL_WINDOW_NOT_FOCUSABLE, touches and left clicks press the panels, all on the UI thread (ui.c). Its events never
+reach the game; closing the game's window while it is open is taken as the quit SDL no longer sends. With one monitor,
+MHGU_SECOND_DISPLAY_WINDOW=640x480 opens it as an ordinary window instead. Tested on Windows with that window: the panels,
+a touch (control file), closing either window. Not tested: a real second monitor (placement, Wayland's full screen),
+real touch and real clicks (a click posted as a window message carries no position SDL uses), Linux beyond compiling.
+
 ## Open questions
 
 - Minimum device: arm64; Android 10+, Vulkan 1.1 with shaderInt64; a Shield TV (3 GB RAM) runs it; other devices roughly Snapdragon 865 /

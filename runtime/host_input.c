@@ -294,7 +294,7 @@ static void script_parse(void) {
 //   dump [n]               save colour target 0 (or the depth of a depth-only pass) of every render pass of the next
 //                          frame (shots/pass_*.png), or of the next n frames (shots/f<i>_pass_*.png for i >= 1)
 //   hudtrace               log every HUD quad of the next frame: its layer, place, and where 16:10 / ultrawide moved it
-//   bottomtouch <u> <v> | bottomtouch up   (Android, dual screen) a finger on the bottom screen at picture pixel u, v, or lifted
+//   bottomtouch <u> <v> | bottomtouch up   (dual screen) a finger on the bottom screen at picture pixel u, v, or lifted
 //   frame                  log the current frame number
 //   fps <n>                (debug) the frame rate target from now on, 30..240 (not saved)
 //   dummy <cm> <degrees>   (debug, MHGU_DUMMY) the held monster's distance and its heading from the hunter's
