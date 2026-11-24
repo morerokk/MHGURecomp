@@ -1287,6 +1287,19 @@ at 30 and 120 fps: 500 counts = 40.1 degrees aiming and charging, as out of aimi
 within 3 units of the aim while turning; pitch stops at +-56 degrees. Not tried by hand with a real mouse, nor with
 the Bowguns' aim (other modes; mode 1's pitch is +0x2714 instead), nor the aim invert settings.
 
+Aiming on the move (2026-11-24, report: with the mouse, LBG / HBG aim turned left and right while walking but not up
+and down; the stick did both): walking aimed (bowguns 0002:016, the Bow's R 0002:000) runs 0x4a1738 and then the
+camera's stick handler 0x2255cc in each update, so 0x4a1738's hook stood aside and the mouse went to the camera. Its
+yaw stays (the hunter follows the camera), but the aim camera 0x226e84 (r0 = the camera) still runs after them and puts
++0x9e8 back from the hunter's aim pitch, so the mouse's pitch was lost. 0x226e84 is hooked too: when it ran for the
+camera since the stick handler's last run, the stick handler's hook gives the mouse's pitch to the aim (as 0x4a1738's
+hook does, mode from its last call, the aim invert option) and the yaw to the camera as before. The Bow charging on the
+move (X held, 0010:002 / 0010:013) also runs both, but not the aim camera: its pitch is the camera's own and stays on
+the camera path. Tested (scratch-hbg mtest.sh / ltest.sh / btest.sh, `MHGU_MOUSECAM_LOG=1`, W held + mousemove 0 -400):
+HBG walking aimed, camera pitch 0439 -> 1683 (was stuck at 0442 before); LBG (control `weapon 6 1` in town, then
+`depart 101`) 0445 -> 1688, mode 0 as the HBG; Bow R walking 043a -> 167a (was stuck too); Bow charging walk still on
+the camera path; standing aim unchanged. Not tested: the aim invert settings, a real mouse by hand.
+
 ## Mouse wheel on the item bar (2026-10-31)
 
 The captured mouse's wheel turns the item bar directly (runtime/hle/itembar.c): up the item to the left, down to the
