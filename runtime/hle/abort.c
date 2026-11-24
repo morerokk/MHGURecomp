@@ -9,6 +9,8 @@
 #include "../hle.h"
 #include "../kernel.h"
 
+int fs_log_open_writes(const char *tag);  // runtime/services/fs.c: files open for writing (logged), the count
+
 static const char *guest_str(uint32_t addr, char *buf, size_t size) {  // a guest string ("-": none), cut at size
     if (!addr) return "-";
     size_t i = 0;
@@ -31,6 +33,13 @@ HLE_SDK("_ZN2nn4diag6detail10VAbortImplEPKcS3_S3_iPKNS_6ResultEPKNS_2os17UserExc
     const char *forge = forge_abort_context();
     if (forge) LOG("[abort] inside a Forge mod's file call: %s\n", forge);
     kernel_log_guest_stack("[abort] the game", c);
+    char plug[400];
+    if (forge_stack_plugins(c->r[13], plug, sizeof plug)) LOG("[abort] Forge plugins' code on the stack:%s\n", plug);
+    // A save's commit with a file still open for writing (2002-6457, nn::fs's WriteModeFileNotClosed) names no file:
+    // which ones are open, and who opened them (every abort: any file I/O left half done is worth knowing)
+    int nw = fs_log_open_writes("[abort] open for writing");
+    int nf = forge_log_open_files("[abort] a Forge plugin's open file");
+    if (STK(0) && result == 0x327202u && !nw && !nf) LOG("[abort] (no file is open for writing on the host side)\n");
     exit(1);
 }
 

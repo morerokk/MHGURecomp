@@ -10,7 +10,9 @@
 
 #include "../config.h"
 #include "../hle.h"
+#include "../forge.h"
 #include "../ipc.h"
+#include "../kernel.h"
 #include "../mods.h"
 #include "../romfs.h"
 
@@ -70,13 +72,62 @@ static Service *open_romfs_storage(void) {
 #define MAX_PENDING 16
 typedef struct { char path[1100]; bool deleted, created; } Pending;  // created: the new content is in path + TMP_EXT
 typedef struct { char root[1024]; bool journal; int npending; Pending pending[MAX_PENDING]; } HostFs;
-typedef struct { int fd; bool writes; char path[1100]; } HostFile;
+typedef struct HostFile {
+    int fd;
+    bool writes;
+    char path[1100];
+    struct HostFile *wnext;  // (g_wfiles: open for writing)
+    time_t opened;
+    uint64_t thread;         // the guest thread that opened it
+    char callers[160];       // the game's calls that opened it (kernel_game_callers)
+    char plugins[200];       // and Forge plugins' (forge_stack_plugins)
+} HostFile;
 
 // Writing now (Pause/Suspend waits for it: runtime/pause.h): files open for writing, save mounts with changes not
 // committed yet (a save deletes, creates and writes its files, then commits), a commit with its backup
 static int g_writing;
 static void writing(int d) { __atomic_add_fetch(&g_writing, d, __ATOMIC_ACQ_REL); }
 bool fs_writing(void) { return __atomic_load_n(&g_writing, __ATOMIC_ACQUIRE) > 0; }
+
+// The files open for writing now, for the abort log (fs_log_open_writes, runtime/hle/abort.c): nn::fs aborts a save's
+// commit while one is still open (2002-6457, WriteModeFileNotClosed, checked in the game's own SDK before the commit
+// reaches here), and its own message names no file. Each one keeps who opened it and when.
+static pthread_mutex_t g_wfiles_lock = PTHREAD_MUTEX_INITIALIZER;
+static HostFile *g_wfiles;
+
+static void wfile_add(HostFile *f) {
+    Cpu *c = kernel_current_cpu();
+    f->opened = time(NULL);
+    KThread *t = kernel_current_thread();
+    f->thread = t ? t->id : 0;
+    if (c) {
+        kernel_game_callers(c->r[13], f->callers, sizeof f->callers);
+        forge_stack_plugins(c->r[13], f->plugins, sizeof f->plugins);
+    }
+    pthread_mutex_lock(&g_wfiles_lock);
+    f->wnext = g_wfiles;
+    g_wfiles = f;
+    pthread_mutex_unlock(&g_wfiles_lock);
+}
+
+static void wfile_remove(HostFile *f) {
+    pthread_mutex_lock(&g_wfiles_lock);
+    for (HostFile **p = &g_wfiles; *p; p = &(*p)->wnext)
+        if (*p == f) { *p = f->wnext; break; }
+    pthread_mutex_unlock(&g_wfiles_lock);
+}
+
+int fs_log_open_writes(const char *tag) {
+    int n = 0;
+    time_t now = time(NULL);
+    pthread_mutex_lock(&g_wfiles_lock);  // (an abort: the lock is never held long, and never across a guest call)
+    for (HostFile *f = g_wfiles; f; f = f->wnext, n++)
+        LOG("%s: %s, opened %llds ago by guest thread %llu, the game's calls:%s%s%s\n", tag, f->path,
+            (long long)(now - f->opened), (unsigned long long)f->thread, f->callers[0] ? f->callers : " (none found)",
+            f->plugins[0] ? ", Forge plugins' calls:" : "", f->plugins);
+    pthread_mutex_unlock(&g_wfiles_lock);
+    return n;
+}
 typedef struct { DIR *d; char path[1024]; int mode; } HostDir;
 
 static const char *in_path(IpcReq *req, int i) {
@@ -427,7 +478,7 @@ static void file(Service *s, IpcReq *req, IpcResp *resp) {
 static void file_close(Service *s) {
     HostFile *f = s->state;
     if (f->fd >= 0) close(f->fd);
-    if (f->writes) writing(-1);
+    if (f->writes) writing(-1), wfile_remove(f);
     free(f);
 }
 
@@ -559,8 +610,8 @@ static void filesystem(Service *s, IpcReq *req, IpcResp *resp) {
         if (fd < 0) { resp->result = errno_result(); break; }
         HostFile *f = calloc(1, sizeof *f);
         f->fd = fd;
-        if ((f->writes = (mode & 6) != 0)) writing(1);  // (Write, Append)
         strlcpy(f->path, p, sizeof f->path);
+        if ((f->writes = (mode & 6) != 0)) writing(1), wfile_add(f);  // (Write, Append)
         Service *fsvc = service_new("IFile", file, f);
         fsvc->on_close = file_close;
         ipc_return_object(resp, fsvc);
