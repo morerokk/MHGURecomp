@@ -434,6 +434,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(menu_chord);
     SAME(title_back_exit);
     SAME(show_battery);
+    SAME(show_temperature);
     SAME(updates);
     SAME(hp.village);
     SAME(hp.quests);
@@ -2008,6 +2009,7 @@ void reset_section() {
         c.fsr_animsurf = f.fsr_animsurf;
         c.show_fps = f.show_fps;
         c.show_battery = f.show_battery;
+        c.show_temperature = f.show_temperature;
         c.fps = f.fps;
         c.vsync = f.vsync;
         c.shader_prewarm = f.shader_prewarm;
@@ -2439,6 +2441,9 @@ std::vector<Row> main_rows() {
         add_choice(r, "show.battery", "Battery indicator", c.show_battery, {tr("Off"), tr("With FPS counter"), tr("By itself")},
                    [](int v) { c.show_battery = v; }, ini("ShowBattery"));
         r.back().help = tr("The battery's charge, in the FPS counter's box or in a box of its own (drag it like the FPS counter).");
+        add_choice(r, "show.temperature", "Temperature", c.show_temperature, {tr("Off"), tr("Celsius"), tr("Fahrenheit")},
+                   [](int v) { c.show_temperature = v; }, ini("ShowTemperature"));
+        r.back().help = tr("The device's temperature (its battery's) under the FPS counter, or in a box of its own when the FPS counter is off.");
 #endif
         number(r, "fps", "Frame rate limit", &c.fps, (int)lo("FPS"), (int)hi("FPS"), 1, ini("FPS"));
         {  // left / right: one frame per second more or less; Confirm: the common ones

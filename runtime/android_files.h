@@ -1,4 +1,5 @@
-// Android: the app's files folder (runtime/platform/android.c; the settings' Android tab shows it)
+// Android: the app's files folder (runtime/platform/android.c; the settings' Android tab shows it), the device's
+// temperatures (the FPS counter's)
 #pragma once
 #ifdef __cplusplus
 extern "C" {
@@ -6,6 +7,9 @@ extern "C" {
 const char *android_home(void);                   // the files folder in use (the working directory)
 const char *android_files_folder(void);           // the one the player chose, "" when it is the app's own
 const char *android_files_folder_problem(void);   // why a chosen one isn't used now, or ""
+// [Performance] ShowTemperature (also in runtime/platform/android.c): the battery's temperature in tenths of a degree
+// C, INT_MIN while not known. Read on a thread of its own, started at the first call.
+int android_temperature(void);
 #ifdef __cplusplus
 }
 #endif

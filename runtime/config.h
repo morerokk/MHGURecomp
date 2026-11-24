@@ -135,6 +135,7 @@ typedef struct {
     int title_back_exit;      // [Controls] TitleBackExit: B on the title screen's Main Menu asks to quit (runtime/hle/title_exit.c)
     int kbm_prompts;          // [Controls] KeyboardPrompts: the game's button glyphs show keys and mouse buttons (hle/prompts.c)
     int show_battery;         // [Performance] ShowBattery: BATTERY_*, the battery's charge beside the frame rate or alone
+    int show_temperature;     // [Performance] ShowTemperature (Android): TEMP_*, the device's temperatures under the frame rate
     char save_location[256];  // [Application] SaveLocation (PC): the folder holding the save (save_0/), "" the default
                               // (%APPDATA%\MHGURecomp\save, ~/.local/share/MHGURecomp/save: main.c)
     int backups_on;           // [Save Backups] Backups: a copy of the save at each save (services/fs.c)
@@ -165,6 +166,7 @@ enum { HDR_GAMMA_OFF, HDR_GAMMA_22, HDR_GAMMA_24 };                   // [HDR] G
 enum { HDR_TONEMAP_VANILLA, HDR_TONEMAP_NONE, HDR_TONEMAP_RENODRT };  // [HDR] ToneMapper
 enum { HDR_FORMAT_AUTO, HDR_FORMAT_HDR10, HDR_FORMAT_SCRGB };  // [HDR] HDRFormat
 enum { BATTERY_OFF, BATTERY_WITH_FPS, BATTERY_ALONE };
+enum { TEMP_OFF, TEMP_CELSIUS, TEMP_FAHRENHEIT };  // [Performance] ShowTemperature
 enum { THEME_GOLD, THEME_BLUE, THEME_HUNTER };  // [Application] Theme
 enum { UI_CENTER = 1, UI_21_9, UI_32_9, UI_EDGES };  // the middle 16:9, 21:9, 32:9, the picture's sides
 enum { FSR_NATIVE, FSR_QUALITY, FSR_BALANCED, FSR_PERFORMANCE, FSR_ULTRA_PERFORMANCE };  // output / render: 1, 1.5, 1.7, 2, 3
@@ -310,6 +312,7 @@ bool config_confirm_exit(void); // atomic, safe on the host main thread
 bool config_menu_chord(void);   // [Controls] MenuChord as saved, atomic (the input is read on another thread)
 bool config_title_back_exit(void);  // [Controls] TitleBackExit as saved, atomic (the game's thread reads it)
 int config_show_battery(void);  // [Performance] ShowBattery as saved, atomic
+int config_show_temperature(void);  // [Performance] ShowTemperature as saved (TEMP_*), atomic
 bool config_show_fps(void);     // [Performance] ShowFPS as saved, atomic (the game's thread draws it)
 
 #ifdef __cplusplus

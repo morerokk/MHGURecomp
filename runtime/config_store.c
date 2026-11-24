@@ -44,6 +44,7 @@ static SDL_AtomicInt live_hdr_saturation = {0x42480000}, live_hdr_highlight_satu
 // [Performance]
 static SDL_AtomicInt show_fps;
 static SDL_AtomicInt show_battery;
+static SDL_AtomicInt show_temperature;
 static SDL_AtomicInt live_fps;
 static SDL_AtomicInt live_vsync = {1};
 // [Controls]
@@ -198,6 +199,7 @@ void config_store_loaded(const Config *c) {
     SDL_SetAtomicInt(&menu_chord, c->menu_chord);
     SDL_SetAtomicInt(&title_back_exit, c->title_back_exit);
     SDL_SetAtomicInt(&show_battery, c->show_battery);
+    SDL_SetAtomicInt(&show_temperature, c->show_temperature);
 }
 void config_runtime_init(const Config *effective) {
     startup = saved; runtime_ready = true; runtime_fsr = effective->fsr != 0;
@@ -323,6 +325,7 @@ bool config_confirm_exit(void) { return SDL_GetAtomicInt(&confirm_exit) != 0; }
 bool config_menu_chord(void) { return SDL_GetAtomicInt(&menu_chord) != 0; }
 bool config_title_back_exit(void) { return SDL_GetAtomicInt(&title_back_exit) != 0; }
 int config_show_battery(void) { return SDL_GetAtomicInt(&show_battery); }
+int config_show_temperature(void) { return SDL_GetAtomicInt(&show_temperature); }
 bool config_show_fps(void) { return SDL_GetAtomicInt(&show_fps) != 0; }
 bool config_restart_required(const Config *c) {
     if (!runtime_ready) return false;

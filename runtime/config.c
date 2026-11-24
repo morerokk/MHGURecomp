@@ -82,6 +82,7 @@
     /* [Performance] */                                                                             \
     .show_fps = 0,                                                                                  \
     .show_battery = BATTERY_OFF,                                                                    \
+    .show_temperature = TEMP_OFF,                                                                   \
     .fps = 60,                                                                                      \
     .vsync = 1,                                                                                     \
     .shader_prewarm = 1,                                                                            \
@@ -337,6 +338,12 @@ static const char DEFAULT_INI[] =
     "; Off, WithFPS, ByItself\n"
     "; Default: Off\n"
     "ShowBattery = Off\n"
+    "\n"
+    "; Android only: show the device's temperature (its battery's) under the frame rate, or in a box of its own when the\n"
+    "; frame rate is off\n"
+    "; Off, Celsius, Fahrenheit\n"
+    "; Default: Off\n"
+    "ShowTemperature = Off\n"
     "\n"
     "; Framerate cap\n"
     "; Between 30 and 240\n"
@@ -854,6 +861,7 @@ const ConfigSetting g_settings[] = {
     {"HDR", "HDRFormat", SET_CHOICE, F(hdr_format), 0, 0, 0, "Auto,HDR10|pq,scRGB|fp16", NULL, false, ERR_HDR},
     ON_OFF("Performance", "ShowFPS", show_fps, false),
     {"Performance", "ShowBattery", SET_CHOICE, F(show_battery), 0, 0, 0, "Off,WithFPS,ByItself", NULL, false, ERR_MISC},
+    {"Performance", "ShowTemperature", SET_CHOICE, F(show_temperature), 0, 0, 0, "Off,Celsius|C,Fahrenheit|F", NULL, false, ERR_MISC},
     {"Performance", "FPS|FrameRate", SET_INT, F(fps), 0, 30, 240, NULL, NULL, false, ERR_MISC},
     ON_OFF("Performance", "VSync", vsync, false),
     ON_OFF("Performance", "ShaderPrewarm", shader_prewarm, true),
