@@ -10,6 +10,8 @@
 uint32_t interp_exec(Cpu *c, uint32_t pc, uint32_t w, int *link);
 // The same through the pre-decoded op a run uses for w (tools/test_lift.py --interp-ops).
 uint32_t interp_exec_op(Cpu *c, uint32_t pc, uint32_t w, int *link);
+// The same as a JIT block of its own (x86-64 hosts: tools/test_lift.py --jit).
+uint32_t interp_exec_jit(Cpu *c, uint32_t pc, uint32_t w, int *link);
 // Bumped when what a run decodes may have changed without the code word in memory changing (a hook set, an entry's
 // kept words): every thread drops its decoded blocks (interp.c) at its next block.
 extern volatile uint32_t g_code_gen;

@@ -1428,6 +1428,44 @@ old way while on.
   tail-call threaded ops (each handler jumping to the next) might give another ~1.5x; matching an emulator would take a
   JIT (AArch32 -> x86-64 and -> AArch64), a project of its own.
 
+## Interpreter: JIT on x86-64 (2026-11-24)
+
+Report: every loading screen slow with MHGU Definitive Edition 3.1.0 (MH4U Port renamed; now 15 monster entries).
+Its quest_group_fix hook (quest_group_rename, module/quest.c, the quest list loader step 0x3b7de8: every list entry
+against every monster's 12 slots, ~2 M instructions a call, ~1000 calls a town load, ~2.2 G instructions in all) made
+the town's load (title -> town, quickhunt) 18.6 s without the mod -> 23.5 s with it, 18.9 s with only that patch
+taken out of the IPS. A fix is the mod's (slot pairs made once, an ID range check first: a PR to its author). Since
+bigger code mods will come, the interpreted code now runs as x86-64 code (runtime/interp_jit.h, included by interp.c;
+runtime/jit_mem.c the executable memory):
+- Blocks are interp.c's (block_build's rules, the same decode_op), translated: data processing (every shift form;
+  register-specified shifts unless their carry is needed), MOVW / MOVT, every LDR / STR / LDRB / STRB / LDRH / STRH /
+  LDRSB / LDRSH / LDRD / STRD addressing mode, LDM / STM, B / BL / BX / BLX, MUL / MLA / MLS / UMULL / SMULL / UMLAL /
+  SMLAL, CLZ, SXTB / SXTH / UXTB / UXTH (+ add), REV, UBFX / SBFX / BFI / BFC, conditions. Anything else (VFP, NEON,
+  SVC, exclusives, MRS / MSR ...) is a call from the block to the interpreter's own op for it. All state stays in the
+  Cpu (registers, 0 / 1 flag words) as before, so the two mix freely. Baseline x86-64 only (no LZCNT / BMI).
+- jit_run is interp_run_inner's loop around them. A direct branch's exit is patched into a jump to its target's block
+  once the loop has found the target interpreted (chaining), after a check of the run's return address (it ends the
+  run, as in the interpreter) and, going backward, of g_code_gen; indirect branches go back to the loop. Each block
+  compares its guest words on entry (as each op did) and is rebuilt when one changed; the old one jumps to the new.
+- Per thread: an 8 MiB arena (freed at thread exit), started over when full or for a new code generation, but only
+  while none of the thread's blocks is running (a nested run then uses the interpreter). Windows: the arena has a
+  function table entry (one frame layout), so ExitThread's longjmp unwinds through a block (tested: without it, a
+  crash).
+- Bad accesses: gchk's checks with g_ip_pc set, except for sp-based ones; g_ip_last is the block's first instruction.
+  Flags are read back a byte at a time: a dword load of a byte SETcc just stored stalls (no store forwarding), which
+  first made it only 2.3x the interpreter, then 5.4x after that change.
+- Measured (Ryzen 7 9800X3D, testsave/save_0, quickhunt, two runs each): title -> town 18.6 s without the mod, 23.5 s
+  with it interpreted, 19.2 s with the JIT. The quest list thread 21 -> 1.1 Gcycles (~0.5 cycles an instruction). In a
+  hunt with the Stygian Zinogre quest (1023) the mod's code 82 -> 36 ms a second (callees included), the same
+  instruction counts. Forge plugins (KatLib, KatSmithy in the second plugin region, KatEquipmentBox, Ninja Style,
+  key-quest-markers, better-inputs, NoFlinch) together with the mod: no faults, plugin logs the same.
+- Checked: tools/test_lift.py --jit (each instruction as a block of its own) against Unicorn, 4000-instruction runs on
+  four seeds of main: none different (a planted ADD -> SUB was caught at once); a JIT vs interpreter-op comparison on
+  random states, Windows and Linux (archlinux WSL, the System V calls), 18000 runs: none different.
+- MHGU_JIT=0: the interpreter alone. MHGU_JIT_DUMP=<file>: every block's code (for a disassembler, with MHGU_SAMPLE).
+- Not done: an AArch64 back end (Android, a Mac), so phones still interpret; registers kept in host registers across
+  a block (the next big step if a mod needs it); not tried on a laptop CPU or by hand in a fight.
+
 ## Even letter spacing in the game's text: [Graphics] FixKerning (2026-11-07)
 
 - The UI text (cGUI, font_festa.gfd) looked unevenly spaced, on the console too. Three causes, all fixed with
