@@ -613,14 +613,16 @@ their own updates 0x67262c / 0x673930), a 3-head-hit line reproduced (aims -7.55
 head, wing at 30 fps too).
 The Bow's Pierce arrows (uShellPlw10_000, update 0x67957c; a Pierce-only bow, uncharged shots) had the same kind of
 bug by another way: no stop on a hit, but a hit sets a timer (+0x15ec, 4 frames from the data, stored as 4 minus the
-step) and the update it runs out in moves the arrow at 0.7 of its velocity (+0x1010, per frame), the next hit coming
-after it. On the Switch that update covers frames 2-4 after the hit, so hit to hit = 2 + 2 x 0.7 = 3.4 frames of the
-arrow's speed (measured 3.405); at 60 fps 3.7; at 240 fps the next hit also came 3 updates after the timer ran out (at
-30 and 60 fps the next update; nothing in the arrow +0x1380..+0x1800 counts it), so ~4.5 (258-262 units). Fixed in the
-same file: slowed from frame 2 by the factor last seen, the rest taken back when the game's timer runs out, and held
-from frame 4 until the next hit (at most 1 frame). Measured 3.40 at 60, 144 and 240 fps, the next gap x0.70 as at 30.
-At 240 fps the hits still come 0.75 frame later than on the Switch (the wait found above); after an arrow's last hit
-it can stand still up to 1 frame. Not covered: uShellPlw10_001 (update 0x67bf88), charged shots, Bow Hunter Arts. Rig:
+step) and the update it runs out in moves the arrow at 0.7 of its velocity (+0x1010, per frame) and sets a 1-frame
+wait (+0x1404, counted down by the step) before the next hit can land. On the Switch that update covers frames 2-4
+after the hit, so hit to hit = 2 + 2 x 0.7 = 3.4 frames of the arrow's speed (measured 3.405), and the next update's
+step of 2 ends the wait at once (hit at frame 4); at 60 fps 3.7 (hit at frame 4); at 240 fps the wait held the hit
+back 3 more updates, to frame 4.75: ~4.5 (258-262 units). The monster's hit list (status +0x444..+0x4f8) only records
+attack numbers, no timer. Fixed in the same file: slowed from frame 2 by the factor last seen, the rest taken back
+when the game's timer runs out, the wait cut by what the Switch's next update would take off it, and the part of an
+update past frame 4 not moved. Measured 3.40 at 60, 144 and 240 fps (the next gap x0.70 as at 30), hits 4 updates
+apart at 60, 10 (4.17 frames) at 144, 16 at 240, 2 at 30 (untouched). Not covered: uShellPlw10_001 (update
+0x67bf88), charged shots, Bow Hunter Arts, whether other shells use +0x1404 the same way. Rig:
 scratch-pierce\brun.sh (the Bow save: X draws, R taps fire; NOHOLD=1 FIRE=10 CHARGE=0.1), gaps.sh prints hit-to-hit
 distance over the arrow's speed. The rig (outside the repo):
 C:\MHGURecompile\scratch-pierce\run.sh <tag> <fps>: quest 605 (Tigrex by the Tail) area 1, MHGU_DUMMY=1200 facing,
