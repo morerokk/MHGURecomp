@@ -1231,6 +1231,15 @@ static void *lobby_thread(void *arg) {
         }
         bool keyed = lobby_header(req, NULL);
         pthread_mutex_lock(&L.mu);
+        // (the network may have closed while we connected - Hunter Search closes one every ~10 s: lobby_host_stop
+        // moves lobby_gen on before it clears the code under L.mu, so this sees one or the other. A listing of a closed
+        // network, or one without its code, is never sent: the server takes a protocol 4 listing without a code for a
+        // game that only claims 4.)
+        if (lobby_gen != gen || (with_code && !L.code[0])) {
+            pthread_mutex_unlock(&L.mu);
+            hclose(s);
+            break;
+        }
         memcpy(req + LOBBY_HEADER, L.info, NETINFO_SIZE);
         memcpy(req + LOBBY_HEADER + NETINFO_SIZE, L.code, CODE_LEN);
         bool coded = with_code && L.code[0];
