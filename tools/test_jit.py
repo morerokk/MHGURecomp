@@ -74,7 +74,7 @@ def main():
               '-B"$G"', '-L"$G"', '-static']
         run = ['qemu-aarch64', exe]
     else:
-        cc = ['clang', '-march=x86-64-v3']
+        cc = ['clang'] if sys.platform == 'darwin' and os.uname().machine == 'arm64' else ['clang', '-march=x86-64-v3']  # (native on Apple Silicon)
         run = [exe]
     build = cc + ['-O1', '-w', '-I' + conv(rt), '-o', exe] + [conv(s) for s in srcs] + ([] if os.name == 'nt' and not args.wsl else ['-lpthread', '-lm'])
     steps = ' '.join(build) + ' && ' + ' '.join(run) + ' words ' + conv(os.path.join(work, 'words.txt'))

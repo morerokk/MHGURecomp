@@ -790,13 +790,17 @@ static void jit_emit_block(J *j, const Op *ops, const uint32_t *mem, uint32_t n)
 static void jit_code_written(void *p, size_t n) { __builtin___clear_cache((char *)p, (char *)p + n); }
 
 static void jit_patch_site(JitTls *t, uint32_t site, const uint8_t *to) {
+    jit_write_begin();
     patch_br(t->base + site, to);
     jit_code_written(t->base + site, 4);
+    jit_write_end();
 }
 
 static void jit_redirect(uint8_t *old, const uint8_t *new) {
     uint32_t w = 0x14000000u;
+    jit_write_begin();
     memcpy(old, &w, 4);
     patch_br(old, new);
     jit_code_written(old, 4);
+    jit_write_end();
 }
