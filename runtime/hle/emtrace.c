@@ -7,7 +7,9 @@
 // 0x1000 + the ems number for small monsters) points emact / emsweep at the first monster of that species instead.
 // Hooked: the engine's frame function (0xda5824: the limiter, which also measures the frame step), after it runs.
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "../hle.h"
 
@@ -218,9 +220,14 @@ static void frame(Cpu *c) {
         float dx = x - g_seen[s].x0, dz = z - g_seen[s].z0;
         g_seen[s].dist = sqrtf(dx * dx + dz * dz);
         g_seen[s].updates++;
-        if (g_level >= 2)
-            LOG("[em] %08x %.1f ms act %08x pos %.1f %.1f %.1f yaw %d spd %.3f step %.3f\n", en,
-                (double)(now - g_seen[s].start_ns) / 1e6, act, x, y, z, (int)(LD32(info + 0x54) & 0xffff), LDF(info + 0x398), step);
+        if (g_level >= 2) {
+            // (and our hunter's position, x z: for how an action aims at the hunter)
+            uint32_t gc = LD32(0x1a8ca48u), sp = LD32(0x1a85b58u), slot = gc ? LD32(gc + 0x30) : 4;
+            uint32_t pl = sp && slot < 4 ? LD32(sp + 0x1c + 4 * slot) : 0;
+            LOG("[em] %08x %.1f ms act %08x pos %.1f %.1f %.1f yaw %d spd %.3f step %.3f pl %.1f %.1f\n", en,
+                (double)(now - g_seen[s].start_ns) / 1e6, act, x, y, z, (int)(LD32(info + 0x54) & 0xffff), LDF(info + 0x398), step,
+                pl ? (double)LDF(pl + 0x40) : 0.0, pl ? (double)LDF(pl + 0x48) : 0.0);
+        }
     }
     if (__atomic_load_n(&g_sweep, __ATOMIC_ACQUIRE) && !g_req) {
         uint32_t en = 0;
@@ -252,8 +259,33 @@ static void frame(Cpu *c) {
             if (e && target(e)) en = e;
         }
         if (!en) { LOG("[em] emact: no large monster in the zone\n"); return; }
-        LOG("[em] emact %08x %u:%u mode %u\n", en, g_req_group, g_req_index, g_req_mode);
+        LOG("[em] emact %08x %u:%u mode %u (status %08x, scale %.4f)\n", en, g_req_group, g_req_index, g_req_mode, LD32(en + 0x1428u),
+            (double)LDF(en + 0x60));
         g_forced = g_req_group | g_req_index << 8;
+        // MHGU_EMACT_PLACE="<cm> <degrees>" (or <cm>_<degrees>): first the monster put that far from our hunter (on the hunter's +z side), turned
+        // so the hunter is that many degrees off its facing (0 ahead, + as its yaw grows): every forced action from the
+        // same start. Several "<cm> <degrees>" pairs separated by ';' are used in turn, one per emact.
+        const char *pe = getenv("MHGU_EMACT_PLACE");
+        static unsigned placed;
+        float pd, pr;
+        if (pe) {
+            unsigned n = 1;
+            for (const char *q = pe; *q; q++) n += *q == ';';
+            unsigned want = placed++ % n;
+            for (unsigned i = 0; i < want && pe; i++) pe = strchr(pe, ';'), pe = pe ? pe + 1 : NULL;
+        }
+        char *pe_end;  // (the two numbers may be separated by a space or '_')
+        if (pe && (pd = strtof(pe, &pe_end), pe_end != pe) && (*pe_end == ' ' || *pe_end == '_') &&
+            (pr = strtof(pe_end + 1, NULL), 1)) {
+            uint32_t gc = LD32(0x1a8ca48u), sp = LD32(0x1a85b58u), slot = gc ? LD32(gc + 0x30) : 4;
+            uint32_t pl = sp && slot < 4 ? LD32(sp + 0x1c + 4 * slot) : 0, info = LD32(en + 0x1428u);
+            if (pl && info) {
+                STF(info + 0x40, LDF(pl + 0x40)), STF(info + 0x44, LDF(pl + 0x44)), STF(info + 0x48, LDF(pl + 0x48) + pd);
+                float h = 3.14159265f - pr * 0.0174532925f;  // (the bearing to the hunter is pi, along -z)
+                ST32(info + 0x54, (uint32_t)(int32_t)(h / 6.28318531f * 65536.0f) & 0xffffu);
+                LOG("[em] emact: placed %.0f cm from the hunter, hunter %.0f degrees off its facing\n", (double)pd, (double)pr);
+            }
+        }
         uint32_t saved[16];
         for (int i = 0; i < 16; i++) saved[i] = c->r[i];
         c->r[0] = en, c->r[1] = g_req_group, c->r[2] = g_req_index, c->r[3] = g_req_mode;

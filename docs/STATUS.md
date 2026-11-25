@@ -789,6 +789,24 @@ shared 0x277114 (heading) and 0x2c2864 (root motion), both stepped; his own unsc
 the hunter straight ahead, so a bite that homes in on a hunter at its side was not seen turning; enraged vs calm
 variants were not told apart.
 
+Hellblade Glavenus' tail slam (2026-11-25): no frame-rate difference found. Reported (the Pierce reporter, recomp at 60
+fps, a GIF): in the black-tail state, the overhead tail slam (rears back, pivots ~90 degrees, tail down beside the
+hunter) "loses its hit"; players also say Glavenus misses this slam slightly now and then on its own. Rig
+(C:\MHGURecompile\scratch-glav, run.sh <tag> <fps>): Hub quest 41201 can't start from the Village (0x2125b8 crash),
+so the scratch-qlist save goes to the Hunters' Pub (X, RIGHT, A, DOWN, A) and `depart 41201` from there;
+MHGU_START_AREA=1, MHGU_SUMMON=1200, MHGU_EMTRACE=2. New debug aids: MHGU_EMACT_PLACE="<cm>_<deg>;..." puts the monster
+that far from the hunter, the hunter that many degrees off its facing, before each emact (cycling the list); the
+[em] trace has the hunter's x z ("pl"); emact logs the monster's status block and scale (+0x60); MHGU_SUMMON logs
+"hunter hit" when the hunter lost HP (not the game's resets of HP to its maximum, +0x13d8). The slam is 7:82
+(2.9 s; two variants: ~240 units with a turn of up to ~50 degrees, or ~900 straight on). All 24 group 7 actions last
+the same at 30 and 240 fps. Moves first seemed 7% shorter at 60 / 240 fps (7:82 straight: 944 against 882), but
+that was the quest's random size: 7:82 at 900 cm straight on, 30 fps scale 1.177 path 942, 60 fps scale 1.133 path
+907, 800.3 / 800.5 per unit of scale; turns 24.8 / -10.9 against 24.8 / -10.4. Position writers (interpwatch): the
+motion's root motion 0x271e70 (from 0xb52c38), copied to status +0x40 at 0x2c2864, then the slope factor 0x4330b8
+(max(1 + dot(move dir, slope) * k, 0.1), direction only). Not covered: the hit itself (how often the slam lands on a
+hunter at its landing spot, at both rates with the size held), the black-tail state (the quest's Glavenus had its tail
+glowing from the start in every run), the reporter's own setup.
+
 Start in an area (2026-11-18, debug, runtime/hle/quickhunt.c): MHGU_START_AREA=<n> starts every hunt in area n of its map, by replacing the area the random start picked (town +0xc9, copied to sGameControl +0x49 by the town's move 0x8bdfd0 when departing) for low rank's camp too. With MHGU_QUICKHUNT=<quest>, straight from start-up into that area, e.g. MHGU_QUICKHUNT=204 MHGU_START_AREA=8 (Harvest Tour: Arctic Ridge). Checked on that: the game's pick was area 0, the hunter arrived on the snowfield of area 8 ("hunter in area 8" in the camera trace). An area number the map doesn't have is not checked. Not a teleport: it only acts when departing.
 
 Training dummy (2026-11-02, debug, runtime/hle/dummy.c): MHGU_DUMMY=1 holds the zone's first large monster in front of the hunter (240 cm, or MHGU_DUMMY=<cm>), in the hunter's area, its motion stopped, outside the camp: nothing can be hit in the camp. Every hit on it takes 1 HP and logs the damage it would have done, so attacks can be tested without chasing a monster; GU has no training area. Tested hidden on the unmodded game, quest 404 (Volvidon), Charge Blade: walk out of camp, hits logged per part. What it rests on: a player's weapon attack is one object at player+0x3020 (+0xc owner, +0x34 u16 its number, +0x38 s16 its motion value: damage is proportional to it, +0x5c / +0x60 frames until its hitbox opens and how long it stays open). A monster remembers the numbers that hit it (status +0x448, a fixed list; 0x36ba4c checks it in the collision update 0x36b15c): one hit per number, so a new number makes a new hit while the hitbox is open.

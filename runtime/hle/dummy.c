@@ -164,6 +164,12 @@ static void collision(Cpu *c) {
     g_updates++;
     if (g_summon > 0) {
         uint32_t pl = local_player();
+        // (a hit since the last update: logged, for counting how often attacks land. The game now and then puts the HP back
+        // to its maximum, +0x13d8: that is no hit)
+        int hp = pl ? (int)LD16(pl + 0x13d6) : 5000, hp_max = pl ? (int)LD16(pl + 0x13d8) : 0;
+        if (pl && hp < 5000 && hp != hp_max)
+            LOG("[dummy] hunter hit: HP -%d at %.1f %.1f %.1f, update %u\n", hp > hp_max ? 5000 - hp : hp_max - hp,
+                (double)LDF(pl + 0x40), (double)LDF(pl + 0x44), (double)LDF(pl + 0x48), g_updates);
         if (pl) ST16(pl + 0x13d6, 5000), ST16(pl + 0x13da, 5000);  // (the hunter's HP and its red part, above any one hit: it lasts as long as the test)
         if (g_keephp) keep_hp();
         summon_once();
