@@ -1681,6 +1681,34 @@ refuses RWX memory keeps the interpreter (jit_tls, logged).
   fwprintf before and so never reached log.txt or logcat. The Makefile now rebuilds the FSR C++ objects when those
   forced headers change (header dependencies aren't tracked). Next: that log from the reporter.
 
+## Steam Deck: terrain flickering black in Deserted Island area 6 (issue #232, fixed 2026-11-25)
+
+- Symptom (RADV only: Steam Deck, Mesa 26.0.0-devel VANGOGH): terrain and its decals, sometimes parts of monsters,
+  flicker black for a frame, two or three times every few seconds. Either a square around the hunter or everything but
+  that square: one shadow cascade at a time. Needs shadow casters at ground level: small monsters in the area (it
+  stopped when they died), and more of it once area 6's breakable rock has sunk into the ground. It keeps going on the
+  pause screen. Repro: MHGU_QUICKHUNT=837 (The Way of the Nargacuga, Village high rank) MHGU_START_AREA=6, no monster
+  debug options (MHGU_SUMMON pins the hunter in place).
+- Debugged live on the user's Deck over SSH (the game started by `systemd-run --user` with a scratch MHGU_HOME and save,
+  driven through MHGU_CONTROL). Screenshots, bursts (up to 300 frames) and pass dumps never caught it.
+- Ruled out on the Deck: fast clears, DCC and HiZ (RADV_DEBUG=nofastclears / nohiz; early runs without them looked
+  clean only because the rock wasn't broken yet), colour and depth clears done as draws, zeroing of new images, FXAA,
+  FMZ (0 x Inf) on every fragment-shader multiply, the depth bias representation alone (D24 steps for decals vs. the
+  default for the terrain, PR 235), and waiting for the GPU after each frame or each submission.
+- RADV_DEBUG=syncshaders (idle after every draw) hid it: a race between draws inside one render pass, where the port
+  puts no barriers. Bisected with temporary barrier modes, toggled live in the same flickering pause screen: a new
+  pass (full barrier) before every draw hid it; before only the draws that sample rendered textures didn't; only in
+  depth-only passes did, only in colour passes didn't; only where the polygon offset or polygon state (st.poly:
+  offset enable, culling, winding) differs from the draw before did, and in depth-only passes alone too. Sending all
+  pipeline and dynamic state again at those draws without a barrier didn't. Each result checked by switching back.
+  Likely a RADV bug: depth bias changes between draws of a depth-only pass (the shadow cascades, the depth pre-pass)
+  should not need a barrier.
+- Workaround (g_vk.bias_sync, device.c / exec.c draw): on RADV (driverID MESA_RADV), in a depth-only pass, a draw whose
+  polygon offset or polygon state differs from the draw before starts a new render pass behind a full barrier.
+  MHGU_VK_BIAS_SYNC=1 / 0 turns it on / off on any driver. Cost on the Deck (paused in area 6, gpuprof): GPU busy
+  5.34 -> 5.92 ms a frame, 60 fps unchanged. Off on the R9 (AMD's Windows driver). Checked on the Deck: rock broken,
+  small monsters around, the pause screen: no flicker.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,

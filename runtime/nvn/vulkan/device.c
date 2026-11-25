@@ -250,6 +250,17 @@ static void create_device(void) {
     }
 #endif
     if (getenv("MHGU_VK_NO_POLL")) g_vk.no_poll = atoi(getenv("MHGU_VK_NO_POLL")) != 0;
+    // RADV (Mesa's AMD driver: the Steam Deck): the draws of a depth-only pass (shadow cascades, depth pre-pass) overlap
+    // where the polygon offset changes between them, and a shadow cascade at a time came out wrong: terrain and its
+    // decals flickering black (Deserted Island area 6, exec.c draw). MHGU_VK_BIAS_SYNC=1 / 0 turns it on / off anywhere.
+    if (!g_vk.api11) {
+        VkPhysicalDeviceDriverProperties dp = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+        VkPhysicalDeviceProperties2 p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &dp};
+        vkGetPhysicalDeviceProperties2(g_vk.phys, &p2);
+        g_vk.bias_sync = dp.driverID == VK_DRIVER_ID_MESA_RADV;
+    }
+    if (getenv("MHGU_VK_BIAS_SYNC")) g_vk.bias_sync = atoi(getenv("MHGU_VK_BIAS_SYNC")) != 0;
+    if (g_vk.bias_sync) LOG("[vk] depth-only passes: a barrier where the polygon offset changes (RADV)\n");
     if (g_vk.no_poll) {
         g_vk.fences = true;
         LOG("[vk] no completion checks: a fence per submission, waited for by a thread of its own\n");

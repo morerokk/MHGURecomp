@@ -4295,6 +4295,21 @@ static void draw(CmdRec *r, bool indexed) {
     if (in_pass && pass_models && !pass_msaa && ms_want_depth && !pass_want_depth) st.rt_dirty = true;
     if (in_pass && pass_models && pass_msaa && !ms_want_depth && !models_2d_in_samples()) st.rt_dirty = true;
     models_fxaa_track(ms_want_depth);  // (FXAA: the same, models_fxaa_end)
+    // RADV (g_vk.bias_sync, device.c): in a depth-only pass a draw whose polygon offset or polygon state (offset enable,
+    // culling, winding) differs from the draw before starts a new pass, behind a full barrier. Without it the Steam Deck's
+    // shadow cascades came out wrong one at a time (the terrain and its decals flickering black, mostly with shadow
+    // casters at ground level: small monsters, the area 6 rock sunk into the ground). Found on the Deck: RADV_DEBUG=
+    // syncshaders hid it; barriers in colour passes, or the state sent again without a barrier, did not; these did, at
+    // about 0.6 ms of a 5.3 ms frame there. Within a pass draws get no barrier otherwise.
+    if (g_vk.bias_sync) {
+        static float last_offset[3];
+        static uint8_t last_poly[4];
+        if (in_pass && pass_ncolor == 0 &&
+            (memcmp(last_offset, st.poly_offset, sizeof last_offset) || memcmp(last_poly, st.poly, sizeof last_poly)))
+            st.rt_dirty = true;
+        memcpy(last_offset, st.poly_offset, sizeof last_offset);
+        memcpy(last_poly, st.poly, sizeof last_poly);
+    }
     if (st.rt_dirty) vk_end_pass();  // (MSAA: the ending pass marks its targets for resolving before they are read)
     ms_resolve_sampled(0, pr->vi);
     ms_resolve_sampled(1, pr->fi);
