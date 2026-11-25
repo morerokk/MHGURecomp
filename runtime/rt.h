@@ -107,6 +107,9 @@ bool fnhook_room(uint32_t addr, bool tramp);  // a hook at addr (with a trampoli
 // pc, if pc is one of them.
 void fnhook_keep_entry(uint32_t addr, uint32_t w0, uint32_t w1);
 bool fnhook_entry_word(uint32_t pc, uint32_t *w);
+// A mod's jump into its subsdk, where the loader moved the subsdk (runtime/mods.c): *w, the word at pc in memory (as
+// the mod wrote it), becomes the one that jumps to where the subsdk is. False: not one (*w as it was).
+bool mods_code_word(uint32_t pc, uint32_t *w);
 void rt_fatal_trace(void) __attribute__((noreturn));
 void crash_handler_install(void);
 

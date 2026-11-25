@@ -171,7 +171,8 @@ static bool arm_imm(uint32_t v, uint32_t *enc) {
 
 // A patched word at a that leads into a mod's subsdk the loader placed elsewhere than the game's layout (loader_moved):
 // a B / BL, an `add` / `sub pc, pc, #imm` (MH4U Port's hooks) or a pc-relative offset (a literal the code adds to
-// pc, from up to 4 KiB before it) moved by the same difference. 1: moved, 0: not one of those, -1: can't be encoded.
+// pc, from up to 4 KiB before it) moved by the same difference. 1: a jump moved, 2: an offset moved, 0: not one of
+// those, -1: can't be encoded.
 static int retarget(uint32_t a, uint32_t *w) {
     uint32_t v = *w, enc;
     int32_t shift;
@@ -194,7 +195,52 @@ static int retarget(uint32_t a, uint32_t *w) {
     }
     if (!loader_moved(a + v, 0x1000, &shift)) return 0;
     *w = v + (uint32_t)shift;
-    return 1;
+    return 2;
+}
+
+// The moved jumps (retarget 1) stay in memory as the mod wrote them, the bytes it has on the console and in emulators:
+// a Forge plugin that checks the game's code before it hooks it (WishFinder accepts MHGU Definitive Edition's own
+// `add pc, pc, #imm` words at the places DE patches) sees what it sees there. The interpreter and the JIT, which run
+// every patched function, decode them moved (interp.c code_word), while memory still has the mod's word (a hook or
+// cheat writing over it after is run as it is). Offsets (retarget 2) are data the code loads, so they are moved in
+// memory: no plugin checks those words, and a load can't tell them apart.
+typedef struct { uint32_t addr, mem, run; } MovedWord;
+static MovedWord *moved_words;
+static int nmoved_words, moved_cap;
+
+static void moved_word_add(uint32_t addr, uint32_t mem, uint32_t run) {
+    for (int i = 0; i < nmoved_words; i++)  // (a later mod's patch of the same word replaces it)
+        if (moved_words[i].addr == addr) {
+            moved_words[i].mem = mem, moved_words[i].run = run;
+            return;
+        }
+    if (nmoved_words == moved_cap) {
+        moved_cap = moved_cap ? moved_cap * 2 : 256;
+        moved_words = realloc(moved_words, moved_cap * sizeof *moved_words);
+        if (!moved_words) FATAL("mods: no memory for the moved jumps\n");
+    }
+    moved_words[nmoved_words++] = (MovedWord){addr, mem, run};
+}
+
+static int moved_word_cmp(const void *a, const void *b) {
+    uint32_t x = ((const MovedWord *)a)->addr, y = ((const MovedWord *)b)->addr;
+    return x < y ? -1 : x > y;
+}
+
+bool mods_code_word(uint32_t pc, uint32_t *w) {
+    int lo = 0, hi = nmoved_words - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        const MovedWord *m = &moved_words[mid];
+        if (m->addr == pc) {
+            if (*w != m->mem) return false;
+            *w = m->run;
+            return true;
+        }
+        if (m->addr < pc) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return false;
 }
 
 // Where the word at a jumps, if it is a B / BL or an `add` / `sub pc, pc, #imm` (the jumps mods' hooks use)
@@ -253,9 +299,9 @@ static void report_bad_jumps(const char *mod, const char *file, int first, int c
         LOG("This build of the mod may be for another version of the game or for other mods\n");
 }
 
-// The patches of main's and sdk's code: the bytes go into memory now (jumps and offsets into a subsdk retargeted),
-// and every function they touch runs in the interpreter from now on (dispatch_interpret, as a cheat's changes do),
-// which reads them there.
+// The patches of main's and sdk's code: the bytes go into memory now (offsets into a moved subsdk retargeted, jumps
+// into it as written and run retargeted: MovedWord), and every function they touch runs in the interpreter from now
+// on (dispatch_interpret, as a cheat's changes do), which reads them there.
 void mods_patch_code(void) {
     int words = 0, fns = 0, moved = 0, failed = 0, bad = 0, bad_first = nbad_jumps;
     for (int i = 0; i < npending; i++) {
@@ -263,13 +309,15 @@ void mods_patch_code(void) {
         const Module *m = p->m;
         uint32_t a = m->base + p->off;
         for (uint32_t k = (4 - (a & 3)) & 3; k + 4 <= p->len; k += 4) {
-            uint32_t w;
+            uint32_t w, mem;
             memcpy(&w, p->bytes + k, 4);
+            mem = w;
             int r = retarget(a + k, &w);
             if (r < 0) LOG("[mods] %s: %s: the jump at %s+%x into a moved subsdk can't be encoded there (left as it is)\n",
                            p->mod, p->file, m->name, a + k - m->base);
             moved += r > 0, failed += r < 0;
-            memcpy(p->bytes + k, &w, 4);
+            if (r == 1) moved_word_add(a + k, mem, w);
+            else memcpy(p->bytes + k, &w, 4);
             uint32_t t;
             if (r >= 0 && jump_target(a + k, w, &t) && !in_code(t)) {
                 if (nbad_jumps < MAX_BAD_JUMPS)
@@ -298,6 +346,7 @@ void mods_patch_code(void) {
         if (bad) report_bad_jumps(p->mod, p->file, bad_first, bad);
         words = fns = moved = failed = bad = 0, bad_first = nbad_jumps;
     }
+    if (nmoved_words) qsort(moved_words, nmoved_words, sizeof *moved_words, moved_word_cmp);
     free(pending);
     pending = NULL, npending = pending_cap = 0;
 }
