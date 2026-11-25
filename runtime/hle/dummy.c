@@ -231,6 +231,34 @@ static void damage(Cpu *c) {
     fnhook_call_original(c, FN_EN_DAMAGE);
 }
 
+// (debug, temporary) MHGU_ATKTRACE=1: the generic attack update (0x36919c, r0 the attack): each new owner logged once with
+// the attack's kind (+0x6d), type (+0x3a) and windows (+0x5c, +0x60), and whether it is the zone's large monster
+#define FN_ATK_UPDATE 0x36919cu
+static void atk_update(Cpu *c) {
+    uint32_t at = c->r[0], owner = LD32(at + 0xc);
+    if (owner && LD32(owner) == 0x19f3104u) {  // (the monster's other attacks: every update, for their lifetime)
+        uint32_t sys = LD32(0x2326764u);
+        LOG("[atkobj] %08x %.1f ms step %.3f windows %.2f %.2f\n", owner, (double)(plat_now_ns() / 100000ull) / 10.0,
+            sys ? (double)LDF(sys + 0x68) : 0.0, (double)LDF(at + 0x5c), (double)LDF(at + 0x60));
+    }
+    static uint32_t seen[64];
+    static int n;
+    int k = 0;
+    while (k < n && seen[k] != owner) k++;
+    if (k == n && n < 64) {
+        seen[n++] = owner;
+        uint32_t sen = LD32(G_SENEMY), big = 0;
+        for (int i = 0; i < MAX_EN && sen; i++) {
+            uint32_t e = LD32(sen + 0x1c + 4u * (uint32_t)i), info = e ? LD32(e + EN_INFO) : 0;
+            if (info && LD16(info + 0x1b6) < 10000) big = big ? big : e;
+        }
+        LOG("[atk] attack %08x owner %08x (vt %08x)%s%s kind %u type 0x%x windows %.2f %.2f\n", at, owner, owner ? LD32(owner) : 0,
+            owner == big ? " = large monster" : "", owner == local_player() ? " = our hunter" : "", LD8(at + 0x6d), LD8(at + 0x3a),
+            (double)LDF(at + 0x5c), (double)LDF(at + 0x60));
+    }
+    fnhook_call_original(c, FN_ATK_UPDATE);
+}
+
 void dummy_set(float dist, float turn) {
     if (dist > 0) g_dist = dist;
     g_turn = turn;
@@ -239,6 +267,7 @@ void dummy_set(float dist, float turn) {
 }
 
 void dummy_init(void) {
+    if (getenv("MHGU_ATKTRACE")) fnhook_set(FN_ATK_UPDATE, hle_register("dummy:atk", atk_update));
     const char *e = getenv("MHGU_SUMMON");
     if (e && *e && atoi(e) > 0) {
         g_summon = (float)atoi(e);
