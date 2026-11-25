@@ -127,7 +127,8 @@ static void summon_once(void) {
     STF(pos + 8, LDF(pl + OBJ_POS + 8) + fz * g_summon);
     ST8(en + OBJ_ZONE, LD8(pl + OBJ_ZONE));
     g_summoned = true;
-    LOG("[dummy] summoned the large monster %.0f cm in front of the hunter, zone %u\n", (double)g_summon, LD8(pl + OBJ_ZONE));
+    LOG("[dummy] summoned the large monster %.0f cm in front of the hunter, zone %u (hunter %08x)\n", (double)g_summon,
+        LD8(pl + OBJ_ZONE), pl);
 }
 
 // MHGU_SUMMON_KEEPHP=1 (with MHGU_SUMMON): the large monster's HP goes back to its maximum whenever it falls under half (on
@@ -166,11 +167,22 @@ static void collision(Cpu *c) {
         uint32_t pl = local_player();
         // (a hit since the last update: logged, for counting how often attacks land. The game now and then puts the HP back
         // to its maximum, +0x13d8: that is no hit)
+        // MHGU_SUMMON_HP: 5000 (default) as below; "max": topped up to the hunter's own maximum instead (hits then show
+        // as HP lost below it; a single hit above the maximum still carts); 0: left alone
+        static int mode = -1;  // (0 alone, 1 5000, 2 max)
+        if (mode < 0) {
+            const char *m = getenv("MHGU_SUMMON_HP");
+            mode = !m || !*m ? 1 : *m == '0' ? 0 : *m == 'm' ? 2 : 1;
+        }
         int hp = pl ? (int)LD16(pl + 0x13d6) : 5000, hp_max = pl ? (int)LD16(pl + 0x13d8) : 0;
-        if (pl && hp < 5000 && hp != hp_max)
+        int top = mode == 2 ? hp_max : 5000;
+        if (pl && mode == 1 && hp < 5000 && hp != hp_max)
             LOG("[dummy] hunter hit: HP -%d at %.1f %.1f %.1f, update %u\n", hp > hp_max ? 5000 - hp : hp_max - hp,
                 (double)LDF(pl + 0x40), (double)LDF(pl + 0x44), (double)LDF(pl + 0x48), g_updates);
-        if (pl) ST16(pl + 0x13d6, 5000), ST16(pl + 0x13da, 5000);  // (the hunter's HP and its red part, above any one hit: it lasts as long as the test)
+        if (pl && mode == 2 && hp < hp_max)
+            LOG("[dummy] hunter hit: HP -%d at %.1f %.1f %.1f, update %u\n", hp_max - hp, (double)LDF(pl + 0x40),
+                (double)LDF(pl + 0x44), (double)LDF(pl + 0x48), g_updates);
+        if (pl && mode) ST16(pl + 0x13d6, top), ST16(pl + 0x13da, top);  // (the hunter's HP and its red part: it lasts as long as the test)
         if (g_keephp) keep_hp();
         summon_once();
         // The hunter stays where the first summon found it: knocked out of the area it would be put back in the camp.
