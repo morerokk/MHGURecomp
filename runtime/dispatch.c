@@ -10,6 +10,7 @@
 #include "hle.h"
 #include "interp.h"
 #include "kernel.h"
+#include "mods.h"
 
 typedef struct { const uint32_t *addrs; const GuestFn *fns; uint32_t count, lo, hi; } FnTable;
 static FnTable tables[2];
@@ -392,7 +393,9 @@ static GuestFn dispatch_slow(Cpu *c) {
     if (!f) {
         uint32_t off;
         const char *s = loader_symbol_at(c->r[14], &off);
-        FATAL("no function at %x (lr=%x %s+%x)\n", pc, c->r[14], s ? s : "?", off);
+        char note[400];
+        bool mod = mods_jump_note(pc, note, sizeof note);
+        FATAL("no function at %x (lr=%x %s+%x)%s%s\n", pc, c->r[14], s ? s : "?", off, mod ? "\n  " : "", mod ? note : "");
     }
     unsigned h = (pc >> 2) & (DCACHE - 1);
     dcache[h].addr = pc;

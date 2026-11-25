@@ -24,6 +24,8 @@ void mods_make_dir(void);  // creates an empty mods/ (standalone: shows players 
 int mods_romfs_layers(const char **out, int max);  // host folders to layer over the RomFS, in order
 void mods_patch_module(struct Module *m, const uint8_t build_id[32]);  // exefs patches for a loaded module
 void mods_patch_code(void);  // then the patches of main's and sdk's code: once the dispatch tables are set up
+// pc is where a mod's patch jumps to no code (logged by mods_patch_code): a line naming the mod in buf
+bool mods_jump_note(uint32_t pc, char *buf, size_t n);
 // The mods' exefs/<name> (a subsdk): its path in path, and the mod's name (the last mod that has one); NULL: none.
 // skip: a file to pass over (and its mod's name), else NULL.
 const char *mods_exefs_file(const char *name, char *path, size_t n, bool (*skip)(const char *path, const char *mod));

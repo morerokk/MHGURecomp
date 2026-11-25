@@ -81,11 +81,68 @@ typedef struct { Module *m; uint32_t off, len; uint8_t *bytes; const char *mod, 
 static Pending *pending;
 static int npending, pending_cap;
 
+// Every patch of the module being patched (mods_patch_module), in the order applied: two mods that change the same
+// bytes differently are logged (report_overlaps), the later one's bytes are the ones used.
+typedef struct { uint32_t off, len, seq; const char *mod; uint8_t *bytes; } Seen;
+static Seen *seen;
+static int nseen, seen_cap;
+
+static void remember(const char *mod, uint32_t off, const uint8_t *bytes, uint32_t len) {
+    if (nseen == seen_cap) {
+        seen_cap = seen_cap ? 2 * seen_cap : 256;
+        seen = realloc(seen, seen_cap * sizeof *seen);
+    }
+    Seen *s = &seen[nseen];
+    s->off = off, s->len = len, s->seq = (uint32_t)nseen, s->mod = mod, s->bytes = malloc(len);
+    memcpy(s->bytes, bytes, len);
+    nseen++;
+}
+
+static int by_off(const void *x, const void *y) {
+    const Seen *a = x, *b = y;
+    return a->off != b->off ? (a->off < b->off ? -1 : 1) : (a->seq < b->seq ? -1 : a->seq > b->seq);
+}
+
+static void report_overlaps(const Module *m) {
+    enum { PAIRS = 32, SHOWN = 3 };
+    struct { const char *first, *later; int n; uint32_t at[SHOWN]; } pair[PAIRS];
+    int npair = 0;
+    qsort(seen, nseen, sizeof *seen, by_off);
+    for (int i = 0; i < nseen; i++) {
+        const Seen *a = &seen[i];
+        for (int j = i + 1; j < nseen && seen[j].off < a->off + a->len; j++) {
+            const Seen *b = &seen[j];
+            if (b->mod == a->mod) continue;
+            uint32_t lo = b->off, hi = a->off + a->len < b->off + b->len ? a->off + a->len : b->off + b->len;
+            if (!memcmp(a->bytes + (lo - a->off), b->bytes, hi - lo)) continue;  // (the same change: no conflict)
+            const Seen *first = a->seq < b->seq ? a : b, *later = a->seq < b->seq ? b : a;
+            int k = 0;
+            while (k < npair && !(pair[k].first == first->mod && pair[k].later == later->mod)) k++;
+            if (k == npair) {
+                if (npair == PAIRS) continue;
+                pair[npair].first = first->mod, pair[npair].later = later->mod, pair[npair++].n = 0;
+            }
+            if (pair[k].n < SHOWN) pair[k].at[pair[k].n] = lo;
+            pair[k].n++;
+        }
+    }
+    for (int k = 0; k < npair; k++) {
+        LOG("[mods] %s changes %d place(s) of %s that %s changes too (", pair[k].later, pair[k].n, m->name,
+            pair[k].first);
+        for (int i = 0; i < pair[k].n && i < SHOWN; i++) LOG("%s%s+%x", i ? ", " : "", m->name, pair[k].at[i]);
+        LOG("%s): %s's changes are used there (it loads later). Fine if it was made to go with %s; if not, one of the "
+            "two may not work right\n", pair[k].n > SHOWN ? ", ..." : "", pair[k].later, pair[k].first);
+    }
+    for (int i = 0; i < nseen; i++) free(seen[i].bytes);
+    nseen = 0;
+}
+
 // One patch: `len` bytes at offset `off` of the module's memory image.
 static void apply(Apply *a, uint32_t off, const uint8_t *bytes, uint32_t len) {
     Module *m = a->m;
     if (!len) return;
     if ((uint64_t)off + len > m->size) { a->bad++; return; }
+    remember(a->mod, off, bytes, len);
     bool compiled = m == &g_modules[0] || m == &g_modules[1];  // (a subsdk's code is interpreted: it just changes)
     if (compiled && off < m->text_off + m->text_size && off + len > m->text_off) {  // code: see mods_patch_code
         if (npending == pending_cap) {
@@ -140,11 +197,67 @@ static int retarget(uint32_t a, uint32_t *w) {
     return 1;
 }
 
+// Where the word at a jumps, if it is a B / BL or an `add` / `sub pc, pc, #imm` (the jumps mods' hooks use)
+static bool jump_target(uint32_t a, uint32_t v, uint32_t *t) {
+    if (v >> 28 != 0xF && (v & 0x0E000000) == 0x0A000000) {
+        *t = a + 8 + (uint32_t)((int32_t)(v << 8) >> 6);
+        return true;
+    }
+    if ((v & 0x0FFFF000) == 0x028FF000 || (v & 0x0FFFF000) == 0x024FF000) {
+        uint32_t imm = ror32(v & 0xFF, 2 * (v >> 8 & 15));
+        *t = a + 8 + ((v & 0x0FFFF000) == 0x028FF000 ? imm : 0u - imm);
+        return true;
+    }
+    return false;
+}
+
+static bool in_code(uint32_t t) {
+    for (int i = 0; i < g_nexefs; i++) {
+        const Module *m = &g_modules[i];
+        if (t >= m->base + m->text_off && t < m->base + m->text_off + m->text_size) return true;
+    }
+    return false;
+}
+
+// Mods' jumps that lead where no module's code is (a build of the mod made for another set of mods' subsdks, which
+// puts its own elsewhere): logged at start, and named if the game gets there (mods_jump_note)
+typedef struct { uint32_t target, from; const char *mod, *module; } BadJump;
+#define MAX_BAD_JUMPS 256
+static BadJump bad_jumps[MAX_BAD_JUMPS];
+static int nbad_jumps;
+
+bool mods_jump_note(uint32_t pc, char *buf, size_t n) {
+    for (int i = 0; i < nbad_jumps; i++) {
+        const BadJump *b = &bad_jumps[i];
+        if (b->target != pc) continue;
+        snprintf(buf, n, "%x is where the mod %s jumps from %s+%x, where no code is: the mod doesn't fit the other mods "
+                 "installed (see its [mods] warning at the start of log.txt)", pc, b->mod, b->module, b->from);
+        return true;
+    }
+    return false;
+}
+
+static void report_bad_jumps(const char *mod, const char *file, int first, int count) {
+    LOG("[mods] %s: %s: %d jump(s) lead where no module's code is (", mod, file, count);
+    for (int i = first; i < nbad_jumps && i < first + 3; i++)
+        LOG("%s%s+%x -> %08x", i > first ? ", " : "", bad_jumps[i].module, bad_jumps[i].from, bad_jumps[i].target);
+    LOG("%s): the game crashes when it gets to one. ", count > 3 ? ", ..." : "");
+    const Module *own = NULL;
+    for (int i = 2; i < g_nexefs; i++)
+        if (g_modules[i].mod && !strcmp(g_modules[i].mod, mod)) own = &g_modules[i];
+    if (own)
+        LOG("This build of the mod was likely made for other mods' subsdks before its %s (the layout of the mods "
+            "installed puts it at %08x): install the mods it was built with, or get its build for the mods you have\n",
+            own->name, own->expected ? own->expected : own->base);
+    else
+        LOG("This build of the mod may be for another version of the game or for other mods\n");
+}
+
 // The patches of main's and sdk's code: the bytes go into memory now (jumps and offsets into a subsdk retargeted),
 // and every function they touch runs in the interpreter from now on (dispatch_interpret, as a cheat's changes do),
 // which reads them there.
 void mods_patch_code(void) {
-    int words = 0, fns = 0, moved = 0, failed = 0;
+    int words = 0, fns = 0, moved = 0, failed = 0, bad = 0, bad_first = nbad_jumps;
     for (int i = 0; i < npending; i++) {
         Pending *p = &pending[i];
         const Module *m = p->m;
@@ -157,6 +270,12 @@ void mods_patch_code(void) {
                            p->mod, p->file, m->name, a + k - m->base);
             moved += r > 0, failed += r < 0;
             memcpy(p->bytes + k, &w, 4);
+            uint32_t t;
+            if (r >= 0 && jump_target(a + k, w, &t) && !in_code(t)) {
+                if (nbad_jumps < MAX_BAD_JUMPS)
+                    bad_jumps[nbad_jumps++] = (BadJump){t, a + k - m->base, p->mod, m->name};
+                bad++;
+            }
         }
         memcpy(G2H(a), p->bytes, p->len);
         uint32_t last = 0;
@@ -176,7 +295,8 @@ void mods_patch_code(void) {
             words, fns);
         if (moved || failed) LOG(", %d jump(s) / offset(s) into a moved subsdk retargeted%s", moved, failed ? " (some failed)" : "");
         LOG("\n");
-        words = fns = moved = failed = 0;
+        if (bad) report_bad_jumps(p->mod, p->file, bad_first, bad);
+        words = fns = moved = failed = bad = 0, bad_first = nbad_jumps;
     }
     free(pending);
     pending = NULL, npending = pending_cap = 0;
@@ -317,4 +437,5 @@ void mods_patch_module(Module *m, const uint8_t build_id[32]) {
         }
         closedir(d);
     }
+    report_overlaps(m);
 }
