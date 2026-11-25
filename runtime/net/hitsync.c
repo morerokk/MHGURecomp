@@ -263,8 +263,8 @@ static void hit(Cpu *c) {
     if (g_shotpos) {
         uint32_t at = c->r[1], p, s = LD32(at + AT_OWNER);
         if (LD8(at + AT_VIA) && shot_of(at, &p))
-            LOG("[shotpos] shell %08x at %.1f %.1f %.1f, target %08x\n", s, (double)LDF(s + 0x40), (double)LDF(s + 0x44),
-                (double)LDF(s + 0x48), c->r[2]);
+            LOG("[shotpos] shell %08x at %.1f %.1f %.1f, target %08x, age %.3f %.3f\n", s, (double)LDF(s + 0x40), (double)LDF(s + 0x44),
+                (double)LDF(s + 0x48), c->r[2], (double)LDF(s + 0x1378), (double)LDF(s + 0x137c));
     }
     if (!active()) { fnhook_call_original(c, FN_HIT); return; }
     uint32_t at = c->r[1], en = c->r[2], info, player;

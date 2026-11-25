@@ -9,6 +9,9 @@
 // the third in the neck at 60 fps (reported 2026-11-24; measured: 253 units from the first hit to the second at 30
 // fps, 311 at 60). Here the stop lasts 2 frames whatever the frame rate: after the update that took the hit, the shell
 // keeps still for the rest of the 2 frames (its movement in each update cut by the part of its step still inside it).
+// Its age (+0x1378, frames flown, which the update that takes a hit doesn't add to) stands still with it: Pierce's
+// critical distance goes by it, so with the age running on, a third hit landed 1-2 frames "older" than on the Switch at
+// 60 fps and fell out of the window (reported after the first fix: 47, 47, 31 = the head without the x1.5).
 //
 // The Bow. Its arrows (uShellPlw10_000, update 0x67957c) don't stop on a hit. A hit sets a timer (+0x15ec, from the
 // shot's data: 4 frames for the Pierce arrows measured, stored as 4 minus the step by the update that takes the hit)
@@ -35,6 +38,8 @@
 #define SH_STEP       0x1cu      // shell: its step (f32, 60 fps frames)
 #define SH_POS        0x40u      // shell: its position
 #define SH_HITS       0x15d8u    // bowgun shell: u16, the monster hits it has taken (the u16 after it is something else)
+#define SH_AGE        0x1378u    // shell: f32, frames it has flown (not counting the update that took a hit)
+#define SH_AGE_WAS    0x137cu    // shell: f32, that at the start of the last update
 #define AR_VEL        0x1010u    // arrow: its velocity, per frame of 60 fps
 #define AR_SLOW       0x15ecu    // arrow: f32, the timer a hit starts; the update it runs out in slows the arrow
 #define AR_REARM      0x1404u    // shell: f32, set to 1 frame when that timer runs out, counted down by the step; the
@@ -77,6 +82,8 @@ static void update(Cpu *c) {
         g_held[k].left -= hold;
         if (!(g_held[k].left > 0.0f)) g_held[k].shell = 0;
         for (int i = 0; i < 3; i++) STF(s + SH_POS + 4u * (uint32_t)i, p0[i] + (p[i] - p0[i]) * keep);
+        // (its age stands still too, as in the update that took the hit: it starts the update from +0x137c)
+        STF(s + SH_AGE, LDF(s + SH_AGE_WAS) + (LDF(s + SH_AGE) - LDF(s + SH_AGE_WAS)) * keep);
         if (g_log) LOG("[shellstep] %08x held %.3f of step %.3f, %.3f left\n", s, (double)hold, (double)step, (double)g_held[k].left);
     }
     if (g_log >= 2) {

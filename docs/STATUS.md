@@ -611,6 +611,16 @@ varies about 2% from shot to shot at any rate (70.0 to 71.8 a frame), and the fi
 one shot's hit list is noisy; the spacing isn't. Not covered: the w04_100 / _101 shell classes (other bowgun ammo,
 their own updates 0x67262c / 0x673930), a 3-head-hit line reproduced (aims -7.55 / -4 / -1 gave head, head, neck or
 head, wing at 30 fps too).
+Follow-up (2026-11-25, reporter built f22f026: 3 x 47 now possible at 60 fps but rare): the shell's age (+0x1378,
+frames flown; +0x137c the value at the update's start) isn't added to by the update that takes a hit, and Pierce's
+critical distance (x1.5: the reporter's 47 against 31, the rig's head 15 / 19 against 10 / 13, the second number of
+each an affinity crit x1.25) goes by it. The fix held the shell's position for the rest of the 2 frames but let its
+age run, so each later hit came 1 frame older per hit before it at 60 fps (ages at the hits 11 / 16 / 21-22 against
+12 / 16 / 20 at 30 fps) and a third hit could leave the window. Now the age is held with it: 12 / 16 / 20 at 60 fps,
+12.1 / 16.3 / 20.6 at 144, +4 per hit at 240 (scratch-pierce run.sh at 1600 cm). Checked and ruled out on the way: a
+swept hit test (the previous position +0x1000 made 4x as far back changed no hit). Not explained: at 240 fps the first
+hit came ~150 units earlier along the shot in both runs (x 1889 / 1843 against 1713-1752 at 30 / 60 / 144), the shot's
+age matching its distance, so most likely the held Tigrex's frozen pose (it is frozen at whatever frame it was in).
 The Bow's Pierce arrows (uShellPlw10_000, update 0x67957c; a Pierce-only bow, uncharged shots) had the same kind of
 bug by another way: no stop on a hit, but a hit sets a timer (+0x15ec, 4 frames from the data, stored as 4 minus the
 step) and the update it runs out in moves the arrow at 0.7 of its velocity (+0x1010, per frame) and sets a 1-frame
