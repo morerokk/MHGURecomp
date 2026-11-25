@@ -137,17 +137,23 @@ void textinput_update(void) {
     bool want = textinput_active() || overlay_menu_open();  // (Forge's menu takes typed text too)
     SDL_Window *w = ui_window();
     if (!w) return;
-#ifdef __ANDROID__
-    // The on-screen keyboard covers half the screen: it comes up only for a real text box (the game's entries, the chat,
-    // a Forge plugin's field). The settings menu has its own on-screen keys, and a physical keyboard still types in it.
+    // The on-screen keyboard comes up only for a real text box (the game's entries, the chat, a Forge plugin's field).
+    // The settings menu has its own on-screen keys, and a physical keyboard still types in it. Android's covers half the
+    // screen. A Steam Deck's (SteamOS opens it when Steam started the game: SDL_ENABLE_STEAM_SCREEN_KEYBOARD, X11) takes
+    // the controller while it is up and types Escape and the like into the game: the menu flickered shut as Plus + Minus
+    // let go, and Confirm on the Save / Exit questions came back as Back, the menu again instead of closing (issue #467).
     static bool screen_keyboard = true;
     bool screen = textinput_active() || overlay_wants_text();
     if (screen != screen_keyboard) {
         if (g_window_on) SDL_StopTextInput(w), g_window_on = false;  // (before the hint changes: a shown keyboard hides)
+#ifdef __ANDROID__
         SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, screen ? "auto" : "0");
+#else
+        if (screen) SDL_ResetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD);  // (SDL's own choice again: Steam's hint, the env)
+        else SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, "0");
+#endif
         screen_keyboard = screen;
     }
-#endif
     if (want == g_window_on) return;
     if (want) SDL_StartTextInput(w);
     else SDL_StopTextInput(w);
