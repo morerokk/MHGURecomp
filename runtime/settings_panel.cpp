@@ -2559,6 +2559,8 @@ std::vector<Row> main_rows() {
         add_choice(r, "show.battery", "Battery indicator", c.show_battery, {tr("Off"), tr("With FPS counter"), tr("By itself")},
                    [](int v) { c.show_battery = v; }, ini("ShowBattery"));
         r.back().help = tr("The battery's charge, in the FPS counter's box or in a box of its own (drag it like the FPS counter).");
+#endif
+#ifdef __ANDROID__  // (the temperature is Android's: runtime/overlay.cpp)
         add_choice(r, "show.temperature", "Temperature", c.show_temperature, {tr("Off"), tr("Celsius"), tr("Fahrenheit")},
                    [](int v) { c.show_temperature = v; }, ini("ShowTemperature"));
         r.back().help = tr("The device's temperature (its battery's) under the FPS counter, or in a box of its own when the FPS counter is off.");
