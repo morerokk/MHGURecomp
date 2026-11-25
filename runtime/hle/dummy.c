@@ -127,7 +127,8 @@ static void summon_once(void) {
     STF(pos + 8, LDF(pl + OBJ_POS + 8) + fz * g_summon);
     ST8(en + OBJ_ZONE, LD8(pl + OBJ_ZONE));
     g_summoned = true;
-    LOG("[dummy] summoned the large monster %.0f cm in front of the hunter, zone %u\n", (double)g_summon, LD8(pl + OBJ_ZONE));
+    LOG("[dummy] summoned the large monster %.0f cm in front of the hunter, zone %u (hunter %08x)\n", (double)g_summon,
+        LD8(pl + OBJ_ZONE), pl);
 }
 
 // MHGU_SUMMON_KEEPHP=1 (with MHGU_SUMMON): the large monster's HP goes back to its maximum whenever it falls under half (on
@@ -166,11 +167,22 @@ static void collision(Cpu *c) {
         uint32_t pl = local_player();
         // (a hit since the last update: logged, for counting how often attacks land. The game now and then puts the HP back
         // to its maximum, +0x13d8: that is no hit)
+        // MHGU_SUMMON_HP: 5000 (default) as below; "max": topped up to the hunter's own maximum instead (hits then show
+        // as HP lost below it; a single hit above the maximum still carts); 0: left alone
+        static int mode = -1;  // (0 alone, 1 5000, 2 max)
+        if (mode < 0) {
+            const char *m = getenv("MHGU_SUMMON_HP");
+            mode = !m || !*m ? 1 : *m == '0' ? 0 : *m == 'm' ? 2 : 1;
+        }
         int hp = pl ? (int)LD16(pl + 0x13d6) : 5000, hp_max = pl ? (int)LD16(pl + 0x13d8) : 0;
-        if (pl && hp < 5000 && hp != hp_max)
+        int top = mode == 2 ? hp_max : 5000;
+        if (pl && mode == 1 && hp < 5000 && hp != hp_max)
             LOG("[dummy] hunter hit: HP -%d at %.1f %.1f %.1f, update %u\n", hp > hp_max ? 5000 - hp : hp_max - hp,
                 (double)LDF(pl + 0x40), (double)LDF(pl + 0x44), (double)LDF(pl + 0x48), g_updates);
-        if (pl) ST16(pl + 0x13d6, 5000), ST16(pl + 0x13da, 5000);  // (the hunter's HP and its red part, above any one hit: it lasts as long as the test)
+        if (pl && mode == 2 && hp < hp_max)
+            LOG("[dummy] hunter hit: HP -%d at %.1f %.1f %.1f, update %u\n", hp_max - hp, (double)LDF(pl + 0x40),
+                (double)LDF(pl + 0x44), (double)LDF(pl + 0x48), g_updates);
+        if (pl && mode) ST16(pl + 0x13d6, top), ST16(pl + 0x13da, top);  // (the hunter's HP and its red part: it lasts as long as the test)
         if (g_keephp) keep_hp();
         summon_once();
         // The hunter stays where the first summon found it: knocked out of the area it would be put back in the camp.
@@ -219,6 +231,34 @@ static void damage(Cpu *c) {
     fnhook_call_original(c, FN_EN_DAMAGE);
 }
 
+// (debug, temporary) MHGU_ATKTRACE=1: the generic attack update (0x36919c, r0 the attack): each new owner logged once with
+// the attack's kind (+0x6d), type (+0x3a) and windows (+0x5c, +0x60), and whether it is the zone's large monster
+#define FN_ATK_UPDATE 0x36919cu
+static void atk_update(Cpu *c) {
+    uint32_t at = c->r[0], owner = LD32(at + 0xc);
+    if (owner && LD32(owner) == 0x19f3104u) {  // (the monster's other attacks: every update, for their lifetime)
+        uint32_t sys = LD32(0x2326764u);
+        LOG("[atkobj] %08x %.1f ms step %.3f windows %.2f %.2f\n", owner, (double)(plat_now_ns() / 100000ull) / 10.0,
+            sys ? (double)LDF(sys + 0x68) : 0.0, (double)LDF(at + 0x5c), (double)LDF(at + 0x60));
+    }
+    static uint32_t seen[64];
+    static int n;
+    int k = 0;
+    while (k < n && seen[k] != owner) k++;
+    if (k == n && n < 64) {
+        seen[n++] = owner;
+        uint32_t sen = LD32(G_SENEMY), big = 0;
+        for (int i = 0; i < MAX_EN && sen; i++) {
+            uint32_t e = LD32(sen + 0x1c + 4u * (uint32_t)i), info = e ? LD32(e + EN_INFO) : 0;
+            if (info && LD16(info + 0x1b6) < 10000) big = big ? big : e;
+        }
+        LOG("[atk] attack %08x owner %08x (vt %08x)%s%s kind %u type 0x%x windows %.2f %.2f\n", at, owner, owner ? LD32(owner) : 0,
+            owner == big ? " = large monster" : "", owner == local_player() ? " = our hunter" : "", LD8(at + 0x6d), LD8(at + 0x3a),
+            (double)LDF(at + 0x5c), (double)LDF(at + 0x60));
+    }
+    fnhook_call_original(c, FN_ATK_UPDATE);
+}
+
 void dummy_set(float dist, float turn) {
     if (dist > 0) g_dist = dist;
     g_turn = turn;
@@ -227,6 +267,7 @@ void dummy_set(float dist, float turn) {
 }
 
 void dummy_init(void) {
+    if (getenv("MHGU_ATKTRACE")) fnhook_set(FN_ATK_UPDATE, hle_register("dummy:atk", atk_update));
     const char *e = getenv("MHGU_SUMMON");
     if (e && *e && atoi(e) > 0) {
         g_summon = (float)atoi(e);

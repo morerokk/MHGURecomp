@@ -803,9 +803,21 @@ the same at 30 and 240 fps. Moves first seemed 7% shorter at 60 / 240 fps (7:82 
 that was the quest's random size: 7:82 at 900 cm straight on, 30 fps scale 1.177 path 942, 60 fps scale 1.133 path
 907, 800.3 / 800.5 per unit of scale; turns 24.8 / -10.9 against 24.8 / -10.4. Position writers (interpwatch): the
 motion's root motion 0x271e70 (from 0xb52c38), copied to status +0x40 at 0x2c2864, then the slope factor 0x4330b8
-(max(1 + dot(move dir, slope) * k, 0.1), direction only). Not covered: the hit itself (how often the slam lands on a
-hunter at its landing spot, at both rates with the size held), the black-tail state (the quest's Glavenus had its tail
-glowing from the start in every run), the reporter's own setup.
+(max(1 + dot(move dir, slope) * k, 0.1), direction only).
+Hits on the hunter, same day (follow-up report: "melee hit detection disappears for some monsters"): no difference.
+One run (same monster size) alternating 30 and 240 fps live (control "fps") between attempts, each from the same start
+(MHGU_EMACT_PLACE), hunter pinned with MHGU_SUMMON_HP=max (topped up to its own maximum, +0x13d8, every update; each
+loss below it logged as a hit; the default 5000 left the HUD's bar empty and hid most hits). Real hits only (more
+than 2 HP: Hellblade's fireblight ticks 2 every 0.67 s), 100 ms or more into the attempt: 7:15 (a tail attack)
+15/28 at 30 fps, 16/28 at 240; 7:82 (the slam) 16/28 and 17/28; 7:13 8/8 and 7/8; 7:20 8/8 and 8/8 with the same
+damage at the same times. A first small run (8 each) looked like fewer tail hits at 240 (3/8, 4/8): chance, gone with
+20 more each (9/20 vs 13/20, 10/20 vs 13/20). Hunter attacks for comparison: the attack object (0x368960 sets it up;
+player +0x3020) has +0x5c / +0x60 = frames to open / open, as floats from its data, counted down by the step (seen at
+240 fps: 10.0 down to -0.026, no whole numbers). Monster attacks don't go through 0x368960 (its callers: 0x4b737c,
+hunter; 0x1337300, kind 3) nor through 0x370968 against the hunter (MHGU_LOG_PLHITS=1 in hitsync.c logged none while
+the hunter lost HP); their timing wasn't traced, only measured as above. Scripts: scratch-glav run_fps.sh (ACTS,
+STARTS, REPS, GAP), hits2.py. Not covered: the black-tail state (the quest's Glavenus had its tail glowing from the
+start in every run), other monsters, 60 fps (only 30 and 240), the reporter's own setup.
 
 Start in an area (2026-11-18, debug, runtime/hle/quickhunt.c): MHGU_START_AREA=<n> starts every hunt in area n of its map, by replacing the area the random start picked (town +0xc9, copied to sGameControl +0x49 by the town's move 0x8bdfd0 when departing) for low rank's camp too. With MHGU_QUICKHUNT=<quest>, straight from start-up into that area, e.g. MHGU_QUICKHUNT=204 MHGU_START_AREA=8 (Harvest Tour: Arctic Ridge). Checked on that: the game's pick was area 0, the hunter arrived on the snowfield of area 8 ("hunter in area 8" in the camera trace). An area number the map doesn't have is not checked. Not a teleport: it only acts when departing.
 

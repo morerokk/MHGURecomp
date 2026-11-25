@@ -39,6 +39,7 @@ uint64_t rt_ticks(void) { return 0; }
 void rt_fatal_trace(void) { fflush(stdout); fflush(stderr); _exit(44); }
 uint8_t g_fnhook[0x03000000u >> 5];
 bool fnhook_entry_word(uint32_t pc, uint32_t *w) { (void)pc; (void)w; return false; }
+bool mods_code_word(uint32_t pc, uint32_t *w) { (void)pc; (void)w; return false; }
 bool kernel_mapped(uint64_t addr, uint32_t size) { (void)addr; (void)size; return true; }
 uint32_t kernel_heap_size(void) { return 0; }
 void forge_guest_fault(uint32_t pc, uint32_t addr, int size, int write, const char *why) {
