@@ -4,6 +4,10 @@
 /obj/
 /build-linux/
 /obj-linux/
+/app/
+/release/
+/third_party/macos-deps/
+*.dylib
 /run/
 /game/
 /save/

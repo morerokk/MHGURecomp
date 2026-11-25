@@ -5,12 +5,14 @@
 #ifdef MHGU_NULL_BACKEND
 static uint64_t frames;
 void backend_init(void) { LOG("[nvn] null renderer\n"); }
+void backend_quit(void) {}
 void backend_loading_screen(void) {}
 bool shader_prewarm_progress(uint64_t *done, uint64_t *total) {
     if (done) *done = 0;
     if (total) *total = 0;
     return false;
 }
+bool shader_warmup_progress(uint64_t *done, uint64_t *total) { return shader_prewarm_progress(done, total); }  // (none: zeros, false)
 void backend_execute(uint64_t handle) { (void)handle; }
 void backend_present(NvnTexture *tex) {
     (void)tex;
@@ -26,4 +28,8 @@ void renderer_sync(void) {}
 uint64_t renderer_fence_seq(void) { return 0; }
 void renderer_wait_seq(uint64_t seq) { (void)seq; }
 void renderer_flush(void) {}
+// Vulkan backend debug hooks that host_input.c reaches (keys, MHGU_CONTROL): nothing to do without it.
+volatile int g_gpuprof_request, g_shadow_scissor_mode, g_clear_draw = -1;
+void vk_cycle_msaa(void) {}
+void vk_set_msaa(uint32_t n) { (void)n; }
 #endif

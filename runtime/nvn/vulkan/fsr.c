@@ -37,6 +37,10 @@
 //  - The camera of a frame: the capture whose jittered projection the frame's scene draws read from their uniform
 //    buffers (found by its m[8] / m[9]); none found (no jitter yet): the newest capture.
 //
+//  - [Upscaler] MetalFX = On (macOS): Apple's MetalFX temporal scaler instead of FSR 3.1, on the same inputs (metalfx.m):
+//    the prep passes are submitted, MetalFX runs on its own Metal queue, and the next submission waits for it; then RCAS
+//    for [Upscaler] Sharpness (MetalFX has none of its own). Everything else above is the same for both.
+//
 //   MHGU_FSR_LOG=1     a line per second: frames with FSR / scaled, where the HUD started, the camera match
 //   MHGU_FSR_DEBUG=1   FSR's own checks of its inputs (FFX debug checking; messages in the log)
 //   MHGU_FSR_MVCHECK=1 (with MHGU_FSR_LOG) how well the camera motion vectors match the picture (mv_check)
@@ -50,9 +54,11 @@
 #include "../../camera_jitter.h"
 #include "../../kernel.h"
 #include "fsr.h"
+#include "metalfx.h"
 #include "shaders.h"
 
 bool g_fsr_on;
+static bool use_mfx;  // [Upscaler] MetalFX: Apple's temporal scaler takes FSR's inputs instead of FSR (metalfx.m)
 
 static uint32_t rw, rh, ow, oh;  // render size, output size
 static bool logging;
@@ -452,6 +458,81 @@ static const char SHOT_GLSL[] =
     "    imageStore(outp, p, vec4(clamp(c, smin, smax), textureLod(shot, uv, 0.0).a));\n"
     "}\n";
 
+// ---- (MetalFX: it has no sharpening of its own) RCAS, as FSR 3.1 runs it after its upscale for [Upscaler] Sharpness:
+// AMD's robust contrast-adaptive sharpening (FidelityFX FSR1's FsrRcasF, without its noise removal), at the output size,
+// from img_rcas (MetalFX writes its picture there instead of the output when RCAS runs: no copy) into the output.
+// con = 2^-(2 - 2 sharpness), as FSR 3.1 maps Sharpness.
+static const char RCAS_GLSL[] =
+    "#version 450\n"
+    "layout(local_size_x = 8, local_size_y = 8) in;\n"
+    "layout(set = 0, binding = 0) uniform sampler2D src;\n"
+    "layout(set = 0, binding = 1, rgba8) uniform writeonly image2D dst;\n"
+    "layout(push_constant) uniform Push { float con; } pc;\n"
+    "void main() {\n"
+    "    ivec2 p = ivec2(gl_GlobalInvocationID.xy), sz = textureSize(src, 0);\n"
+    "    if (p.x >= sz.x || p.y >= sz.y) return;\n"
+    "    vec4 e4 = texelFetch(src, p, 0);\n"
+    "    vec3 b = texelFetch(src, clamp(p + ivec2(0, -1), ivec2(0), sz - 1), 0).rgb;\n"
+    "    vec3 d = texelFetch(src, clamp(p + ivec2(-1, 0), ivec2(0), sz - 1), 0).rgb;\n"
+    "    vec3 f = texelFetch(src, clamp(p + ivec2(1, 0), ivec2(0), sz - 1), 0).rgb;\n"
+    "    vec3 h = texelFetch(src, clamp(p + ivec2(0, 1), ivec2(0), sz - 1), 0).rgb;\n"
+    "    vec3 e = e4.rgb;\n"
+    "    vec3 mn4 = min(min(b, d), min(f, h)), mx4 = max(max(b, d), max(f, h));\n"
+    "    vec3 hit_min = min(mn4, e) / max(4.0 * mx4, vec3(1e-5));\n"
+    "    vec3 hit_max = (1.0 - max(mx4, e)) / min(4.0 * mn4 - 4.0, vec3(-1e-5));\n"
+    "    vec3 l3 = max(-hit_min, hit_max);\n"
+    "    float lobe = max(-(0.25 - 1.0 / 16.0), min(max(l3.r, max(l3.g, l3.b)), 0.0)) * pc.con;\n"
+    "    vec3 c = (lobe * (b + d + f + h) + e) / (4.0 * lobe + 1.0);\n"
+    "    imageStore(dst, p, vec4(clamp(c, 0.0, 1.0), e4.a));\n"
+    "}\n";
+
+static VkDescriptorSetLayout rcas_set_layout;
+static VkPipelineLayout rcas_layout;
+static VkPipeline rcas_pipe;
+static TexBackend img_rcas;  // MetalFX's picture when RCAS runs (rcas_on), RCAS's input
+
+// ---- (MHGU_FSR_LOG) GPU time of the steps, from timestamps: TS_PREP0 .. TS_PREP1 the prep passes (both upscalers),
+// TS_UP0 .. TS_UP1 FSR 3.1's dispatch (its RCAS included), or MetalFX's RCAS (MetalFX itself: Metal's own times,
+// vk_mfx_gpu_ns). A ring of frames, read once their submissions completed.
+enum { TS_PREP0, TS_PREP1, TS_UP0, TS_UP1, TS_N };
+#define TS_RING 8
+static VkQueryPool ts_pool;
+static struct { uint64_t seq; bool up; } ts_slot[TS_RING];  // seq: the submission holding the slot's last timestamp
+static uint32_t ts_cur;
+static uint64_t ts_sum[2], ts_n;  // prep, upscale (ns), frames
+
+static void ts_write(VkCommandBuffer cb, int which) {
+    if (!ts_pool) return;
+    if (which == TS_PREP0) vkCmdResetQueryPool(cb, ts_pool, ts_cur * TS_N, TS_N);
+    vkCmdWriteTimestamp(cb, which & 1 ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, ts_pool,
+                        ts_cur * TS_N + which);
+    if (which == TS_UP1) ts_slot[ts_cur].up = true;
+}
+
+static void ts_frame_end(bool written) {  // (run_fsr's end) the slot is done; the next frame takes the next one
+    if (!ts_pool || !written) return;
+    ts_slot[ts_cur].seq = vk_pending_seq();
+    ts_cur = (ts_cur + 1) % TS_RING;
+    if (ts_slot[ts_cur].seq && vk_completed_seq() < ts_slot[ts_cur].seq) vk_wait_seq(ts_slot[ts_cur].seq);
+    ts_slot[ts_cur].seq = 0, ts_slot[ts_cur].up = false;
+}
+
+static void ts_collect(void) {  // (each present) the completed slots into the sums
+    if (!ts_pool) return;
+    uint64_t done = vk_completed_seq();
+    for (uint32_t i = 0; i < TS_RING; i++) {
+        if (!ts_slot[i].seq || ts_slot[i].seq > done) continue;
+        uint64_t t[TS_N];
+        if (vkGetQueryPoolResults(g_vk.dev, ts_pool, i * TS_N, TS_N, sizeof t, t, sizeof t[0], VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
+            double period = g_vk.props.limits.timestampPeriod;
+            ts_sum[0] += (uint64_t)((t[TS_PREP1] - t[TS_PREP0]) * period);
+            if (ts_slot[i].up) ts_sum[1] += (uint64_t)((t[TS_UP1] - t[TS_UP0]) * period);
+            ts_n++;
+        }
+        ts_slot[i].seq = 0, ts_slot[i].up = false;
+    }
+}
+
 static VkDescriptorSetLayout shot_set_layout;
 static VkPipelineLayout shot_layout;
 static VkPipeline shot_pipe;
@@ -577,6 +658,21 @@ static bool prep_init(void) {
         LOG("[fsr] the quest rewards' pass could not be set up: their picture stays as the game makes it\n");
         shot_pipe = VK_NULL_HANDLE;
     }
+    if (logging && g_vk.props.limits.timestampComputeAndGraphics) {
+        VkQueryPoolCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, .queryType = VK_QUERY_TYPE_TIMESTAMP,
+                                    .queryCount = TS_RING * TS_N};
+        if (vkCreateQueryPool(g_vk.dev, &qi, NULL, &ts_pool) != VK_SUCCESS) ts_pool = VK_NULL_HANDLE;
+    }
+    if (use_mfx) {  // (MetalFX: Sharpness through RCAS)
+        static const VkDescriptorType rcas_types[] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE};
+        if (!make_compute(RCAS_GLSL, "mfx_rcas", rcas_types, 2, 4, &rcas_set_layout, &rcas_layout, &rcas_pipe) ||
+            // (MetalFX's output: read, written and a render target, its outputTextureUsage)
+            !own_image(&img_rcas, VK_FORMAT_R8G8B8A8_UNORM, ow, oh, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT |
+                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
+            LOG("[fsr] MetalFX's sharpening pass could not be set up: no sharpening\n");
+            rcas_pipe = VK_NULL_HANDLE;
+        }
+    }
     if (g_fsr_objvel && !objvel_init()) {
         LOG("[fsr] object motion could not be set up: camera motion only\n");
         g_fsr_objvel = false;
@@ -677,6 +773,22 @@ static void anim_bypass(VkCommandBuffer cb, TexBackend *h, TexBackend *out, cons
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, bypass_layout, 0, 1, &set, 0, NULL);
     vkCmdPushConstants(cb, bypass_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, pc);
     vkCmdDispatch(cb, (out->width + 7) / 8, (out->height + 7) / 8, 1);
+    vk_full_barrier(cb);
+}
+
+// (MetalFX) [Upscaler] Sharpness on its output: RCAS (RCAS_GLSL).
+static bool rcas_on(const TexBackend *out, float sharpness) {  // (then MetalFX writes img_rcas, rcas() the output)
+    return rcas_pipe && sharpness > 0.0f && out->format == img_rcas.format && out->width == ow && out->height == oh;
+}
+
+static void rcas(VkCommandBuffer cb, TexBackend *out, float sharpness) {
+    Bind b[2] = {SAMPLED(&img_rcas), STORAGE(out)};
+    VkDescriptorSet set = make_set(rcas_set_layout, b, 2);
+    float con = exp2f(-(2.0f - 2.0f * sharpness));
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, rcas_pipe);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, rcas_layout, 0, 1, &set, 0, NULL);
+    vkCmdPushConstants(cb, rcas_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof con, &con);
+    vkCmdDispatch(cb, (ow + 7) / 8, (oh + 7) / 8, 1);
     vk_full_barrier(cb);
 }
 
@@ -1502,7 +1614,7 @@ static void scale_to_stand(NvnTexture *h, NvnTexture *hs) {
 
 // prep + FSR: H -> H'. false: not done (H' untouched).
 static bool run_fsr(NvnTexture *h, NvnTexture *hs, NvnTexture *depth, NvnTexture *mask, const CamRecord *cam) {
-    if (!ctx_make()) return false;
+    if (!use_mfx && !ctx_make()) return false;
     TexBackend *hb = vk_tex(h, true), *db = vk_tex(depth, true), *ob = hs->backend;
     if (hb->width != rw || hb->height != rh || db->width != rw || db->height != rh) {
         static int nlog;
@@ -1541,6 +1653,7 @@ static bool run_fsr(NvnTexture *h, NvnTexture *hs, NvnTexture *depth, NvnTexture
     }
     VkCommandBuffer cb = vk_cmd();
     vk_full_barrier(cb);
+    ts_write(cb, TS_PREP0);
     // 1. prep
     static const VkComponentMapping id = {0};
     VkDescriptorSet set = vk_alloc_set(prep_set_layout);
@@ -1588,6 +1701,24 @@ static bool run_fsr(NvnTexture *h, NvnTexture *hs, NvnTexture *depth, NvnTexture
     if (objv) n_objv_frames++;
     if (react) n_react_frames++;
     mv_check(cb, hb, &img_sil[sil_cur], !reset && prev_in_ok, jd);  // ((debug) MHGU_FSR_MVCHECK)
+    ts_write(cb, TS_PREP1);
+    if (use_mfx) {  // 2. MetalFX instead of FSR: on its own Metal queue between this submission and the next
+        vk_full_barrier(cb);
+        bool sharpen = rcas_on(ob, sharpness);
+        MfxDispatch md = {.color = hb->image, .depth = img_depth.image, .motion = img_mvf.image, .reactive = img_react.image,
+                          .output = sharpen ? img_rcas.image : ob->image, .jitter = {cam->jitter[0], cam->jitter[1]}, .reset = reset};
+        uint64_t seq = vk_pending_seq(), done_val = 0;
+        vk_submit_extra(VK_NULL_HANDLE, VK_NULL_HANDLE);  // (the inputs, and the frame's scene before them)
+        VkSemaphore done = VK_NULL_HANDLE;
+        if (!vk_mfx_encode(&md, seq, &done, &done_val)) { ts_frame_end(true); return false; }
+        vk_wait_next_submit(done, done_val);
+        cb = vk_cmd();  // (a new command buffer: its submission waits for MetalFX)
+        vk_full_barrier(cb);
+        ts_write(cb, TS_UP0);
+        if (sharpen) rcas(cb, ob, sharpness);
+        ts_write(cb, TS_UP1);
+        goto upscaled;
+    }
     // 2. FSR
     uint64_t now = plat_now_ns();
     float dt = last_dispatch_ns ? (float)((now - last_dispatch_ns) / 1e6) : 16.7f;
@@ -1631,15 +1762,20 @@ static bool run_fsr(NvnTexture *h, NvnTexture *hs, NvnTexture *depth, NvnTexture
             if (issues & bit) { nlog++; LOG("[fsr] dispatch rejected: %s\n", ffxVkPortableValidationIssueName(bit)); }
         return false;
     }
+    ts_write(cb, TS_UP0);
     FfxVkPortableResult r = ffxVkPortableUpscaleContextRecordDispatch(ctx, &di);
     if (r != FFX_VK_PORTABLE_OK) {
         static int nlog;
         if (nlog++ < 20) LOG("[fsr] dispatch failed: %d\n", r);
+        ts_frame_end(true);
         return false;
     }
     vk_full_barrier(cb);
+    ts_write(cb, TS_UP1);
+upscaled:
     if (anim) anim_bypass(cb, hb, ob, cam->jitter);  // (animated surfaces: the current input there)
     prev_store(cb, hb);
+    ts_frame_end(true);
     if (reset) n_reset++;
     prev_cam = *cam;
     prev_fsr_present = g_present_count;
@@ -1793,6 +1929,7 @@ NvnTexture *vk_fsr_present(NvnTexture *t) {
         anim_seq = 0;
     }
     if (g_fsr_objvel) objvel_static_update();
+    ts_collect();
     cap_frame++;
     if (logging && now - log_t0 >= 1000000000ull) {
         LOG("[fsr] 1s: FSR %u, scaled %u, neither %u | history resets %u | camera matched %u (newest %u, 1 back %u, 2 back %u, "
@@ -1842,6 +1979,18 @@ NvnTexture *vk_fsr_present(NvnTexture *t) {
         }
         n_fsr = n_scaled = n_none = n_match = n_nomatch = n_reset = n_objv_frames = n_react_frames = 0;
         memset(lag_hist, 0, sizeof lag_hist);
+        if (ts_n) {  // (GPU time, ms a frame)
+            uint64_t mfx_ns = 0;
+            uint32_t mfx_n = vk_mfx_gpu_ns(&mfx_ns);
+            if (use_mfx)
+                LOG("[fsr] GPU a frame: prep %.3f ms, MetalFX %.3f ms + RCAS %.3f ms = %.3f ms upscaling (%llu frames)\n",
+                    ts_sum[0] / 1e6 / ts_n, mfx_n ? mfx_ns / 1e6 / mfx_n : 0.0, ts_sum[1] / 1e6 / ts_n,
+                    (mfx_n ? mfx_ns / 1e6 / mfx_n : 0.0) + ts_sum[1] / 1e6 / ts_n, (unsigned long long)ts_n);
+            else
+                LOG("[fsr] GPU a frame: prep %.3f ms, FSR 3.1 %.3f ms upscaling (RCAS included) (%llu frames)\n",
+                    ts_sum[0] / 1e6 / ts_n, ts_sum[1] / 1e6 / ts_n, (unsigned long long)ts_n);
+            ts_sum[0] = ts_sum[1] = ts_n = 0;
+        }
         log_t0 = now;
     }
     frame_open = false;
@@ -1856,9 +2005,15 @@ void vk_fsr_init(void) {
     rw = g_render_size[0], rh = g_render_size[1], ow = g_fsr_output[0], oh = g_fsr_output[1];
     logging = getenv("MHGU_FSR_LOG") != NULL;
     if (g_vk.api11) { LOG("[fsr] FSR 3.1 needs Vulkan 1.2: FSR off, the picture is scaled from %ux%u\n", rw, rh); return; }
+    if (g_config.fsr_metalfx) {
+        if (!g_vk.metal_objects || g_vk.fences)
+            LOG("[fsr] MetalFX needs MoltenVK's VK_EXT_metal_objects and timeline semaphores: FSR 3.1 instead\n");
+        else if (!(use_mfx = vk_mfx_init(g_vk.dev, g_vk.timeline, rw, rh, ow, oh)))
+            LOG("[fsr] MetalFX is not available: FSR 3.1 instead\n");
+    }
     FfxVkPortableDeviceCapabilities caps = {.structSize = sizeof caps};
-    if (ffxVkPortableQueryDeviceCapabilities(g_vk.phys, &caps) != FFX_VK_PORTABLE_OK || !caps.fsr3ComputePrerequisites ||
-        !g_vk.fsr_storage_wo_format) {
+    if (!use_mfx && (ffxVkPortableQueryDeviceCapabilities(g_vk.phys, &caps) != FFX_VK_PORTABLE_OK ||
+                     !caps.fsr3ComputePrerequisites || !g_vk.fsr_storage_wo_format)) {
         LOG("[fsr] this GPU lacks what FSR 3.1 needs (subgroup operations, storage formats, storage writes without a "
             "format): FSR off, the picture is scaled from %ux%u\n", rw, rh);
         return;
@@ -1874,6 +2029,7 @@ void vk_fsr_init(void) {
     if (!prep_init()) { LOG("[fsr] the prep shader could not be built: FSR off\n"); g_fsr_objvel = false; return; }
     g_fsr_on = true;
     camjit_set(false, rw, rh, 8);
-    LOG("[fsr] on (FSR 3.1): %ux%u -> %ux%u, sharpness %.2f, fp16 %d, object motion %s, reactive %.2f\n",
-        rw, rh, ow, oh, g_config.fsr_sharpness, g_vk.fsr_fp16, g_fsr_objvel ? "on" : "off", g_config.fsr_reactive);
+    LOG("[fsr] on (%s): %ux%u -> %ux%u, sharpness %.2f, fp16 %d, object motion %s, reactive %.2f\n",
+        use_mfx ? "MetalFX" : "FSR 3.1", rw, rh, ow, oh, g_config.fsr_sharpness, g_vk.fsr_fp16, g_fsr_objvel ? "on" : "off",
+        g_config.fsr_reactive);
 }

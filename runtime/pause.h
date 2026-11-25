@@ -1,4 +1,4 @@
-// Pause/Suspend ([Controls] PauseKey, the Pause key by default): the game stops where it is, offline only.
+// Pause/Suspend ([Controls] PauseKey, the Pause key by default; P on the Mac): the game stops where it is, offline only.
 //
 // The game's render thread is held in its present (runtime/nvn/objects.c nvnQueuePresentTexture), which stops the
 // game: its main thread waits for the render thread before the next frame. Meanwhile the held thread shows the last

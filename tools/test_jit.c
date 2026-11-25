@@ -67,8 +67,13 @@ static int guest_memory(void) {  // the 4 GB window, committed on touch
     AddVectoredExceptionHandler(1, commit_on_touch);
     return 1;
 #else
+#ifdef MAP_FIXED_NOREPLACE
     return mmap((void *)(uintptr_t)GUEST_BASE, 0x100000000ull, PROT_READ | PROT_WRITE,
                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE | MAP_NORESERVE, -1, 0) != MAP_FAILED;
+#else  // (macOS: no such flag; the address is a hint, and honoured when the range is free)
+    return mmap((void *)(uintptr_t)GUEST_BASE, 0x100000000ull, PROT_READ | PROT_WRITE,
+                MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0) == (void *)(uintptr_t)GUEST_BASE;
+#endif
 #endif
 }
 

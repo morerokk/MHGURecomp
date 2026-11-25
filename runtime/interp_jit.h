@@ -26,11 +26,20 @@
 //   while no block of the thread is running (in_jit 0); until then a nested run falls back to the interpreter.
 // MHGU_JIT=0: the interpreter alone. tools/test_lift.py --jit checks the translations against Unicorn (x86-64);
 // tools/test_jit.py checks the JIT against the interpreter (both hosts; --a64 under qemu-aarch64).
-// (Not on Apple hosts yet: their JIT memory needs MAP_JIT and per-thread write protection toggling.)
-#if (defined(__x86_64__) || defined(__aarch64__)) && !defined(__APPLE__) && !defined(MHGU_NO_JIT)
+// (Apple Silicon: the arena is MAP_JIT memory, which a thread writes or runs but never both: jit_write_begin /
+// jit_write_end switch the thread to writing around everything that changes the arena. Not on Intel Macs.)
+#if (defined(__x86_64__) || defined(__aarch64__)) && (!defined(__APPLE__) || defined(__aarch64__)) && !defined(MHGU_NO_JIT)
 #define HAVE_JIT 1
 #include <pthread.h>
 #include <stddef.h>
+
+#if defined(__APPLE__) && defined(__aarch64__)
+static inline void jit_write_begin(void) { pthread_jit_write_protect_np(0); }
+static inline void jit_write_end(void) { pthread_jit_write_protect_np(1); }
+#else
+static inline void jit_write_begin(void) {}
+static inline void jit_write_end(void) {}
+#endif
 
 void *jit_mem_alloc(size_t n);
 int jit_mem_register(void *base, void *rf);
@@ -127,7 +136,13 @@ static JitTls *jit_tls(void) {
     pthread_once(&jit_once, jit_key_init);
     JitTls *t = calloc(1, sizeof *t);
     if (t) t->base = jit_mem_alloc(JIT_ARENA);
-    if (!t || !t->base || !jit_header(t)) {
+    int made = 0;
+    if (t && t->base) {
+        jit_write_begin();
+        made = jit_header(t);
+        jit_write_end();
+    }
+    if (!made) {
         if (t && t->base) jit_mem_free(t->base, JIT_ARENA, NULL);
         free(t);
         t_jit_failed = 1;
@@ -145,7 +160,7 @@ static JitTls *jit_tls(void) {
 
 // The block at pc (stop: an address it must not run into, the run's return address; 0 none). NULL: no room now (a
 // block of this thread is running) or a test word that did not fit.
-static uint8_t *jit_build(JitTls *t, uint32_t pc, uint32_t stop, int test, uint32_t tw) {
+static uint8_t *jit_build_in(JitTls *t, uint32_t pc, uint32_t stop, int test, uint32_t tw) {
     for (int tries = 0; tries < 2; tries++) {
         if ((size_t)(t->dcur - t->cur) < JIT_GUARD) {
             if (t->in_jit) return NULL;
@@ -198,6 +213,12 @@ static uint8_t *jit_build(JitTls *t, uint32_t pc, uint32_t stop, int test, uint3
         return entry;
     }
     return NULL;
+}
+static uint8_t *jit_build(JitTls *t, uint32_t pc, uint32_t stop, int test, uint32_t tw) {
+    jit_write_begin();
+    uint8_t *r = jit_build_in(t, pc, stop, test, tw);
+    jit_write_end();
+    return r;
 }
 
 static uint8_t *jit_get(JitTls *t, uint32_t pc, uint32_t ret) {

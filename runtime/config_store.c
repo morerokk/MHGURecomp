@@ -54,7 +54,11 @@ static SDL_AtomicInt live_menu_confirm;
 static SDL_AtomicInt live_background = {1};
 static SDL_AtomicInt live_combo;
 static SDL_AtomicInt live_chat_key;
+#ifdef __APPLE__
+static SDL_AtomicInt live_pause_key = {SDL_SCANCODE_P};  // (config.c PAUSE_KEY_DEFAULT)
+#else
 static SDL_AtomicInt live_pause_key = {SDL_SCANCODE_PAUSE};
+#endif
 static SDL_AtomicInt menu_chord = {1};
 static SDL_AtomicInt title_back_exit = {1};
 // [Mouse]

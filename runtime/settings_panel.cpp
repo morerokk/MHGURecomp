@@ -367,6 +367,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(fsr_objmotion);
     SAME(fsr_reactive);
     SAME(fsr_animsurf);
+    SAME(fsr_metalfx);
     SAME(vsync);
     SAME(shader_prewarm);
     SAME(draw_distance);
@@ -2021,6 +2022,7 @@ void reset_section() {
         c.fsr_objmotion = f.fsr_objmotion;
         c.fsr_reactive = f.fsr_reactive;
         c.fsr_animsurf = f.fsr_animsurf;
+        c.fsr_metalfx = f.fsr_metalfx;
         c.show_fps = f.show_fps;
         c.show_battery = f.show_battery;
         c.show_temperature = f.show_temperature;
@@ -2553,10 +2555,12 @@ std::vector<Row> main_rows() {
         }
         header(r, "graphics.header", tr("Graphics"));
         add_bool(r, "show.fps", "FPS counter", &c.show_fps, ini("ShowFPS"));
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(__APPLE__)
         add_choice(r, "show.battery", "Battery indicator", c.show_battery, {tr("Off"), tr("With FPS counter"), tr("By itself")},
                    [](int v) { c.show_battery = v; }, ini("ShowBattery"));
         r.back().help = tr("The battery's charge, in the FPS counter's box or in a box of its own (drag it like the FPS counter).");
+#endif
+#ifdef __ANDROID__  // (the temperature is Android's: runtime/overlay.cpp)
         add_choice(r, "show.temperature", "Temperature", c.show_temperature, {tr("Off"), tr("Celsius"), tr("Fahrenheit")},
                    [](int v) { c.show_temperature = v; }, ini("ShowTemperature"));
         r.back().help = tr("The device's temperature (its battery's) under the FPS counter, or in a box of its own when the FPS counter is off.");
@@ -2639,6 +2643,9 @@ std::vector<Row> main_rows() {
             add_bool(r, "fsr.motion", "Object motion", &c.fsr_objmotion, ini("ObjectMotion"));
             number(r, "fsr.reactive", tr("Reactive mask"), &c.fsr_reactive, lo("Reactive"), hi("Reactive"), .05f, ini("Reactive"));
             add_bool(r, "fsr.surfaces", "Animated surfaces", &c.fsr_animsurf, ini("AnimSurf"));
+#ifdef __APPLE__
+            add_bool(r, "fsr.metalfx", "MetalFX upscaler", &c.fsr_metalfx, ini("MetalFX"));
+#endif
         }
         header(r, "hdr.header", "HDR");
         add_bool(r, "hdr", "HDR", &c.hdr, ini("HDR"));
@@ -3734,12 +3741,14 @@ void settings_panel(bool *open) {
     auto *window = ImGui::GetCurrentWindow();
     float spacing = ImGui::GetStyle().ItemSpacing.y;
     GuideLayout guides = guide_layout(ImGui::GetContentRegionAvail().x);
-    // pinned above the guides: the help of the row focused or pointed at, with room for the longest of the tab
-    float help_area = pinned_guides && s.help_height > 0 ? s.help_height + spacing * 2 : 0;
-    s.guide_height = pinned_guides ? guides.height + help_area : 0;
     float guide_top =
         std::max(window->Pos.y + window->Size.y - ImGui::GetStyle().WindowPadding.y - guides.height,
                  window->InnerClipRect.Min.y);
+    // pinned above the guides: the help of the row focused or pointed at, with room for the longest of the tab (at most
+    // half of what is above the guides, so a small window at a large menu size keeps room for the rows)
+    float help_area = pinned_guides && s.help_height > 0 ? s.help_height + spacing * 2 : 0;
+    help_area = std::min(help_area, (guide_top - window->InnerClipRect.Min.y) / 2);
+    s.guide_height = pinned_guides ? guides.height + help_area : 0;
     float help_top = std::max(guide_top - help_area, window->InnerClipRect.Min.y);
     if (pinned_guides)
         ImGui::PushClipRect(
@@ -4012,8 +4021,11 @@ void settings_panel(bool *open) {
         draw->AddRectFilled(ImVec2(x0, help_top - spacing), ImVec2(x1, guide_top),
                             ImGui::GetColorU32(ImGuiCol_WindowBg) | IM_COL32_A_MASK);
         draw->AddLine(ImVec2(x0 + pad, help_top), ImVec2(x1 - pad, help_top), look.divider);
-        if (!help.empty())
+        if (!help.empty()) {
+            draw->PushClipRect(ImVec2(x0 + pad, help_top), ImVec2(x1, guide_top), true);  // (a help cut to its room)
             draw_help(draw, ImVec2(x0 + pad, help_top + spacing), look.text_dim, help, help_wrap);
+            draw->PopClipRect();
+        }
     }
     if (pinned_guides && s.view == View::Main)
         draw_guides(window, guides, guide_top);

@@ -1123,6 +1123,17 @@ static void to_device(const float *sink, float *out, uint32_t n, int channels) {
     }
 }
 
+// SDL_InitSubSystem(SDL_INIT_AUDIO), on macOS with 256-frame device periods instead of SDL's 1024 at 48 kHz: SDL's
+// CoreAudio queue holds 3 of those (64 ms) and the renderer keeps 2 more queued ahead of it (pacing), about 105 ms in
+// all, on top of the device's own (~150 ms more for AirPods). At 256 it is about 50 ms. SDL_AUDIO_DEVICE_SAMPLE_FRAMES
+// in the environment still wins (a hint set at normal priority yields to it).
+static bool audio_init(void) {
+#ifdef SDL_PLATFORM_MACOS
+    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "256");
+#endif
+    return SDL_InitSubSystem(SDL_INIT_AUDIO);
+}
+
 static int output_channels(void) { return config_audio_output() == AUDIO_OUT_51 ? 6 : 2; }
 static void apply_gain(SDL_AudioStream *st);
 
@@ -1626,7 +1637,7 @@ static void renderer_open_output(Renderer *r) {
         if (r->wav) wav_header(r->wav, 0, r->wav_ch);
     }
     if (getenv("MHGU_NO_AUDIO") && strcmp(getenv("MHGU_NO_AUDIO"), "0")) return;
-    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) { LOG("[audren] SDL audio init failed: %s\n", SDL_GetError()); return; }
+    if (!audio_init()) { LOG("[audren] SDL audio init failed: %s\n", SDL_GetError()); return; }
     r->output = true;
     int n = 0;
     SDL_AudioDeviceID *ids = SDL_GetAudioPlaybackDevices(&n);
@@ -1939,7 +1950,7 @@ SERVICE("audout:u", audout_u) {
         pthread_mutex_init(&a->lock, NULL);
         a->event = kernel_create_event_pair(&a->ev_w, &a->ev_r);
         if (getenv("MHGU_AUDOUT_WAV")) a->wav = fopen(getenv("MHGU_AUDOUT_WAV"), "wb");
-        if (!(getenv("MHGU_NO_AUDIO") && strcmp(getenv("MHGU_NO_AUDIO"), "0")) && SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+        if (!(getenv("MHGU_NO_AUDIO") && strcmp(getenv("MHGU_NO_AUDIO"), "0")) && audio_init()) {
             char name[sizeof g_config.audio_device];
             SDL_AudioDeviceID dev = wanted_device(name, sizeof name);
             audout_open(a, dev, name);

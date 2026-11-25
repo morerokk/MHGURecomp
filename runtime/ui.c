@@ -3,6 +3,7 @@
 //   MHGU_HIDDEN=1     no visible window (test runs; controls then come only from MHGU_INPUT)
 // Display mode, size and the 3D resolution come from the settings (runtime/config.c, mhgurecomp.ini).
 #include <stdlib.h>
+#include <string.h>
 
 #include <SDL3/SDL.h>
 
@@ -17,6 +18,12 @@
 #include "nvn/vulkan/second_display.h"
 #endif
 
+void backend_quit(void);  // (runtime/nvn: vulkan/device.c, backend_null.c)
+static void quit(void) {
+    LOG("window closed\n");
+    backend_quit();  // (before exit(): runtime/nvn/vulkan/device.c exit_handler says why)
+    exit(0);
+}
 void ldn_log_state(void);  // (net/net.h)
 
 static int launch_argc;
@@ -44,6 +51,37 @@ static void folder_picked(void *what, const char *const *list, int filter) {
     SDL_strlcpy(picked_path, list[0], sizeof picked_path);
     SDL_SetAtomicInt(&picked_ready, (int)(intptr_t)what);
 }
+#ifdef __APPLE__
+// A folder chosen as the save's place that has no save in it yet gets a copy of the one in use (the default folder's:
+// the game would otherwise start a new save there and look as if it had lost the old). Nothing is overwritten or
+// removed, and a folder that already has a save is used as it is.
+static SDL_EnumerationResult copy_entry(void *to, const char *dir, const char *name) {
+    char src[2200], dst[2200];
+    SDL_PathInfo info;
+    if (SDL_snprintf(src, sizeof src, "%s%s", dir, name) >= (int)sizeof src ||
+        SDL_snprintf(dst, sizeof dst, "%s/%s", (const char *)to, name) >= (int)sizeof dst || !SDL_GetPathInfo(src, &info))
+        return SDL_ENUM_CONTINUE;
+    if (info.type == SDL_PATHTYPE_DIRECTORY) {
+        SDL_CreateDirectory(dst);
+        SDL_EnumerateDirectory(src, copy_entry, dst);
+    } else if (info.type == SDL_PATHTYPE_FILE && !SDL_GetPathInfo(dst, NULL))
+        SDL_CopyFile(src, dst);
+    return SDL_ENUM_CONTINUE;
+}
+static void adopt_save(const char *from, const char *to) {
+    char src[1200], dst[1200], marker[1300];
+    if (!from || !SDL_strcmp(from, to) || SDL_snprintf(src, sizeof src, "%s/save_0", from) >= (int)sizeof src ||
+        SDL_snprintf(dst, sizeof dst, "%s/save_0", to) >= (int)sizeof dst)
+        return;
+    SDL_snprintf(marker, sizeof marker, "%s/system", src);
+    if (!SDL_GetPathInfo(marker, NULL)) return;  // (no save in use)
+    SDL_snprintf(marker, sizeof marker, "%s/system", dst);
+    if (SDL_GetPathInfo(marker, NULL)) return;  // (a save is already there)
+    SDL_CreateDirectory(dst);
+    SDL_EnumerateDirectory(src, copy_entry, dst);
+    LOG("[ui] no save in the new save folder: copied the one from %s\n", src);
+}
+#endif
 #endif
 int ui_take_picked_folder(char *out, size_t size) {
 #ifdef __ANDROID__
@@ -105,6 +143,27 @@ static void fit_desktop(SDL_DisplayID d, int *w, int *h) {
     if (fh > r.h) fh = r.h, fw = r.h * *w / *h;
     LOG("[ui] %dx%d does not fit the desktop: window %dx%d\n", *w, *h, fw, fh);
     *w = fw, *h = fh;
+}
+
+// The window in the picture's shape, so it shows no bars: the desktop or the window manager may make it narrower than
+// asked (macOS Stage Manager keeps a strip at the left: 1480x833 came out 1291x833), and the other side follows.
+// Resizing by hand keeps the shape too (the aspect ratio lock set at creation).
+static void fit_picture(void) {
+    float a = (float)g_config.render_w / (float)g_config.render_h;
+    int w = 0, h = 0, pw = 0, ph = 0;
+    SDL_SyncWindow(window);
+    SDL_GetWindowSize(window, &w, &h);
+    if (!w || !h || (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN)) return;
+    int fw = w, fh = h;
+    if ((float)w / (float)h > a + 0.01f) fw = (int)((float)h * a + 0.5f);
+    else if ((float)w / (float)h < a - 0.01f) fh = (int)((float)w / a + 0.5f);
+    if (fw != w || fh != h) {
+        SDL_SetWindowSize(window, fw, fh);
+        SDL_SyncWindow(window);
+    }
+    SDL_GetWindowSize(window, &fw, &fh);
+    SDL_GetWindowSizeInPixels(window, &pw, &ph);
+    LOG("[ui] window %dx%d (%dx%d pixels)%s\n", fw, fh, pw, ph, fw != w || fh != h ? ", narrowed to the picture's shape" : "");
 }
 
 // Where the window was when the game last closed, so it opens there again, on that monitor (issue #425): window.txt
@@ -237,6 +296,7 @@ static void set_fullscreen(bool on) {
         SDL_DisplayID d = SDL_GetDisplayForWindow(window);
         fit_desktop(d, &win_w, &win_h);
         SDL_SetWindowSize(window, win_w, win_h);
+        fit_picture();
 #ifndef __ANDROID__
         // (back where it was windowed, when that was on this monitor. Not checked against the monitor's free area: just
         // out of an exclusive mode, Windows still gives that mode's, 1440x1920 for a 1440x3440 monitor, which would
@@ -253,7 +313,7 @@ static void set_fullscreen(bool on) {
 
 // The window's icon. Windows takes it from the exe (extras/icon/mhgurecomp.rc) and Android from the launcher icon, so only
 // Linux sets one: extras/icon/mhgurecomp-128.png, built into the program (the path is relative to the repo, where make runs).
-#if !defined(_WIN32) && !defined(__ANDROID__)
+#if !defined(_WIN32) && !defined(__ANDROID__) && !defined(__APPLE__)  // (macOS: the app bundle's icon)
 __asm__(".pushsection .rodata\n.globl mhgu_icon_png\nmhgu_icon_png:\n.incbin \"extras/icon/mhgurecomp-128.png\"\n"
         ".globl mhgu_icon_png_end\nmhgu_icon_png_end:\n.popsection");
 extern const unsigned char mhgu_icon_png[], mhgu_icon_png_end[];
@@ -380,6 +440,9 @@ void ui_init(void) {
     if (g_config.save_location[0]) {  // ([Application] SaveLocation: MHGU_SAVE_DIR still wins, fs.c)
         static char save[1100];
         if (plat_use_folder(g_config.save_location, save, sizeof save)) {
+#ifdef __APPLE__
+            if (!getenv("MHGU_SAVE_DIR")) adopt_save(g_save_dir, save);
+#endif
             g_save_dir = save;
             LOG("[ui] save folder (SaveLocation): %s\n", save);
         } else
@@ -435,6 +498,9 @@ void ui_init(void) {
     window = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
     if (!window) FATAL("SDL_CreateWindow: %s\n", SDL_GetError());
+    float a = (float)g_config.render_w / (float)g_config.render_h;
+    SDL_SetWindowAspectRatio(window, a, a);
+    fit_picture();
 #ifndef __ANDROID__
     // (no place kept yet: where the system put it, so a window maximized or resized without being moved is kept too)
     if (place_kept && win_x == SDL_WINDOWPOS_UNDEFINED) SDL_GetWindowPosition(window, &win_x, &win_y);
@@ -448,6 +514,23 @@ void ui_init(void) {
     // (Mode, or how the game was closed: windowed after F11 from full screen, or full screen after F11 from Windowed -
     // borderless then, as F11 does)
     if (win_full) set_fullscreen(true);
+#endif
+#ifdef __APPLE__
+    plat_menu_init();
+#endif
+}
+
+// A live setting was changed (the Settings menu: config_set has put it in g_config and the live values): apply what
+// isn't read as the game goes - the window mode. (MSAA, VSync and the controller in the background follow the live
+// values: device.c frame_begin, ui_run.)
+void ui_setting_changed(const char *key) {
+    if (!strcmp(key, "Mode")) {
+        if (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) set_fullscreen(false);  // (Borderless <-> Fullscreen too)
+        if (g_config.display_mode != DISPLAY_WINDOWED) set_fullscreen(true);
+    }
+#ifdef MHGU_DUAL_SCREEN
+    if (!strcmp(key, "SecondDisplay") || !strcmp(key, "Panels") || !strcmp(key, "Background") || !strcmp(key, "Wallpaper"))
+        config_second_display_request();  // (the bottom screen's window opens, closes or redraws: nvn/vulkan/second_display_desktop.c)
 #endif
 }
 
@@ -477,7 +560,7 @@ int ui_run(void) {
                     // A game that hung is closed this way: what its threads wait on, into the log for the report
                     ldn_log_state();
                     kernel_dump_threads("window closed", true);
-                    if (!config_confirm_exit() && !overlay_settings_dirty()) { LOG("window closed\n"); exit(0); }
+                    if (!config_confirm_exit() && !overlay_settings_dirty()) quit();
                     overlay_request_close();
                     continue;
                 }
@@ -494,13 +577,17 @@ int ui_run(void) {
         if (action == 12) {  // (the title screen's B: the same question as closing the window)
             if (!config_confirm_exit() && !overlay_settings_dirty()) {
                 LOG("exit from the title screen\n");
-                exit(0);
+                quit();
             }
             overlay_request_close();
         }
-        if (action == 1) exit(0);
+        if (action == 1) quit();
         if (action == 2) {
-            if (restart_application()) exit(0);
+#ifdef __APPLE__
+            if (plat_restart_game()) quit();  // (the app again through LaunchServices: darwin_menu.m)
+#else
+            if (restart_application()) quit();
+#endif
             SDL_SetAtomicInt(&action_failed, 1);
         }
 #ifdef __ANDROID__
