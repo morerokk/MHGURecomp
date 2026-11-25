@@ -9,19 +9,22 @@
 // the third in the neck at 60 fps (reported 2026-11-24; measured: 253 units from the first hit to the second at 30
 // fps, 311 at 60). Here the stop lasts 2 frames whatever the frame rate: after the update that took the hit, the shell
 // keeps still for the rest of the 2 frames (its movement in each update cut by the part of its step still inside it).
+// Its age (+0x1378, frames flown, which the update that takes a hit doesn't add to) stands still with it: Pierce's
+// critical distance goes by it, so with the age running on, a third hit landed 1-2 frames "older" than on the Switch at
+// 60 fps and fell out of the window (reported after the first fix: 47, 47, 31 = the head without the x1.5).
 //
 // The Bow. Its arrows (uShellPlw10_000, update 0x67957c) don't stop on a hit. A hit sets a timer (+0x15ec, from the
 // shot's data: 4 frames for the Pierce arrows measured, stored as 4 minus the step by the update that takes the hit)
 // counted down by the step; the update in which it runs out moves the arrow slower (its velocity +0x1010, per frame,
-// times a factor from the data: 0.7 measured), and the next hit lands after that, on the Switch and at 60 fps in the
-// next update. On the Switch the update that empties the timer covers frames 2 to 4 after the hit, so the arrow flew
-// slow for half of each gap (2 + 2 x 0.7 = 3.4 frames' worth); at 60 fps only for the last frame (3.7); at 240 fps the
-// last quarter, and the next hit came 3 updates later still (something outside the arrow waits another 0.75 frame;
-// not found), so 4.45 frames' worth. Here an arrow is slowed from where the 30 fps game slows it (frame 2 for a 4-frame
-// timer) by the factor last seen; when the game's timer runs out (the factor is read then, from the velocity) what was
-// let through beyond it is taken back; and from where the 30 fps game's next hit lands (frame 4) the arrow keeps still
-// until it does, at most 1 frame. So it is where the 30 fps game has it at each hit; the hits come when the game lets
-// them (at 240 fps 0.75 frame later than on the Switch, as without this).
+// times a factor from the data: 0.7 measured) and sets a 1-frame wait (+0x1404, counted down by the step) after which
+// the next hit can land. On the Switch the update that empties the timer covers frames 2 to 4 after the hit, so the
+// arrow flew slow for half of each gap (2 + 2 x 0.7 = 3.4 frames' worth), and the next update's step of 2 ends the wait
+// at once: the hit lands at frame 4. At 60 fps only the last frame was slow (3.7), the hit at frame 4; at 240 fps the
+// last quarter, and the wait held the hit back 3 more updates, to frame 4.75 (4.45 frames' worth). Here an arrow is
+// slowed from where the 30 fps game slows it (frame 2 for a 4-frame timer) by the factor last seen; when the game's
+// timer runs out (the factor is read then, from the velocity) what was let through beyond it is taken back and the
+// wait loses what the 30 fps game's next update would take off it, so the next hit lands at frame 4; the part of that
+// update past frame 4 (at 144 fps it ends at 4.17) moves nothing, so the arrow is where the 30 fps game has it then.
 //
 // At 30 fps and below the original. MHGU_NO_SHELLSTEP=1: the original for both (for comparing). MHGU_LOG_SHELLSTEP=1:
 // what each does; 2: every update of every bowgun shell and arrow too.
@@ -35,11 +38,14 @@
 #define SH_STEP       0x1cu      // shell: its step (f32, 60 fps frames)
 #define SH_POS        0x40u      // shell: its position
 #define SH_HITS       0x15d8u    // bowgun shell: u16, the monster hits it has taken (the u16 after it is something else)
+#define SH_AGE        0x1378u    // shell: f32, frames it has flown (not counting the update that took a hit)
+#define SH_AGE_WAS    0x137cu    // shell: f32, that at the start of the last update
 #define AR_VEL        0x1010u    // arrow: its velocity, per frame of 60 fps
 #define AR_SLOW       0x15ecu    // arrow: f32, the timer a hit starts; the update it runs out in slows the arrow
+#define AR_REARM      0x1404u    // shell: f32, set to 1 frame when that timer runs out, counted down by the step; the
+                                 // next hit can land once it is 0
 #define STOP_FRAMES   2.0f       // how long the 30 fps game holds a shell on a hit: one update, step 2.0
 #define SWITCH_STEP   2.0f
-#define MAX_WAIT      1.0f       // frames an arrow is held at most for its next hit
 #define MAX_HELD      16
 
 static struct { uint32_t shell; float left; } g_held[MAX_HELD];  // shells still inside a stop, and how much of it is left
@@ -76,6 +82,8 @@ static void update(Cpu *c) {
         g_held[k].left -= hold;
         if (!(g_held[k].left > 0.0f)) g_held[k].shell = 0;
         for (int i = 0; i < 3; i++) STF(s + SH_POS + 4u * (uint32_t)i, p0[i] + (p[i] - p0[i]) * keep);
+        // (its age stands still too, as in the update that took the hit: it starts the update from +0x137c)
+        STF(s + SH_AGE, LDF(s + SH_AGE_WAS) + (LDF(s + SH_AGE) - LDF(s + SH_AGE_WAS)) * keep);
         if (g_log) LOG("[shellstep] %08x held %.3f of step %.3f, %.3f left\n", s, (double)hold, (double)step, (double)g_held[k].left);
     }
     if (g_log >= 2) {
@@ -129,6 +137,9 @@ static void arrow_update(Cpu *c) {
             float f = n0 > 0.0f ? n1 / n0 : 1.0f;
             over = g_arrow[k].after_slowed - f * g_arrow[k].after;
             if (f > 0.0f && f < 1.0f) g_factor = f;
+            // (and the 1-frame wait it starts before the next hit can land: the 30 fps game's next update takes 2 off it)
+            float wait0 = LDF(s + AR_REARM);
+            if (wait0 > 0.0f) STF(s + AR_REARM, fmaxf(0.0f, wait0 - (SWITCH_STEP - step)));
             g_arrow[k].slowed = true;
             if (g_log) LOG("[shellstep] arrow %08x slowed at frame %.3f: factor %.3f, took back %.3f frames\n", s, (double)t0, (double)f, (double)over);
         } else if (!g_arrow[k].slowed && !(timer > 0.0f)) {
@@ -138,7 +149,7 @@ static void arrow_update(Cpu *c) {
             g_arrow[k].after += slow, g_arrow[k].after_slowed += slow * g_factor;
         }
         if (g_arrow[k].shell) {
-            keep -= wait / step;  // (past the 30 fps game's next hit: held until it lands)
+            keep -= wait / step;  // (past the 30 fps game's next hit: kept still for it)
             if (keep < 0.0f) keep = 0.0f;
             for (int i = 0; i < 3; i++) {
                 float a = LDF(s + SH_POS + 4u * (uint32_t)i);
@@ -146,7 +157,7 @@ static void arrow_update(Cpu *c) {
             }
             if (g_log && (keep < 1.0f || over != 0.0f))
                 LOG("[shellstep] arrow %08x frame %.3f: moved %.3f of its step %.3f\n", s, (double)t0, (double)keep, (double)step);
-            if (t0 >= g_arrow[k].hit_at + MAX_WAIT) g_arrow[k].shell = 0;  // (no next hit: it flies on)
+            if (t1 >= g_arrow[k].hit_at - 0.001f) g_arrow[k].shell = 0;  // (its next hit is due: nothing more to do)
         }
     }
     if (g_log >= 2) {

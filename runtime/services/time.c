@@ -90,7 +90,14 @@ static void timezone_service(Service *s, IpcReq *req, IpcResp *resp) {
         resp_size(resp, 4);
         break;
     }
-    default: LOG("[time] ITimeZoneService cmd %u (ok)\n", req->cmd); resp_size(resp, 0x10);
+    default: {  // (cmd 4 LoadTimeZoneRule: a plugin can ask every frame)
+        static uint32_t logged[8];
+        if (req->cmd >= 256 || !(logged[req->cmd / 32] & 1u << (req->cmd % 32))) {
+            if (req->cmd < 256) logged[req->cmd / 32] |= 1u << (req->cmd % 32);
+            LOG("[time] ITimeZoneService cmd %u (ok; logged once)\n", req->cmd);
+        }
+        resp_size(resp, 0x10);
+    }
     }
 }
 

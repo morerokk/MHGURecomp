@@ -627,6 +627,22 @@ static void pkt_report(const char *who) {
         who, t[0], r[0], t[1], r[1], t[2], r[2]);
 }
 
+// Game packet gaps, for the log: Pia's connection check ends a session after a few seconds without packets, with
+// nothing from this layer, and the game says "Connection lost". These say which way the packets stopped: the game
+// sending none (its loop stalled: a long load, a hitch) or none arriving. rx by node (a station: [0] = the host).
+#define GAP_LOG_NS 2000000000ull
+static uint64_t gap_tx, gap_rx[MAX_NODES];
+static void gap_note(uint64_t *last, const char *what, int node) {
+    uint64_t now = plat_now_ns(), prev = __atomic_exchange_n(last, now, __ATOMIC_RELAXED);
+    if (!prev || now - prev < GAP_LOG_NS) return;
+    if (node < 0) LOG("[ldn] the game sent no packets for %.1f s\n", (double)(now - prev) / 1e9);
+    else LOG("[ldn] %s%.0d: no packets for %.1f s\n", what, node, (double)(now - prev) / 1e9);
+}
+static double gap_since(const uint64_t *last) {
+    uint64_t t = __atomic_load_n(last, __ATOMIC_RELAXED);
+    return t ? (double)(plat_now_ns() - t) / 1e9 : -1;
+}
+
 static Hello make_hello(bool scan_only, const uint8_t *user_name, uint16_t version) {  // version: the host's (see PROTO_MIN)
     Hello h = {0};
     memcpy(h.magic, PROTO_MAGIC, 4);
@@ -710,11 +726,12 @@ static void ryu_xmit(const VPacket *p, const void *data, uint32_t len) {
 
 void ldn_send(const VPacket *p, const void *data, uint32_t len) {
     if (L.ryu || L.room) { if (ldn_net_up()) ryu_xmit(p, data, len); return; }
-    if (L.state == ST_AP_CREATED) { host_route(0, p, data, len); return; }
+    if (L.state == ST_AP_CREATED) { gap_note(&gap_tx, NULL, -1); host_route(0, p, data, len); return; }
     if (L.state != ST_STATION_CONNECTED) return;
     bool all = p->dst_ip == ldn_broadcast_ip() || p->dst_ip == 0xFFFFFFFFu;
     if (all || p->dst_ip == L.own_ip) vsock_deliver(p, data, len);  // (a broadcast reaches the sender too)
     if (p->dst_ip == L.own_ip) return;
+    gap_note(&gap_tx, NULL, -1);
     hsock us = L.us;
     if (us != BADSOCK && direct_usable(&L.up) && udp_send(us, &L.up.paddr, &L.up, false, U_DATA, 0, p, data, len)) {
         pkt_count(pkt_tx, PATH_DIRECT);
@@ -785,6 +802,7 @@ static void link_received(int from, const VPacket *p, const void *data, uint32_t
             LOG("[ldn] MHGU_LDN_LOSS: dropping %d%% of the received packets\n", loss_pct);
         }
     }
+    if (from >= 0 && from < MAX_NODES) gap_note(&gap_rx[from], from ? "node " : "the host", from);
     if (loss_pct && (int)(arc4random() % 100) < loss_pct) return;
     if (lag_ms <= 0) {
         if (from > 0) host_route(from, p, data, len);
@@ -911,7 +929,8 @@ static void *station_thread(void *arg) {
     }
     l->has_thread = false;
     pthread_mutex_unlock(&L.mu);
-    LOG("[ldn] node %d (%s) left\n", slot, ipstr(l->ip));
+    LOG("[ldn] node %d (%s) left (its last game packet %.1f s ago)\n", slot, ipstr(l->ip), gap_since(&gap_rx[slot]));
+    __atomic_store_n(&gap_rx[slot], 0, __ATOMIC_RELAXED);
     vsock_peer_gone(l->ip);
     signal_change();
     return NULL;
@@ -2500,6 +2519,8 @@ static bool host_start(void) {
 
 static void host_stop(uint32_t reason) {  // (caller: not holding L.mu)
     lobby_host_stop();
+    __atomic_store_n(&gap_tx, 0, __ATOMIC_RELAXED);
+    for (int i = 0; i < MAX_NODES; i++) __atomic_store_n(&gap_rx[i], 0, __ATOMIC_RELAXED);
     if (L.hosting) {
         L.hosting = false;
         pthread_join(L.host_th, NULL);
@@ -2656,6 +2677,7 @@ static void station_leave(void) {  // (caller: not holding L.mu)
     L.up.udp_up = false;
     L.up.p_up = L.up.p_known = false;
     L.joined_code[0] = 0;
+    __atomic_store_n(&gap_tx, 0, __ATOMIC_RELAXED), __atomic_store_n(&gap_rx[0], 0, __ATOMIC_RELAXED);
     vsock_network_down();
     friends_poke();
 }
@@ -3596,6 +3618,9 @@ HLE_FUNC("_ZN2nn3ldn14ConnectPrivateERKNS0_13NetworkConfigERKNS0_14SecurityConfi
 
 HLE_FUNC("_ZN2nn3ldn10DisconnectEv", ldn_disconnect) { NTRACE(); LDN_CALL();
     if (L.state != ST_STATION_CONNECTED && L.state != ST_ERROR) { RET(R_INVALID_STATE); return; }
+    if (L.state == ST_STATION_CONNECTED && !L.ryu && !L.room)  // (a menu choice, or Pia's connection check: "Connection lost")
+        LOG("[ldn] the game ended its connection to the host: its last game packet sent %.1f s ago, received %.1f s ago\n",
+            gap_since(&gap_tx), gap_since(&gap_rx[0]));
     if (L.ryu) ryu_stop();
     else if (L.room) room_stop();
     else station_leave();

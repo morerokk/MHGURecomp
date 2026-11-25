@@ -611,16 +611,28 @@ varies about 2% from shot to shot at any rate (70.0 to 71.8 a frame), and the fi
 one shot's hit list is noisy; the spacing isn't. Not covered: the w04_100 / _101 shell classes (other bowgun ammo,
 their own updates 0x67262c / 0x673930), a 3-head-hit line reproduced (aims -7.55 / -4 / -1 gave head, head, neck or
 head, wing at 30 fps too).
+Follow-up (2026-11-25, reporter built f22f026: 3 x 47 now possible at 60 fps but rare): the shell's age (+0x1378,
+frames flown; +0x137c the value at the update's start) isn't added to by the update that takes a hit, and Pierce's
+critical distance (x1.5: the reporter's 47 against 31, the rig's head 15 / 19 against 10 / 13, the second number of
+each an affinity crit x1.25) goes by it. The fix held the shell's position for the rest of the 2 frames but let its
+age run, so each later hit came 1 frame older per hit before it at 60 fps (ages at the hits 11 / 16 / 21-22 against
+12 / 16 / 20 at 30 fps) and a third hit could leave the window. Now the age is held with it: 12 / 16 / 20 at 60 fps,
+12.1 / 16.3 / 20.6 at 144, +4 per hit at 240 (scratch-pierce run.sh at 1600 cm). Checked and ruled out on the way: a
+swept hit test (the previous position +0x1000 made 4x as far back changed no hit). Not explained: at 240 fps the first
+hit came ~150 units earlier along the shot in both runs (x 1889 / 1843 against 1713-1752 at 30 / 60 / 144), the shot's
+age matching its distance, so most likely the held Tigrex's frozen pose (it is frozen at whatever frame it was in).
 The Bow's Pierce arrows (uShellPlw10_000, update 0x67957c; a Pierce-only bow, uncharged shots) had the same kind of
 bug by another way: no stop on a hit, but a hit sets a timer (+0x15ec, 4 frames from the data, stored as 4 minus the
-step) and the update it runs out in moves the arrow at 0.7 of its velocity (+0x1010, per frame), the next hit coming
-after it. On the Switch that update covers frames 2-4 after the hit, so hit to hit = 2 + 2 x 0.7 = 3.4 frames of the
-arrow's speed (measured 3.405); at 60 fps 3.7; at 240 fps the next hit also came 3 updates after the timer ran out (at
-30 and 60 fps the next update; nothing in the arrow +0x1380..+0x1800 counts it), so ~4.5 (258-262 units). Fixed in the
-same file: slowed from frame 2 by the factor last seen, the rest taken back when the game's timer runs out, and held
-from frame 4 until the next hit (at most 1 frame). Measured 3.40 at 60, 144 and 240 fps, the next gap x0.70 as at 30.
-At 240 fps the hits still come 0.75 frame later than on the Switch (the wait found above); after an arrow's last hit
-it can stand still up to 1 frame. Not covered: uShellPlw10_001 (update 0x67bf88), charged shots, Bow Hunter Arts. Rig:
+step) and the update it runs out in moves the arrow at 0.7 of its velocity (+0x1010, per frame) and sets a 1-frame
+wait (+0x1404, counted down by the step) before the next hit can land. On the Switch that update covers frames 2-4
+after the hit, so hit to hit = 2 + 2 x 0.7 = 3.4 frames of the arrow's speed (measured 3.405), and the next update's
+step of 2 ends the wait at once (hit at frame 4); at 60 fps 3.7 (hit at frame 4); at 240 fps the wait held the hit
+back 3 more updates, to frame 4.75: ~4.5 (258-262 units). The monster's hit list (status +0x444..+0x4f8) only records
+attack numbers, no timer. Fixed in the same file: slowed from frame 2 by the factor last seen, the rest taken back
+when the game's timer runs out, the wait cut by what the Switch's next update would take off it, and the part of an
+update past frame 4 not moved. Measured 3.40 at 60, 144 and 240 fps (the next gap x0.70 as at 30), hits 4 updates
+apart at 60, 10 (4.17 frames) at 144, 16 at 240, 2 at 30 (untouched). Not covered: uShellPlw10_001 (update
+0x67bf88), charged shots, Bow Hunter Arts, whether other shells use +0x1404 the same way. Rig:
 scratch-pierce\brun.sh (the Bow save: X draws, R taps fire; NOHOLD=1 FIRE=10 CHARGE=0.1), gaps.sh prints hit-to-hit
 distance over the arrow's speed. The rig (outside the repo):
 C:\MHGURecompile\scratch-pierce\run.sh <tag> <fps>: quest 605 (Tigrex by the Tail) area 1, MHGU_DUMMY=1200 facing,
@@ -776,6 +788,24 @@ shared 0x277114 (heading) and 0x2c2864 (root motion), both stepped; his own unsc
 0x107d9c8, 0x1079b00, 0x1079da8) are one-off offsets when a motion starts. Not covered: actions the sweep plays with
 the hunter straight ahead, so a bite that homes in on a hunter at its side was not seen turning; enraged vs calm
 variants were not told apart.
+
+Hellblade Glavenus' tail slam (2026-11-25): no frame-rate difference found. Reported (the Pierce reporter, recomp at 60
+fps, a GIF): in the black-tail state, the overhead tail slam (rears back, pivots ~90 degrees, tail down beside the
+hunter) "loses its hit"; players also say Glavenus misses this slam slightly now and then on its own. Rig
+(C:\MHGURecompile\scratch-glav, run.sh <tag> <fps>): Hub quest 41201 can't start from the Village (0x2125b8 crash),
+so the scratch-qlist save goes to the Hunters' Pub (X, RIGHT, A, DOWN, A) and `depart 41201` from there;
+MHGU_START_AREA=1, MHGU_SUMMON=1200, MHGU_EMTRACE=2. New debug aids: MHGU_EMACT_PLACE="<cm>_<deg>;..." puts the monster
+that far from the hunter, the hunter that many degrees off its facing, before each emact (cycling the list); the
+[em] trace has the hunter's x z ("pl"); emact logs the monster's status block and scale (+0x60); MHGU_SUMMON logs
+"hunter hit" when the hunter lost HP (not the game's resets of HP to its maximum, +0x13d8). The slam is 7:82
+(2.9 s; two variants: ~240 units with a turn of up to ~50 degrees, or ~900 straight on). All 24 group 7 actions last
+the same at 30 and 240 fps. Moves first seemed 7% shorter at 60 / 240 fps (7:82 straight: 944 against 882), but
+that was the quest's random size: 7:82 at 900 cm straight on, 30 fps scale 1.177 path 942, 60 fps scale 1.133 path
+907, 800.3 / 800.5 per unit of scale; turns 24.8 / -10.9 against 24.8 / -10.4. Position writers (interpwatch): the
+motion's root motion 0x271e70 (from 0xb52c38), copied to status +0x40 at 0x2c2864, then the slope factor 0x4330b8
+(max(1 + dot(move dir, slope) * k, 0.1), direction only). Not covered: the hit itself (how often the slam lands on a
+hunter at its landing spot, at both rates with the size held), the black-tail state (the quest's Glavenus had its tail
+glowing from the start in every run), the reporter's own setup.
 
 Start in an area (2026-11-18, debug, runtime/hle/quickhunt.c): MHGU_START_AREA=<n> starts every hunt in area n of its map, by replacing the area the random start picked (town +0xc9, copied to sGameControl +0x49 by the town's move 0x8bdfd0 when departing) for low rank's camp too. With MHGU_QUICKHUNT=<quest>, straight from start-up into that area, e.g. MHGU_QUICKHUNT=204 MHGU_START_AREA=8 (Harvest Tour: Arctic Ridge). Checked on that: the game's pick was area 0, the hunter arrived on the snowfield of area 8 ("hunter in area 8" in the camera trace). An area number the map doesn't have is not checked. Not a teleport: it only acts when departing.
 
