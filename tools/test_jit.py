@@ -10,6 +10,7 @@ Linux, so it is skipped on Windows without it). Needs clang. Exit status 0 when 
 """
 import argparse
 import os
+import platform
 import random
 import re
 import subprocess
@@ -73,6 +74,9 @@ def main():
         cc = ['clang', '--target=aarch64-linux-gnu', '--sysroot=/usr/aarch64-linux-gnu', '--gcc-toolchain=/usr',
               '-B"$G"', '-L"$G"', '-static']
         run = ['qemu-aarch64', exe]
+    elif platform.machine() in ('aarch64', 'arm64'):  # an AArch64 host: its own back end, run natively
+        cc = ['clang', '-march=armv8-a', '-fsigned-char']
+        run = [exe]
     else:
         cc = ['clang', '-march=x86-64-v3']
         run = [exe]
