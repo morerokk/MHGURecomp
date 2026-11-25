@@ -202,7 +202,7 @@ static const char DEFAULT_INI[] =
     "; Default: On\n"
     "FXAA = On\n"
     "\n"
-    "; Which FXAA method to use."
+    "; Which FXAA method to use.\n"
     "; Original, 3_11\n"
     "; Default: Original\n"
     "FXAAMode = Original\n"
