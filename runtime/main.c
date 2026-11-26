@@ -74,6 +74,7 @@ static void boot(const char *root) {
     mods_patch_code();  // (the mods' patches of the game's code: runtime/mods.c)
     forge_init();  // (Forge plugins in the mods: runtime/forge.c)
     hpscale_init();  // (large monster HP by the number of hunters: runtime/hle/hpscale.c)
+    { void equipcheck_init(void); equipcheck_init(); }  // (a red X for weapon types this game lacks: runtime/hle/equipcheck.c)
     villagehub_init();  // (Village quests at the Hub / Pub counter: runtime/hle/villagehub.c)
     rewardbox_init();  // (quest rewards: Send to the Item Box in one go: runtime/hle/rewardbox.c)
     urgentcredit_init();  // (Urgent quests count for all who clear them: runtime/hle/urgentcredit.c)

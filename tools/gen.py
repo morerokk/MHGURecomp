@@ -129,6 +129,9 @@ PATCHES = {
     # ... and f_475a68 makes no quest object for a weapon class without an entry in its table (class 5), so the quest
     # crashed on load: `ldrb r0, [r8, #0x4d4]`, that hunter is a Great Sword user instead
     ('main', 0x475afc): (0xE5D804D4, '{ extern uint32_t equipcheck_class(uint32_t); c->r[0] = equipcheck_class(c->r[8]); }'),
+    # ... and the Hub's player list (cUIOPlayerInfoPanel) takes such a hunter's class from the record, now the Great
+    # Sword's: `ldrb r0, [sb, #0x4d4]` gives the class they really have, so their weapon icon is a red X
+    ('main', 0x80dfb8): (0xE5D904D4, '{ extern uint32_t equipcheck_panel_class(uint32_t); c->r[0] = equipcheck_panel_class(c->r[9]); }'),
 }
 
 # Monster jump physics (runtime/hle/emjump.c): the stores of `pos += vel; vel += acc; acc.y += -0.2`, done once per
