@@ -29,8 +29,8 @@
 volatile bool g_bottom_hud_on;
 extern volatile int g_hudtrace_active;  // (exec.c)
 
-// ---- the MHXX bottom screen: its 320x240 picture, centred on the panel at the largest whole fit, with MHXX's panel
-// base: a grid of 4 x 3 cells under the top bar (cell edges measured on MHXX's quest screen, test/mhxx-reference,
+// ---- the MHXX bottom screen: its 320x240 picture, centred on the panel at the largest whole fit (its shape kept; the
+// background, colour or wallpaper, fills the rest of a panel of another shape), with MHXX's panel base: a grid of 4 x 3 cells under the top bar (cell edges measured on MHXX's quest screen, test/mhxx-reference,
 // Azahar 2126.2). [Dual Screen] Panels places panels on it, as MHXX's Panel Customize does.
 static const int16_t cell_x[5] = {2, 81, 161, 240, 319}, cell_y[4] = {26, 97, 168, 237};
 
@@ -310,7 +310,8 @@ static void fill(VkCommandBuffer cb, float x0, float y0, float x1, float y1, Col
 static void draw_panels(VkCommandBuffer cb) {
     float s, ox, oy;
     screen_fit(img_w, img_h, &s, &ox, &oy);
-    fill_alpha(cb, ox, oy, ox + 320.0f * s, oy + 240.0f * s, background(), background_alpha());
+    // (the whole panel, not only the 3DS picture: a bottom screen that isn't 4:3 had black bars round it)
+    fill_alpha(cb, 0, 0, (float)img_w, (float)img_h, background(), background_alpha());
     for (int p = 0; p < nplaced; p++) {
         const Kind *k = &kinds[placed[p].kind];
         float r[4], x0 = 0, y0 = 0, x1 = 0, y1 = 0;
@@ -368,8 +369,7 @@ void bottom_hud_empty_picture(uint32_t *px, uint32_t w, uint32_t h, bool panels)
     float s, ox, oy;
     screen_fit(w, h, &s, &ox, &oy);
     uint32_t a = background_alpha() > 0 ? 0xff : 0;
-    cpu_fill_alpha(px, w, h, 0, 0, (float)w, (float)h, (Colour){0, 0, 0}, a);
-    cpu_fill_alpha(px, w, h, ox, oy, ox + 320.0f * s, oy + 240.0f * s, background(), a);
+    cpu_fill_alpha(px, w, h, 0, 0, (float)w, (float)h, background(), a);  // (the whole panel, as draw_panels)
     if (!panels) return;  // (out of a quest: the background alone, so it shows the bottom screen is on)
     for (int p = 0; p < nplaced; p++) {
         const Kind *k = &kinds[placed[p].kind];
