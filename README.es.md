@@ -331,7 +331,8 @@ Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
 - `[Multiplayer]`: `Port`, `Join` (direcciones de anfitriones fuera de tu LAN), `Server` (servidor de salas por
   internet: vacío = el predeterminado, `Off` = ninguno, o `host[:puerto]`), `Key` (clave de emparejamiento: solo los
   jugadores con la misma clave ven las salas de los demás; vacío = públicas), `SyncSmallMonsters`, `ShareUrgentCredit` (On por defecto: una misión Urgente que publicó otra persona
-  también cuenta para ti al completarla, si la tienes desbloqueada)
+  también cuenta para ti al completarla, si la tienes desbloqueada), `ShareDeviantCredit` (On por defecto: lo mismo
+  para las misiones de permiso especial, así se te desbloquea también el siguiente nivel)
 - `[Monster HP]`: factores de vida de los monstruos y de sus partes (retrocesos, roturas, cortes) para 1 a 4 cazadores en las misiones de la Sala, y excepciones por misión (por
   defecto: todos 1, como el juego original)
 - `[Village Quests]`: `VillageQuestsInHub` (On por defecto), `HubHP` (1.5 por defecto: las misiones de la Aldea

@@ -176,6 +176,7 @@ int main(int argc, char **argv) {
     Config fsr_config=config_editable();
     assert(config_defaults().sync_small_monsters==1);
     assert(config_defaults().share_urgent==1);
+    assert(config_defaults().share_deviant==1);
     assert(config_defaults().shader_prewarm==1);
     assert(config_defaults().loading_indicator==1);
     assert(config_defaults().draw_distance==1.0f);

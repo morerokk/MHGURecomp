@@ -45,7 +45,7 @@ graphics API are reimplemented on Windows, Linux and Android, with Vulkan for re
 | **Frame rate** | Framerates anywhere between 30-240 fps, with fixes for bugs that GU normally has on emulators at high frame rates |
 | **Controls** | Almost any controller is supported (SDL), as well as native keyboard+mouse support. |
 | **Multiplayer** | Online play through the "Local Wireless" feature. Comes preloaded with an online server, but you can also host your own or directly connect to friends by forwarding port 39500. |
-| **Multiplayer options** | Small monsters are synced between players, monster HP optionally scaled by player count, Village quests playable in Multiplayer Hubs, Urgent Quest credit for everyone |
+| **Multiplayer options** | Small monsters are synced between players, monster HP optionally scaled by player count, Village quests playable in Multiplayer Hubs, Urgent and Deviant Quest credit for everyone |
 | **Quality of life** | Fast-forward unskippable cutscenes with A, an in-game PC settings menu (F1 or `Plus`+`Minus`), Discord Rich Presence |
 | **Lag compensation** | Networking fixes and improved netcode, similar to newer-gen Monster Hunter games. |
 | **Mods** | Almost all mods that work on emulators also work here. Natively supports Forge plugins ([Mods](#mods)), too! |
@@ -311,7 +311,8 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   empty = the default, `Off` = none, or `host[:port]`), `Key` (matchmaking key: only players with the same key see
   each other's hubs; empty = public), `SyncSmallMonsters`,
   `ShareUrgentCredit` (default On: an Urgent quest someone else posted counts for you too when you clear it, if you
-  have unlocked it yourself)
+  have unlocked it yourself), `ShareDeviantCredit` (default On: the same for Deviant / Special Permit quests, so the
+  next level unlocks for you too)
 - `[Monster HP]`: factors on monster HP and part HP (flinches, breaks, severs) for 1 to 4 hunters in Hub quests, and per-quest exceptions (default: all 1, the
   original game)
 - `[Village Quests]`: `VillageQuestsInHub` (default On), `HubHP` (default 1.5: Village quests posted in the Hub

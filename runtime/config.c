@@ -120,6 +120,7 @@
     .sync_small_monsters = 1,                                                                       \
     .lag_compensation = 1,                                                                          \
     .share_urgent = 1,                                                                              \
+    .share_deviant = 1,                                                                             \
     /* [Monster HP, Village Quests] */                                                              \
     .hp = {{1, 1, 1, 1}, 1.5f},                                                                     \
     .village_in_hub = 1,                                                                            \
@@ -531,6 +532,12 @@ static const char DEFAULT_INI[] =
     "; quest have their own setting.\n"
     "; Default: On\n"
     "ShareUrgentCredit = On\n"
+    "\n"
+    "; Clearing a Deviant (Special Permit) quest posted by someone else also counts for you, if you have unlocked it\n"
+    "; yourself, so the next level unlocks as if you had posted it. The original game only counts it for the hunter who\n"
+    "; posted it. This only changes your own save, the others in the quest have their own setting.\n"
+    "; Default: On\n"
+    "ShareDeviantCredit = On\n"
     "; Crossplay with Ryujinx players. RyuServers: Ryujinx LDN servers whose lobbies show up in Search Hubs next to\n"
     "; the others (host or host:port, comma separated; default port 30456). Empty: no crossplay. RyuHost: the server a\n"
     "; hub you create is made on, so Ryujinx players can join it (their LDN server = the same address); empty: a\n"
@@ -939,6 +946,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Multiplayer", "SyncSmallMonsters", sync_small_monsters, false),
     ON_OFF("Multiplayer", "LagCompensation", lag_compensation, false),
     ON_OFF("Multiplayer", "ShareUrgentCredit", share_urgent, false),
+    ON_OFF("Multiplayer", "ShareDeviantCredit", share_deviant, false),
     {"Monster HP", "1Player|1Players", SET_FACTOR, F(hp.scale[0]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
     {"Monster HP", "2Players|2Player", SET_FACTOR, F(hp.scale[1]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
     {"Monster HP", "3Players|3Player", SET_FACTOR, F(hp.scale[2]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},

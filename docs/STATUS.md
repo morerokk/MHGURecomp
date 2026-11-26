@@ -472,7 +472,7 @@ script module (vm +0x8d0) is not loaded during a hunt, when the script always sa
 screen, where 0x588d40 runs. 0x74af8c also goes by a table of quest variants (0x182cde4, bits at +0x35d4): Sky Render
 11401 and 1005 read locked after their clear, when their replay versions take their place. In the quest files mFlag is the file's last u16 (the language references before it have variable length): bit 0
 is on 28 quests: 206, 303, 402, 501, 601, 620, 713, 806, 906, 1005, 1017, 1018, 1019, 1026, 1039, 10216, 10307, 10335,
-10531, 10606, 10608, 10710, 10722, 10768, 11204, 11319, 11401, 11432. Special Permit quests stay the poster's. Other
+10531, 10606, 10608, 10710, 10722, 10768, 11204, 11319, 11401, 11432. Special Permit quests stay the poster's (since 2026-11-26 unless ShareDeviantCredit, below). Other
 things only the poster gets, unchanged: the contract fee back (0x5c7274) and the cutscene-seen flags (0x34e4d8,
 0x34fb60). Each game decides for its own save: nothing is sent, and the host's setting doesn't matter.
 
@@ -487,6 +487,19 @@ counter. An insta-clear cheat (sQuest +0xec = 0x29) on the host ended the quest 
 quest 0010216 cleared, posted by someone else: it counts here too"; back in the Hub "Hunter Rank 2 unlocked!", the 2-star
 quests unlocked, and new NPC dialogue. Not checked yet: a joiner who hasn't unlocked the Urgent, in a real hub (only
 through the harness above; the board may refuse them first).
+
+Deviant quests (2026-11-26): ini [Multiplayer] ShareDeviantCredit = On (default, applies at Save) does the same for
+Special Permit quests (numbers 4MMLL, deviant MM 1-18, level LL 1-16; 13-18 start at 11), in the same file: 0x5ae768
+(sQuest +0xb8 bit 19) says no when 0x74af8c says the quest is unlocked. Only its call from 0x588d40 (return address
+0x588dc0) is changed: 0x373110 asks it in a hunt for the Special Permit damage scaling (2+ hunters). A level's clear
+flag is what unlocks the next one (0x74af8c read 40102 locked before 40101's bit was set and unlocked after, on the
+result screen). ShareUrgentCredit never covered Deviant quests: none has the Urgent bit, and with it On and
+ShareDeviantCredit Off a joiner's clear didn't count. Tested (2026-11-26) with a temporary harness, not committed: a copy of
+testsave/save_0 (every Lv1 unlocked, nothing cleared), Hub offline via the World Map, control-file "depart 40101", the
+instant-clear cheat; at 0x588d40 the quest's bit cleared first and 0x5ae3b4 made to answer "not the poster" for that
+call. As the poster: 40101 set, 40102 unlocked. Not the poster, On: "[deviant] quest 0040101 cleared, posted by someone
+else: it counts here too", set, 40102 unlocked. Off: not set. 40102 (locked), On: "not unlocked in this save", not set.
+Rig: C:\MHGURecompile\scratch-deviant (hunt.sh; the harness code isn't kept). Not checked yet: two real players.
 
 ## Quest 713 "Research Team's First Rodeo": black screen after the clear (2026-11-07, not a port bug)
 

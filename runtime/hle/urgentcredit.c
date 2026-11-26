@@ -12,13 +12,20 @@
 // (+0x500 of the object at 0x1a390e0: 206 and 303 in byte 1, 10216 in byte 0xc, 10307 in 0xd, 11204 in 0xaf). The script
 // module isn't loaded during a hunt (the answer is then always no), but is on the result screen, where 0x588d40 runs.
 // The save is each player's own, so this needs nothing from the host and changes nothing for the others in the quest.
+//
+// Deviant quests (Special Permit, numbers 4MMLL: deviant MM, level LL) the same way, with ini [Multiplayer]
+// ShareDeviantCredit: the second check above, 0x5ae768 (sQuest +0xb8 bit 19), is made to say no when the quest is
+// unlocked in this save. 0x5ae768 is also asked in a hunt for the damage scaling of Special Permit quests (0x373110), so
+// only the call from 0x588d40 is changed. ShareUrgentCredit never covered them: no Special Permit quest has the Urgent bit.
 #include <string.h>
 
 #include "../config.h"
 #include "../hle.h"
 
 #define FN_URGENT   0x5ae75cu  // (sQuest) -> an Urgent quest
+#define FN_PERMIT   0x5ae768u  // (sQuest) -> a Special Permit (Deviant) quest
 #define FN_UNLOCKED 0x74af8cu  // (quest number, 0xff, 0) -> unlocked in this save
+#define LR_CLEAR    0x588dc0u  // 0x588d40's call of FN_PERMIT returns here
 #define SQ_QUEST_NO 0xe0u      // sQuest: the quest number
 
 static bool unlocked(Cpu *c, uint32_t q) {
@@ -43,6 +50,19 @@ static void urgent(Cpu *c) {
     c->r[0] = 0;
 }
 
+static void permit(Cpu *c) {
+    uint32_t q = LD32(c->r[0] + SQ_QUEST_NO), lr = c->r[14];
+    fnhook_call_original(c, FN_PERMIT);
+    if (lr != LR_CLEAR || !(c->r[0] & 1) || !config_live_share_deviant()) return;
+    if (!unlocked(c, q)) {
+        LOG("[deviant] quest %07u cleared, posted by someone else: not unlocked in this save, it doesn't count\n", q);
+        return;
+    }
+    LOG("[deviant] quest %07u cleared, posted by someone else: it counts here too\n", q);
+    c->r[0] = 0;
+}
+
 void urgentcredit_init(void) {
     fnhook_set(FN_URGENT, hle_register("urgentcredit:urgent", urgent));
+    fnhook_set(FN_PERMIT, hle_register("urgentcredit:permit", permit));
 }

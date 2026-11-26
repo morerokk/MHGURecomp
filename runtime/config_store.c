@@ -71,6 +71,7 @@ static SDL_AtomicInt live_friend_requests;
 static SDL_AtomicInt live_friend_online_notices;
 static SDL_AtomicInt live_friend_hub_notices;
 static SDL_AtomicInt live_share_urgent;
+static SDL_AtomicInt live_share_deviant;
 // [Monster HP, Village Quests]
 static SDL_AtomicInt live_village;
 // [Quest Rewards]
@@ -152,6 +153,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->discord != saved.discord) SDL_SetAtomicInt(&live_discord, c->discord);
     if (all || c->discord_hunter != saved.discord_hunter) SDL_SetAtomicInt(&live_discord_hunter, c->discord_hunter);
     if (all || c->share_urgent != saved.share_urgent) SDL_SetAtomicInt(&live_share_urgent, c->share_urgent);
+    if (all || c->share_deviant != saved.share_deviant) SDL_SetAtomicInt(&live_share_deviant, c->share_deviant);
     if (all || c->fsr_sharpness != saved.fsr_sharpness) set_float(&live_fsr_sharpness, c->fsr_sharpness);
     if (all || c->fsr_reactive != saved.fsr_reactive) set_float(&live_fsr_reactive, c->fsr_reactive);
     if (all || c->village_in_hub != saved.village_in_hub) SDL_SetAtomicInt(&live_village, c->village_in_hub);
@@ -295,6 +297,7 @@ float config_live_hp_village(void) {
 int config_live_discord(void) { return SDL_GetAtomicInt(&live_discord); }
 int config_live_discord_hunter(void) { return SDL_GetAtomicInt(&live_discord_hunter); }
 int config_live_share_urgent(void) { return SDL_GetAtomicInt(&live_share_urgent); }
+int config_live_share_deviant(void) { return SDL_GetAtomicInt(&live_share_deviant); }
 // [Keybinds] rows a mod set for now (mod_bind_set): its keys, over the settings' while set
 static SDL_AtomicInt mod_binds[BINDS][BIND_KEYS], mod_bind_set[BINDS];
 void config_mod_bind(int bind, const int keys[BIND_KEYS]) {

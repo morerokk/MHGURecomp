@@ -235,7 +235,7 @@ Escape、Insert、F1 以及 F7 到 F12 被重编译层保留，无法绑定。
 - `[Performance]`：`FPS`（30 到 240），`VSync`（On / Off；帧率高于显示器刷新率时请关闭 VSync），`ShaderPrewarm`（On / Off：启动时在后台转换游戏的全部着色器，这样首次出现时显示为黑色的东西会更少；首次启动时这需要约 20 秒，在 Logo 画面期间进行，缓存文件夹需要约 340 MB）。exe 旁边的 `pipelines.list` 列出了常见区域所用的着色器组合；开启预编译后，它们也会在后台准备好，因此首次进入这些区域时不会再短暂出现黑色表面。该列表只在 MSAA 为 Off 时录制；其余部分仍会在首次需要时准备。录制更多组合：[docs/PIPELINE_LIST.md](docs/PIPELINE_LIST.md)。`LoadingIndicator`（On / Off：游戏启动并准备着色器期间，右下角显示的“Loading”框；仅限 ini，设置菜单中没有）
 - `[Controls]`：`FaceButtons`（Position / Label），`MenuConfirm`（设置菜单的确认键），`BackgroundInput`（On / Off：游戏窗口位于后台时手柄仍然有效，例如前面开着 wiki 的时候；默认 On），`ComboInputWindow`（Lenient / Strict：对于像狩猎笛 X+A 这样的输入，游戏等待第二个按键的时长；默认的 Lenient 在任何帧率下都与 30 fps 时一样长，Strict 为固定帧数，帧率越高越短）
 - `[Mouse]`：`MouseSensitivity`（1 = 默认，0.1 到 10）
-- `[Multiplayer]`：`Port`，`Join`（局域网之外的主机地址），`Server`（用于互联网集会所的大厅服务器：留空 = 默认服务器，`Off` = 不使用，或 `host[:port]`），`Key`（匹配密钥：只有密钥相同的玩家才能看到彼此的集会所；留空 = 公开），`SyncSmallMonsters`，`ShareUrgentCredit`（默认 On：别人发布的紧急任务，只要你自己也已解锁，完成后对你同样计入）
+- `[Multiplayer]`：`Port`，`Join`（局域网之外的主机地址），`Server`（用于互联网集会所的大厅服务器：留空 = 默认服务器，`Off` = 不使用，或 `host[:port]`），`Key`（匹配密钥：只有密钥相同的玩家才能看到彼此的集会所；留空 = 公开），`SyncSmallMonsters`，`ShareUrgentCredit`（默认 On：别人发布的紧急任务，只要你自己也已解锁，完成后对你同样计入），`ShareDeviantCredit`（默认 On：二名特殊许可任务同样如此，下一等级也会为你解锁）
 - `[Monster HP]`：集会所任务中 1 到 4 名猎人时怪物体力和部位耐久（硬直、破坏、切断）的倍率，以及针对单个任务的例外设置（默认：全部为 1，即原版游戏）
 - `[Village Quests]`：`VillageQuestsInHub`（默认 On），`HubHP`（默认 1.6：在集会所发布的村任务会先把怪物体力和部位耐久乘以这个值，再乘以 `[Monster HP]` 的倍率）
 - `[Quest Rewards]`：`HoldASend`（默认 On：任务结束时，在奖励箱的“送入道具箱”画面长按 A，可把道具一个接一个地送入道具箱）
