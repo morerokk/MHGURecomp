@@ -46,13 +46,14 @@ body:
         - Windows
         - Linux
         - Steam Deck
+        - Android
     validations:
       required: true
   - type: input
     id: hardware
     attributes:
       label: Hardware
-      description: CPU and GPU, and on Linux the distribution.
+      description: CPU and GPU, and on Linux the distribution. On Android, the device and Android version.
       placeholder: "Ryzen 5 5600, RX 6700 XT, Fedora 44"
     validations:
       required: false
@@ -61,7 +62,7 @@ body:
     attributes:
       label: Log
       description: |
-        Attach `log.txt` by dragging it into this box. It's next to `mhgurecomp.exe` (on Linux, next to `mhgurecomp`).
+        Attach `log.txt` by dragging it into this box. It's next to `mhgurecomp.exe` (on Linux, next to `mhgurecomp`). On Android, long-press the app icon and pick Share log.
         The game replaces it every time it starts, so copy it right after the problem, before starting the game again.
     validations:
       required: false

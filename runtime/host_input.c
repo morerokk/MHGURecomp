@@ -705,10 +705,16 @@ static bool pad_matches(SDL_JoystickID id) {
     return name && SDL_strcasestr(name, sel);
 }
 
+static bool pad_can_rumble(SDL_Gamepad *p) {
+    return SDL_GetBooleanProperty(SDL_GetGamepadProperties(p), SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false);
+}
+
 static void log_pad(SDL_JoystickID id, const char *tag) {
     const char *name = SDL_GetGamepadNameForID(id);
-    LOG("[input] %s: %s (%04x:%04x), SDL mapping %s\n", tag, name ? name : "?", SDL_GetGamepadVendorForID(id),
-        SDL_GetGamepadProductForID(id), SDL_GetGamepadMappingForID(id) ? "known" : "NONE (SDL guesses the buttons)");
+    SDL_Gamepad *open = SDL_GetGamepadFromID(id);  // (rumble is known once it's open; skipped ones aren't)
+    LOG("[input] %s: %s (%04x:%04x), SDL mapping %s%s\n", tag, name ? name : "?", SDL_GetGamepadVendorForID(id),
+        SDL_GetGamepadProductForID(id), SDL_GetGamepadMappingForID(id) ? "known" : "NONE (SDL guesses the buttons)",
+        !open ? "" : pad_can_rumble(open) ? ", rumble yes" : ", rumble NO (SDL can't rumble it)");
 }
 
 static int find_pad(SDL_JoystickID id) {
@@ -1111,23 +1117,64 @@ static void mouse_update(int *rx, int *ry) {
 // only its stop time moves).
 #define RUMBLE_STEP 0x0C00            // (of 0xFFFF: ~5%; the DualSense's motors take 8 bits)
 #define RUMBLE_CHANGE_NS 50000000ull
+
+#ifdef __ANDROID__
+// Android: the device's own vibrator for a controller SDL can't rumble. SDL's Android backend rumbles a controller only
+// when InputDevice.getVibratorManager() lists a motor for it, and handhelds' built-in pads (AYN Odin / Thor, Retroid...)
+// list none: their motors are the system vibrator, which SDL's haptic subsystem has as "VIBRATOR_SERVICE" (Java's
+// SDLHapticHandler; one strength, as Vibrator.vibrate's amplitude). Opened the first time it's needed. A phone with a
+// controller that has no motors vibrates itself then.
+static SDL_Haptic *device_vibrator(void) {
+    static bool tried;
+    static SDL_Haptic *vib;
+    if (tried) return vib;
+    tried = true;
+    if (!SDL_InitSubSystem(SDL_INIT_HAPTIC)) {
+        LOG("[input] device vibrator: SDL haptics won't start: %s\n", SDL_GetError());
+        return NULL;
+    }
+    int n = 0;
+    SDL_HapticID *ids = SDL_GetHaptics(&n);
+    for (int i = 0; i < n && !vib; i++) {
+        SDL_Haptic *h = SDL_OpenHaptic(ids[i]);
+        if (h && SDL_InitHapticRumble(h)) vib = h;
+        else if (h) SDL_CloseHaptic(h);
+    }
+    SDL_free(ids);
+    if (vib) LOG("[input] device vibrator: %s, rumble for controllers without their own\n", SDL_GetHapticName(vib));
+    else LOG("[input] device vibrator: none (%d haptic device(s))\n", n);
+    return vib;
+}
+#endif
+
 static void rumble_update(void) {
     static uint32_t sent, peak, sends;
     static uint64_t sent_ns, on_ns;
     static SDL_Gamepad *sent_pad;
-    static bool wireless;
+    static bool wireless, failed_logged;
+    static SDL_Haptic *vib;  // (Android: the device's vibrator stands in for this controller's motors)
     uint32_t v = input_rumble();
     uint64_t now = plat_now_ns();
     if (v && !on_ns) on_ns = now, peak = 0, sends = 0;  // (the log: each rumble's length, strongest motor values, reports)
     if (v) peak = ((v >> 16) > (peak >> 16) ? v & 0xFFFF0000u : peak & 0xFFFF0000u) | ((v & 0xFFFF) > (peak & 0xFFFF) ? v & 0xFFFF : peak & 0xFFFF);
     if (!v && on_ns) {
         LOG("[input] rumble %.0f ms, low %u high %u, %u strength(s) sent%s\n", (now - on_ns) / 1e6, peak >> 16, peak & 0xFFFF,
-            sends, pad ? (wireless ? " (wireless)" : "") : " (no controller)");
+            sends, !pad ? " (no controller)" : vib ? " (device vibrator)" : wireless ? " (wireless)" : "");
         on_ns = 0;
     }
-    if (!pad) { sent_pad = NULL; return; }
-    if (pad != sent_pad)
+    if (!pad) {
+        if (vib && sent) SDL_StopHapticRumble(vib);
+        sent_pad = NULL, vib = NULL;
+        return;
+    }
+    if (pad != sent_pad) {
+        if (vib && sent) SDL_StopHapticRumble(vib);
         sent = 0, sent_pad = pad, wireless = SDL_GetGamepadConnectionState(pad) == SDL_JOYSTICK_CONNECTION_WIRELESS;
+        vib = NULL;
+#ifdef __ANDROID__
+        if (!pad_can_rumble(pad)) vib = device_vibrator();
+#endif
+    }
     bool change;
     if (!v || !sent) {
         change = v != sent;  // (start, stop)
@@ -1135,10 +1182,18 @@ static void rumble_update(void) {
         int dl = abs((int)(v >> 16) - (int)(sent >> 16)), dh = abs((int)(v & 0xFFFF) - (int)(sent & 0xFFFF));
         change = (dl >= RUMBLE_STEP || dh >= RUMBLE_STEP) && now - sent_ns >= RUMBLE_CHANGE_NS * (wireless ? 2 : 1);
     }
-    bool renew = v && now - sent_ns >= 100000000ull;
+    // (the vibrator less often, for longer: each call restarts Android's one-shot vibration, a stutter on some motors)
+    bool renew = v && now - sent_ns >= (vib ? 500000000ull : 100000000ull);
     if (!change && !renew) return;
     uint32_t out = change ? v : sent;
-    SDL_RumbleGamepad(pad, (Uint16)(out >> 16), (Uint16)out, out ? 200 : 0);
+    if (vib) {  // (one motor: the stronger of the two)
+        uint32_t m = (out >> 16) > (out & 0xFFFF) ? out >> 16 : out & 0xFFFF;
+        if (m) SDL_PlayHapticRumble(vib, m / 65535.0f, 1000);
+        else SDL_StopHapticRumble(vib);
+    } else if (!SDL_RumbleGamepad(pad, (Uint16)(out >> 16), (Uint16)out, out ? 200 : 0) && !failed_logged) {
+        failed_logged = true;  // (once a run: it fails the same way every 5 ms)
+        LOG("[input] rumble not sent: %s\n", SDL_GetError());
+    }
     if (change && v) sends++;
     sent = out, sent_ns = now;
 }
