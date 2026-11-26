@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 #include "cpu.h"
+#include "exitcode.h"
 #include "platform.h"
 
 #define LOG(...) fprintf(stderr, __VA_ARGS__)

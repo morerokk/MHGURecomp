@@ -27,6 +27,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "../exitcode.h"
 #include "../platform.h"
 
 #ifndef MAP_FIXED_NOREPLACE
@@ -470,14 +471,15 @@ static void fault_handler(int sig, siginfo_t *si, void *uc) {
                  "drive it is on has a read error), so the game can't start. Download the release again and unpack it "
                  "over the game folder; if this keeps happening, move the game folder to another drive.", name);
         plat_error_box(msg);
-        _exit(1);
+        fprintf(stderr, "[exit] code %d (%s)\n", EXIT_CANT_START, rt_exit_meaning(EXIT_CANT_START));
+        _exit(EXIT_CANT_START);
     }
 #endif
     char what[80];
     snprintf(what, sizeof what, "%s (code %d, addr %llx)", sig_name(sig), si ? si->si_code : 0,
              (unsigned long long)fa);
     rt_fault_report(what, fa, pc, lr);
-    _exit(139);  // (rt_fault_report does not return)
+    _exit(EXIT_CRASH_RECOMP);  // (rt_fault_report does not return)
 }
 
 void plat_crash_handler_install(void) {

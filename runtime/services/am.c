@@ -60,7 +60,7 @@ static void common_state_getter(Service *s, IpcReq *req, IpcResp *resp) {
 static void self_controller(Service *s, IpcReq *req, IpcResp *resp) {
     (void)s;
     switch (req->cmd) {
-    case 0: LOG("[am] application requested exit\n"); exit(0);
+    case 0: LOG("[am] application requested exit\n"); rt_exit(EXIT_NORMAL);
     case 9: {  // GetLibraryAppletLaunchableEvent: applets may be launched (the game waits for it at boot)
         uint32_t w, r;
         KEvent *ev = kernel_create_event_pair(&w, &r);

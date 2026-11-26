@@ -52,7 +52,10 @@ static Service *open_romfs_storage(void) {
         snprintf(base, sizeof base, "%s/romfs", g_game_dir);
         const char *layers[64];
         int n = mods_romfs_layers(layers, 64);
-        if (!romfs_open(base, layers, n)) FATAL("cannot read the game's romfs folder (%s)\n", base);
+        if (!romfs_open(base, layers, n)) {
+            rt_blame(EXIT_CANT_START);  // (the game files: missing, or not readable)
+            FATAL("cannot read the game's romfs folder (%s)\n", base);
+        }
         opened = true;
     }
     return service_new("IStorage(romfs)", storage, NULL);

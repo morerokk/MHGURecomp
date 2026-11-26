@@ -58,7 +58,7 @@ static void rtld_init_main(Cpu *c) {  // (then the mods' subsdks, in the order r
 __attribute__((constructor(101))) static void reserve_guest_space(void) {
     if (plat_reserve_guest(GUEST_BASE, GUEST_SPACE)) return;
     fprintf(stderr, "FATAL: the guest address window at %llx is not free\n", GUEST_BASE);
-    exit(1);
+    rt_exit(EXIT_CRASH_RECOMP);
 }
 
 static void boot(const char *root) {
@@ -67,7 +67,10 @@ static void boot(const char *root) {
     snprintf(npdm_path, sizeof npdm_path, "%s/main.npdm", exefs);
 
     char why[512];
-    if (!gamelib_load(why, sizeof why)) FATAL("%s\n", why);
+    if (!gamelib_load(why, sizeof why)) {
+        rt_blame(EXIT_CANT_START);  // (the game's library is missing or doesn't fit this build)
+        FATAL("%s\n", why);
+    }
     loader_load(exefs);
     kernel_init();
     dispatch_init();
@@ -264,7 +267,7 @@ int main(int argc, char **argv) {
             if (android_offer_import(msg, data, sizeof data)) continue;  // (from a folder the player picked: check again)
 #endif
             plat_error_box(msg);
-            return 1;
+            rt_exit(EXIT_CANT_START);
         }
     }
     LOG("MHGU Recomp %s\n", MHGU_VERSION);

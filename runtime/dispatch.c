@@ -386,7 +386,13 @@ static GuestFn dispatch_slow(Cpu *c) {
     }
     for (int i = 0; i < override_count; i++)
         if (overrides[i].addr == pc) return overrides[i].fn;
-    if (pc & 1) FATAL("jump to Thumb code at %x (lr=%x)\n", pc, c->r[14]);
+    // (a jump to where no code is: the code that jumped there, by the return address it left, is blamed; one in the
+    // game's own code or nowhere known: the port's, a function the recompilation missed)
+    if (pc & 1) {
+        int who = rt_blame_guest(c->r[14], EXIT_CRASH_RECOMP);
+        rt_blame(who == EXIT_CRASH_GAME ? EXIT_CRASH_RECOMP : who);
+        FATAL("jump to Thumb code at %x (lr=%x)\n", pc, c->r[14]);
+    }
     GuestFn f = dispatch_lookup(pc);
     if (!f && interp_owns(pc)) f = interp_entry;
     if (!f && pc >= FORGE_TRAMP && pc < FORGE_STUBS) f = trampoline;
@@ -395,6 +401,8 @@ static GuestFn dispatch_slow(Cpu *c) {
         const char *s = loader_symbol_at(c->r[14], &off);
         char note[400];
         bool mod = mods_jump_note(pc, note, sizeof note);
+        int who = rt_blame_guest(c->r[14], EXIT_CRASH_RECOMP);
+        rt_blame(mod ? EXIT_CRASH_SUBSDK : who == EXIT_CRASH_GAME ? EXIT_CRASH_RECOMP : who);
         FATAL("no function at %x (lr=%x %s+%x)%s%s\n", pc, c->r[14], s ? s : "?", off, mod ? "\n  " : "", mod ? note : "");
     }
     unsigned h = (pc >> 2) & (DCACHE - 1);
@@ -424,15 +432,14 @@ static int cmp_host(const void *a, const void *b) {
     uint64_t x = ((const uint64_t *)a)[0], y = ((const uint64_t *)b)[0];
     return x < y ? -1 : x > y;
 }
-const char *rt_host_fn_name(uint64_t pc, uint64_t *offset) {
+static uint32_t host_fn_lookup(uint64_t pc, uint64_t *offset) {
     static uint64_t (*byhost)[2];
     static uint64_t n;
-    static __thread char name[32];
-    if (!tables[0].count) return NULL;
+    if (!tables[0].count) return 0;
     if (!byhost) {
         uint64_t total = tables[0].count + tables[1].count, k = 0;
         uint64_t (*v)[2] = malloc(total * sizeof *v);
-        if (!v) return NULL;
+        if (!v) return 0;
         for (int t = 0; t < 2; t++)
             for (uint32_t i = 0; i < tables[t].count; i++) {
                 v[k][0] = (uint64_t)(uintptr_t)tables[t].fns[i];
@@ -448,9 +455,16 @@ const char *rt_host_fn_name(uint64_t pc, uint64_t *offset) {
         if (byhost[mid][0] <= pc) lo = mid + 1;
         else hi = mid;
     }
-    if (!lo || pc - byhost[lo - 1][0] > 0x100000) return NULL;
-    snprintf(name, sizeof name, "f_%llx", (unsigned long long)byhost[lo - 1][1]);
+    if (!lo || pc - byhost[lo - 1][0] > 0x100000) return 0;
     if (offset) *offset = pc - byhost[lo - 1][0];
+    return (uint32_t)byhost[lo - 1][1];
+}
+uint32_t rt_host_fn_addr(uint64_t pc) { return host_fn_lookup(pc, NULL); }  // (0: none)
+const char *rt_host_fn_name(uint64_t pc, uint64_t *offset) {
+    static __thread char name[32];
+    uint32_t a = host_fn_lookup(pc, offset);
+    if (!a) return NULL;
+    snprintf(name, sizeof name, "f_%x", a);
     return name;
 }
 
@@ -466,37 +480,46 @@ void rt_fatal_trace(void) {
             fprintf(stderr, "  r%-2d %08x  r%-2d %08x  r%-2d %08x  r%-2d %08x\n", i, c->r[i], i + 1, c->r[i + 1], i + 2,
                     c->r[i + 2], i + 3, c->r[i + 3]);
     }
+    // The exit code says whose code it was (exitcode.h); _exit, as abort() did: no exit handlers after a crash
+    int code = rt_blamed() ? rt_blamed() : EXIT_CRASH_RECOMP;
+    fprintf(stderr, "[exit] code %d (%s)\n", code, rt_exit_meaning(code));
     fflush(stderr);
     plat_fatal_notice();
-    signal(SIGABRT, SIG_DFL);
-    abort();
+    _exit(code);
 }
 
 void rt_udf(Cpu *c, uint32_t pc) {
     (void)c;
+    rt_blame(rt_blame_guest(pc, EXIT_CRASH_RECOMP));
     FATAL("undefined instruction / trap at %x\n", pc);
 }
 
 void rt_thumb(Cpu *c, uint32_t pc) {
     (void)c;
+    rt_blame(rt_blame_guest(pc, EXIT_CRASH_RECOMP));
     FATAL("BLX to Thumb code at %x\n", pc);
 }
 
 void rt_bkpt(Cpu *c, uint32_t imm, uint32_t pc) {
     (void)c;
+    rt_blame(rt_blame_guest(pc, EXIT_CRASH_RECOMP));
     FATAL("bkpt #%u at %x\n", imm, pc);
 }
 
 void rt_fault_report(const char *what, uint64_t fa, uint64_t pc, uint64_t lr) {
     uint64_t po = 0, lo = 0;
-    const char *ps = rt_host_fn_name(pc, &po), *ls = rt_host_fn_name(lr, &lo);
+    char pbuf[300];  // (both lookups return the same thread-local buffer: the pc's name is kept before the lr's)
+    const char *ps = rt_host_fn_name(pc, &po);
     if (!ps) ps = plat_symbol(pc, &po);
+    if (ps) ps = strcpy(pbuf, ps[0] && strlen(ps) < sizeof pbuf ? ps : "?");
+    const char *ls = rt_host_fn_name(lr, &lo);
     if (!ls) ls = plat_symbol(lr, &lo);
     fprintf(stderr, "\n*** %s accessing %#llx", what, (unsigned long long)fa);
     if (fa >= GUEST_BASE && fa < GUEST_BASE + GUEST_SPACE) fprintf(stderr, " (guest %08llx)", (unsigned long long)(fa - GUEST_BASE));
     fprintf(stderr, "\n    host pc %llx (%s+%llx)\n    host lr %llx (%s)\n", (unsigned long long)pc, ps ? ps : "?",
             (unsigned long long)po, (unsigned long long)lr, ls ? ls : "?");
     engine_modules_report();
+    rt_blame(rt_blame_host(pc));
     rt_fatal_trace();
 }
 

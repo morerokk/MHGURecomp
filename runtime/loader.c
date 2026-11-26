@@ -377,6 +377,7 @@ void loader_load(const char *exefs) {
             expected += nso_size(path);
             continue;
         }
+        rt_blame(EXIT_CRASH_SUBSDK);  // (a mod's subsdk that can't be loaded: the exit code says so; until relocated)
         uint32_t size = nso_size(path), base = size ? place_subsdk(expected, size, lo) : 0;
         if (!size) FATAL("mod %s: exefs/%s is not an NSO (remove the mod, or turn it off in the Mods tab)\n", mod, name);
         if (!base || g_nmodules == MAX_MODULES)
@@ -393,9 +394,14 @@ void loader_load(const char *exefs) {
         load_nso(m, path, base);
         expected += size;
         lo = base + size;
+        rt_blame(0);
     }
     g_nexefs = g_nmodules;
-    for (int i = 0; i < g_nmodules; i++) relocate(&g_modules[i], false);
+    for (int i = 0; i < g_nmodules; i++) {
+        rt_blame(i >= 2 ? EXIT_CRASH_SUBSDK : 0);
+        relocate(&g_modules[i], false);
+    }
+    rt_blame(0);
     for (int i = 2; i < g_nexefs; i++) {  // (a subsdk's code runs in the interpreter, as Forge plugins' does)
         Module *m = &g_modules[i];
         interp_add_range(m->base + m->text_off, m->base + m->text_off + m->text_size);

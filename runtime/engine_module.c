@@ -1,4 +1,7 @@
 // Engine modules (engine_module.h): engine_modules/<name>/<name>.dll (.so) for each <name> engine_modules/enabled.txt lists.
+#ifndef _WIN32
+#define _GNU_SOURCE  // (dladdr)
+#endif
 #include "engine_module.h"
 
 #include <ctype.h>
@@ -208,6 +211,37 @@ int engine_modules_loaded(const char **names, int max) {
     int n = g_nmods < max ? g_nmods : max;
     for (int i = 0; i < n; i++) names[i] = g_mod[i].own;
     return g_nmods;
+}
+
+// Is pc in a library loaded from a module's folder: its own, or one it brought along? (for the crash's exit code)
+bool engine_module_at(uint64_t pc) {
+    char path[1200];
+#ifdef _WIN32
+    HMODULE h;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCSTR)(uintptr_t)pc, &h) ||
+        !GetModuleFileNameA(h, path, sizeof path))
+        return false;
+    for (char *c = path; *c; c++) *c = *c == '\\' ? '/' : (char)tolower((unsigned char)*c);
+#else
+    Dl_info di;
+    if (!dladdr((void *)(uintptr_t)pc, &di) || !di.dli_fname) return false;
+    snprintf(path, sizeof path, "%s", di.dli_fname);
+#endif
+    // (one whose entry is running counts too: it is g_mod[g_nmods] until it has started)
+    for (int i = 0; i <= g_nmods && i < MAX_MODULES_LOADED; i++) {
+        const char *dir = g_mod[i].dir;
+        size_t n = strlen(dir);
+        if (!n || strlen(path) <= n || path[n] != '/') continue;
+#ifdef _WIN32
+        bool same = true;
+        for (size_t k = 0; k < n && same; k++) same = path[k] == (char)tolower((unsigned char)dir[k]);
+#else
+        bool same = !strncmp(path, dir, n);
+#endif
+        if (same) return true;
+    }
+    return false;
 }
 
 void engine_modules_report(void) {

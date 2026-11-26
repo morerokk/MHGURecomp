@@ -14,3 +14,4 @@ void engine_modules_init(const char *port_version);
 void engine_modules_shutdown(void);
 int engine_modules_loaded(const char **names, int max);  // the loaded modules' names; returns how many
 void engine_modules_report(void);  // in a crash report: which modules were loaded (none: says nothing)
+bool engine_module_at(uint64_t pc);  // pc is in a library from a module's folder (its own, or one it brought)

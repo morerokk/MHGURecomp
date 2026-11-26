@@ -50,7 +50,7 @@ static void check_cpu(const char *path, const uint32_t *needs) {
         snprintf(msg, sizeof msg, "This PC's processor lacks features the game was built for (missing: %s). The game "
                  "can't run on this processor.", list);
     plat_error_box(msg);
-    exit(1);
+    rt_exit(EXIT_CANT_START);
 #else
     (void)path, (void)needs;
 #endif
@@ -70,7 +70,7 @@ static void damaged(const char *path, const char *detail) {
     snprintf(msg, sizeof msg, "The game's file %s is damaged (%s), so the game can't start. Download the release "
              "again and unpack it over the game folder.", name, detail);
     plat_error_box(msg);
-    exit(1);
+    rt_exit(EXIT_CANT_START);
 }
 
 static uint64_t le(const unsigned char *p, int n) {

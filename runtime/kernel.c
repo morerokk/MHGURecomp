@@ -616,7 +616,7 @@ static void svc_impl(Cpu *c, uint32_t imm, uint32_t pc) {
         r[0] = R_OK_;
         r[1] = 0;
         break;
-    case 0x07: kernel_log_guest_stack("ExitProcess (the game quit)", c); exit(0);
+    case 0x07: kernel_log_guest_stack("ExitProcess (the game quit)", c); rt_exit(EXIT_NORMAL);
     case 0x08: {  // CreateThread(prio r0, entry r1, arg r2, stack_top r3, core r4) -> r1 handle
         KThread *t = thread_new(r[1], r[2], r[3], (int)r[0], (int)r[4]);
         t->handle = kernel_new_handle(&t->obj);
@@ -754,6 +754,7 @@ static void svc_impl(Cpu *c, uint32_t imm, uint32_t pc) {
     }
     case 0x26:  // Break(reason, info, size)
         if (r[0] & 0x80000000u) { LOG("[kernel] Break notification %x\n", r[0]); r[0] = R_OK_; break; }
+        rt_blame(rt_blame_guest(pc, EXIT_CRASH_GAME));  // (the code that gave up: the game, or a mod's)
         FATAL("svcBreak(reason=%x, info=%x, size=%x) at %x\n", r[0], r[1], r[2], pc);
     case 0x27: debug_string(r[0], r[1]); r[0] = R_OK_; break;
     case 0x29: {  // GetInfo(id1 lo r0, id0 r1, handle r2, id1 hi r3) -> r1:r2

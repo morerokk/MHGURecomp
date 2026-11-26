@@ -11,6 +11,14 @@
 
 int fs_log_open_writes(const char *tag);  // runtime/services/fs.c: files open for writing (logged), the count
 
+// The exit code of the game giving up (exitcode.h): a mod's code that called it, or inside a Forge mod's file call,
+// is the mod's; else the game's
+static int gave_up(const Cpu *c) {
+    int who = rt_blame_guest(c->r[14], EXIT_CRASH_GAME);
+    if (who == EXIT_CRASH_GAME && forge_abort_context()) who = EXIT_CRASH_FORGE;
+    return who;
+}
+
 static const char *guest_str(uint32_t addr, char *buf, size_t size) {  // a guest string ("-": none), cut at size
     if (!addr) return "-";
     size_t i = 0;
@@ -40,12 +48,12 @@ HLE_SDK("_ZN2nn4diag6detail10VAbortImplEPKcS3_S3_iPKNS_6ResultEPKNS_2os17UserExc
     int nw = fs_log_open_writes("[abort] open for writing");
     int nf = forge_log_open_files("[abort] a Forge plugin's open file");
     if (STK(0) && result == 0x327202u && !nw && !nf) LOG("[abort] (no file is open for writing on the host side)\n");
-    exit(1);
+    rt_exit(gave_up(c));
 }
 
 HLE_SDK("abort", abort) {
     kernel_log_guest_stack("[abort] abort()", c);
-    exit(1);
+    rt_exit(gave_up(c));
 }
 
 // The game's fatal error (0xa3e16c(object, format, ...): vsnprintf into a 1 KB buffer at sp + 4, the object's error
@@ -62,5 +70,5 @@ HLE_SDK("exit", exit) {
             LD32(c->r[13] + 0x414));
     }
     kernel_log_guest_stack("[abort] the game", c);
-    exit((int)ARG(0));
+    rt_exit(ARG(0) ? gave_up(c) : EXIT_NORMAL);
 }

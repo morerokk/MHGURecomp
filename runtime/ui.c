@@ -434,7 +434,10 @@ void ui_init(void) {
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, (Sint64)flags);
     window = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
-    if (!window) FATAL("SDL_CreateWindow: %s\n", SDL_GetError());
+    if (!window) {
+        rt_blame(EXIT_CANT_START);  // (no Vulkan driver for the window, or no display)
+        FATAL("SDL_CreateWindow: %s\n", SDL_GetError());
+    }
 #ifndef __ANDROID__
     // (no place kept yet: where the system put it, so a window maximized or resized without being moved is kept too)
     if (place_kept && win_x == SDL_WINDOWPOS_UNDEFINED) SDL_GetWindowPosition(window, &win_x, &win_y);
@@ -477,7 +480,7 @@ int ui_run(void) {
                     // A game that hung is closed this way: what its threads wait on, into the log for the report
                     ldn_log_state();
                     kernel_dump_threads("window closed", true);
-                    if (!config_confirm_exit() && !overlay_settings_dirty()) { LOG("window closed\n"); exit(0); }
+                    if (!config_confirm_exit() && !overlay_settings_dirty()) { LOG("window closed\n"); rt_exit(EXIT_NORMAL); }
                     overlay_request_close();
                     continue;
                 }
@@ -494,13 +497,13 @@ int ui_run(void) {
         if (action == 12) {  // (the title screen's B: the same question as closing the window)
             if (!config_confirm_exit() && !overlay_settings_dirty()) {
                 LOG("exit from the title screen\n");
-                exit(0);
+                rt_exit(EXIT_NORMAL);
             }
             overlay_request_close();
         }
-        if (action == 1) exit(0);
+        if (action == 1) rt_exit(EXIT_NORMAL);
         if (action == 2) {
-            if (restart_application()) exit(0);
+            if (restart_application()) rt_exit(EXIT_RESTART);
             SDL_SetAtomicInt(&action_failed, 1);
         }
 #ifdef __ANDROID__
@@ -509,7 +512,7 @@ int ui_run(void) {
             SDL_SetAtomicInt(&away, 1);  // (the picker takes the window's surface away: the renderer draws nothing)
             // (after 1 and 2 the app closes, the game has the old files open; the others leave it running)
             // (and after 8 / 9, the files folder changed: the game has the old one's files open)
-            if (android_import(action - 2, true) && (action <= 4 || action >= 10)) { LOG("[ui] imported: closing\n"); exit(0); }
+            if (android_import(action - 2, true) && (action <= 4 || action >= 10)) { LOG("[ui] imported: closing\n"); rt_exit(EXIT_NORMAL); }
             SDL_SetAtomicInt(&away, 0);
         }
 #else

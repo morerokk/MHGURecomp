@@ -459,6 +459,9 @@ mods or Forge plugins, and **they run with the same rights as the game, so only 
 you ask for it: put the module's folder in `engine_modules\` and add its folder name on a line of its own in
 `engine_modules\enabled.txt`. `log.txt` lists what was loaded. Details for module authors: [docs/ENGINE-MODULES.md](docs/ENGINE-MODULES.md).
 
+Launchers and mod managers can tell from the game's exit code whether it closed normally or crashed, and whether the crash
+was in the game, the port, a Forge plugin, a subsdk mod or an engine module: [docs/EXIT-CODES.md](docs/EXIT-CODES.md).
+
 ## Cheats
 
 You can configure cheats in the F1 menu. You can also manually configure them by putting .txt files in the `cheats/` subfolder.
