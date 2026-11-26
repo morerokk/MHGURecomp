@@ -362,6 +362,7 @@ bool equal(const Config &a, const Config &b) {
     SAME(render_h);
     SAME(fps);
     SAME(fsr);
+    SAME(upscaler_method);
     SAME(fsr_quality);
     SAME(fsr_sharpness);
     SAME(fsr_objmotion);
@@ -2631,6 +2632,8 @@ std::vector<Row> main_rows() {
             r.back().value = tr("Off (HDR)");
         }
         if (c.fsr && !c.hdr) {
+            add_choice(r, "fsr.method", tr("Upscaler method"), c.upscaler_method, {tr("FSR 3.1"), tr("SGSR 2")},
+                       [](int v) { s.draft.upscaler_method = v; }, ini("Method"));
             add_choice(
                 r, "fsr.quality", "FSR quality", c.fsr_quality,
                 {tr("Native AA"), tr("Quality"), tr("Balanced"), tr("Performance"), tr("Ultra performance")},

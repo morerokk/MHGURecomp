@@ -55,6 +55,7 @@
     .fsr_objmotion = 1,                                                                             \
     .fsr_reactive = 0.9f,                                                                           \
     .fsr_animsurf = 1,                                                                              \
+    .upscaler_method = UPSCALER_FSR3,                                                               \
     /* [Graphics] */                                                                                \
     .draw_distance = 1.0f,                                                                          \
     .aniso = 1,                                                                                     \
@@ -208,9 +209,14 @@ static const char DEFAULT_INI[] =
     "FXAAMode = Original\n"
     "\n"
     "[Upscaler]\n"
-    "; FSR temporal upscaling\n"
+    "; Temporal upscaling\n"
     "; Default: Off\n"
     "FSR = Off\n"
+    "\n"
+    "; Temporal upscaler to use when FSR is On.\n"
+    "; FSR3 (AMD FSR 3.1), SGSR2 (Qualcomm Snapdragon GSR 2, the mobile 2-pass variant)\n"
+    "; Default: FSR3\n"
+    "Method = FSR3\n"
     "\n"
     "; FSR quality\n"
     "; NativeAA, Quality, Balanced, Performance, UltraPerformance\n"
@@ -824,6 +830,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_MISC "Invalid frame cap, anti-aliasing, controller, HUD or volume setting."
 #define ERR_TOGGLE "Invalid On/Off value."
 #define ERR_FSR "Invalid FSR quality, sharpness or reactive mask."
+#define ERR_UPSCALER "Invalid upscaler method."
 #define ERR_NET "Invalid port or Join address list (no newlines, ';' or '#')."
 #define ERR_SERVER "Invalid hub server or matchmaking key (no newlines, ';' or '#')."
 #define ERR_CROSSPLAY "Invalid emulator crossplay address, name or password (no newlines, ';' or '#')."
@@ -862,6 +869,7 @@ const ConfigSetting g_settings[] = {
     ON_OFF("Anti-aliasing", "FXAA", fxaa, false),
     {"Anti-aliasing", "FXAAMode", SET_CHOICE, F(fxaa_mode), 0, 0, 0, "Original,3_11", NULL, false, ERR_MISC},
     ON_OFF("Upscaler", "FSR", fsr, true),
+    {"Upscaler", "Method", SET_CHOICE, F(upscaler_method), 0, 0, 0, "FSR3|fsr|fsr3,SGSR2|sgsr2", NULL, true, ERR_UPSCALER},
     {"Upscaler", "FSRQuality", SET_CHOICE, F(fsr_quality), 0, 0, 0,
      "NativeAA|native|aa,Quality,Balanced,Performance,UltraPerformance|ultraperf", NULL, true, ERR_FSR},
     {"Upscaler", "Sharpness", SET_FLOAT, F(fsr_sharpness), 0, 0.0f, 1.0f, NULL, NULL, false, ERR_FSR},
@@ -1454,6 +1462,7 @@ void config_load(void) {
     e = getenv("MHGU_RENDER");
     if (e && parse_size(e, &w, &h)) render_auto = false, g_config.render_w = w, g_config.render_h = h;
     if ((e = getenv("MHGU_FSR"))) g_config.fsr = atoi(e) != 0;  // (test runs: MHGU_FSR=0|1, MHGU_FSR_QUALITY=quality...)
+    if ((e = getenv("MHGU_UPSCALER"))) config_parse(config_setting("Method"), e, &g_config);
     if ((e = getenv("MHGU_FSR_QUALITY"))) config_parse(config_setting("FSRQuality"), e, &g_config);
     if ((e = getenv("MHGU_FSR_OBJMOTION"))) g_config.fsr_objmotion = atoi(e) != 0;
     if ((e = getenv("MHGU_FSR_ANIMSURF"))) g_config.fsr_animsurf = atoi(e) != 0;
@@ -1503,9 +1512,9 @@ void config_load(void) {
         // overrides (A/B)
         g_fsr_lod_bias = log2f((float)w / (float)g_fsr_output[0]);
         if ((e = getenv("MHGU_FSR_LODBIAS"))) g_fsr_lod_bias = strtof(e, NULL);
-        LOG("[config] FSR 3.1 %s (x%.1f): the 3D picture at %dx%d, upscaled to %ux%u, sharpness %.2f, texture LOD bias "
-            "%.2f\n", names[g_config.fsr_quality], r, w, h, g_fsr_output[0], g_fsr_output[1], g_config.fsr_sharpness,
-            g_fsr_lod_bias);
+        LOG("[config] %s %s (x%.1f): the 3D picture at %dx%d, upscaled to %ux%u, sharpness %.2f, texture LOD bias "
+            "%.2f\n", g_config.upscaler_method == UPSCALER_SGSR2 ? "SGSR 2" : "FSR 3.1", names[g_config.fsr_quality], r, w, h,
+            g_fsr_output[0], g_fsr_output[1], g_config.fsr_sharpness, g_fsr_lod_bias);
     }
     // Resolution scaling: a 3D picture more than 1080 lines high (the Switch's docked picture) is rendered by the game
     // 1080 lines high, in the same shape (g_render_size: what its code, its cameras and its memory see), and the

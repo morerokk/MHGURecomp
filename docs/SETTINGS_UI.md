@@ -133,10 +133,10 @@ cover the game itself. Back-to-exit on the title screen is separate and does not
 use this policy: B on the Main Menu opens the Exit question through
 `runtime/hle/title_exit.c`, leaving the pad and gameplay menus untouched.
 
-## FSR settings
+## Upscaler settings
 
- Graphics & Audio exposes all six
-[Upscaler] fields: FSR, quality, sharpness, object motion, reactive mask and
+ Graphics & Audio exposes all seven
+[Upscaler] fields: FSR, method (FSR 3.1 / SGSR 2), quality, sharpness, object motion, reactive mask and
 animated surfaces. They persist without removing INI comments/aliases,
 participate in draft equality, dirty guards and section reset.
 Sharpness and reactive mask apply at Save (each FSR frame reads them, fsr.c run_fsr); the others are marked

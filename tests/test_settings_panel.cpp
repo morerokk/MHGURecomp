@@ -676,6 +676,9 @@ int main() {
     confirm();
     assert(settings_panel_dirty());
     down();
+    selected("fsr.method");
+    press(ImGuiKey_GamepadDpadRight);  // FSR 3.1 -> SGSR 2
+    down();
     selected("fsr.quality");
     press(ImGuiKey_GamepadDpadRight);
     press(ImGuiKey_End);
@@ -683,6 +686,7 @@ int main() {
     selected("save");
     confirm();
     assert(config_editable().fsr == 1);
+    assert(config_editable().upscaler_method == UPSCALER_SGSR2);
     assert(config_editable().fsr_quality == FSR_QUALITY);
     Config fsr_saved = config_editable();
     assert(config_restart_required(&fsr_saved));

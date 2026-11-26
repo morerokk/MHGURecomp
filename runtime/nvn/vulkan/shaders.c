@@ -188,6 +188,11 @@ uint32_t *vk_glsl_to_spirv_ex(const char *src, size_t srclen, const char *name, 
     return r;
 }
 
+uint32_t *vk_glsl_to_spirv_stage_ex(const char *src, size_t srclen, int stage, const char *name, const char *const *defs,
+                                    int ndefs, uint64_t salt, int opt, size_t *nwords) {
+    return glsl_compile(src, srclen, stage, name, defs, ndefs, NULL, salt, opt, nwords);
+}
+
 VkShaderModule vk_module(const uint32_t *spv, size_t nwords) {
     VkShaderModuleCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = nwords * 4, .pCode = spv};
     VkShaderModule m;
