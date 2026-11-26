@@ -22,7 +22,9 @@ fully clear of the guide.
 L/R cycles seven tabs once per press and selects their first field. The tabs are
 Display, Graphics & Audio, Controls, Network, Misc, Mods and Menu Options. Misc
 contains the monster-HP multipliers (under a "Monster HP Scaling" title: a header row,
-skipped by navigation) and quest-specific overrides. D-pad or
+skipped by navigation; above them a line of two buttons, Original and Rebalanced, that set
+the four multipliers to 1 / 1 / 1 / 1 or 0.74 / 1 / 1.26 / 1.48: left/right move between
+the two, up/down treat the line as one row) and quest-specific overrides. D-pad or
 left stick moves between rows; left/right adjusts the selected value. Confirm
 opens the host-address text editor, or a dropdown on rows with choices (an arrow after
 their value): their choices in a small window of its own under the row (above it when

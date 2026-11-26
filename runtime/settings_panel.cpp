@@ -47,6 +47,7 @@ struct Row {
     bool enabled = true, cold = false, action = false, warn = false;
     bool header = false, current = false;  // a section title (not a row to select); the choice a dropdown has now
     bool menu = false;                     // Confirm opens a dropdown of its choices
+    int pair = 0;  // one of two buttons side by side on one line (button_pair): 1 the left one, 2 the right one
     std::function<void(int)> adjust;
     std::function<void()> activate;
 };
@@ -726,6 +727,14 @@ void action(std::vector<Row> &rows, const std::string &id, const std::string &na
     r.activate = std::move(fn);
     r.enabled = enabled;
     rows.push_back(std::move(r));
+}
+// Two buttons side by side on one line: left / right move between them, up / down leave the line (navigate)
+void button_pair(std::vector<Row> &rows, const std::string &id, const std::string &left, std::function<void()> a,
+                 const std::string &right, std::function<void()> b, const std::string &help) {
+    action(rows, id + ".1", left, std::move(a));
+    rows.back().pair = 1, rows.back().help = help;
+    action(rows, id + ".2", right, std::move(b));
+    rows.back().pair = 2, rows.back().help = help;
 }
 // This version's release notes (Application: What's new): update/changelog.txt, which the updater writes when it installs
 // a release (updater/updater.c save_changelog), as plain text after the version on its first line. Empty: there are
@@ -2756,6 +2765,18 @@ std::vector<Row> main_rows() {
         add_bool(r, "deviant", "Deviant quests count for all", &c.share_deviant, ini("ShareDeviantCredit"));
         add_bool(r, "rewards.hold", "Hold A to send items to box", &c.quest_hold_send, ini("HoldASend"));
         header(r, "hp.header", tr("Monster HP Scaling"));
+        // Rebalanced: Monster Hunter Rise's multipliers (1, 1.35, 1.7, 2 for 1-4 hunters, solo as its base) over its
+        // 2-hunter one, as a Hub quest's own HP is the 2-hunter value here
+        const char *presets =
+            tr("Original: the game's own monster HP for any number of hunters. Rebalanced: HP grows with the number of hunters as in Monster Hunter Rise, with the game's own HP as the 2-hunter value. In a hub, the values of the player who created the hub are used.");
+        button_pair(
+            r, "hp.preset", tr("Original"), []() { std::fill(s.draft.hp.scale, s.draft.hp.scale + 4, 1.f); },
+            tr("Rebalanced"),
+            []() {
+                const float rise[4] = {.74f, 1.f, 1.26f, 1.48f};
+                std::copy(rise, rise + 4, s.draft.hp.scale);
+            },
+            presets);
         for (int i = 0; i < 4; i++)
             number(r, "hp." + std::to_string(i), std::to_string(i + 1) + " " + tr(i == 0 ? "Hunter" : "Hunters"), &c.hp.scale[i],
                    lo("1Player"), hi("1Player"), .05f, ini("1Player"));
@@ -3248,13 +3269,19 @@ void navigate(std::vector<Row> &rows, bool list = false) {
             return;
         }
     }
+    // (two buttons on one line, button_pair: up / down go past its other button, and come to its left one)
+    bool line = dy && !dx && !pressed(ImGuiKey_Tab, true);
     if (dx)
         delta = dx;
     if (delta) {
+        if (line && ((dy > 0 && it->pair == 1) || (dy < 0 && it->pair == 2)))
+            index += dy;
         int next = std::clamp(index + delta, 0, (int)rows.size() - 1);
         int step = delta > 0 ? 1 : -1;
         while (next >= 0 && next < (int)rows.size() && !rows[next].enabled)
             next += step;
+        if (line && next > 0 && next < (int)rows.size() && rows[next].pair == 2 && rows[next - 1].enabled)
+            --next;
         if (next >= 0 && next < (int)rows.size())
             focus(rows[next].id);
     }
@@ -3322,8 +3349,8 @@ void draw_rows(std::vector<Row> &rows, bool list = false) {
             continue;
         }
         bool grid = keyboard_view && r.id.size() > 4 && r.id[4] >= '0' && r.id[4] <= '9';
-        float rw = grid ? cell : width;
-        if (grid && i % 10)
+        float rw = grid ? cell : r.pair ? (width - gap) / 2 : width;
+        if ((grid && i % 10) || r.pair == 2)
             ImGui::SameLine();
         ImVec2 p = ImGui::GetCursorScreenPos();
         float wrap = std::max(font, rw * (r.action ? 1.f : .58f) - font);
@@ -3369,8 +3396,9 @@ void draw_rows(std::vector<Row> &rows, bool list = false) {
         if (r.current)  // (the dropdown's choice now: a bar on its left)
             w->DrawList->AddRectFilled(rect.Min, ImVec2(rect.Min.x + font * .22f, rect.Max.y), t.accent,
                                        t.rounding, ImDrawFlags_RoundCornersLeft);
-        w->DrawList->AddText(ImGui::GetFont(), font, ImVec2(p.x + font * .5f, p.y + (h - label.y) * .5f), ink,
-                             r.title.c_str(), nullptr, wrap);
+        float label_x = r.pair ? p.x + std::max(font * .5f, (rw - label.x) * .5f) : p.x + font * .5f;  // (a pair's: centred)
+        w->DrawList->AddText(ImGui::GetFont(), font, ImVec2(label_x, p.y + (h - label.y) * .5f), ink, r.title.c_str(),
+                             nullptr, wrap);
         float arrow = 0;
         if (r.menu && r.enabled) {  // (Confirm opens a dropdown: an arrow after the value)
             arrow = font * 1.1f;
