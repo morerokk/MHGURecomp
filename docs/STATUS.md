@@ -491,7 +491,9 @@ through the harness above; the board may refuse them first).
 Deviant quests (2026-11-26): ini [Multiplayer] ShareDeviantCredit = On (default, applies at Save) does the same for
 Special Permit quests (numbers 4MMLL, deviant MM 1-18, level LL 1-16; 13-18 start at 11), in the same file: 0x5ae768
 (sQuest +0xb8 bit 19) says no when 0x74af8c says the quest is unlocked. Only its call from 0x588d40 (return address
-0x588dc0) is changed: 0x373110 asks it in a hunt for the Special Permit damage scaling (2+ hunters). A level's clear
+0x588dc0) is changed: 0x373110 asks it in a hunt to pick a damage multiplier from a table (0x1824bc0, 4 rows x 3
+columns: column 0 when 0x5a8d68, quest data +0xf, is below 2, else 1, or 2 for Special Permit; values 0.5 down to 0;
+only for attacks with +0x6d = 2, probably a monster's; the hunter count plays no part). A level's clear
 flag is what unlocks the next one (0x74af8c read 40102 locked before 40101's bit was set and unlocked after, on the
 result screen). ShareUrgentCredit never covered Deviant quests: none has the Urgent bit, and with it On and
 ShareDeviantCredit Off a joiner's clear didn't count. Tested (2026-11-26) with a temporary harness, not committed: a copy of

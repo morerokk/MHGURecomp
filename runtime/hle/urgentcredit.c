@@ -15,7 +15,7 @@
 //
 // Deviant quests (Special Permit, numbers 4MMLL: deviant MM, level LL) the same way, with ini [Multiplayer]
 // ShareDeviantCredit: the second check above, 0x5ae768 (sQuest +0xb8 bit 19), is made to say no when the quest is
-// unlocked in this save. 0x5ae768 is also asked in a hunt for the damage scaling of Special Permit quests (0x373110), so
+// unlocked in this save. 0x5ae768 is also asked in a hunt (0x373110) to pick a damage multiplier for some attacks, so
 // only the call from 0x588d40 is changed. ShareUrgentCredit never covered them: no Special Permit quest has the Urgent bit.
 #include <string.h>
 
