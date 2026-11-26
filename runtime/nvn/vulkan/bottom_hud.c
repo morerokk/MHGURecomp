@@ -30,8 +30,8 @@ volatile bool g_bottom_hud_on;
 extern volatile int g_hudtrace_active;  // (exec.c)
 
 // ---- the MHXX bottom screen: its 320x240 picture, centred on the panel at the largest whole fit (its shape kept; the
-// background, colour or wallpaper, fills the rest of a panel of another shape), with MHXX's panel base: a grid of 4 x 3 cells under the top bar (cell edges measured on MHXX's quest screen, test/mhxx-reference,
-// Azahar 2126.2). [Dual Screen] Panels places panels on it, as MHXX's Panel Customize does.
+// background, colour or wallpaper, fills the rest of a panel of another shape), with MHXX's panel base: a grid of 4 x 3
+// cells under the top bar (cell edges measured on MHXX's quest screen, test/mhxx-reference, Azahar 2126.2). [Dual Screen] Panels places panels on it, as MHXX's Panel Customize does.
 static const int16_t cell_x[5] = {2, 81, 161, 240, 319}, cell_y[4] = {26, 97, 168, 237};
 
 // A part of the game's 1280x720 HUD canvas: its pieces, by layer and place (hudtrace in a quest, 2026-11-20).
