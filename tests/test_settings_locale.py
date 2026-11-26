@@ -116,7 +116,8 @@ class SettingsLocaleTest(unittest.TestCase):
                      "Default: ",
                      "MHGU Player"}  # (a language's own name, the Switch buttons' keybinds, a help line's prefix, the room name others see)
         visible = {text for text in literals(source) if text and
-                   (text[0].isupper() or " " in text) and any(c.isalpha() for c in text)}
+                   (text[0].isupper() or " " in text) and any(c.isalpha() for c in text) and
+                   not re.fullmatch(r'(?:\w+@\d+,\d+ ?)+', text)}  # (not a bottom screen panel list: "map@0,0 target@0,2")
         self.assertFalse(visible - set(keys) - unchanged,
                          f"Untranslated UI labels: {sorted(visible - set(keys) - unchanged)}")
 
