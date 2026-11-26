@@ -29,8 +29,8 @@
 volatile bool g_bottom_hud_on;
 extern volatile int g_hudtrace_active;  // (exec.c)
 
-// ---- the MHXX bottom screen: its 320x240 picture, centred on the panel at the largest whole fit (its shape kept; the
-// background, colour or wallpaper, fills the rest of a panel of another shape), with MHXX's panel base: a grid of 4 x 3
+// ---- the MHXX bottom screen: its 320x240 picture, its panel grid centred on the panel at the largest fit (screen_fit:
+// its shape kept; the background, colour or wallpaper, fills the rest), with MHXX's panel base: a grid of 4 x 3
 // cells under the top bar (cell edges measured on MHXX's quest screen, test/mhxx-reference, Azahar 2126.2). [Dual Screen] Panels places panels on it, as MHXX's Panel Customize does.
 static const int16_t cell_x[5] = {2, 81, 161, 240, 319}, cell_y[4] = {26, 97, 168, 237};
 
@@ -112,10 +112,16 @@ static void box_rect(int p, int i, float r[4]) {
     if (panel_boxes(p) == 1) r[2] = cell_x[placed[p].col + k->cols], r[3] = cell_y[placed[p].row + k->rows];
 }
 
-// The 3DS picture on the panel: scale and top left, from the upright size.
+// The 3DS picture on the panel: scale and top left (of the whole 320x240), from the upright size. What is fitted is the
+// panel grid with a 2-pixel border all round it (x 0..320, y 24..238: the boxes as drawn are 2..318 x 26..236), not the
+// whole 3DS screen, whose empty top bar would only be a strip of background above the grid: the grid takes the panel's
+// full width or height, its shape kept, and the background fills the rest on the other two sides.
+#define FIT_Y0 24.0f
+#define FIT_W 320.0f
+#define FIT_H 214.0f
 static void screen_fit(uint32_t w, uint32_t h, float *scale, float *x0, float *y0) {
-    float s = (float)w / 320.0f < (float)h / 240.0f ? (float)w / 320.0f : (float)h / 240.0f;
-    *scale = s, *x0 = ((float)w - 320.0f * s) * 0.5f, *y0 = ((float)h - 240.0f * s) * 0.5f;
+    float s = (float)w / FIT_W < (float)h / FIT_H ? (float)w / FIT_W : (float)h / FIT_H;
+    *scale = s, *x0 = ((float)w - FIT_W * s) * 0.5f, *y0 = ((float)h - FIT_H * s) * 0.5f - FIT_Y0 * s;
 }
 
 // In a quest: the quest clock (layer 103, its pieces at the top left) was drawn this frame or the last. The panels
