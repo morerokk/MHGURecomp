@@ -491,13 +491,15 @@ The build recompiles the game code from your own copy of the game. Nothing in th
    ```bash
    pacman -S --needed make git diffutils \
      mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-lld mingw-w64-ucrt-x86_64-pkgconf \
-     mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-shaderc mingw-w64-ucrt-x86_64-nasm \
-     mingw-w64-ucrt-x86_64-vulkan-headers mingw-w64-ucrt-x86_64-vulkan-loader \
+     mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-libusb mingw-w64-ucrt-x86_64-shaderc \
+     mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-vulkan-headers mingw-w64-ucrt-x86_64-vulkan-loader \
      mingw-w64-ucrt-x86_64-vulkan-memory-allocator
    ```
 
    FFmpeg (for the game's movies) isn't installed: the first build downloads its source and builds the small part the
-   movies need into the executable (see "FFmpeg" below).
+   movies need into the executable (see "FFmpeg" below). SDL3 isn't either: the first build downloads SDL's release
+   and builds `SDL3.dll` with libusb, which MSYS2's SDL3 package lacks and the Switch 2 controllers need (`SDL3=system`
+   uses MSYS2's package instead).
 
 3. Install [Python](https://www.python.org/) 3.10 or newer for Windows. Then, in a Command Prompt in the repository
    folder, make the tools' virtual environment (the Makefile uses `tools\venv` when it exists):
@@ -539,7 +541,8 @@ Useful targets and options:
 - `make clean`: removes the compiled files (`obj\` and the program files in `build\`). It keeps `build\data`.
 - `GENARCH=-march=x86-64-v2`: compiles the game code without AVX2, for older CPUs. Untested.
 - `FFMPEG=system`: links the system's FFmpeg libraries instead of building them (see below).
-- Linux: `SDL3=system`, `SHADERC=system`: link the system's SDL3 / shaderc instead of building them (see Linux).
+- `SDL3=system`: links the system's SDL3 (Windows: MSYS2's, without the Switch 2 controllers) instead of building it.
+- Linux: `SHADERC=system`: links the system's shaderc instead of building it (see Linux).
 
 ### FFmpeg
 
@@ -595,7 +598,7 @@ release" address).
 `make` fills `licenses\` with everything a copy has to carry: this project's `LICENSE.txt`, `THIRD_PARTY_NOTICES.txt`
 (code compiled in), FFmpeg's license, and on Windows the licenses of the MSYS2 packages behind the bundled DLLs and
 the libraries linked in. `licenses\README.txt` lists those with their versions and where their exact source is, and
-holds a written offer for the source of the LGPL DLL among them (libiconv, which SDL3 uses): whoever publishes the
+holds a written offer for the source of the LGPL DLL among them (libusb, which SDL3 uses): whoever publishes the
 release makes that offer, so keep those sources at hand for three years (the MSYS2 address it gives is one copy).
 
 The exe creates the `mods` and `cheats` folders and the ini on first start. Players then add their own `data\` as
@@ -612,7 +615,8 @@ needs:
 - the Vulkan loader and headers, plus `curl` and optionally `nasm` for building FFmpeg (see "FFmpeg" above; no
   FFmpeg package needed);
 - `cmake` and the development files of what SDL uses on a desktop: X11 (with Xcursor, Xext, Xfixes, Xi, Xrandr,
-  Xss, Xtst), Wayland (wayland-protocols, libxkbcommon, libdecor), PipeWire, PulseAudio, ALSA, libudev and D-Bus.
+  Xss, Xtst), Wayland (wayland-protocols, libxkbcommon, libdecor), PipeWire, PulseAudio, ALSA, libudev, D-Bus and
+  libusb (the Switch 2 controllers; SDL loads the system's libusb-1.0.so.0 when one is plugged in).
   Like FFmpeg, the first build downloads pinned releases of SDL3 and shaderc (with glslang and SPIRV-Tools) to
   `third_party/`, checked against their SHA-256, and links them in statically, so the game runs on distributions
   that have neither (Ubuntu 24.04 has no SDL3) and the release needs nothing besides glibc, libstdc++ and the
@@ -647,7 +651,7 @@ Windows checkout, into its own folders so the Windows build is left alone:
 ```bash
 pacman -Syu --needed make git clang lld python cmake vulkan-headers vulkan-icd-loader nasm vulkan-swrast \
     libx11 libxcursor libxext libxfixes libxi libxrandr libxss libxtst wayland wayland-protocols libxkbcommon \
-    libdecor pipewire libpulse alsa-lib systemd-libs dbus
+    libdecor pipewire libpulse alsa-lib systemd-libs dbus libusb
 mkdir -p /usr/local/include/vma && cp /mnt/c/msys64/ucrt64/include/vma/vk_mem_alloc.h /usr/local/include/vma/
 make -j16 B=build-linux O=obj-linux     # in the repository, under /mnt/c/...
 ```

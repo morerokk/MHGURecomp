@@ -67,16 +67,26 @@ endif
 # every distribution has them (Ubuntu 24.04 / Linux Mint 22: no SDL3), and a distribution's own can need a newer glibc
 # than GLIBC_MAX. SDL still loads X11, Wayland, libdecor, PipeWire / PulseAudio / ALSA, udev... from the system when
 # it runs, as its shared library does. Needs cmake. SDL3=system / SHADERC=system link the system's libSDL3.so.0 /
-# libshaderc_shared.so.1 instead. (Windows: always MSYS2's, their DLLs bundled.)
-SDL3          ?= $(if $(filter windows,$(PLATFORM)),system,bundled)
+# libshaderc_shared.so.1 instead. Windows: shaderc is MSYS2's DLL, bundled; SDL3 is built here too, as SDL3.dll beside
+# the executable, because MSYS2's has no libusb: SDL talks to the Switch 2 controllers (Pro Controller, Joy-Con 2, NSO
+# GameCube) over USB bulk transfers through libusb, without it they never show up. SDL loads libusb-1.0.dll (MSYS2's
+# libusb, LGPL) when one is plugged in; bundle ships it. SDL3=system links MSYS2's SDL3.dll instead.
+SDL3          ?= bundled
 SHADERC       ?= $(if $(filter windows,$(PLATFORM)),system,bundled)
 SDL3_VER      := 3.4.18
 SDL3_SHA256   := 9c75cf16330322c217dedd2e0609f1124f1b54b8633e763467b4684d0f4334a3
 SDL3_TAR      := third_party/sdl3/SDL3-$(SDL3_VER).tar.gz
 SDL3_DIR      := $(O)/sdl3-$(SDL3_VER)
+ifeq ($(PLATFORM),windows)
+SDL3_CONF     := -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+SDL3_NEED     := HIDAPI HIDAPI_LIBUSB HIDAPI_LIBUSB_SHARED
+else
 SDL3_CONF     := -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
-# (what a player's desktop needs: the configure must find these, or SDL would quietly build without them)
-SDL3_NEED     := X11 WAYLAND WAYLAND_LIBDECOR PIPEWIRE PULSEAUDIO ALSA HIDAPI LIBUDEV DBUS
+# (what a player's desktop needs: the configure must find these, or SDL would quietly build without them; libusb:
+# the Switch 2 controllers, as on Windows - SDL loads libusb-1.0.so.0 from the system when one is plugged in)
+SDL3_NEED     := X11 WAYLAND WAYLAND_LIBDECOR PIPEWIRE PULSEAUDIO ALSA HIDAPI HIDAPI_LIBUSB HIDAPI_LIBUSB_SHARED \
+                 LIBUDEV DBUS
+endif
 # shaderc with the glslang and SPIRV-Tools / SPIRV-Headers releases it was released with, in one static library
 SHADERC_VER   := 2026.4
 GLSLANG_VER   := 16.6.0
@@ -95,6 +105,9 @@ CMAKE_BUILD   = cd $(1) && MAKEFLAGS= cmake -S src -B build -DCMAKE_BUILD_TYPE=R
 ifeq ($(SDL3),system)
 SDL_DEPS :=
 SDL_LIBS := -lSDL3
+else ifeq ($(PLATFORM),windows)
+SDL_DEPS := $(SDL3_DIR)/lib/libSDL3.dll.a
+SDL_LIBS := -L$(SDL3_DIR)/lib -lSDL3
 else
 SDL_DEPS := $(SDL3_DIR)/lib/libSDL3.a
 SDL_LIBS := $(SDL_DEPS) -pthread -lm
@@ -124,7 +137,7 @@ ZSTD_DEPS := $(ZSTD_DIR)/lib/libzstd.a
 ZSTD_LIBS := $(ZSTD_DEPS)
 endif
 # the libraries' headers, for everything compiled here (the stamps: built before anything includes them)
-LIB_INC    := $(if $(SDL_DEPS),-I$(SDL3_DIR)/include -DMHGU_SDL_BUNDLED) $(if $(SHADERC_DEPS),-I$(SHADERC_DIR)/include) \
+LIB_INC    := $(if $(SDL_DEPS),-I$(SDL3_DIR)/include $(if $(filter linux,$(PLATFORM)),-DMHGU_SDL_BUNDLED)) $(if $(SHADERC_DEPS),-I$(SHADERC_DIR)/include) \
               $(if $(ZSTD_DEPS),-I$(ZSTD_DIR)/include)
 LIB_STAMPS := $(if $(SDL_DEPS),$(SDL3_DIR)/.built) $(if $(SHADERC_DEPS),$(SHADERC_DIR)/.built) $(if $(ZSTD_DEPS),$(ZSTD_DIR)/.built)
 
@@ -469,11 +482,11 @@ $(SDL3_DIR)/.built: $(SDL3_TAR)
 	tar -xzf $< -C $(SDL3_DIR)/src --strip-components=1
 	$(call CMAKE_BUILD,$(SDL3_DIR),-DCMAKE_INSTALL_PREFIX="$(abspath $(SDL3_DIR))" $(SDL3_CONF),--target install)
 	@cd $(SDL3_DIR) && for n in $(SDL3_NEED); do grep -Eq "^-- +SDL_$${n} +\(Wanted: ON\): ON$$" configure.log || \
-	    { echo "sdl3: SDL $(SDL3_VER) was configured without SDL_$$n: install its development files (README.md, Linux)"; exit 1; }; done
+	    { echo "sdl3: SDL $(SDL3_VER) was configured without SDL_$$n: install its development files (README.md, Tools)"; exit 1; }; done
 	touch $@
 	@echo "sdl3: SDL $(SDL3_VER) built in $(SDL3_DIR)"
 
-$(SDL3_DIR)/lib/libSDL3.a: $(SDL3_DIR)/.built ;
+$(SDL3_DIR)/lib/libSDL3.a $(SDL3_DIR)/lib/libSDL3.dll.a: $(SDL3_DIR)/.built ;
 
 # the bundled shaderc: its release with glslang, SPIRV-Tools and SPIRV-Headers in its third_party/, built as one static
 # library (shaderc_combined) into $(SHADERC_DIR)/lib, its header into $(SHADERC_DIR)/include
@@ -535,7 +548,7 @@ $(B)/licenses/FFmpeg.txt: $(FFMPEG_DIR)/.built
 
 $(B)/licenses/SDL3.txt: $(SDL3_DIR)/.built
 	@mkdir -p $(dir $@)
-	@{ echo "This program contains SDL $(SDL3_VER), $(if $(ANDROID),as libSDL3.so,linked statically), under the zlib license (below). Its source code is"; \
+	@{ echo "This program contains SDL $(SDL3_VER), $(if $(ANDROID),as libSDL3.so,$(if $(filter windows,$(PLATFORM)),as SDL3.dll,linked statically)), under the zlib license (below). Its source code is"; \
 	   echo "https://github.com/libsdl-org/SDL/releases/download/release-$(SDL3_VER)/SDL3-$(SDL3_VER).tar.gz."; \
 	   echo; cat $(SDL3_DIR)/src/LICENSE.txt; } > $@
 $(B)/licenses/shaderc.txt: $(SHADERC_DIR)/.built
@@ -560,7 +573,8 @@ $(GAMELIB): $(GEN_OBJ) | $(EXE)
 PY := $(firstword $(wildcard tools/venv/Scripts/python.exe) $(wildcard tools/venv/bin/python) python3)
 
 # The build folder is the game folder: mhgurecomp.exe starts from it on its own (runtime/main.c), with
-# - bundle (Windows): the MSYS2 DLLs it needs beside it (tools/bundle_dlls.py; not the GPU driver's vulkan-1.dll)
+# - bundle (Windows): the MSYS2 DLLs it needs beside it (tools/bundle_dlls.py; not the GPU driver's vulkan-1.dll), with
+#   the SDL3.dll built here (--own) and the libusb-1.0.dll it loads at run time (--load)
 # - data: the game files from $(GAME) in $(B)/data/exefs and $(B)/data/romfs, once (hard links where the file system
 #   allows them - no second copy on disk, and deleting them leaves $(GAME) alone - else copies).
 # Nothing else: a player copies it as a whole into their game folder (or over it: their settings, caches, mods/ and
@@ -570,7 +584,7 @@ PY := $(firstword $(wildcard tools/venv/Scripts/python.exe) $(wildcard tools/ven
 LICENSE_PKGS := libstdc++ libgcc libwinpthread vulkan-memory-allocator glslang spirv-tools zlib zstd
 bundle: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER)
 	@$(PY) tools/bundle_dlls.py "$$(cygpath -m "$$(dirname "$$(command -v $(CC))")")" $(B) $^ \
-	    --licenses $(B)/licenses --with $(LICENSE_PKGS)
+	    $(if $(SDL_DEPS),--own $(SDL3_DIR)/bin --load libusb-1.0.dll) --licenses $(B)/licenses --with $(LICENSE_PKGS)
 
 data: $(B)/data/.complete
 $(B)/data/.complete:

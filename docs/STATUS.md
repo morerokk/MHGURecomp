@@ -1711,6 +1711,25 @@ refuses RWX memory keeps the interpreter (jit_tls, logged).
   5.34 -> 5.92 ms a frame, 60 fps unchanged. Off on the R9 (AMD's Windows driver). Checked on the Deck: rock broken,
   small monsters around, the pause screen: no flicker.
 
+## Switch 2 controllers on Windows: SDL3 built with libusb (2026-11-26)
+
+- Reported (0.18.3, Windows 11): a Switch 2 Pro Controller (057e:2069) over USB never shows up, no `[input] gamepad`
+  line. SDL's Switch 2 driver (SDL_hidapi_switch2.c) must send an init sequence over the bulk endpoints of USB
+  interface 1 before the controller reports anything, and does that through libusb; the Switch 2 controllers are on
+  SDL's libusb list (SDL_hidapi.c SDL_libusb_required), so without libusb they're skipped altogether. MSYS2's SDL3.dll
+  is built without it (no `SDL_HIDAPI_LIBUSB` string in it). Steam Input was the workaround.
+- The Windows build now makes SDL 3.4.18 from third_party/ like Linux and Android, as SDL3.dll (cmake, SDL3_CONF), with
+  libusb loaded at run time (SDL_LIBUSB_DYNAMIC "libusb-1.0.dll"); SDL3_NEED checks HIDAPI_LIBUSB(_SHARED) on both
+  desktops. bundle_dlls.py takes our SDL3.dll (--own) and MSYS2's libusb-1.0.dll (--load: not in any import table),
+  LGPL-2.1, in licenses/README.txt's written offer. libiconv-2.dll is gone (only MSYS2's SDL3 imported it). New build
+  needs: mingw-w64-ucrt-x86_64-cmake and -libusb; `SDL3=system` links MSYS2's SDL3.dll as before.
+- The Linux release already had libusb (Arch's libusb found by SDL's configure); it needs read/write access to the
+  device under /dev/bus/usb (udev rules such as Steam's).
+- Only devices on that libusb list are opened through libusb (the whitelist is on by default where a platform HID
+  backend exists); every other controller goes through SDL's usual Windows paths. Bluetooth Switch 2 is still a stub in
+  SDL 3.4.18. Checked: the game starts and loads libusb-1.0.dll and the new SDL3.dll; no Switch 2 controller here, so
+  the controller itself is untested.
+
 ## Next steps
 1. Modding tools: decode resident.arc tables (weapon00..14 Base/Level data: record layouts derivable from the game
    code that reads them), monster files per `arc/enemy/emXXX_YY.arc` (`attackdata`, `bodydata`, `dtbase`,

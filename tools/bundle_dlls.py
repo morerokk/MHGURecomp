@@ -1,10 +1,15 @@
 """Copy the DLLs a Windows build needs next to it, so the executable starts without MSYS2 on PATH.
 
-usage: python tools/bundle_dlls.py <dll dir> <out dir> <exe or dll>... [--licenses <dir> [--with <package>...]]
+usage: python tools/bundle_dlls.py <dll dir> <out dir> <exe or dll>... [--own <dir>]... [--load <dll>]...
+           [--licenses <dir> [--with <package>...]]
 
 Follows the import tables (and delay-load imports) of the given files recursively. A DLL found in <dll dir> (MSYS2's
 ucrt64/bin) is copied to <out dir> when missing or older; anything not found there is the system's (kernel32,
 ucrtbase...) and is left alone. vulkan-1.dll is never copied: the GPU driver's own loader (System32) must be used.
+
+--own: a folder of DLLs built here (SDL3.dll), found there before <dll dir>; copied the same way, their licenses not
+collected (the Makefile writes those). --load: a DLL loaded at run time with LoadLibrary rather than imported
+(libusb-1.0.dll, which SDL opens when a Switch 2 controller is plugged in), bundled as if imported.
 
 --licenses: the license files of the MSYS2 package behind each DLL copied, and of the packages named after --with
 (libraries linked in rather than shipped as DLLs, without the package prefix: libstdc++, glslang...), go to
@@ -113,7 +118,7 @@ def write_licenses(src, out, dlls, extra):
         if os.path.isdir(os.path.join(out, n)):
             shutil.rmtree(os.path.join(out, n))
     lines = ['Licenses of the third-party software in this game folder, besides LICENSE.txt (MHGU Recomp itself),',
-             'THIRD_PARTY_NOTICES.txt (code compiled into mhgurecomp.exe) and FFmpeg.txt.',
+             'THIRD_PARTY_NOTICES.txt (code compiled into mhgurecomp.exe), FFmpeg.txt and SDL3.txt.',
              '',
              'From MSYS2 (https://www.msys2.org/): each package\'s license files are in the folder of its name here, and its',
              'exact source (the upstream release and MSYS2\'s build recipe and patches) at the address given.', '']
@@ -150,34 +155,57 @@ def write_licenses(src, out, dlls, extra):
 
 def main():
     args = sys.argv[1:]
-    lic_dir, extra = None, []
-    if '--licenses' in args:
-        i = args.index('--licenses')
-        lic_dir = args[i + 1]
-        if '--with' in args:
-            extra = args[args.index('--with') + 1:]
-        args = args[:i]
-    src, out, roots = args[0], args[1], args[2:]
-    have = {n.lower(): n for n in os.listdir(src)}
+    lic_dir, extra, own, load = None, [], [], []
+    if '--with' in args:
+        extra = args[args.index('--with') + 1:]
+        args = args[:args.index('--with')]
+    rest = []
+    while args:
+        a = args.pop(0)
+        if a in ('--licenses', '--own', '--load'):
+            v = args.pop(0)
+            if a == '--licenses':
+                lic_dir = v
+            else:
+                (own if a == '--own' else load).append(v)
+        else:
+            rest.append(a)
+    src, out, roots = rest[0], rest[1], rest[2:]
+    have = {n.lower(): os.path.join(src, n) for n in os.listdir(src)}
+    msys = set(have)
+    for d in own:
+        for n in os.listdir(d):
+            if n.lower().endswith('.dll'):
+                have[n.lower()] = os.path.join(d, n)
+                msys.discard(n.lower())
     seen, todo, copied = set(), list(roots), 0
-    while todo:
-        for name in imports(todo.pop()):
+    pending = list(load)
+    while todo or pending:
+        for name in pending or imports(todo.pop()):
             k = name.lower()
-            if k in seen or k in NEVER or k not in have:
+            if k in seen or k in NEVER:
+                continue
+            if k not in have:
+                if name in pending:
+                    sys.exit(f'bundle_dlls: {name} (--load) is in neither {src} nor {own}')
                 continue
             seen.add(k)
-            s, t = os.path.join(src, have[k]), os.path.join(out, have[k])
-            if not os.path.exists(t) or os.path.getmtime(t) < os.path.getmtime(s):
+            s = have[k]
+            t = os.path.join(out, os.path.basename(s))
+            # (an own DLL also when its size differs: build/ may hold a newer copy of MSYS2's from an SDL3=system build)
+            if not os.path.exists(t) or os.path.getmtime(t) < os.path.getmtime(s) or \
+                    (k not in msys and os.path.getsize(t) != os.path.getsize(s)):
                 shutil.copy2(s, t)
                 copied += 1
             todo.append(s)
+        pending = []
     print(f'bundle_dlls: {len(seen)} DLLs needed, {copied} copied to {out}')
     for n in os.listdir(out):  # (MSYS2 DLLs an earlier build needed and this one doesn't)
         if n.lower().endswith('.dll') and n.lower() in have and n.lower() not in seen:
             os.remove(os.path.join(out, n))
             print(f'bundle_dlls: {n} not needed any more: removed')
     if lic_dir:
-        write_licenses(src, lic_dir, [have[k] for k in seen], extra)
+        write_licenses(src, lic_dir, [os.path.basename(have[k]) for k in seen if k in msys], extra)
 
 
 if __name__ == '__main__':
