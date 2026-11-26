@@ -133,6 +133,18 @@ static void down(int n = 1) {
         press(ImGuiKey_GamepadDpadDown);
 }
 static void tab() { press(ImGuiKey_GamepadR1); }
+// Down until a row has the focus, or across tabs (R1, or L1 backwards) until one does: the rows and tabs between
+// come and go as settings are added, so walks that only count rows go through these
+static void down_to(const char *name) {
+    for (int i = 0; i < 60 && ImGui::GetCurrentContext()->NavId != id(name); i++)
+        down();
+    selected(name);
+}
+static void tab_to(const char *name, ImGuiKey key = ImGuiKey_GamepadR1) {
+    for (int i = 0; i < 16 && ImGui::GetCurrentContext()->NavId != id(name); i++)
+        press(key);
+    selected(name);
+}
 static void back() { press(ImGuiKey_GamepadFaceRight); }
 static void confirm() { press(ImGuiKey_GamepadFaceDown); }
 int main() {
@@ -204,9 +216,9 @@ int main() {
     io.AddKeyEvent(ImGuiKey_GamepadR1, true);
     idle(35);
     selected("volume");  // (Audio first)
-    down(4);  // (mutebg, audio.output, show.fps, fps)
-    selected("fps");
     io.AddKeyEvent(ImGuiKey_GamepadR1, false);
+    idle();
+    down_to("fps");
     idle();
     // The frame rate: Confirm lists the common ones, left / right go a frame at a time
     confirm();
@@ -221,8 +233,7 @@ int main() {
     confirm();
     assert(config_editable().fps == 91);
     press(ImGuiKey_Home);
-    down(4);
-    selected("fps");
+    down_to("fps");
     confirm();
     selected("choice.2");  // (91 is none of them: the one below)
     press(ImGuiKey_GamepadDpadUp);
@@ -232,7 +243,7 @@ int main() {
     confirm();
     assert(config_editable().fps == 60);
     press(ImGuiKey_Home);
-    down(4);
+    down_to("fps");
     confirm();
     selected("choice.1");
     back();  // (Back closes the dropdown, nothing changed)
@@ -342,8 +353,39 @@ int main() {
     selected("code.join");  // (the Friends tab: Session code is disabled without a hub)
     tab();
     selected("sync");  // (the Hub heading first)
-    down(5);  // (lag compensation, village quests, urgent quests, hold A, then the HP heading is passed)
+    down_to("rewards.hold");
+    // The HP presets: two buttons on one line; left / right go between them, up / down treat the line as one row
+    down();
+    selected("hp.preset.1");  // (the HP heading passed)
+    press(ImGuiKey_GamepadDpadRight);
+    selected("hp.preset.2");
+    down();
     selected("hp.0");
+    press(ImGuiKey_GamepadDpadUp);
+    selected("hp.preset.1");  // (up onto the line: its left button)
+    down();
+    selected("hp.0");  // (down from the left button: past the right one)
+    press(ImGuiKey_GamepadDpadUp);
+    press(ImGuiKey_GamepadDpadRight);
+    press(ImGuiKey_GamepadDpadUp);
+    selected("rewards.hold");  // (up from the right button: past the left one)
+    down();
+    press(ImGuiKey_GamepadDpadRight);
+    assert(!settings_panel_dirty());
+    confirm();  // Rebalanced
+    selected("hp.preset.2");
+    assert(settings_panel_dirty());
+    press(ImGuiKey_GamepadFaceUp);  // (Y saves)
+    {
+        Config e = config_editable();
+        assert(e.hp.scale[0] == .74f && e.hp.scale[1] == 1.f && e.hp.scale[2] == 1.26f && e.hp.scale[3] == 1.48f);
+    }
+    press(ImGuiKey_Home);
+    down_to("hp.preset.1");
+    confirm();  // Original
+    press(ImGuiKey_GamepadFaceUp);
+    for (float v : config_editable().hp.scale)
+        assert(v == 1.f);
     tab();
     selected("mod.Aaa");
     // The Mods tab: the conflict scan runs on another thread; Aaa and Bbb both replace a.bin
@@ -595,16 +637,17 @@ int main() {
     assert(!strcmp(config_editable().save_location, "/games/MHGU saves"));
     { Config saved = config_editable(); assert(config_restart_required(&saved)); }
     press(ImGuiKey_Home);
-    down(11);
-    selected("save.location.reset");
+    down_to("save.location.reset");
     confirm();
     press(ImGuiKey_End);
     press(ImGuiKey_GamepadDpadUp);
     confirm();
     assert(!config_editable().save_location[0]);
     press(ImGuiKey_Home);
-    down(11);  // (Use the default folder: disabled again, skipped)
-    selected("restart");
+    down_to("save.location.pick");
+    down();
+    selected("backups");  // (Use the default folder: disabled again, skipped)
+    down_to("restart");
     confirm();
     selected("dialog.cancel");
     back();
@@ -628,13 +671,8 @@ int main() {
     assert(w->Size.x <= io.DisplaySize.x);
     assert(w->ContentSize.x <= w->InnerRect.GetWidth() + 1);
     float top = w->Pos.y;
-    press(ImGuiKey_GamepadL1);
-    press(ImGuiKey_GamepadL1);
-    press(ImGuiKey_GamepadL1);  // (Cheats, Mods, Misc)
-    selected("sync");  // (the Hub heading first)
-    down(5);  // (lag compensation, village quests, urgent quests, hold A, then the HP heading is passed)
-    selected("hp.0");
-    down(5);
+    tab_to("sync", ImGuiKey_GamepadL1);  // (Misc: the Hub heading first)
+    down_to("hp.advanced");
     confirm();
     idle();
     assert(w->Pos.y == top);
@@ -665,14 +703,8 @@ int main() {
     assert(w->Size.x <= 640);
     assert(w->Size.y <= 480);
     assert(w->ContentSize.x <= w->InnerRect.GetWidth() + 1);
-    press(ImGuiKey_GamepadL1);
-    press(ImGuiKey_GamepadL1);
-    press(ImGuiKey_GamepadL1);
-    press(ImGuiKey_GamepadL1);  // (Friends, Network, Controls, Graphics & Audio)
-    selected("volume");
-    down(15);  // (mutebg, audio.output, show.fps, fps, vsync, prewarm, msaa, fxaa, fxaamode, drawdist, aniso, smooth, kerning,
-               // boldtext, fsr)
-    selected("fsr");
+    tab_to("volume", ImGuiKey_GamepadL1);  // (Graphics & Audio)
+    down_to("fsr");
     confirm();
     assert(settings_panel_dirty());
     down();
