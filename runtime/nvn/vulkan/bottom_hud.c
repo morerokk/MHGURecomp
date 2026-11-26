@@ -29,7 +29,7 @@
 volatile bool g_bottom_hud_on;
 extern volatile int g_hudtrace_active;  // (exec.c)
 
-// ---- the MHXX bottom screen: its 320x240 picture stretched over the whole panel (screen_fit), with MHXX's panel
+// ---- the MHXX bottom screen: its 320x240 picture, centred on the panel at the largest whole fit, with MHXX's panel
 // base: a grid of 4 x 3 cells under the top bar (cell edges measured on MHXX's quest screen, test/mhxx-reference,
 // Azahar 2126.2). [Dual Screen] Panels places panels on it, as MHXX's Panel Customize does.
 static const int16_t cell_x[5] = {2, 81, 161, 240, 319}, cell_y[4] = {26, 97, 168, 237};
@@ -112,13 +112,10 @@ static void box_rect(int p, int i, float r[4]) {
     if (panel_boxes(p) == 1) r[2] = cell_x[placed[p].col + k->cols], r[3] = cell_y[placed[p].row + k->rows];
 }
 
-// The 3DS picture on the panel, from the upright size: sx, sy panel pixels per 3DS pixel across and down. The grid takes
-// the whole panel whatever its shape (a dual-screen handheld's bottom screen is seldom the 3DS's 4:3: no bars round
-// it), so its cells stretch; s, the smaller of the two, is for what keeps its shape (the frames' width, the D-pad's
-// cross; NULL when not wanted). The HUD pieces keep theirs inside their panels (replay).
-static void screen_fit(uint32_t w, uint32_t h, float *sx, float *sy, float *s) {
-    *sx = (float)w / 320.0f, *sy = (float)h / 240.0f;
-    if (s) *s = fminf(*sx, *sy);
+// The 3DS picture on the panel: scale and top left, from the upright size.
+static void screen_fit(uint32_t w, uint32_t h, float *scale, float *x0, float *y0) {
+    float s = (float)w / 320.0f < (float)h / 240.0f ? (float)w / 320.0f : (float)h / 240.0f;
+    *scale = s, *x0 = ((float)w - 320.0f * s) * 0.5f, *y0 = ((float)h - 240.0f * s) * 0.5f;
 }
 
 // In a quest: the quest clock (layer 103, its pieces at the top left) was drawn this frame or the last. The panels
@@ -311,16 +308,16 @@ static void fill_alpha(VkCommandBuffer cb, float x0, float y0, float x1, float y
 static void fill(VkCommandBuffer cb, float x0, float y0, float x1, float y1, Colour c) { fill_alpha(cb, x0, y0, x1, y1, c, 1.0f); }
 
 static void draw_panels(VkCommandBuffer cb) {
-    float sx, sy, s;
-    screen_fit(img_w, img_h, &sx, &sy, &s);
-    fill_alpha(cb, 0, 0, (float)img_w, (float)img_h, background(), background_alpha());
+    float s, ox, oy;
+    screen_fit(img_w, img_h, &s, &ox, &oy);
+    fill_alpha(cb, ox, oy, ox + 320.0f * s, oy + 240.0f * s, background(), background_alpha());
     for (int p = 0; p < nplaced; p++) {
         const Kind *k = &kinds[placed[p].kind];
         float r[4], x0 = 0, y0 = 0, x1 = 0, y1 = 0;
         for (int i = 0; i < panel_boxes(p); i++) {
             box_rect(p, i, r);
             float b = 2.0f * s;
-            x0 = r[0] * sx, y0 = r[1] * sy, x1 = r[2] * sx - sx, y1 = r[3] * sy - sy;
+            x0 = ox + r[0] * s, y0 = oy + r[1] * s, x1 = ox + r[2] * s - s, y1 = oy + r[3] * s - s;
             fill(cb, x0, y0, x1, y1, k->dark ? art_frame : pad_frame);
             fill(cb, x0 + b, y0 + b, x1 - b, y1 - b, k->dark ? art_fill : pad_fill);
         }
@@ -328,7 +325,7 @@ static void draw_panels(VkCommandBuffer cb) {
         if (t >= 0 && t / 3 == p) {  // (the touched part: a lit frame round it)
             float r[4];
             part_rect(p, t % 3, r);
-            float lx0 = r[0] * sx, ly0 = r[1] * sy, lx1 = r[2] * sx - sx, ly1 = r[3] * sy - sy, w = 2.0f * s;
+            float lx0 = ox + r[0] * s, ly0 = oy + r[1] * s, lx1 = ox + r[2] * s - s, ly1 = oy + r[3] * s - s, w = 2.0f * s;
             fill(cb, lx0, ly0, lx1, ly0 + w, lit), fill(cb, lx0, ly1 - w, lx1, ly1, lit);
             fill(cb, lx0, ly0, lx0 + w, ly1, lit), fill(cb, lx1 - w, ly0, lx1, ly1, lit);
         }
@@ -343,9 +340,9 @@ static void draw_panels(VkCommandBuffer cb) {
 // Panel thread: is upright pixel u, v of a w x h picture on a placed panel? Everywhere else the wallpaper shows. (By place,
 // not by the picture's alpha: the game's HUD pieces write alpha as they blend, inside the panels too.)
 bool bottom_hud_covers(uint32_t u, uint32_t v, uint32_t w, uint32_t h) {
-    float sx, sy;
-    screen_fit(w, h, &sx, &sy, NULL);
-    float x = (float)u / sx, y = (float)v / sy;
+    float s, ox, oy;
+    screen_fit(w, h, &s, &ox, &oy);
+    float x = ((float)u - ox) / s, y = ((float)v - oy) / s;
     for (int p = 0; p < nplaced; p++) {
         const Kind *k = &kinds[placed[p].kind];
         if (x >= cell_x[placed[p].col] && x < cell_x[placed[p].col + k->cols] && y >= cell_y[placed[p].row] &&
@@ -368,17 +365,18 @@ static void cpu_fill(uint32_t *px, uint32_t w, uint32_t h, float x0, float y0, f
 
 void bottom_hud_empty_picture(uint32_t *px, uint32_t w, uint32_t h, bool panels) {
     if (nplaced < 0) place_panels(g_config.bottom_panels[0] ? g_config.bottom_panels : BOTTOM_PANELS_DEFAULT);
-    float sx, sy, s;
-    screen_fit(w, h, &sx, &sy, &s);
+    float s, ox, oy;
+    screen_fit(w, h, &s, &ox, &oy);
     uint32_t a = background_alpha() > 0 ? 0xff : 0;
-    cpu_fill_alpha(px, w, h, 0, 0, (float)w, (float)h, background(), a);
+    cpu_fill_alpha(px, w, h, 0, 0, (float)w, (float)h, (Colour){0, 0, 0}, a);
+    cpu_fill_alpha(px, w, h, ox, oy, ox + 320.0f * s, oy + 240.0f * s, background(), a);
     if (!panels) return;  // (out of a quest: the background alone, so it shows the bottom screen is on)
     for (int p = 0; p < nplaced; p++) {
         const Kind *k = &kinds[placed[p].kind];
         for (int i = 0; i < panel_boxes(p); i++) {
             float r[4];
             box_rect(p, i, r);
-            float x0 = r[0] * sx, y0 = r[1] * sy, x1 = r[2] * sx - sx, y1 = r[3] * sy - sy, b = 2.0f * s;
+            float x0 = ox + r[0] * s, y0 = oy + r[1] * s, x1 = ox + r[2] * s - s, y1 = oy + r[3] * s - s, b = 2.0f * s;
             cpu_fill(px, w, h, x0, y0, x1, y1, k->dark ? art_frame : pad_frame);
             cpu_fill(px, w, h, x0 + b, y0 + b, x1 - b, y1 - b, k->dark ? art_fill : pad_fill);
         }
@@ -428,15 +426,15 @@ static void replay(VkCommandBuffer cb, const BottomDraw *d) {
     const Source *g = &kinds[placed[p].kind].src[sub];
     static const Source map_frame = {105.0f, 1030.0f, 130.0f, 1200.0f, 315.0f};
     if (placed[p].kind == K_MAP) g = map_src_found ? &map_src : &map_frame;
-    float sx, sy, r[4];
-    screen_fit(img_w, img_h, &sx, &sy, NULL);
+    float s, ox, oy, r[4];
+    screen_fit(img_w, img_h, &s, &ox, &oy);
     part_rect(p, sub, r);
     Source art_part;
     if (kinds[placed[p].kind].nsrc == 3) art_layout(d, sub, r, &art_part), g = &art_part;
-    float sw = (r[2] - r[0]) * sx, sh = (r[3] - r[1]) * sy;
+    float sw = (r[2] - r[0]) * s, sh = (r[3] - r[1]) * s;
     float k = sw / (g->x1 - g->x0) < sh / (g->y1 - g->y0) ? sw / (g->x1 - g->x0) : sh / (g->y1 - g->y0);
     float w = (g->x1 - g->x0) * k, h = (g->y1 - g->y0) * k;
-    float left = r[0] * sx + (sw - w) * 0.5f, top = r[1] * sy + (sh - h) * 0.5f;
+    float left = ox + r[0] * s + (sw - w) * 0.5f, top = oy + r[1] * s + (sh - h) * 0.5f;
     float vx = left - g->x0 * k, vy = top - g->y0 * k;
     // (flipped as exec.c set_viewport does, so the pieces come out as the game's own pass draws them)
     VkViewport vp = {vx, vy + 720.0f * k, 1280.0f * k, -720.0f * k, 0.0f, 1.0f};
@@ -544,9 +542,9 @@ void bottom_hud_touch(bool down, uint32_t u, uint32_t v) {
     int32_t rx = 0, ry = 0;
     atomic_store(&touched, -1);
     if (down && atomic_load(&want_w) && nplaced > 0) {
-        float sx, sy;
-        screen_fit(atomic_load(&want_w), atomic_load(&want_h), &sx, &sy, NULL);
-        float x = (float)u / sx, y = (float)v / sy;  // (3DS bottom screen pixels)
+        float s, ox, oy;
+        screen_fit(atomic_load(&want_w), atomic_load(&want_h), &s, &ox, &oy);
+        float x = ((float)u - ox) / s, y = ((float)v - oy) / s;  // (3DS bottom screen pixels)
         for (int p = 0; p < nplaced; p++) {
             const Kind *k = &kinds[placed[p].kind];
             float x0 = cell_x[placed[p].col], x1 = cell_x[placed[p].col + k->cols], y0 = cell_y[placed[p].row], y1 = cell_y[placed[p].row + k->rows];
