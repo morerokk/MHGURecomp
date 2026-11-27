@@ -44,15 +44,16 @@ static const char VEL_GLSL[] =
     "    imageStore(out_vel, p, vec4(ndc * 0.2495 + 0.5, 0.0, 0.0));\n"
     "}\n";
 
-// A fullscreen triangle with explicit locations and UVs: v = 0 at the top row (Vulkan image coordinates), so that
-// REQUEST_NDC_Y_UP in Qualcomm's shaders sees +y up in clip space, like the game's cameras.
+// A fullscreen triangle with explicit locations and UVs: v = 0 at the top row. The game's render textures have row 0
+// at the top of the screen (Vulkan image coordinates), so the UV is p itself, with no flip; REQUEST_NDC_Y_UP in
+// Qualcomm's shaders then turns v = 0 into +y up in clip space, like the game's cameras.
 static const char QUAD_VS[] =
     "#version 450\n"
     "layout(location = 0) out vec2 texCoord;\n"
     "void main() {\n"
     "    vec2 p = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);\n"
     "    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
-    "    texCoord = vec2(p.x, 1.0 - p.y);\n"
+    "    texCoord = p;\n"
     "}\n";
 
 // Qualcomm's sample keeps both history images RGBA16F. The port's H' is RGBA8 (the game's LDR picture), so a small
