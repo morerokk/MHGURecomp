@@ -31,8 +31,11 @@ enum {
 
 // [Monster HP]: factors on the HP multiplier of Hub-type quests' large monsters
 #define HP_QUESTS_MAX 256
-#define HP_SCALE_MIN 0.05f
-#define HP_SCALE_MAX 20.0f
+#define HP_SCALE_MIN 0.5f
+#define HP_SCALE_MAX 10.0f
+#define HP_VILLAGE_MIN 1.0f  // [Village Quests] HubHP: never below the Village quest's own HP
+// v clamped to lo..HP_SCALE_MAX (a value saved by an older version, or a hub host's); NaN gives lo
+static inline float hp_clamp(float v, float lo) { return v >= lo ? (v <= HP_SCALE_MAX ? v : HP_SCALE_MAX) : lo; }
 typedef struct {
     float scale[4];  // by the number of hunters (index: hunters - 1)
     float village;   // Village quests posted in the Hub / Pub: this first, then scale ([Village Quests] HubHP)

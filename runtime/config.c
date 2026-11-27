@@ -579,6 +579,7 @@ static const char DEFAULT_INI[] =
     "; Playercount-specific HP multipliers for monsters in Hub quests.\n"
     "; Only affects large monster health.\n"
     "; When joining a hub, the host's scaling settings are always used.\n"
+    "; From 0.5 to 10.\n"
     "; Default: 1.0\n"
     "1Player = 1.0\n"
     "2Players = 1.0\n"
@@ -595,6 +596,7 @@ static const char DEFAULT_INI[] =
     "\n"
     "; When playing a Village Quest from the Hub, first multiply the monster HP by this amount.\n"
     "; This amount is then scaled again by the [Monster HP] settings.\n"
+    "; From 1 to 10.\n"
     "; Default: 1.5\n"
     "HubHP = 1.5\n"
     "\n"
@@ -752,14 +754,15 @@ static bool parse_size(const char *v, int *w, int *h) {
 }
 
 // [Monster HP] factors: "0.6", "0.6x", or a comma separated list of up to four (squashed: no spaces). The count read,
-// 0 when one is not a number in HP_SCALE_MIN..HP_SCALE_MAX.
+// 0 when one is not a number. One outside HP_SCALE_MIN..HP_SCALE_MAX is brought to the nearer end (older versions
+// took 0.05-20, so a file may hold such a value).
 static int parse_factors(const char *v, float f[4]) {
     int n = 0;
     while (*v && n < 4) {
         char *end;
         float x = strtof(v, &end);
-        if (end == v || !(x >= HP_SCALE_MIN && x <= HP_SCALE_MAX)) return 0;
-        f[n++] = x;
+        if (end == v || !isfinite(x)) return 0;
+        f[n++] = hp_clamp(x, HP_SCALE_MIN);
         v = end + (*end == 'x');
         if (*v == ',') v++;
         else if (*v) return 0;
@@ -840,7 +843,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_GAME_FOLDER "Invalid game files folder (one line, no ';' or '#')."
 #define ERR_PANELS "Invalid bottom screen panel list (one line, no ';' or '#')."
 #define ERR_WALLPAPER "Invalid wallpaper file name (one line, no ';' or '#')."
-#define ERR_HP "HP factors must be 0.05-20."
+#define ERR_HP "HP factors must be 0.5-10."
 #define ERR_VILLAGE "Invalid village HP or quest override count."
 #define ERR_MOUSE "Mouse sensitivity must be 0.1-10 and smoothing 0-0.9."
 #define ERR_CONFIRM "Invalid menu confirmation policy."
@@ -952,7 +955,7 @@ const ConfigSetting g_settings[] = {
     {"Monster HP", "3Players|3Player", SET_FACTOR, F(hp.scale[2]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
     {"Monster HP", "4Players|4Player", SET_FACTOR, F(hp.scale[3]), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_HP},
     ON_OFF("Village Quests", "VillageQuestsInHub", village_in_hub, false),
-    {"Village Quests", "HubHP", SET_FACTOR, F(hp.village), 0, HP_SCALE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_VILLAGE},
+    {"Village Quests", "HubHP", SET_FACTOR, F(hp.village), 0, HP_VILLAGE_MIN, HP_SCALE_MAX, NULL, NULL, false, ERR_VILLAGE},
     ON_OFF("Quest Rewards", "HoldASend", quest_hold_send, false),
     // (crossplay: runtime/net reads these from g_config, so a change takes effect at the next start)
     {"Multiplayer", "RyuServers", SET_TEXT, F(ldn_ryu_servers), sizeof g_config.ldn_ryu_servers, 0, 0, NULL, NULL, true, ERR_CROSSPLAY},
@@ -1120,7 +1123,7 @@ bool config_parse(const ConfigSetting *s, const char *value, Config *c) {
     }
     case SET_FACTOR:
         if (parse_factors(v, f) != 1) return false;
-        *field_float(s, c) = f[0];
+        *field_float(s, c) = hp_clamp(f[0], s->min);  // (HubHP: from 1)
         return true;
     case SET_CHOICE:
         if (!spelled(s->choices, v, &index)) return false;

@@ -360,7 +360,7 @@ bool config_validate(const Config *c, char *error, size_t size) {
         for (int j = 0; j < i; j++)
             if (c->hp.quest[j].quest == c->hp.quest[i].quest) return fail(error, size, "Duplicate quest ID.");
         for (int j = 0; j < 4; j++)
-            if (!factor_valid(c->hp.quest[i].scale[j])) return fail(error, size, "Quest HP factors must be 0.05-20.");
+            if (!factor_valid(c->hp.quest[i].scale[j])) return fail(error, size, "Quest HP factors must be 0.5-10.");
     }
     if (size) *error = 0;
     return true;

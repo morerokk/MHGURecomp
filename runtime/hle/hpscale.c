@@ -14,6 +14,7 @@
 // The number of hunters is the quest's join count (sQuestSelector), as it was when the quest started.
 // Multiplayer: every game computes a monster's HP itself, so all must use the same factors: the hub's host sends its
 // settings to the others (ldn_send_aux), whose games use them instead of their own while they are in that hub.
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -215,11 +216,15 @@ void hpscale_aux_received(const void *data, uint32_t len) {
         memcpy(s.quest[i].scale, m + 24 + 20 * i, 16);
     }
     memcpy(&s.village, m + 20 + 20 * nq, 4);
-    if (!(s.village >= HP_SCALE_MIN && s.village <= HP_SCALE_MAX)) return;
-    for (int i = 0; i <= nq; i++)  // (a damaged or hostile message: keep to the range the ini allows)
+    // (a damaged message is dropped; a host on an older version, which took 0.05-20, or a hostile one is kept to the
+    // range the ini allows)
+    if (!isfinite(s.village)) return;
+    s.village = hp_clamp(s.village, HP_VILLAGE_MIN);
+    for (int i = 0; i <= nq; i++)
         for (int k = 0; k < 4; k++) {
-            float v = i < nq ? s.quest[i].scale[k] : s.scale[k];
-            if (!(v >= HP_SCALE_MIN && v <= HP_SCALE_MAX)) return;
+            float *v = i < nq ? &s.quest[i].scale[k] : &s.scale[k];
+            if (!isfinite(*v)) return;
+            *v = hp_clamp(*v, HP_SCALE_MIN);
         }
     pthread_mutex_lock(&g_lock);
     bool changed = !g_have_host || memcmp(g_host.scale, s.scale, 16) || g_host.quests != s.quests ||
