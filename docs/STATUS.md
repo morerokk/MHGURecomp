@@ -653,6 +653,21 @@ distance over the arrow's speed. The rig (outside the repo):
 C:\MHGURecompile\scratch-pierce\run.sh <tag> <fps>: quest 605 (Tigrex by the Tail) area 1, MHGU_DUMMY=1200 facing,
 MHGU_DUMMY_SCALE=1.0 (the quest's size roll, 0.82-0.96 seen, at object +0x60), MHGU_DUMMY_AIM (aim pitch, player
 +0x14b8), MHGU_LOG_SHOTPOS (hitsync.c); a Heavy Bowgun: L + X selects Pierce S Lv1, R held aims, X reloads, A fires.
+Second follow-up (2026-11-27, reporter: fixed at 60 fps, back at 120, with video): the critical distance isn't a
+distance but the shot's age. The shell's update works out its attack's motion value (+0x13e0, s16) from its age at the
+end of the update: Pierce S Lv1 13 -> 19 (x1.5) from age 14, back to 13 at 26, 10 from 42; the Bow's Pierce arrows
+(same field) 2 -> 3 from 16 to 32 (MHGU_LOG_SHELLSTEP=2 logs age and motion value per update). On the Switch updates end
+at multiples of 2 frames of age and a hit is found where one ends, so its age is the next multiple of 2 after the shot
+reached the part; here at the first update after that: at 120 fps 13 or 13.5 where the Switch has 14, outside the
+window (rig, NOGRID A/B at 1750 cm: first hits at 13.0 / 13.5 got 10, the head without x1.5). Not step jitter: steps at
+120 were 0.500 flat and the hits +4 frames of age apart. Fix (shellstep.c grid_before / grid_after, both shell types):
+each update runs with the Switch's age at the end of its update this one ends in (rounded up to a multiple of 2, put
+back after the update); and where the next hit is due (a bowgun shell 4 frames of flight after its last, an arrow at
+its hit_at) an update past it ends there, as the Switch's does, and the age keeps that: at 144 fps the 6-frame wait
+rounds up to 6.25 and the age ran 1/4 frame ahead per hit (hits now exactly +4 at 144 for both). Checked: every first
+hit at 12.5-13.75 at 120 / 144 / 240 fps gets the x1.5 (as the Switch's 14), at 12.0 not (as its 12), 30 fps untouched,
+arrows turn x1.5 at the update ending past 14 (Switch's 16) at 60 / 120 / 240. What stays different: a hit still lands
+where the shot first touches the part, up to 1.5 frames shallower than the Switch's (which part it hits, not how hard).
 
 Monster AI and the frame rate (2026-10-25): measured, no difference. f_276154(monster, group, index, flag) starts an
 enemy's new action (stores it at monster +0x73e0, sends it to the other players) for small and large monsters alike;

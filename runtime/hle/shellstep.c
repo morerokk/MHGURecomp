@@ -26,6 +26,13 @@
 // wait loses what the 30 fps game's next update would take off it, so the next hit lands at frame 4; the part of that
 // update past frame 4 (at 144 fps it ends at 4.17) moves nothing, so the arrow is where the 30 fps game has it then.
 //
+// Both: the critical distance. A shell's update works out its attack's motion value from its age (+0x1378): x1.5 from
+// one age to another (Pierce S Lv1 shells measured: 14 to 26 frames; Pierce arrows: 16 to 32). On the Switch its updates
+// end at multiples of 2 frames of age, and a hit is found where one ends: its age is the next multiple of 2 after the
+// shot reached the part. Here a hit lands at the first update after that, up to 1.5 frames younger at 120 fps, 13 or
+// 13.5 where the 30 fps game has 14, outside the window (reported after the fixes above: still 47, 47, 31 at 120 fps).
+// So each update runs with the 30 fps game's age at the end of its update this one ends in (`grid_before`).
+//
 // At 30 fps and below the original. MHGU_NO_SHELLSTEP=1: the original for both (for comparing). MHGU_LOG_SHELLSTEP=1:
 // what each does; 2: every update of every bowgun shell and arrow too.
 #include <math.h>
@@ -40,15 +47,19 @@
 #define SH_HITS       0x15d8u    // bowgun shell: u16, the monster hits it has taken (the u16 after it is something else)
 #define SH_AGE        0x1378u    // shell: f32, frames it has flown (not counting the update that took a hit)
 #define SH_AGE_WAS    0x137cu    // shell: f32, that at the start of the last update
+#define SH_MV         0x13e0u    // shell: s16, its attack's motion value (worked out by its update; x1.5 at critical distance)
 #define AR_VEL        0x1010u    // arrow: its velocity, per frame of 60 fps
 #define AR_SLOW       0x15ecu    // arrow: f32, the timer a hit starts; the update it runs out in slows the arrow
 #define AR_REARM      0x1404u    // shell: f32, set to 1 frame when that timer runs out, counted down by the step; the
                                  // next hit can land once it is 0
 #define STOP_FRAMES   2.0f       // how long the 30 fps game holds a shell on a hit: one update, step 2.0
 #define SWITCH_STEP   2.0f
+#define HIT_FLIGHT    4.0f       // frames a shell flies from a hit to its next (6 frames, the first 2 standing still)
 #define MAX_HELD      16
 
 static struct { uint32_t shell; float left; } g_held[MAX_HELD];  // shells still inside a stop, and how much of it is left
+// Bowgun shells whose next hit is still to come, and their age at the last
+static struct { uint32_t shell; float age; } g_last[MAX_HELD];
 // Arrows since a hit: frames since it (at the end of the last update), the frame the 30 fps game slows the arrow from
 // and the one its next hit lands at, of the frames after the slow-down so far all of them and those weighted by the
 // factor they were slowed by here, and whether the game's timer has run out.
@@ -62,15 +73,56 @@ static int held_slot(uint32_t s) {
     return -1;
 }
 
+static int last_slot(uint32_t s) {
+    for (int i = 0; i < MAX_HELD; i++)
+        if (g_last[i].shell == s) return i;
+    return -1;
+}
+
+// The age the update runs with: the 30 fps game's at the end of its update this one ends in. Its updates end at whole
+// 2-frame steps of age, so that is where it sees a hit's age, and the motion value goes by the age (Pierce's critical
+// distance: x1.5 from a set age to another, both multiples of 2 frames for the shots measured). Here a hit can land up
+// to a step after the shell reaches the part, up to 1.5 frames younger than the 30 fps game's at 120 fps, outside the
+// window if that is where it starts (reported: the same three hits, 47, 47, 31 at 120 fps). `due`, if > 0, is the age
+// at which the next hit is due (4 frames of flight after the last): an update past it ends there, as a 30 fps update
+// does, and the age keeps that (at 144 fps a wait for the next hit rounds up to whole updates, 6.25 frames, and the
+// age would run 1/4 frame ahead per hit). Returns what to take off again after the update (`grid_after`).
+typedef struct { float age0, end, end30, off; } Grid;
+static Grid grid_before(uint32_t s, float step, float due) {
+    Grid g = {LDF(s + SH_AGE), 0.0f, 0.0f, 0.0f};
+    g.end = g.end30 = g.age0 + step;
+    if (!(step > 0.0f && step < SWITCH_STEP)) return g;
+    if (due > 0.0f && g.age0 < due - 0.001f && g.end > due) g.end30 = due;
+    // (steps vary a little with the frame pacing: an age a hair past a 2-frame point is at it; and a hair past it after
+    // the update, which compares it with ages that are multiples of 2, rather than a rounding error short of it)
+    g.off = SWITCH_STEP * ceilf((g.end30 - 0.05f) / SWITCH_STEP) - g.end + 0.001f;
+    STF(s + SH_AGE, g.age0 + g.off);
+    return g;
+}
+static void grid_after(uint32_t s, const Grid *g) {
+    if (g->off == 0.0f && g->end30 == g->end) return;
+    float age = LDF(s + SH_AGE) - g->off;
+    if (age > g->age0 + 0.001f) age -= g->end - g->end30;  // (it flew: up to the hit that is due)
+    STF(s + SH_AGE, age), STF(s + SH_AGE_WAS, LDF(s + SH_AGE_WAS) - g->off);
+}
+
 static void update(Cpu *c) {
     uint32_t s = c->r[0];
     float step = LDF(s + SH_STEP), p0[3] = {LDF(s + SH_POS), LDF(s + SH_POS + 4), LDF(s + SH_POS + 8)};
     uint16_t hits = LD16(s + SH_HITS);
+    int l = last_slot(s);
+    // (forgotten once the next hit is no longer due, or for a new shell where an old one was)
+    if (l >= 0 && !(LDF(s + SH_AGE) >= g_last[l].age && LDF(s + SH_AGE) < g_last[l].age + HIT_FLIGHT)) g_last[l].shell = 0, l = -1;
+    Grid g = grid_before(s, step, l >= 0 ? g_last[l].age + HIT_FLIGHT : 0.0f);
     fnhook_call_original(c, FN_W04_UPDATE);
+    grid_after(s, &g);
     float p[3] = {LDF(s + SH_POS), LDF(s + SH_POS + 4), LDF(s + SH_POS + 8)};
     int k = held_slot(s);
     if (LD16(s + SH_HITS) != hits && step > 0.0f && step < STOP_FRAMES) {
         // (this update took a hit and stood still for it: the rest of the stop is still to come)
+        if (l < 0) l = last_slot(0);
+        if (l < 0) l = 0;
+        g_last[l].shell = s, g_last[l].age = LDF(s + SH_AGE);
         if (k < 0) k = held_slot(0);
         if (k < 0) k = 0;  // (more than MAX_HELD shells held at once: the oldest entry gives way)
         g_held[k].shell = s, g_held[k].left = STOP_FRAMES - step;
@@ -88,9 +140,9 @@ static void update(Cpu *c) {
     }
     if (g_log >= 2) {
         float dx = LDF(s + SH_POS) - p0[0], dy = LDF(s + SH_POS + 4) - p0[1], dz = LDF(s + SH_POS + 8) - p0[2];
-        LOG("[shellstep] %08x at %.1f %.1f %.1f, moved %.2f, step %.3f, hits %u\n", s, (double)LDF(s + SH_POS),
+        LOG("[shellstep] %08x at %.1f %.1f %.1f, moved %.2f, step %.3f, hits %u, age %.3f, was %.3f, mv %d\n", s, (double)LDF(s + SH_POS),
             (double)LDF(s + SH_POS + 4), (double)LDF(s + SH_POS + 8), (double)sqrtf(dx * dx + dy * dy + dz * dz), (double)step,
-            LD16(s + SH_HITS));
+            LD16(s + SH_HITS), (double)LDF(s + SH_AGE), (double)LDF(s + SH_AGE_WAS), (int)(int16_t)LD16(s + SH_MV));
     }
 }
 
@@ -107,9 +159,12 @@ static void arrow_update(Cpu *c) {
     float step = LDF(s + SH_STEP), timer0 = LDF(s + AR_SLOW);
     float p0[3] = {LDF(s + SH_POS), LDF(s + SH_POS + 4), LDF(s + SH_POS + 8)};
     float v0[3] = {LDF(s + AR_VEL), LDF(s + AR_VEL + 4), LDF(s + AR_VEL + 8)};
-    fnhook_call_original(c, FN_W10_UPDATE);
-    float timer = LDF(s + AR_SLOW);
     int k = arrow_slot(s);
+    Grid g = grid_before(s, step, k >= 0 ? LDF(s + SH_AGE) + g_arrow[k].hit_at - g_arrow[k].since : 0.0f);
+    fnhook_call_original(c, FN_W10_UPDATE);
+    grid_after(s, &g);
+    float timer = LDF(s + AR_SLOW);
+    k = arrow_slot(s);
     if (step > 0.0f && step < SWITCH_STEP && timer > timer0 + 0.001f) {
         // (a hit started the timer: its length is what is left plus this update's step; the 30 fps game's update that
         // empties it starts at the last whole update before its end, and its next hit lands when that update ends)
@@ -162,9 +217,9 @@ static void arrow_update(Cpu *c) {
     }
     if (g_log >= 2) {
         float dx = LDF(s + SH_POS) - p0[0], dy = LDF(s + SH_POS + 4) - p0[1], dz = LDF(s + SH_POS + 8) - p0[2];
-        LOG("[shellstep] arrow %08x at %.1f %.1f %.1f, moved %.2f, step %.3f, timer %.3f\n", s, (double)LDF(s + SH_POS),
+        LOG("[shellstep] arrow %08x at %.1f %.1f %.1f, moved %.2f, step %.3f, timer %.3f, age %.3f, mv %d\n", s, (double)LDF(s + SH_POS),
             (double)LDF(s + SH_POS + 4), (double)LDF(s + SH_POS + 8), (double)sqrtf(dx * dx + dy * dy + dz * dz), (double)step,
-            (double)timer);
+            (double)timer, (double)LDF(s + SH_AGE), (int)(int16_t)LD16(s + SH_MV));
     }
 }
 
