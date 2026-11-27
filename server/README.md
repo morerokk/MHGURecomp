@@ -18,7 +18,7 @@ One small executable, no database, no configuration file. Uses one port, TCP and
 
 ## Build
 
-Go 1.22 or newer (https://go.dev/dl/), nothing else:
+Go 1.22 or newer (https://go.dev/dl/):
 
 ```
 cd server
