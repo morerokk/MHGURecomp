@@ -868,9 +868,15 @@ runtime only): a monster attack's (+0x6d == 2) window is stretched when it start
 speed from its start at or past its end, where the 30 fps game's last test is; at 60 fps that test then lands at 0.00
 with the tail 66-139 units in, as at 30. Hit counts stay noisy either way (black slam landed 12-14/18 at 30 fps and
 12/18 at 60 before, ~15/18 after), so the per-update geometry is the evidence. MHGU_NO_ATKSTEP=1: the original,
-MHGU_LOG_ATKSTEP=1/2 logs. Not covered: the hunter's own attacks (same update, the same difference, left alone); the
-start of a window (high rates open it up to a step before the Switch's first test: more tests, not fewer). Debug aids
-(dummy.c / emtrace.c): MHGU_COLLTRACE=1/2, MHGU_HB_BLACK=1 / MHGU_HB_RAGE=1 (before each emact), MHGU_SUMMON_NOPIN=1,
+MHGU_LOG_ATKSTEP=1/2 logs. The hunter's own attacks (same update, +0x31 = 7: by the motion speed) were checked and left
+alone: every one measured (Great Sword testsave/save_0, Charge Blade testsave/ninja/save_guild, rig C:\MHGURecompile\
+scratch-melee, run.sh with SAVES / SEQ) has delay and window in whole 2-frame steps (4-60, 8-22) at speed 1, so the last
+test is at the window's end at 30 and 60 fps alike (MHGU_PLCOLL=2 at 30 / 60: last tests at -0.02 / -0.01); hitstop
+(speed 0.1 for ~10 frames) can put a window up to ~0.4 frames off that grid at 30 fps, after the swing has hit. Not
+covered: the start of a window (high rates open it up to a step before the Switch's first test: more tests, not fewer).
+Debug aids (dummy.c / emtrace.c): MHGU_COLLTRACE=1/2 (MHGU_COLLTRACE_PL=1: our hunter's attacks against hunters' targets
+instead), MHGU_PLCOLL=1/2 (our hunter's attacks against monsters, 0x36c0c0, hits via 0x370968; =2 drops the hits),
+MHGU_HB_BLACK=1 / MHGU_HB_RAGE=1 (before each emact), MHGU_SUMMON_NOPIN=1,
 MHGU_SUMMON_WALK=<units/s>; Hellblade's group 7 actions 200-252 (seen: 200, 227, 228, 234, 240, 245-248, 252).
 Explosions: the spawned blast objects (vtable 0x19f3104, window 9990) live ~300 ms at 30 fps and ~325 at 240, untouched.
 

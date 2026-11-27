@@ -291,13 +291,15 @@ void dummy_set(float dist, float turn) {
 static int g_in_big;
 static void coll_test(Cpu *c) {
     uint32_t at = c->r[1], owner = LD32(at + 0xc);
-    int big = owner && LD32(owner) == 0x19f1d44u;
+    static int ours = -1;  // (MHGU_COLLTRACE_PL=1: our hunter's attacks instead)
+    if (ours < 0) ours = getenv("MHGU_COLLTRACE_PL") != NULL;
+    int big = owner && (ours ? owner == local_player() : LD32(owner) == 0x19f1d44u);
     if (big) {
         uint32_t sys = LD32(0x2326764u);
         // (+0x13cc bit 2 of the target: it is skipped, 0x47c6f8; the attack's +0x38: its motion value and type)
-        LOG("[coll] %.1f ms step %.2f attack %08x open %.2f target %08x +13cc %02x atk+30 %08x +34 %08x +38 %08x\n",
+        LOG("[coll] %.1f ms step %.2f attack %08x open %.2f target %08x +13cc %02x atk+30 %08x +34 %08x +38 %08x kind %u\n",
             (double)(plat_now_ns() / 100000ull) / 10.0, sys ? (double)LDF(sys + 0x68) : 0.0, at, (double)LDF(at + 0x60), c->r[2],
-            LD8(c->r[2] + 0x13cc), LD32(at + 0x30), LD32(at + 0x34), LD32(at + 0x38));
+            LD8(c->r[2] + 0x13cc), LD32(at + 0x30), LD32(at + 0x34), LD32(at + 0x38), LD8(at + 0x6d));
     }
     g_in_big = big;
     fnhook_call_original(c, 0x36bb38u);
@@ -325,7 +327,32 @@ static void shape_sphere(Cpu *c) { shape_log(c, 0x368198u, "sphere"); }
 static void shape_capsule(Cpu *c) { shape_log(c, 0x367b5cu, "capsule"); }
 static void shape_three(Cpu *c) { shape_log(c, 0x3683dcu, "three"); }
 
+// (debug) MHGU_PLCOLL=1: our hunter's attacks against monsters (0x36c0c0: collision system, attack, target; its hits go
+// through 0x370968): each test with the attack's countdowns, and each hit it makes
+static uint32_t g_plcoll_at;
+static void plcoll_test(Cpu *c) {
+    uint32_t at = c->r[1], owner = LD32(at + 0xc), sys = LD32(0x2326764u);
+    bool ours = owner && owner == local_player();
+    if (ours)
+        LOG("[plcoll] %.1f ms step %.2f attack %08x delay %.2f open %.2f +38 %08x\n", (double)(plat_now_ns() / 100000ull) / 10.0,
+            sys ? (double)LDF(sys + 0x68) : 0.0, at, (double)LDF(at + 0x5c), (double)LDF(at + 0x60), LD32(at + 0x38));
+    g_plcoll_at = ours ? at : 0;
+    fnhook_call_original(c, 0x36c0c0u);
+    g_plcoll_at = 0;
+}
+static void plcoll_hit(Cpu *c) {
+    if (g_plcoll_at) LOG("[plcoll] hit: attack %08x open %.2f\n", g_plcoll_at, (double)LDF(g_plcoll_at + 0x60));
+    static int drop = -1;  // (=2: the hit is dropped, so the attack goes on testing that target while it overlaps)
+    if (drop < 0) drop = atoi(getenv("MHGU_PLCOLL")) == 2;
+    if (g_plcoll_at && drop) { c->r[0] = 0; return; }
+    fnhook_call_next(c, 0x370968u);
+}
+
 void dummy_init(void) {
+    if (getenv("MHGU_PLCOLL")) {
+        fnhook_set(0x36c0c0u, hle_register("dummy:plcoll", plcoll_test));
+        fnhook_set_outer(0x370968u, hle_register("dummy:plhit", plcoll_hit));
+    }
     if (getenv("MHGU_COLLTRACE")) {
         fnhook_set(0x36bb38u, hle_register("dummy:coll", coll_test));
         fnhook_set(0x368198u, hle_register("dummy:sphere", shape_sphere));

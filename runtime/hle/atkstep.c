@@ -16,8 +16,12 @@
 // update that reaches that point then tests last, with the shapes where the 30 fps game has them (exactly at 60 and
 // 120 fps; at 144 fps up to 0.4 frames past it). Earlier tests are as before (more of them than at 30 fps).
 //
-// Monster attacks only (+0x6d == 2); the hunter's own attacks run through the same update and could have the same
-// difference. At 30 fps and below nothing changes. MHGU_NO_ATKSTEP=1: the original; MHGU_LOG_ATKSTEP=1: each stretch;
+// Monster attacks only (+0x6d == 2). The hunter's own attacks run through the same update (and by the motion speed,
+// +0x31 = 7), but every one measured (Great Sword, Charge Blade: delays 4-60, windows 8-22) is a whole number of
+// 2-frame steps at speed 1, so their last test is at the window's end at 30 and 60 fps alike: left alone. (Hitstop
+// slows the countdown for ~10 frames, speed 0.1, and can leave a window up to ~0.4 frames off that grid at 30 fps,
+// after the swing has already hit: no difference worth copying.)
+// At 30 fps and below nothing changes. MHGU_NO_ATKSTEP=1: the original; MHGU_LOG_ATKSTEP=1: each window start;
 // 2: every monster attack counting down too. MHGU_ATKTRACE=1 (dummy.c) replaces this hook.
 #include <math.h>
 #include <stdlib.h>
@@ -44,7 +48,8 @@ static int g_log;
 
 static void update(Cpu *c) {
     uint32_t at = c->r[0], sys = LD32(G_SYS);
-    if (LD8(at + AT_KIND) != KIND_MONSTER) { fnhook_call_original(c, FN_ATK_UPDATE); return; }
+    uint8_t kind = LD8(at + AT_KIND);
+    if (kind != KIND_MONSTER) { fnhook_call_original(c, FN_ATK_UPDATE); return; }
     float step = sys ? LDF(sys + 0x68) : SWITCH_STEP, delay = LDF(at + AT_DELAY), open = LDF(at + AT_OPEN);
     int k = 0;
     while (k < SLOTS && g_seen[k].at != at) k++;
@@ -59,12 +64,10 @@ static void update(Cpu *c) {
         float grid = SWITCH_STEP * speed, end = (delay > 0.0f ? delay : 0.0f) + open;
         if (grid > 0.01f) {
             float last = grid * ceilf(end / grid - 0.001f), more = last - end;
-            if (more > 0.001f) {
-                STF(at + AT_OPEN, open + more);
-                if (g_log)
-                    LOG("[atkstep] attack %08x: delay %.2f, open %.2f -> %.2f (speed %.3f)\n", at, (double)delay, (double)open,
-                        (double)(open + more), (double)speed);
-            }
+            if (more > 0.001f) STF(at + AT_OPEN, open + more);
+            if (g_log)
+                LOG("[atkstep] attack %08x (kind %u, +0x38 %08x, +0x31 %02x): delay %.2f, open %.2f -> %.2f (speed %.3f)\n", at, kind,
+                    LD32(at + 0x38), LD8(at + AT_FLAGS), (double)delay, (double)open, (double)(more > 0.001f ? open + more : open), (double)speed);
         }
     }
     fnhook_call_original(c, FN_ATK_UPDATE);
