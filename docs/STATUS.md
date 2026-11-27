@@ -848,6 +848,31 @@ hunter; 0x1337300, kind 3) nor through 0x370968 against the hunter (MHGU_LOG_PLH
 the hunter lost HP); their timing wasn't traced, only measured as above. Scripts: scratch-glav run_fps.sh (ACTS,
 STARTS, REPS, GAP), hits2.py. Not covered: the black-tail state (the quest's Glavenus had its tail glowing from the
 start in every run), other monsters, 60 fps (only 30 and 240), the reporter's own setup.
+Found and fixed (2026-11-27, not yet confirmed by the reporter): monster attack windows end later on the Switch. The
+reporter's video (60 against 30 fps, the hunter standing at the base of the tail) and their Forge plugin (black tail at
+the start: status +0x1bb bit 3, copied to monster +0xcac8 so the action-start callback 0x100242c leaves it, countdown
+monster +0xcafc; the game's own way in is 7:248, the sharpening; always enraged: status +0x518 = 1, timer +0x514; every
+attack request 0x75574 turned into 7:247, the black-tail tail slam) pointed at the black-tail slam, which the tests above
+never used (7:82 is the glowing-tail one, and the sweep stopped at action 90). The hit test (0x36bb38: an attack's shapes,
+spheres and capsules at their current positions, against the target's capsule, 0x368198 / 0x367b5c / 0x3683dc; target
++0x13cc bit 2 skips it, 0x47c6f8; a hit goes to 0x378b00, which writes the hunter's hit record, applied in the hunter's
+update 0x49b6c0 -> 0x4f121c) has no previous positions, and the slam's shapes match at 30 and 60 fps at the same point
+of its window, so 60 fps tests a superset of 30's positions within the window. The difference is at its end: the attack
+update 0x36919c counts the delay (+0x5c) and then the window (+0x60) down by step x the owner's motion speed (+0x50c,
++0x31 bit 1), and switches the attack off (+0x05 = 0) only on the update after the one that took the window below 0;
+that one still tests, with the shapes where it has moved them, up to 2 frames x speed past the window's end at 30 fps,
+1 at 60, 1/4 at 240. 7:247's tail reaches the ground at the very end of its window (delay 82, window 20, speed 1.207
+enraged): the last test at 30 fps was at -1.85 frames with the tail 64-128 units into the hunter's capsule, at 60 fps at
+-0.65 with it from 8 units into it to 229 short (rig, forced misses, MHGU_COLLTRACE=2). Fix (runtime/hle/atkstep.c,
+runtime only): a monster attack's (+0x6d == 2) window is stretched when it starts to end at the first multiple of 2 x
+speed from its start at or past its end, where the 30 fps game's last test is; at 60 fps that test then lands at 0.00
+with the tail 66-139 units in, as at 30. Hit counts stay noisy either way (black slam landed 12-14/18 at 30 fps and
+12/18 at 60 before, ~15/18 after), so the per-update geometry is the evidence. MHGU_NO_ATKSTEP=1: the original,
+MHGU_LOG_ATKSTEP=1/2 logs. Not covered: the hunter's own attacks (same update, the same difference, left alone); the
+start of a window (high rates open it up to a step before the Switch's first test: more tests, not fewer). Debug aids
+(dummy.c / emtrace.c): MHGU_COLLTRACE=1/2, MHGU_HB_BLACK=1 / MHGU_HB_RAGE=1 (before each emact), MHGU_SUMMON_NOPIN=1,
+MHGU_SUMMON_WALK=<units/s>; Hellblade's group 7 actions 200-252 (seen: 200, 227, 228, 234, 240, 245-248, 252).
+Explosions: the spawned blast objects (vtable 0x19f3104, window 9990) live ~300 ms at 30 fps and ~325 at 240, untouched.
 
 Start in an area (2026-11-18, debug, runtime/hle/quickhunt.c): MHGU_START_AREA=<n> starts every hunt in area n of its map, by replacing the area the random start picked (town +0xc9, copied to sGameControl +0x49 by the town's move 0x8bdfd0 when departing) for low rank's camp too. With MHGU_QUICKHUNT=<quest>, straight from start-up into that area, e.g. MHGU_QUICKHUNT=204 MHGU_START_AREA=8 (Harvest Tour: Arctic Ridge). Checked on that: the game's pick was area 0, the hunter arrived on the snowfield of area 8 ("hunter in area 8" in the camera trace). An area number the map doesn't have is not checked. Not a teleport: it only acts when departing.
 

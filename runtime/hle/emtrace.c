@@ -262,6 +262,21 @@ static void frame(Cpu *c) {
         LOG("[em] emact %08x %u:%u mode %u (status %08x, scale %.4f)\n", en, g_req_group, g_req_index, g_req_mode, LD32(en + 0x1428u),
             (double)LDF(en + 0x60));
         g_forced = g_req_group | g_req_index << 8;
+        // MHGU_HB_BLACK=1: Hellblade Glavenus' black tail before each emact (status +0x1bb bit 3, copied to monster +0xcac8 so
+        // the action-start callback leaves it; its countdown is monster +0xcafc; the game's own way in is 7:248, the black-tail
+        // tail slam 7:247: from the reporter's plugin, 2026-11-27); MHGU_HB_RAGE=1: and enraged (status +0x518 = 1, timer +0x514)
+        if (getenv("MHGU_HB_BLACK")) {
+            uint32_t st = LD32(en + 0x1428u);
+            if (st) {
+                uint8_t t = (uint8_t)(LD8(st + 0x1bb) | 8);
+                ST8(st + 0x1bb, t), ST8(en + 0xcac8, t);
+                if (getenv("MHGU_HB_RAGE")) {  // (and enraged, as the plugin keeps it: +0x518 = 1, its f32 timer +0x514)
+                    ST8(st + 0x518, 1);
+                    if (!(LDF(st + 0x514) > 600.0f)) STF(st + 0x514, 3600.0f);
+                }
+                LOG("[em] emact: black tail set (%02x, countdown %08x)\n", t, LD32(en + 0xcafc));
+            }
+        }
         // MHGU_EMACT_PLACE="<cm> <degrees>" (or <cm>_<degrees>): first the monster put that far from our hunter (on the hunter's +z side), turned
         // so the hunter is that many degrees off its facing (0 ahead, + as its yaw grows): every forced action from the
         // same start. Several "<cm> <degrees>" pairs separated by ';' are used in turn, one per emact.
@@ -280,6 +295,8 @@ static void frame(Cpu *c) {
             uint32_t gc = LD32(0x1a8ca48u), sp = LD32(0x1a85b58u), slot = gc ? LD32(gc + 0x30) : 4;
             uint32_t pl = sp && slot < 4 ? LD32(sp + 0x1c + 4 * slot) : 0, info = LD32(en + 0x1428u);
             if (pl && info) {
+                void dummy_walk_reset(uint32_t);  // (MHGU_SUMMON_WALK starts over: dummy.c)
+                dummy_walk_reset(pl);
                 STF(info + 0x40, LDF(pl + 0x40)), STF(info + 0x44, LDF(pl + 0x44)), STF(info + 0x48, LDF(pl + 0x48) + pd);
                 float h = 3.14159265f - pr * 0.0174532925f;  // (the bearing to the hunter is pi, along -z)
                 ST32(info + 0x54, (uint32_t)(int32_t)(h / 6.28318531f * 65536.0f) & 0xffffu);

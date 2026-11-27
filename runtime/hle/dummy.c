@@ -160,6 +160,13 @@ static void keep_hp(void) {
 }
 
 static uint32_t g_updates;  // collision updates so far (the hit log's clock)
+static int g_walk_reset;    // (MHGU_SUMMON_WALK) a forced action started: the walk starts over from the first spot
+static float g_walk_t, g_anchor[3];
+static bool g_anchored;
+void dummy_walk_reset(uint32_t pl) {  // (from emtrace's emact, before it places the monster: the hunter back to its spot)
+    if (g_anchored && pl) STF(pl + OBJ_POS, g_anchor[0]), STF(pl + OBJ_POS + 8, g_anchor[2]);
+    g_walk_reset = 1;
+}
 
 static void collision(Cpu *c) {
     g_updates++;
@@ -211,8 +218,19 @@ static void collision(Cpu *c) {
                 STF(pl + OBJ_POS + 4, far ? pin[1] : LDF(pos + 4));
                 STF(pl + OBJ_POS + 8, z);
             }
-        } else if (pl && g_summoned) {
+        } else if (pl && g_summoned && !getenv("MHGU_SUMMON_NOPIN")) {  // (MHGU_SUMMON_NOPIN=1: left where pushes put it)
             if (pin_pl != pl) pin_pl = pl, pin[0] = LDF(pl + OBJ_POS), pin[1] = LDF(pl + OBJ_POS + 4), pin[2] = LDF(pl + OBJ_POS + 8);
+            // (MHGU_SUMMON_WALK=<units a second>: the pinned spot slides along +x for 3 s after each forced action
+            // starts, a hunter walking past; back to the first spot at the next one, emtrace.c)
+            static float walk = -1.0f;
+            if (walk < 0.0f) walk = getenv("MHGU_SUMMON_WALK") ? strtof(getenv("MHGU_SUMMON_WALK"), NULL) : 0.0f;
+            uint32_t sysw = LD32(0x2326764u);
+            if (!g_anchored) g_anchored = true, g_anchor[0] = pin[0], g_anchor[1] = pin[1], g_anchor[2] = pin[2];
+            if (g_walk_reset) g_walk_reset = 0, g_walk_t = 0.0f, pin[0] = g_anchor[0], pin[2] = g_anchor[2];
+            if (walk > 0.0f && sysw && g_walk_t < 3.0f) {  // (for 3 s after each forced action starts)
+                float dt = LDF(sysw + 0x68) / 60.0f;
+                g_walk_t += dt, pin[0] += walk * dt;
+            }
             STF(pl + OBJ_POS, pin[0]), STF(pl + OBJ_POS + 4, pin[1]), STF(pl + OBJ_POS + 8, pin[2]);
         }
     } else {
@@ -266,8 +284,56 @@ void dummy_set(float dist, float turn) {
     LOG("[dummy] now %.0f cm in front, turned %.0f degrees from the hunter's heading\n", (double)g_dist, (double)g_turn);
 }
 
+// (debug) MHGU_COLLTRACE=1: the test of an attack against a target (0x36bb38: collision system, attack, target) for the
+// large monster's attacks, and each shape test under it (0x368198 sphere / 0x367b5c capsule / 0x3683dc: attack shape,
+// target shape, out) with both shapes and the result; =2: every shape test misses, so a whole window is traced. The
+// shapes are where the update has put them: no previous positions, no sweep
+static int g_in_big;
+static void coll_test(Cpu *c) {
+    uint32_t at = c->r[1], owner = LD32(at + 0xc);
+    int big = owner && LD32(owner) == 0x19f1d44u;
+    if (big) {
+        uint32_t sys = LD32(0x2326764u);
+        // (+0x13cc bit 2 of the target: it is skipped, 0x47c6f8; the attack's +0x38: its motion value and type)
+        LOG("[coll] %.1f ms step %.2f attack %08x open %.2f target %08x +13cc %02x atk+30 %08x +34 %08x +38 %08x\n",
+            (double)(plat_now_ns() / 100000ull) / 10.0, sys ? (double)LDF(sys + 0x68) : 0.0, at, (double)LDF(at + 0x60), c->r[2],
+            LD8(c->r[2] + 0x13cc), LD32(at + 0x30), LD32(at + 0x34), LD32(at + 0x38));
+    }
+    g_in_big = big;
+    fnhook_call_original(c, 0x36bb38u);
+    g_in_big = 0;
+}
+static void shape_log(Cpu *c, uint32_t fn, const char *kind) {
+    uint32_t a = c->r[0], t = c->r[1];
+    if (!g_in_big) { fnhook_call_original(c, fn); return; }
+    float A[9], T[7];  // (a sphere: centre +0, radius +0xc; the others: ends +0 and +0x10, radius +0x20)
+    for (int i = 0; i < 4; i++) A[i] = LDF(a + 4u * (uint32_t)i);
+    for (int i = 0; i < 3; i++) A[4 + i] = LDF(a + 0x10u + 4u * (uint32_t)i);
+    A[7] = LDF(a + 0x20);
+    for (int i = 0; i < 3; i++) T[i] = LDF(t + 4u * (uint32_t)i), T[3 + i] = LDF(t + 0x10u + 4u * (uint32_t)i);
+    T[6] = LDF(t + 0x20);
+    fnhook_call_original(c, fn);
+    static int nohit = -1;
+    if (nohit < 0) nohit = atoi(getenv("MHGU_COLLTRACE")) == 2;
+    int got = (int)c->r[0];
+    if (nohit) c->r[0] = 0;  // (=2: every shape test misses, so the whole window is traced)
+    LOG("[shape] %s %d: %.1f %.1f %.1f w %.1f / %.1f %.1f %.1f r %.1f | hunter %.1f %.1f %.1f - %.1f %.1f %.1f r %.1f\n", kind,
+        got, (double)A[0], (double)A[1], (double)A[2], (double)A[3], (double)A[4], (double)A[5], (double)A[6],
+        (double)A[7], (double)T[0], (double)T[1], (double)T[2], (double)T[3], (double)T[4], (double)T[5], (double)T[6]);
+}
+static void shape_sphere(Cpu *c) { shape_log(c, 0x368198u, "sphere"); }
+static void shape_capsule(Cpu *c) { shape_log(c, 0x367b5cu, "capsule"); }
+static void shape_three(Cpu *c) { shape_log(c, 0x3683dcu, "three"); }
+
 void dummy_init(void) {
-    if (getenv("MHGU_ATKTRACE")) fnhook_set(FN_ATK_UPDATE, hle_register("dummy:atk", atk_update));
+    if (getenv("MHGU_COLLTRACE")) {
+        fnhook_set(0x36bb38u, hle_register("dummy:coll", coll_test));
+        fnhook_set(0x368198u, hle_register("dummy:sphere", shape_sphere));
+        fnhook_set(0x367b5cu, hle_register("dummy:capsule", shape_capsule));
+        fnhook_set(0x3683dcu, hle_register("dummy:three", shape_three));
+    }
+    // (it replaces atkstep.c's hook on the same function: debugging only)
+    if (getenv("MHGU_ATKTRACE") && *getenv("MHGU_ATKTRACE") == '1') fnhook_set(FN_ATK_UPDATE, hle_register("dummy:atk", atk_update));
     const char *e = getenv("MHGU_SUMMON");
     if (e && *e && atoi(e) > 0) {
         g_summon = (float)atoi(e);

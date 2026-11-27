@@ -84,6 +84,7 @@ static void boot(const char *root) {
     mashrate_init();  // (mashing out of a stun at high frame rates: runtime/hle/mashrate.c)
     hatestep_init();  // (monsters' attention scores and noticing meters at high frame rates: runtime/hle/hatestep.c)
     shellstep_init();  // (bowgun Pierce shots held on a hit as at 30 fps: runtime/hle/shellstep.c)
+    atkstep_init();  // (monster attack windows' last hit test where the 30 fps game makes it: runtime/hle/atkstep.c)
     inflate_init();  // (zlib's inflate_fast as host code, for loading: runtime/hle/inflate.c)
     fastload_init();  // (shorter transitions when not in a network session: runtime/hle/fastload.c)
     movelog_init();  // (debug, MHGU_LOG_MOVES: runtime/hle/movelog.c)
