@@ -41,6 +41,12 @@ static inline void sgsr2_params(Sgsr2Params *p, const float clip[16], uint32_t r
                                 const float jitter[2], float fovy, bool same, bool reset, int same_frames) {
     memset(p, 0, sizeof *p);
     memcpy(p->clip, clip, sizeof p->clip);  // row-vector order: GLSL sees its transpose, which is what convert needs
+    // At a history reset fsr.c has no previous camera and leaves its matrix all zero: the convert shader would then
+    // divide 0 by 0 (PreClip.w = 0) and NaN handling differs between drivers. Identity = no camera motion.
+    if (reset) {
+        memset(p->clip, 0, sizeof p->clip);
+        p->clip[0] = p->clip[5] = p->clip[10] = p->clip[15] = 1.0f;
+    }
     p->render[0] = (float)rw, p->render[1] = (float)rh;
     p->output[0] = (float)ow, p->output[1] = (float)oh;
     p->render_rcp[0] = 1.0f / rw, p->render_rcp[1] = 1.0f / rh;
