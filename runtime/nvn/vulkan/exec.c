@@ -2465,6 +2465,7 @@ typedef struct {
     uint64_t chash[2], ck;  // program cache: hashes of the vertex / fragment code, the lookup key
     long src_off;           // program cache: where its sources are in programs.src (when src_saved)
     uint32_t vlen, flen;
+    uint64_t shash;         // program cache: hash of those sources (load_program checks them)
     bool src_saved;
     bool wanted;            // (under ready_lock) a draw needs it: a prewarm build goes on to make its modules
     struct Pipe *prewarm;   // pipelines of earlier runs to build once this is (pipeline cache)
@@ -2609,6 +2610,7 @@ typedef struct {
     ShaderInfo vi, fi;  // (msl: NULL)
     uint64_t src_off;   // its sources in programs.src: vlen + flen bytes there
     uint32_t vlen, flen;
+    uint64_t shash;     // src_hash of them
 } ProgRec;
 #define PROGREC_MAGIC 0x31475250u  // "PRG1"
 #define PROGCACHE_PATH "cache/programs.bin"
@@ -2616,7 +2618,16 @@ typedef struct {
 static FILE *progcache_f, *progsrc_f;
 static bool progcache_on;
 typedef struct { char magic[8]; uint64_t stamp; } CacheHeader;
-#define CACHE_FORMAT 1  // bump when what a programs.bin / pipelines.bin record means changes here (ProgRec, PipeKey)
+#define CACHE_FORMAT 2  // bump when what a programs.bin / pipelines.bin record means changes here (ProgRec, PipeKey)
+// Another game started from this folder holds cache/lock: this one reads the caches and adds nothing to them (two
+// writers appending at once spliced programs into each other's sources in programs.src: a player's sky went white).
+static bool cache_readonly;
+
+static uint64_t src_hash(const char *vs, uint32_t vlen, const char *fs, uint32_t flen) {
+    uint64_t h = hash_words(0x6a09e667f3bcc909ull ^ vlen, vs, vlen);
+    h = hash_words(h ^ flen, fs, flen);
+    return h ? h : 1;
+}
 static void pipecache_init(const CacheHeader *hdr);
 static void plist_load(void);
 static void plist_export_finish(void);
@@ -2675,6 +2686,8 @@ static FILE *progcache_rf;  // reads dormant programs' sources back from program
 static pthread_mutex_t progcache_rlock = PTHREAD_MUTEX_INITIALIZER;
 
 // A dormant program's sources, read back from programs.bin, then built (its SPIR-V is in cache/spirv: file reads).
+// Sources that don't match their hash (damaged: see cache_readonly; a disk error) are translated again from the game's
+// code, when it is still where the record says (code_hash), and the new record replaces the damaged one next run.
 static void load_program(void *arg) {
     Prog *p = arg;
     char *vs = malloc(p->vlen + 1), *fs = malloc(p->flen + 1);
@@ -2682,6 +2695,21 @@ static void load_program(void *arg) {
     bool ok = progcache_rf && !fseek(progcache_rf, p->src_off, SEEK_SET) && fread(vs, 1, p->vlen, progcache_rf) == p->vlen &&
               fread(fs, 1, p->flen, progcache_rf) == p->flen;
     pthread_mutex_unlock(&progcache_rlock);
+    if (ok && src_hash(vs, p->vlen, fs, p->flen) != p->shash) {
+        ok = false;
+        bool again = code_hash(p->code[0], p->cmax[0], 0) == p->chash[0] && code_hash(p->code[1], p->cmax[1], 1) == p->chash[1];
+        static _Atomic int nlog;
+        if (atomic_fetch_add(&nlog, 1) < 10)
+            LOG("[shader] program cache: program %016llx's sources in programs.src are damaged: %s\n", (unsigned long long)p->ck,
+                again ? "translated again" : "its code moved, not drawn");
+        if (again) {
+            free(vs);
+            free(fs);
+            p->src_saved = false;
+            run_translate(translate_program, p);  // (translate_core gives it new vi / fi; the record's are left behind)
+            return;
+        }
+    }
     if (!ok) { free(vs); free(fs); set_state(&p->state, 2, p->t_req); prewarm_pipelines(p); return; }
     vs[p->vlen] = fs[p->flen] = 0;
     p->vi->msl = vs;
@@ -2703,10 +2731,12 @@ static void progcache_open(void) {
     hdr.stamp = hash_words(hdr.stamp, (uint64_t[]){(uint64_t)es.st_size, (uint64_t)es.st_mtime}, 16);
 #endif
     mkdir("cache", 0755);
+    cache_readonly = !plat_lock_file("cache/lock");
     uint64_t t0 = plat_now_ns();
     int n = 0, used = 0;
     long good = 0;
-    FILE *f = fopen(PROGCACHE_PATH, "r+b"), *sf = fopen(PROGSRC_PATH, "r+b");
+    const char *mode = cache_readonly ? "rb" : "r+b";
+    FILE *f = fopen(PROGCACHE_PATH, mode), *sf = fopen(PROGSRC_PATH, mode);
     if (f && sf && fread(&fh, sizeof fh, 1, f) == 1 && !memcmp(&fh, &hdr, sizeof hdr)) {
         good = (long)sizeof hdr;
         fseek(sf, 0, SEEK_END);
@@ -2716,19 +2746,22 @@ static void progcache_open(void) {
             if (r.magic != PROGREC_MAGIC || r.size != sizeof r || r.vlen > (16u << 20) || r.flen > (16u << 20)) break;
             if (r.src_off + r.vlen + r.flen > send) break;  // (its sources cut short by a killed run)
             good = ftell(f);
-            long src = (long)r.src_off;
             Prog **slot = progcache_slot(r.ck, true);
-            if (!slot || *slot) continue;  // (a duplicate: translated twice in a run)
-            Prog *p = calloc(1, sizeof *p);
+            if (!slot) continue;
+            // (a later record of the same program wins: translated twice in a run, or again over damaged sources)
+            Prog *p = *slot;
+            if (p) { free(p->vi); free(p->fi); }
+            else { p = calloc(1, sizeof *p); n++; }
             p->vi = malloc(sizeof *p->vi);
             p->fi = malloc(sizeof *p->fi);
             *p->vi = r.vi;
             *p->fi = r.fi;
             p->vi->msl = p->fi->msl = NULL;
-            p->src_off = src;
+            p->src_off = (long)r.src_off;
             p->src_saved = true;
             p->vlen = r.vlen;
             p->flen = r.flen;
+            p->shash = r.shash;
             memcpy(p->code, r.code, sizeof p->code);
             memcpy(p->cmax, r.cmax, sizeof p->cmax);
             memcpy(p->chash, r.chash, sizeof p->chash);
@@ -2737,10 +2770,16 @@ static void progcache_open(void) {
             p->fkey = r.fkey;
             atomic_store(&p->state, 3);
             *slot = p;
-            n++;
         }
-        fseek(f, good, SEEK_SET);
-        if (ftruncate(fileno(f), good)) {}  // (a record cut short by a killed run)
+        if (!cache_readonly) {
+            fseek(f, good, SEEK_SET);
+            if (ftruncate(fileno(f), good)) {}  // (a record cut short by a killed run)
+        }
+    } else if (cache_readonly) {  // (the other game is making it anew: nothing to read yet)
+        if (f) fclose(f);
+        if (sf) fclose(sf);
+        LOG("[shader] program cache: another game started from this folder is making cache/ anew: not used\n");
+        return;
     } else {
         if (f) fclose(f);
         if (sf) fclose(sf);
@@ -2749,11 +2788,18 @@ static void progcache_open(void) {
         if (f) fwrite(&hdr, sizeof hdr, 1, f);
     }
     if (!f || !sf) { if (f) fclose(f); if (sf) fclose(sf); return; }
-    fflush(f);
-    fseek(sf, 0, SEEK_END);
-    progcache_f = f;
-    progsrc_f = sf;
-    progcache_rf = fopen(PROGSRC_PATH, "rb");
+    if (cache_readonly) {
+        fclose(f);
+        progcache_rf = sf;
+        LOG("[shader] program cache: another game started from this folder is using cache/: read only (this one's new "
+            "programs aren't kept)\n");
+    } else {
+        fflush(f);
+        fseek(sf, 0, SEEK_END);
+        progcache_f = f;
+        progsrc_f = sf;
+        progcache_rf = fopen(PROGSRC_PATH, "rb");
+    }
     progcache_on = true;
     pipecache_init(&hdr);  // (attaches the recorded pipelines to their programs before these are built)
     plist_load();          // (and the shipped list's whose programs are in programs.bin)
@@ -2799,6 +2845,7 @@ static void progcache_store(Prog *p) {
     r.vi.msl = r.fi.msl = NULL;
     r.vlen = (uint32_t)strlen(p->vi->msl);
     r.flen = (uint32_t)strlen(p->fi->msl);
+    r.shash = src_hash(p->vi->msl, r.vlen, p->fi->msl, r.flen);
     r.size = (uint32_t)sizeof r;
     long at = ftell(progsrc_f);
     if (at < 0 || fwrite(p->vi->msl, 1, r.vlen, progsrc_f) != r.vlen || fwrite(p->fi->msl, 1, r.flen, progsrc_f) != r.flen) return;
@@ -2809,6 +2856,7 @@ static void progcache_store(Prog *p) {
         p->src_saved = true;
         p->vlen = r.vlen;
         p->flen = r.flen;
+        p->shash = r.shash;
     }
     fflush(progcache_f);
 }
@@ -3084,7 +3132,7 @@ static void pipecache_init(const CacheHeader *hdr) {
     CacheHeader fh;
     int n = 0;
     long good = 0;
-    FILE *f = fopen(PIPECACHE_PATH, "r+b");
+    FILE *f = fopen(PIPECACHE_PATH, cache_readonly ? "rb" : "r+b");
     if (f && fread(&fh, sizeof fh, 1, f) == 1 && !memcmp(fh.magic, "MHGUPRG", 8) &&
         fh.stamp == hash_words(hdr->stamp, (uint64_t[]){sizeof(PipeRec)}, 8)) {
         good = (long)sizeof fh;
@@ -3103,8 +3151,14 @@ static void pipecache_init(const CacheHeader *hdr) {
             (*c)->prewarm = pp;
             n++;
         }
-        fseek(f, good, SEEK_SET);
-        if (ftruncate(fileno(f), good)) {}
+        if (cache_readonly) { fclose(f); f = NULL; }  // (progcache_open: another game writes it)
+        else {
+            fseek(f, good, SEEK_SET);
+            if (ftruncate(fileno(f), good)) {}
+        }
+    } else if (cache_readonly) {
+        if (f) fclose(f);
+        f = NULL;
     } else {
         if (f) fclose(f);
         f = fopen(PIPECACHE_PATH, "wb");

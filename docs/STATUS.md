@@ -583,6 +583,24 @@ alone are more than 848 MB): a 3D resolution above 1920x1080 + 640 MB / 64 is lo
 demo at 4320x2430 crashed at 30 and 120 fps and played at 1280x720 at 30 and 120 fps; with the fix it plays at
 4320x2430. Not tested: multiplayer at a large render size (four hunters, more of the heap in use), FSR with a large output.
 
+## Damaged shader cache: the sky white for one player (2026-11-28)
+
+Report (0.20.5, RTX 4050 laptop, only this player): looking up at the sky turns the screen almost white behind the HUD
+(standing, the picture is fine). Their log has two "vs: GLSL compile failed" whose sources are two programs spliced
+together (a vertex shader cut off mid-line, then "#version 460" of another; one "vs" holds fragment code). Those come
+from cache/programs.src, which every run appends to: nothing stopped two games started from one folder (a double
+launch) from appending at once, each at its own idea of the file's end, so records point at text the other game wrote
+over. Only the splice points fail to compile; a record whose whole range was overwritten builds another program's
+shader without an error, which is how a sky / bloom pass can draw the wrong thing. Not confirmed on the player's
+computer yet: deleting the game folder's cache\ (rebuilt on the next start) should cure it there.
+Fix (exec.c): cache/lock is held for the whole run (platform.h plat_lock_file: Windows no-share open, POSIX flock); a
+second game from the same folder reads the caches but adds nothing to them ("read only" in its log). Each programs.bin
+record now has a hash of its sources (CACHE_FORMAT 2: every cache is made again once); load_program checks it and
+translates a damaged program again from the game's code (when code_hash still matches there), and the newer record
+wins over the old one at the next start ("[shader] program cache: program ... damaged: translated again", 10 lines at
+most). Tested: 60 spliced chunks in a fresh cache -> 10+ damaged programs logged in quest 101, no GLSL failure, none
+again the run after; two games on one home: the second read only, programs.bin unchanged by it; linux.c syntax-checked.
+
 ## A scene texture over the whole screen until the next area (2026-11-28)
 
 Reports (issue #446, 0.18.3 Linux; the user twice, at quest start; also Windows): after a quest start, or on the way

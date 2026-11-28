@@ -14,6 +14,7 @@
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
 #include <spawn.h>
@@ -21,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/ucontext.h>
@@ -204,6 +206,15 @@ bool plat_wait_process(unsigned long pid) {
         nanosleep(&pause, NULL);
     }
     return false;
+}
+
+bool plat_lock_file(const char *path) {
+    int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd < 0) return true;
+    if (!flock(fd, LOCK_EX | LOCK_NB)) return true;  // (fd stays open: the lock goes with the process)
+    int e = errno;
+    close(fd);
+    return e != EWOULDBLOCK;
 }
 
 bool plat_exe_path(char *buf, size_t size) {

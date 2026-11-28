@@ -42,6 +42,10 @@ void plat_init(void);
 bool plat_exe_path(char *buf, size_t size);
 unsigned long plat_process_id(void);
 bool plat_wait_process(unsigned long pid); // Restart child waits for old host to release saves and logs.
+// Takes an exclusive lock on path (the file made if missing) and keeps it until the process ends. false only when
+// another process holds it (exec.c: two games started from one folder must not both append to cache/programs.src);
+// true too when the lock can't be had for another reason (a read-only folder: the caches won't open for writing either).
+bool plat_lock_file(const char *path);
 // Started without a game folder: work in the executable's folder; log to log.txt there when there is no terminal
 // (plat_fatal_notice then tells the player about a fatal error).
 void plat_standalone(void);

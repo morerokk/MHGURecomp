@@ -144,6 +144,14 @@ bool plat_wait_process(unsigned long pid) {
     return result == WAIT_OBJECT_0;
 }
 
+bool plat_lock_file(const char *path) {
+    // (no sharing: a second open fails until this process ends and the system closes the handle; Wine keeps share
+    // modes across processes too)
+    HANDLE h = CreateFileA(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h != INVALID_HANDLE_VALUE) return true;
+    return GetLastError() != ERROR_SHARING_VIOLATION;
+}
+
 bool plat_exe_path(char *buf, size_t size) {
     DWORD n = GetModuleFileNameA(NULL, buf, (DWORD)size);
     return n > 0 && n < size;
