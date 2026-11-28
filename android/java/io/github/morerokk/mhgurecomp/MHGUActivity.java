@@ -37,6 +37,7 @@ public class MHGUActivity extends SDLActivity {
         super.onCreate(saved);
         hideBars();
         hideBarsSoon();
+        hideFromAccessibility(getWindow());
         DualScreen.init(this);  // (the bottom screen's display, when the device has one: after SDL loaded the runtime)
     }
 
@@ -157,6 +158,15 @@ public class MHGUActivity extends SDLActivity {
         later.postDelayed(again, 300);
         later.postDelayed(again, 1000);
         later.postDelayed(again, 3000);
+    }
+
+    // An accessibility service (a button remapper, an autoclicker, Select to Speak, TalkBack...) could put its focus on
+    // the game's full-screen view, and Android then drew its green focus box around the whole screen until the game was
+    // restarted. A screen reader has nothing to read in the game, so its views aren't offered to those services at all.
+    // (Services that watch keys or the foreground app still work: they don't need the views. Dialogs are their own
+    // windows and stay readable.) DualScreen does the same for the bottom screen.
+    static void hideFromAccessibility(Window w) {
+        if (w != null) w.getDecorView().setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
     }
 
     private void hideBars() {

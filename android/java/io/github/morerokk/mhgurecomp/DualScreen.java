@@ -157,6 +157,7 @@ final class DualScreen {
                 }
             });
             setContentView(view);
+            MHGUActivity.hideFromAccessibility(getWindow());  // (no green accessibility focus box on it either)
         }
     }
 }
