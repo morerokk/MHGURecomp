@@ -701,6 +701,7 @@ New `[Mouse]` settings (settings menu: Controls tab, Spanish strings; live, no r
 | `MouseSmoothing` | 0.0 | 0 .. 0.9: each update takes (1 - s) of the counts waiting, the rest trails (hunt camera only; the same total turn: measured 101 + 164 + 196 ... decaying 5, 3, 1 against 240 a step unsmoothed) |
 | `MouseCapture` | Click | Click: a click in the window captures the mouse. Hunt: also captured by itself while the hunt camera is the mouse's (its handler ran in the last 200 ms), free again in menus, cutscenes and villages; Esc or losing focus stops it until a click or the hunt is over |
 | `MenuMouse` | On | Off: the menu pointer (hle/menuptr.c) never takes the mouse (no pointer by itself, no hover / click selection, the mouse stays captured in menus) and the keyboard and mouse defaults of `act_default_binding` (left click confirm / talk, right click back, Space X) are dropped: the `[Keybinds]` everywhere, as before 0.17 |
+| `MouseInput` | On | Off: the game takes nothing from the mouse (host_input.c drops its motion, wheel and button presses; a release still lets go of a held button): no camera, no clicks, no menu pointer. Forge's menu and mods still see it. For a touch screen whose taps come as a real mouse (a Steam Deck under gamescope) |
 
 Measured with `MouseSensitivityY=2 MouseInvertY=On MouseSmoothing=0.6`: the pitch per update went from +125 to -240 (twice,
 reversed), the yaw ramped up and trailed off. The mouse buttons bound to actions (`[Actions.Kbm]`) work while captured

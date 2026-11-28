@@ -114,6 +114,7 @@
     .mouse_smoothing = 0.0f,                                                                        \
     .mouse_capture = MOUSE_CAPTURE_CLICK,                                                           \
     .menu_mouse = 1,                                                                                \
+    .mouse_input = 1,                                                                               \
     /* [Keybinds] */                                                                                \
     .binds = DEFAULT_BINDS,                                                                         \
     /* [Multiplayer] */                                                                             \
@@ -458,6 +459,11 @@ static const char DEFAULT_INI[] =
     "; camera, no pointer shows up by itself, and the mouse buttons do what the Keybinds give them everywhere\n"
     "; Default: On\n"
     "MenuMouse = On\n"
+    "\n"
+    "; Off: the game takes nothing from the mouse - no camera, no clicks, no menu pointer - and a touch screen's taps\n"
+    "; (a Steam Deck's) can't press anything either. The keyboard still works. For playing on a controller only\n"
+    "; Default: On\n"
+    "MouseInput = On\n"
     "\n"
     "[Keybinds]\n"
     "; The keys or mouse buttons for each Switch button, for moving (the left stick) and for turning the item bar\n"
@@ -941,6 +947,7 @@ const ConfigSetting g_settings[] = {
     {"Mouse", "MouseSmoothing", SET_FLOAT, F(mouse_smoothing), 0, 0.0f, 0.9f, NULL, NULL, false, ERR_MOUSE},
     {"Mouse", "MouseCapture", SET_CHOICE, F(mouse_capture), 0, 0, 0, "Click,Hunt", NULL, false, ERR_MISC},
     ON_OFF("Mouse", "MenuMouse", menu_mouse, false),
+    ON_OFF("Mouse", "MouseInput", mouse_input, false),
     KEYS("MoveUp", BIND_MOVE_UP), KEYS("MoveDown", BIND_MOVE_DOWN), KEYS("MoveLeft", BIND_MOVE_LEFT),
     KEYS("MoveRight", BIND_MOVE_RIGHT), KEYS("Walk", BIND_WALK), KEYS("A", BIND_A), KEYS("B", BIND_B), KEYS("X", BIND_X),
     KEYS("Y", BIND_Y), KEYS("L", BIND_L), KEYS("R", BIND_R), KEYS("ZL", BIND_ZL), KEYS("ZR", BIND_ZR),

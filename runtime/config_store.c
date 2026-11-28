@@ -63,7 +63,7 @@ static SDL_AtomicInt menu_chord = {1};
 static SDL_AtomicInt title_back_exit = {1};
 // [Mouse]
 static SDL_AtomicInt live_mouse, live_mouse_y, live_mouse_invert, live_mouse_smooth, live_mouse_capture;
-static SDL_AtomicInt live_menu_mouse = {1};
+static SDL_AtomicInt live_menu_mouse = {1}, live_mouse_input = {1};
 // [Keybinds]
 static SDL_AtomicInt live_binds[BINDS][BIND_KEYS];
 // [Multiplayer]
@@ -118,6 +118,7 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->mouse_smoothing != saved.mouse_smoothing) set_float(&live_mouse_smooth, c->mouse_smoothing);
     if (all || c->mouse_capture != saved.mouse_capture) SDL_SetAtomicInt(&live_mouse_capture, c->mouse_capture);
     if (all || c->menu_mouse != saved.menu_mouse) SDL_SetAtomicInt(&live_menu_mouse, c->menu_mouse);
+    if (all || c->mouse_input != saved.mouse_input) SDL_SetAtomicInt(&live_mouse_input, c->mouse_input);
     if (all || c->draw_distance != saved.draw_distance) set_float(&live_draw, c->draw_distance);
     if (all || c->fxaa != saved.fxaa) SDL_SetAtomicInt(&live_fxaa, c->fxaa);
     if (all || c->msaa != saved.msaa) SDL_SetAtomicInt(&live_msaa, c->msaa);
@@ -228,6 +229,7 @@ int config_live_mouse_invert_y(void) { return SDL_GetAtomicInt(&live_mouse_inver
 float config_live_mouse_smoothing(void) { return get_float(&live_mouse_smooth); }
 int config_live_mouse_capture(void) { return SDL_GetAtomicInt(&live_mouse_capture); }
 int config_live_menu_mouse(void) { return SDL_GetAtomicInt(&live_menu_mouse); }
+int config_live_mouse_input(void) { return SDL_GetAtomicInt(&live_mouse_input); }
 float config_live_draw_distance(void) { return get_float(&live_draw); }
 int config_live_fxaa(void) { return runtime_fsr ? 0 : SDL_GetAtomicInt(&live_fxaa); }
 int config_live_msaa(void) { return runtime_fsr ? 1 : SDL_GetAtomicInt(&live_msaa); }

@@ -623,6 +623,18 @@ static void control_poll(void) {
                 SDL_PushEvent(&b);
                 continue;
             }
+            if (!strcmp(cmd, "touchbtn")) {  // touchbtn <0|1>: a touch screen's left click (SDL_TOUCH_MOUSEID) down / up
+                SDL_Event b = {0};
+                int down = atoi(arg);
+                b.button.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP, b.button.button = SDL_BUTTON_LEFT;
+                b.button.which = SDL_TOUCH_MOUSEID, b.button.down = down != 0, b.button.clicks = 1;
+                SDL_PushEvent(&b);
+                continue;
+            }
+            if (!strcmp(cmd, "btnstat")) {  // btnstat: the mouse buttons held as game buttons (tests)
+                LOG("[control] btnstat mouse_held %#x captured %d\n", mouse_held, mouse_captured);
+                continue;
+            }
             if (!strcmp(cmd, "keyev")) {  // keyev <SDL key name> <0|1>: that key pressed / released (tests: SDL's own event)
                 SDL_Scancode sc = SDL_GetScancodeFromName(arg);
                 if (sc == SDL_SCANCODE_UNKNOWN) { LOG("[control] keyev: no key '%s'\n", arg); continue; }
@@ -898,16 +910,42 @@ static void menu_ptr_wheel(int n) {  // (n > 0 up: a menu of pages turns to the 
 }
 
 static volatile int g_last_dev = -1;  // the device a button was last pressed on: 0 controller, 1 keyboard and mouse
+// A touch screen's tap as SDL passes it on: a left click of SDL_TOUCH_MOUSEID (a Steam Deck's screen, a phone's). It
+// points at a menu, captures the mouse as a click does, and a finger dragged turns the captured camera, but a tap never
+// holds a button: a finger on the Deck's screen held X (Mouse Left's default), and the controller's X presses meanwhile were
+// no presses - for good when its release went missing (issue #470). Under gamescope the taps can come as a real mouse
+// instead: [Mouse] MouseInput = Off for those.
+static bool touch_mouse(const SDL_Event *e) {
+    if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN || e->type == SDL_EVENT_MOUSE_BUTTON_UP) return e->button.which == SDL_TOUCH_MOUSEID;
+    return e->type == SDL_EVENT_MOUSE_MOTION && e->motion.which == SDL_TOUCH_MOUSEID;
+}
 void host_input_event(const SDL_Event *e) {
+    bool touch = touch_mouse(e), mouse_on = config_live_mouse_input();
     if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) g_last_dev = 0, pad_pressed(e->gbutton.which), menu_ptr_idle();
     else if (e->type == SDL_EVENT_GAMEPAD_AXIS_MOTION && (e->gaxis.value > 16000 || e->gaxis.value < -16000)) menu_ptr_idle();
-    else if ((e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat) || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) g_last_dev = 1;
+    else if ((e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat) || (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN && !touch && mouse_on))
+        g_last_dev = 1;  // (a tap is no keyboard and mouse: the controller's prompts stay)
     if (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_KEY_UP) {
         if (e->key.scancode < SDL_SCANCODE_COUNT) ui_keys[e->key.scancode] = e->type == SDL_EVENT_KEY_DOWN;
     } else if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) ui_mouse |= 1u << e->button.button;
     else if (e->type == SDL_EVENT_MOUSE_BUTTON_UP) ui_mouse &= ~(1u << e->button.button);
     else if (e->type == SDL_EVENT_MOUSE_WHEEL && e->wheel.integer_y) ui_wheel_until[e->wheel.integer_y > 0 ? 0 : 1] = plat_now_ns() + 150000000ull;
     else if (e->type == SDL_EVENT_WINDOW_FOCUS_LOST) memset(ui_keys, 0, sizeof ui_keys), ui_mouse = 0;
+    // (a release lets go whoever takes the event below: one lost there held that button - Mouse Left's X - until Forge's
+    // menu opened)
+    if (e->type == SDL_EVENT_MOUSE_BUTTON_UP && e->button.button >= 1 && e->button.button <= SDL_BUTTON_X2)
+        mouse_held &= ~(1u << e->button.button);
+    if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {  // (the log: each device's first click, a touch screen's or a mouse's)
+        static SDL_MouseID seen[8];
+        static int nseen;
+        bool known = false;
+        for (int i = 0; i < nseen && !known; i++) known = seen[i] == e->button.which;
+        if (!known && nseen < 8) {
+            seen[nseen++] = e->button.which;
+            LOG("[input] first click from mouse %u%s\n", (unsigned)e->button.which,
+                touch ? " (a touch screen: never a button held)" : "");
+        }
+    }
     mods_mouse_event(e);  // (the mouse for mods: every event, whoever takes it)
     mods_key_event(e);
     if (overlay_event(e)) return;  // (Forge's menu open: keyboard and mouse are its)
@@ -963,11 +1001,12 @@ void host_input_event(const SDL_Event *e) {
         // (only a captured mouse: the hunt camera's counts, elsewhere the right stick. A free pointer moves nothing: the
         // game's menus can't be pointed at, so a pointer passing over the window must not turn the stick; a menu whose rows
         // are known is the exception: it selects the row under it)
+        if (!mouse_on) break;  // ([Mouse] MouseInput = Off. A finger dragged still turns a captured camera)
         if (mouse_captured) mouse_dx += e->motion.xrel, mouse_dy += e->motion.yrel;
         else if (menu_ptr) menu_ptr_move(e->motion.x, e->motion.y);
         break;
     case SDL_EVENT_MOUSE_WHEEL: {  // (what [Keybinds] says: by default the item bar)
-        int n = wheel_notches(e);
+        int n = mouse_on ? wheel_notches(e) : 0;
         if (mouse_captured && n) wheel_turn(n);
         else if (menu_ptr && n) menu_ptr_wheel(n);
         break;
@@ -978,13 +1017,15 @@ void host_input_event(const SDL_Event *e) {
         if (!e->button.down) {
             mouse_held &= ~(1u << btn);
             if (btn == SDL_BUTTON_LEFT) menu_ptr_drag = false;
-        } else if (host_input_mouse_free()) {
-            break;  // (a mod's free pointer: the click is the mod's only)
+        } else if (!mouse_on || host_input_mouse_free()) {
+            break;  // ([Mouse] MouseInput = Off; a mod's free pointer: the click is the mod's only)
         } else if (menu_ptr && !mouse_captured) {
             menu_ptr_click(btn, e->button.x, e->button.y, e->button.clicks);  // (the menu's: not a capture, not a button)
         } else if (!mouse_captured && !mouse_no_capture) {  // (the click that captures the mouse is not a button press)
             if (!mouse_grab) LOG("[input] capturing the mouse\n");
             mouse_grab = true, mouse_released = false;
+        } else if (touch) {
+            break;  // (a tap: never a button held - touch_mouse. Its capture above lets a finger turn the camera)
         } else {
             mouse_held |= 1u << btn;
         }
@@ -1047,12 +1088,15 @@ static void mouse_update(int *rx, int *ry) {
     if (menuptr_open()) menu_tree = true;
     else if (!input_view_hunt_menu_open()) menu_tree = false;
     // ([Mouse] MenuMouse = Off: never - the mouse stays the camera / right stick and its clicks the keybinds' buttons)
-    bool menu = menu_tree && config_live_menu_mouse() && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
+    // ([Mouse] MouseInput = Off: nothing - no pointer, no capture, no button held)
+    bool mouse_on = config_live_mouse_input();
+    if (!mouse_on) mouse_held = 0, mouse_grab = false;
+    bool menu = mouse_on && menu_tree && config_live_menu_mouse() && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
     // (a mouse captured with a controller in use - MouseCapture = Hunt, or a click long ago - is not the one in use)
     if (menu && !menu_ptr) menu_ptr_idle(), menu_ptr_live = menu_ptr_warp = mouse_captured && host_input_last_device() == 1;
     if (!menu) menu_ptr_idle(), menu_ptr_warp = false;
     menu_ptr = menu;
-    bool want = (mouse_grab || auto_cap) && !menu && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
+    bool want = (mouse_grab || auto_cap) && mouse_on && !menu && !overlay_menu_open() && !chat_active() && !host_input_mouse_free();
     SDL_Window *w = ui_window();
     if (want != mouse_captured && w) {
         if (SDL_SetWindowRelativeMouseMode(w, want) || !want) {
