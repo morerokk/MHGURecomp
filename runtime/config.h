@@ -87,6 +87,7 @@ typedef struct {
     int fsr_objmotion;        // FSR: motion vectors of moving objects (characters, monsters): 1 on, 0 camera only
     float fsr_reactive;       // FSR: reactive mask strength on the game's moving-object mask, 0 (off) .. 1
     int fsr_animsurf;         // FSR: surfaces animated through their texture (banners, water): 1 detected, 0 off
+    int upscaler_method;      // [Upscaler] Method: UPSCALER_FSR3 / UPSCALER_SGSR2 (with [Upscaler] FSR = On)
     int updates;              // [Application] Updates: UPDATES_*, read by the updater (updater/updater.c), not the game
     int shader_prewarm;       // [Performance] ShaderPrewarm: translate the game's shaders at start-up (nvn/vulkan/exec.c)
     int loading_indicator;    // [Performance] LoadingIndicator: the start-up's "Loading" corner (overlay.cpp); ini only
@@ -187,6 +188,7 @@ enum { TEMP_OFF, TEMP_CELSIUS, TEMP_FAHRENHEIT };  // [Performance] ShowTemperat
 enum { THEME_GOLD, THEME_BLUE, THEME_HUNTER };  // [Application] Theme
 enum { UI_CENTER = 1, UI_21_9, UI_32_9, UI_EDGES };  // the middle 16:9, 21:9, 32:9, the picture's sides
 enum { FSR_NATIVE, FSR_QUALITY, FSR_BALANCED, FSR_PERFORMANCE, FSR_ULTRA_PERFORMANCE };  // output / render: 1, 1.5, 1.7, 2, 3
+enum { UPSCALER_FSR3, UPSCALER_SGSR2 };  // [Upscaler] Method: which temporal upscaler runs when FSR is on
 
 extern Config g_config;
 extern uint32_t g_render_size[2];  // read by the game code (tools/gen.py PATCHES: its docked render size)

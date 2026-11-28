@@ -51,6 +51,7 @@
 #include "../../kernel.h"
 #include "fsr.h"
 #include "shaders.h"
+#include "sgsr2.h"
 
 bool g_fsr_on;
 
@@ -1502,7 +1503,8 @@ static void scale_to_stand(NvnTexture *h, NvnTexture *hs) {
 
 // prep + FSR: H -> H'. false: not done (H' untouched).
 static bool run_fsr(NvnTexture *h, NvnTexture *hs, NvnTexture *depth, NvnTexture *mask, const CamRecord *cam) {
-    if (!ctx_make()) return false;
+    bool sgsr2 = g_config.upscaler_method == UPSCALER_SGSR2;
+    if (!sgsr2 && !ctx_make()) return false;  // SGSR 2 needs no FFX context (and no FFX device capabilities)
     TexBackend *hb = vk_tex(h, true), *db = vk_tex(depth, true), *ob = hs->backend;
     if (hb->width != rw || hb->height != rh || db->width != rw || db->height != rh) {
         static int nlog;
@@ -1538,6 +1540,16 @@ static bool run_fsr(NvnTexture *h, NvnTexture *hs, NvnTexture *depth, NvnTexture
         } else {
             reset = true;
         }
+    }
+    // SGSR 2's bSameCamera / minLerpContribution: the camera matrices of this frame and the last FSR frame
+    bool same_camera = !reset;
+    if (same_camera) {
+        double vc[16], vp[16];
+        view_proj(cam, vc);
+        view_proj(&prev_cam, vp);
+        float diff = 0.0f;
+        for (int i = 0; i < 16; i++) diff += (float)fabs(vc[i] - vp[i]);
+        if (diff >= 1e-5f) same_camera = false;  // (Qualcomm's sample: the sum of |VP - prevVP|)
     }
     VkCommandBuffer cb = vk_cmd();
     vk_full_barrier(cb);
@@ -1588,56 +1600,64 @@ static bool run_fsr(NvnTexture *h, NvnTexture *hs, NvnTexture *depth, NvnTexture
     if (objv) n_objv_frames++;
     if (react) n_react_frames++;
     mv_check(cb, hb, &img_sil[sil_cur], !reset && prev_in_ok, jd);  // ((debug) MHGU_FSR_MVCHECK)
-    // 2. FSR
-    uint64_t now = plat_now_ns();
-    float dt = last_dispatch_ns ? (float)((now - last_dispatch_ns) / 1e6) : 16.7f;
-    if (dt < 1.0f) dt = 1.0f;
-    if (dt > 100.0f) dt = 100.0f;
-    last_dispatch_ns = now;
-    FfxVkPortableUpscaleDispatchInfo di = {.structSize = sizeof di, .commandBuffer = cb};
-    di.color = ffx_image(hb, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
-    di.depth = ffx_image(&img_depth, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
-    di.motionVectors = ffx_image(&img_mvf, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
-    di.exposure = ffx_image(NULL, 0);
-    di.reactiveMask = ffx_image(react ? &img_react : NULL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
-    di.transparencyAndCompositionMask = ffx_image(NULL, 0);
-    di.output = ffx_image(ob, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                  VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
-    static float jsign[2] = {0, 0};  // (debug) MHGU_FSR_JITTER_SIGN=sx,sy: other sign conventions, to check this one
-    if (!jsign[0]) {
-        const char *e = getenv("MHGU_FSR_JITTER_SIGN");
-        if (!e || sscanf(e, "%f,%f", &jsign[0], &jsign[1]) != 2) jsign[0] = jsign[1] = 1.0f;
+    // 2. the upscaler: Qualcomm's SGSR 2 or AMD's FSR 3.1, into the same output stand-in
+    if (sgsr2) {
+        if (!vk_sgsr2_dispatch(cb, hb, db, &img_vel, ob, push, cam, objv, same_camera, reset)) {
+            static int nlog;
+            if (nlog++ < 20) LOG("[sgsr2] dispatch failed: the picture is scaled this frame\n");
+            return false;
+        }
+    } else {
+        uint64_t now = plat_now_ns();
+        float dt = last_dispatch_ns ? (float)((now - last_dispatch_ns) / 1e6) : 16.7f;
+        if (dt < 1.0f) dt = 1.0f;
+        if (dt > 100.0f) dt = 100.0f;
+        last_dispatch_ns = now;
+        FfxVkPortableUpscaleDispatchInfo di = {.structSize = sizeof di, .commandBuffer = cb};
+        di.color = ffx_image(hb, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+        di.depth = ffx_image(&img_depth, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
+        di.motionVectors = ffx_image(&img_mvf, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
+        di.exposure = ffx_image(NULL, 0);
+        di.reactiveMask = ffx_image(react ? &img_react : NULL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
+        di.transparencyAndCompositionMask = ffx_image(NULL, 0);
+        di.output = ffx_image(ob, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                      VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+        static float jsign[2] = {0, 0};  // (debug) MHGU_FSR_JITTER_SIGN=sx,sy: other sign conventions, to check this one
+        if (!jsign[0]) {
+            const char *e = getenv("MHGU_FSR_JITTER_SIGN");
+            if (!e || sscanf(e, "%f,%f", &jsign[0], &jsign[1]) != 2) jsign[0] = jsign[1] = 1.0f;
+        }
+        di.jitterOffset = (FfxVkPortableFloat2){jsign[0] * cam->jitter[0], jsign[1] * cam->jitter[1]};  // (the picture shift)
+        di.motionVectorScale = (FfxVkPortableFloat2){1.0f, 1.0f};
+        di.renderSize = (FfxVkPortableExtent2D){rw, rh};
+        di.outputSize = (FfxVkPortableExtent2D){ow, oh};
+        di.frameTimeMilliseconds = dt;
+        di.preExposure = 1.0f;
+        float n = cam->near, f = cam->far;
+        if (!(n > 0.0f) || !(f > n)) n = 8.0f, f = 50000.0f;
+        di.cameraNear = n, di.cameraFar = f;
+        di.cameraVerticalFovRadians = cam->fovy > 0.05f && cam->fovy < 3.0f ? cam->fovy : 1.0f;
+        di.viewSpaceToMeters = 0.01f;
+        di.sharpness = sharpness;
+        di.enableSharpening = sharpness > 0.0f;
+        di.reset = reset;
+        di.frameId = ++frame_id;
+        uint64_t issues = ffxVkPortableValidateUpscaleDispatchInfo(&ctx_ci, &di);
+        if (issues) {
+            static int nlog;
+            for (uint64_t bit = 1; bit && nlog < 20; bit <<= 1)
+                if (issues & bit) { nlog++; LOG("[fsr] dispatch rejected: %s\n", ffxVkPortableValidationIssueName(bit)); }
+            return false;
+        }
+        FfxVkPortableResult r = ffxVkPortableUpscaleContextRecordDispatch(ctx, &di);
+        if (r != FFX_VK_PORTABLE_OK) {
+            static int nlog;
+            if (nlog++ < 20) LOG("[fsr] dispatch failed: %d\n", r);
+            return false;
+        }
+        vk_full_barrier(cb);
     }
-    di.jitterOffset = (FfxVkPortableFloat2){jsign[0] * cam->jitter[0], jsign[1] * cam->jitter[1]};  // (the picture shift)
-    di.motionVectorScale = (FfxVkPortableFloat2){1.0f, 1.0f};
-    di.renderSize = (FfxVkPortableExtent2D){rw, rh};
-    di.outputSize = (FfxVkPortableExtent2D){ow, oh};
-    di.frameTimeMilliseconds = dt;
-    di.preExposure = 1.0f;
-    float n = cam->near, f = cam->far;
-    if (!(n > 0.0f) || !(f > n)) n = 8.0f, f = 50000.0f;
-    di.cameraNear = n, di.cameraFar = f;
-    di.cameraVerticalFovRadians = cam->fovy > 0.05f && cam->fovy < 3.0f ? cam->fovy : 1.0f;
-    di.viewSpaceToMeters = 0.01f;
-    di.sharpness = sharpness;
-    di.enableSharpening = sharpness > 0.0f;
-    di.reset = reset;
-    di.frameId = ++frame_id;
-    uint64_t issues = ffxVkPortableValidateUpscaleDispatchInfo(&ctx_ci, &di);
-    if (issues) {
-        static int nlog;
-        for (uint64_t bit = 1; bit && nlog < 20; bit <<= 1)
-            if (issues & bit) { nlog++; LOG("[fsr] dispatch rejected: %s\n", ffxVkPortableValidationIssueName(bit)); }
-        return false;
-    }
-    FfxVkPortableResult r = ffxVkPortableUpscaleContextRecordDispatch(ctx, &di);
-    if (r != FFX_VK_PORTABLE_OK) {
-        static int nlog;
-        if (nlog++ < 20) LOG("[fsr] dispatch failed: %d\n", r);
-        return false;
-    }
-    vk_full_barrier(cb);
     if (anim) anim_bypass(cb, hb, ob, cam->jitter);  // (animated surfaces: the current input there)
     prev_store(cb, hb);
     if (reset) n_reset++;
@@ -1855,13 +1875,16 @@ void vk_fsr_init(void) {
     if (!g_config.fsr || !g_fsr_output[0]) return;
     rw = g_render_size[0], rh = g_render_size[1], ow = g_fsr_output[0], oh = g_fsr_output[1];
     logging = getenv("MHGU_FSR_LOG") != NULL;
-    if (g_vk.api11) { LOG("[fsr] FSR 3.1 needs Vulkan 1.2: FSR off, the picture is scaled from %ux%u\n", rw, rh); return; }
-    FfxVkPortableDeviceCapabilities caps = {.structSize = sizeof caps};
-    if (ffxVkPortableQueryDeviceCapabilities(g_vk.phys, &caps) != FFX_VK_PORTABLE_OK || !caps.fsr3ComputePrerequisites ||
-        !g_vk.fsr_storage_wo_format) {
-        LOG("[fsr] this GPU lacks what FSR 3.1 needs (subgroup operations, storage formats, storage writes without a "
-            "format): FSR off, the picture is scaled from %ux%u\n", rw, rh);
-        return;
+    bool sgsr2 = g_config.upscaler_method == UPSCALER_SGSR2;
+    if (!sgsr2) {
+        if (g_vk.api11) { LOG("[fsr] FSR 3.1 needs Vulkan 1.2: FSR off, the picture is scaled from %ux%u\n", rw, rh); return; }
+        FfxVkPortableDeviceCapabilities caps = {.structSize = sizeof caps};
+        if (ffxVkPortableQueryDeviceCapabilities(g_vk.phys, &caps) != FFX_VK_PORTABLE_OK || !caps.fsr3ComputePrerequisites ||
+            !g_vk.fsr_storage_wo_format) {
+            LOG("[fsr] this GPU lacks what FSR 3.1 needs (subgroup operations, storage formats, storage writes without a "
+                "format): FSR off, the picture is scaled from %ux%u\n", rw, rh);
+            return;
+        }
     }
     if (g_config.fsr_objmotion) {  // (device.c enables both where the GPU has them)
         VkPhysicalDeviceFeatures f;
@@ -1872,8 +1895,13 @@ void vk_fsr_init(void) {
                 "camera motion only (the reactive mask still covers moving objects)\n");
     }
     if (!prep_init()) { LOG("[fsr] the prep shader could not be built: FSR off\n"); g_fsr_objvel = false; return; }
+    if (sgsr2 && !vk_sgsr2_init(rw, rh, ow, oh)) {
+        LOG("[sgsr2] SGSR 2 could not be set up: the picture is scaled\n");
+        return;
+    }
     g_fsr_on = true;
     camjit_set(false, rw, rh, 8);
-    LOG("[fsr] on (FSR 3.1): %ux%u -> %ux%u, sharpness %.2f, fp16 %d, object motion %s, reactive %.2f\n",
-        rw, rh, ow, oh, g_config.fsr_sharpness, g_vk.fsr_fp16, g_fsr_objvel ? "on" : "off", g_config.fsr_reactive);
+    LOG("[fsr] on (%s): %ux%u -> %ux%u, sharpness %.2f, fp16 %d, object motion %s, reactive %.2f\n",
+        sgsr2 ? "SGSR 2" : "FSR 3.1", rw, rh, ow, oh, g_config.fsr_sharpness, g_vk.fsr_fp16,
+        g_fsr_objvel ? "on" : "off", g_config.fsr_reactive);
 }

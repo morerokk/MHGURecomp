@@ -284,8 +284,9 @@ Every setting is also in `mhgurecomp.ini`, with a comment above each one that ex
   kept in `window.txt` beside `mhgurecomp.ini` (not on Wayland, where programs can't place their windows)
 - `[Anti-aliasing]`: `MSAA` (Off / 2x / 4x / 8x), `FXAA` (On / Off), `FXAAMode` (Original / 3_11: FXAA 3.11 in
   place of GU's FXAA, sharper textures; default Original)
-- `[Upscaler]`: `FSR` (Off / On, default Off), `FSRQuality` (NativeAA / Quality / Balanced / Performance /
-  UltraPerformance), `Sharpness`. FSR replaces MSAA and FXAA while it is on. Details: `docs/FSR-PORT.md`
+- `[Upscaler]`: `FSR` (Off / On, default Off), `Method` (FSR3 / SGSR2, default FSR3), `FSRQuality` (NativeAA /
+  Quality / Balanced / Performance / UltraPerformance), `Sharpness`. The upscaler replaces MSAA and FXAA while it
+  is on. SGSR 2 is Qualcomm's mobile upscaler for Adreno GPUs. Details: `docs/FSR-PORT.md`, `docs/SGSR2-PORT.md`
 - `[Graphics]`: `DrawDistance` (how far away people in the villages and the Hubs are still drawn: 1 = the game's,
   2 = twice as far, 0.5 = half, 0 = no limit; up to 10)
 - `[HDR]`: `HDR` (Off / On, default Off: native HDR10 or scRGB output on an HDR display, a port of the RenoDX HDR mod

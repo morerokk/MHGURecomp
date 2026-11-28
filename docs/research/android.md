@@ -151,8 +151,9 @@ device neither is set and the same Vulkan calls and shaders are made as before.
 - Shaders: SPIR-V 1.3 instead of 1.5, in other files of cache/spirv/. The translated GLSL needs nothing newer.
 - Features: VkPhysicalDevice16BitStorageFeatures for what the Vulkan11 / Vulkan12 structures held; sampler mirror clamp
   from VK_KHR_sampler_mirror_clamp_to_edge (without it: mirrored repeat). shaderInt8 and scalarBlockLayout aren't asked for.
-- FSR 3.1 stays off (fsr.c says so in the log and the picture is scaled from the smaller 3D size). The other picture
-  settings are unchanged. A PC with both picks a Vulkan 1.2 GPU over a 1.1 one.
+- FSR 3.1 stays off on Vulkan 1.1 (fsr.c says so in the log and the picture is scaled from the smaller 3D size).
+  SGSR 2 (`Method = SGSR2`) does work on 1.1: it uses no FFX features. The other picture settings are unchanged. A PC
+  with both picks a Vulkan 1.2 GPU over a 1.1 one.
 - `MHGU_VK11=1` takes this path on a PC. R9 270X, Windows, quest 101, 14 minutes each: 53.6 fps on the 1.2 path, 53.7
   on the 1.1 path, the same picture, nothing in the log.
 

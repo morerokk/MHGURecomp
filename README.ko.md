@@ -281,8 +281,8 @@ Escape, Insert, F1, F7~F12는 리컴프가 사용하므로 지정할 수 없습�
   이 위치는 `mhgurecomp.ini` 옆의 `window.txt`에 저장됩니다(프로그램이 창 위치를 정할 수 없는 Wayland 제외)
 - `[Anti-aliasing]`: `MSAA` (Off / 2x / 4x / 8x), `FXAA` (On / Off), `FXAAMode` (Original / 3_11: GU의 FXAA 대신
   FXAA 3.11을 사용해 텍스처가 더 선명합니다. 기본값 Original)
-- `[Upscaler]`: `FSR` (Off / On, 기본값 Off), `FSRQuality` (NativeAA / Quality / Balanced / Performance /
-  UltraPerformance), `Sharpness`. FSR을 켜면 MSAA와 FXAA를 대신합니다. 자세한 내용: `docs/FSR-PORT.md`
+- `[Upscaler]`: `FSR` (Off / On, 기본값 Off), `Method` (FSR3 / SGSR2, 기본값 FSR3), `FSRQuality` (NativeAA / Quality / Balanced / Performance /
+  UltraPerformance), `Sharpness`. FSR을 켜면 MSAA와 FXAA를 대신합니다. 자세한 내용: `docs/FSR-PORT.md`, `docs/SGSR2-PORT.md`
 - `[Graphics]`: `DrawDistance` (마을과 집회소의 사람들을 얼마나 멀리까지 그리는지: 1 = 게임 기본값,
   2 = 두 배, 0.5 = 절반, 0 = 제한 없음. 최대 10)
 - `[HDR]`: `HDR` (Off / On, 기본값 Off: HDR 디스플레이에서 네이티브 HDR10 또는 scRGB 출력. 이 게임용 RenoDX HDR 모드를

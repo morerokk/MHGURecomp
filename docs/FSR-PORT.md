@@ -313,5 +313,7 @@ The next three are FSR 3.1 only, on a 2560x1440 screen: the old setup (native 19
 Nothing in the preparation is specific to FSR: the jittered main camera (`runtime/hle/camera_jitter.c`), per-pixel motion vectors from the
 camera and from moving objects, the scene depth, the reactive and animated-surface masks, the HUD split (the HUD is drawn after the upscale at
 output size), the texture LOD bias and the output-size handling (`runtime/nvn/vulkan/fsr.c`, `textures.c`) are what any temporal upscaler
-needs. The upscaler itself is called from one place: `run_fsr` in `fsr.c` prepares the inputs and then records the FSR 3.1 dispatch. A DLSS backend (NVIDIA, via NGX or Streamline on
+needs. The upscaler itself is called from one place: `run_fsr` in `fsr.c` prepares the inputs and then records the dispatch of the chosen backend
+(`[Upscaler] Method`: FSR 3.1 or, since 2026-11-26, Qualcomm's SGSR 2; see `docs/SGSR2-PORT.md`). SGSR 2 needs no reactive mask and no sharpening:
+its velocity input is only the moving objects' vectors, with static pixels reprojected from depth. A DLSS backend (NVIDIA, via NGX or Streamline on
 Vulkan) could be added the same way by someone with an NVIDIA RTX card. The author has no such card, so it is neither implemented nor tested.

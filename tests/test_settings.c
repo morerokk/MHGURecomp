@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
     fputs("; Keep this comment\r\n[Display]\r\nMode = Borderless Window\r\nResolution = Desktop\r\nRenderResolution = Auto\r\n"
           "AspectRatio = 21:9\r\nFOV = 1.1 ; camera comment\r\n"
           "[Performance]\r\nFPS = 60\r\nFrameRate = 60\r\n[Monster HP]\r\nQuest101 = 0.6\r\nQuest102 = 1, 2, 3, 4\r\n"
-          "[Upscaler]\r\nUpscaler = FSR4\r\n"  // (from when FSR 4 existed: ignored, and kept like any unknown line)
+          "[Upscaler]\r\nUpscaler = FSR4\r\nMethod = SGSR2\r\n"  // (FSR 4's old line is ignored and kept like any unknown line)
           "[Future section]\r\nFutureOption = preserve-me", f);
     fclose(f);
     set_env("MHGU_CONFIG", path);
@@ -132,6 +132,10 @@ int main(int argc, char **argv) {
     assert(config_language() == 1); // Failed writes must not change the UI language.
     set_env("MHGU_CONFIG", path);
     set_env("MHGU_WINDOW", ""); set_env("MHGU_FOV", ""); set_env("MHGU_FRAMERATE", "");
+    set_env("MHGU_UPSCALER", "FSR3");  // the A/B override, before it is cleared below
+    g_config = initial; config_load();
+    assert(g_config.upscaler_method == UPSCALER_FSR3);
+    set_env("MHGU_UPSCALER", "");
     g_config = initial; config_load();
     Config loaded = config_editable();
     assert(loaded.language == 1 && config_language() == 1 && loaded.button_icons == 2);
@@ -196,15 +200,17 @@ int main(int argc, char **argv) {
     assert(config_defaults().mute_in_background==0);
     assert(config_defaults().combo_window==COMBO_LENIENT);
     assert(config_defaults().fxaa_mode==FXAA_ORIGINAL);
-    fsr_config.fsr=1;fsr_config.fsr_quality=FSR_BALANCED;
+    fsr_config.fsr=1;fsr_config.fsr_quality=FSR_BALANCED;fsr_config.upscaler_method=UPSCALER_SGSR2;
     fsr_config.fsr_sharpness=.65f;fsr_config.fsr_objmotion=0;fsr_config.fsr_reactive=.35f;fsr_config.fsr_animsurf=0;
     fsr_config.msaa=8;fsr_config.fxaa=1;
     assert(config_save(&fsr_config,error,sizeof error));assert(config_restart_required(&fsr_config));
     text = read_file(path);
-    assert(strstr(text, "Sharpness = 0.65\r\n") && strstr(text, "Reactive = 0.35\r\n") && strstr(text, "Upscaler = FSR4\r\n"));
+    assert(strstr(text, "Sharpness = 0.65\r\n") && strstr(text, "Reactive = 0.35\r\n") && strstr(text, "Upscaler = FSR4\r\n") &&
+           strstr(text, "Method = SGSR2\r\n"));
     free(text);
     g_config=initial;config_load();Config fsr_saved=config_editable();
-    assert(fsr_saved.fsr && fsr_saved.fsr_quality==FSR_BALANCED);
+    assert(fsr_saved.fsr && fsr_saved.fsr_quality==FSR_BALANCED && fsr_saved.upscaler_method==UPSCALER_SGSR2);
+    assert(config_restart_key("Method"));
     assert(fabsf(fsr_saved.fsr_sharpness-.65f)<.001f && fabsf(fsr_saved.fsr_reactive-.35f)<.001f);
     assert(!fsr_saved.fsr_objmotion && !fsr_saved.fsr_animsurf);
     assert(config_live_msaa()==1 && config_live_fxaa()==0);
@@ -216,6 +222,7 @@ int main(int argc, char **argv) {
     assert(config_save(&fsr_saved,error,sizeof error) && !config_restart_required(&fsr_saved));
     assert(fabsf(config_live_fsr_sharpness()-.2f)<.001f && fabsf(config_live_fsr_reactive()-.5f)<.001f);
     assert(!config_restart_key("Sharpness") && !config_restart_key("Reactive"));
+    bad=fsr_saved;bad.upscaler_method=7;assert(!config_save(&bad,error,sizeof error));
     bad=fsr_saved;bad.fsr_quality=5;assert(!config_save(&bad,error,sizeof error));
     bad=fsr_saved;bad.fsr_sharpness=NAN;assert(!config_save(&bad,error,sizeof error));
     bad=fsr_saved;bad.fsr_reactive=1.1f;assert(!config_save(&bad,error,sizeof error));

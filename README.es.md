@@ -304,8 +304,8 @@ Detalles: [docs/SETTINGS_UI.md](docs/SETTINGS_UI.md).
   ubicar sus ventanas)
 - `[Anti-aliasing]`: `MSAA` (Off / 2x / 4x / 8x), `FXAA` (On / Off), `FXAAMode` (Original / 3_11: FXAA 3.11 en lugar
   del FXAA de GU, texturas más nítidas; Original por defecto)
-- `[Upscaler]`: `FSR` (Off / On, Off por defecto), `FSRQuality` (NativeAA / Quality / Balanced / Performance /
-  UltraPerformance), `Sharpness`. FSR sustituye a MSAA y FXAA mientras está activado. Detalles: `docs/FSR-PORT.md`
+- `[Upscaler]`: `FSR` (Off / On, Off por defecto), `Method` (FSR3 / SGSR2, FSR3 por defecto), `FSRQuality` (NativeAA / Quality / Balanced / Performance /
+  UltraPerformance), `Sharpness`. FSR sustituye a MSAA y FXAA mientras está activado. Detalles: `docs/FSR-PORT.md`, `docs/SGSR2-PORT.md`
 - `[Graphics]`: `DrawDistance` (hasta qué distancia se dibuja a la gente en las aldeas y las Salas: 1 = la del juego,
   2 = el doble, 0.5 = la mitad, 0 = sin límite; hasta 10)
 - `[HDR]`: `HDR` (Off / On, Off por defecto: salida HDR10 o scRGB nativa en una pantalla HDR, un port del mod HDR de

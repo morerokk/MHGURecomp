@@ -34,7 +34,7 @@ RT_SRC   := $(wildcard runtime/*.c) $(wildcard runtime/hle/*.c) $(wildcard runti
             runtime/platform/$(PLATFORM).c
 # (simd_int.c / neon.c, helpers of the recompiled code, live in the executable: the game code library imports them,
 # and runtime/interp.c uses them too)
-RT_HDRS  := $(wildcard runtime/*.h) $(wildcard runtime/hle/*.h) $(wildcard runtime/net/*.h) $(wildcard runtime/platform/*.h) $(wildcard runtime/nvn/*.h) $(wildcard runtime/nvn/*/*.h)
+RT_HDRS  := $(wildcard runtime/*.h) $(wildcard runtime/hle/*.h) $(wildcard runtime/net/*.h) $(wildcard runtime/platform/*.h) $(wildcard runtime/nvn/*.h) $(wildcard runtime/nvn/*/*.h) third_party/sgsr2/src/sgsr2_glsl.h
 
 # FFmpeg (the game's movies, runtime/hle/movie.c): by default a small static build of a pinned FFmpeg release, made
 # here from its source (downloaded once to third_party/ffmpeg/, checked against FFMPEG_SHA256) with only what the movies
@@ -238,7 +238,7 @@ IMGUI_OBJ := $(patsubst $(IMGUI)/%.cpp,$(O)/imgui/%.o,$(IMGUI_SRC))
 IMGUIFLAGS := -O2 -g -fvisibility=hidden -DCIMGUI_NO_EXPORT -I$(IMGUI) -I$(IMGUI)/imgui $(LIB_INC)
 # (vendored VulkanMemoryAllocator fallback: -I on a missing dir is ignored, so MSYS2 builds
 # with the system vulkan-memory-allocator package are unaffected)
-RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -Iruntime -Ithird_party/vk_mem_alloc -I$(IMGUI) -Ithird_party/enet/include $(OSFLAGS) $(LIB_INC)
+RTFLAGS  := -O2 -g -fno-strict-aliasing -Wall -Wno-unused-function -Iruntime -Ithird_party/vk_mem_alloc -I$(IMGUI) -Ithird_party/enet/include -Ithird_party/sgsr2/src $(OSFLAGS) $(LIB_INC)
 # FSR 3.1 temporal upscaler (runtime/nvn/vulkan/fsr.c): third_party/fsr-vulkan = AMD FidelityFX SDK 1.1.4's FSR 3.1.4
 # upscaler (host scheduler, Vulkan backend, its GLSL) + a portable C wrapper, all MIT. No AMD binaries: the shaders are
 # compiled with shaderc from the embedded GLSL when first used (src/ffx_fsr3_shaderblobs.cpp), linked into the executable.
@@ -259,6 +259,10 @@ FFX_PASS := $(FFX)/src/backends/vk/shaders/fsr3upscaler
 $(O)/fsr/src/ffx_fsr3_glsl.c.o: FSRFLAGS += -DFFX_GPU_DIR='"$(FFX_GPU)"' -DFFX_PASS_DIR='"$(FFX_PASS)"'
 $(O)/fsr/src/ffx_fsr3_glsl.c.o: $(wildcard $(FFX_GPU)/*.h $(FFX_GPU)/*/*.h $(FFX_PASS)/*.glsl)
 RTFLAGS  += -I$(FSR)/include
+# SGSR 2 (runtime/nvn/vulkan/sgsr2.c): Qualcomm's BSD-3-Clause 2-pass fragment GLSL, embedded with .incbin and compiled
+# with shaderc at run time like the renderer's other shaders. No binaries are shipped.
+SGSR2    := third_party/sgsr2
+SGSR2_GLSL := $(SGSR2)/glsl
 .DEFAULT_GOAL := all
 # NULL_GPU=1: no renderer (runtime/nvn/backend_null.c: the game runs, nothing is drawn)
 ifeq ($(NULL_GPU),1)
@@ -266,7 +270,7 @@ RTFLAGS  += -DMHGU_NULL_BACKEND
 RT_SRC   := $(filter-out runtime/nvn/vulkan/%,$(RT_SRC))
 RT_CXX   :=
 else
-RT_CXX   := $(O)/rt/nvn/vulkan/vma.o $(FSR_OBJ)
+RT_CXX   := $(O)/rt/nvn/vulkan/vma.o $(FSR_OBJ) $(O)/sgsr2/src/sgsr2_glsl.o
 endif
 
 all: $(EXE) $(if $(GEN_SRC),$(GAMELIB)) $(UPDATER) $(if $(filter windows,$(PLATFORM)),bundle) \
@@ -278,6 +282,13 @@ test-settings: $(LIB_STAMPS)
 	@mkdir -p $(O)/settings-test
 	$(CC) $(RTFLAGS) tests/test_settings.c runtime/config.c runtime/config_store.c $(SDL_LIBS) -lm -o $(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe)
 	$(O)/settings-test/test-settings$(if $(filter windows,$(PLATFORM)),.exe) $(O)/settings-test/settings.ini
+
+# Host-only test of the SGSR 2 uniform layout and motion conversion (no game dump or Vulkan headers).
+.PHONY: test-sgsr2
+test-sgsr2:
+	@mkdir -p $(O)/settings-test
+	$(CC) -std=c11 -O2 -Iruntime tests/test_sgsr2.c -lm -o $(O)/settings-test/test-sgsr2$(if $(filter windows,$(PLATFORM)),.exe)
+	$(O)/settings-test/test-sgsr2$(if $(filter windows,$(PLATFORM)),.exe)
 
 # Host-only test of game-action rebinding (runtime/actions.c): ini, sampling, and the golden property of the defaults.
 .PHONY: test-actions
@@ -380,6 +391,11 @@ $(O)/imgui/%.o: $(IMGUI)/%.cpp
 $(O)/rt/nvn/vulkan/vma.o: runtime/nvn/vulkan/vma.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) -O2 -w -Ithird_party/vk_mem_alloc -c $< -o $@
+
+# The SGSR 2 GLSL is data: .incbin paths are relative to where make runs, as with FSR's shaders above.
+$(O)/sgsr2/src/sgsr2_glsl.o: $(SGSR2)/src/sgsr2_glsl.c $(wildcard $(SGSR2_GLSL)/*.fs) third_party/sgsr2/src/sgsr2_glsl.h
+	@mkdir -p $(dir $@)
+	$(CC) -std=c11 -DSGSR2_GLSL_DIR='"$(SGSR2_GLSL)"' -c $< -o $@
 
 $(O)/fsr/%.c.o: $(FSR)/%.c
 	@mkdir -p $(dir $@)
