@@ -34,6 +34,15 @@
 #define BOLD_TEXT_DEFAULT 0
 #define BOLD_TEXT_DEFAULT_INI "Off"
 #endif
+// [HDR] UnclampedScene: off by default on Android (every scene target in 16-bit float doubles the frame's colour
+// bandwidth, which phones' GPUs can least afford: HDR was reported very laggy there)
+#ifdef __ANDROID__
+#define HDR_SCENE_DEFAULT 0
+#define HDR_SCENE_DEFAULT_INI "Off"
+#else
+#define HDR_SCENE_DEFAULT 1
+#define HDR_SCENE_DEFAULT_INI "On"
+#endif
 #define CONFIG_DEFAULT_VALUES                                                                       \
     /* [Display] */                                                                                 \
     .display_mode = DISPLAY_BORDERLESS,                                                             \
@@ -77,7 +86,7 @@
     .hdr_highlight_saturation = 82.0f,                                                          \
     .hdr_flare = 0.0f,                                                                          \
     .hdr_bloom = 100.0f,                                                                        \
-    .hdr_scene = 1,                                                                             \
+    .hdr_scene = HDR_SCENE_DEFAULT,                                                             \
     .hdr_format = HDR_FORMAT_AUTO,                                                              \
     .hdr_analysis = 0,                                                                          \
     /* [Performance] */                                                                             \
@@ -325,10 +334,10 @@ static const char DEFAULT_INI[] =
     "Bloom = 100\n"
     "\n"
     "; Everything the game renders (the 3D scene, depth of field, bloom) is 16-bit float, not only the post-processing,\n"
-    "; so the sun, fire and sparks keep their brightness and glow. Turn it off if anything looks wrong with HDR. Not in\n"
-    "; the settings menu\n"
-    "; Default: On\n"
-    "UnclampedScene = On\n"
+    "; so the sun, fire and sparks keep their brightness and glow. Turn it off if anything looks wrong with HDR. It costs\n"
+    "; GPU time: off by default on Android. Not in the settings menu\n"
+    "; Default: On (Off on Android)\n"
+    "UnclampedScene = " HDR_SCENE_DEFAULT_INI "\n"
     "\n"
     "; The HDR signal: Auto (HDR10 where the display offers it, else scRGB), HDR10 (10-bit PQ) or scRGB (16-bit linear).\n"
     "; Not in the settings menu\n"
@@ -1370,6 +1379,38 @@ static void append_missing_sections(const char *path, const char *seen) {
     if (o) fclose(o);
 }
 
+#ifdef __ANDROID__
+// [HDR] UnclampedScene's default became Off on Android (HDR_SCENE_DEFAULT). An ini written before says On right under
+// the old "; Default: On" line: the template wrote that pair, not the player (it is not in the settings menu), so it is
+// turned to the new default once. A changed value or comment is left alone; the new comment never matches again.
+static void migrate_hdr_scene(const char *path) {
+    static const char old_cmt[] = "; Default: On", old_val[] = "UnclampedScene = On";
+    static char buf[256 * 1024];
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    bool whole = feof(f);
+    fclose(f);
+    if (!whole) return;
+    buf[n] = 0;
+    char *v = strstr(buf, old_val), *after = v ? v + sizeof old_val - 1 : NULL;
+    if (!v || v == buf || v[-1] != '\n' || (*after && *after != '\r' && *after != '\n')) return;
+    char *e = v - 1;  // (the end of the line before)
+    if (e > buf && e[-1] == '\r') e--;
+    char *c = e - (sizeof old_cmt - 1);
+    if (c < buf || strncmp(c, old_cmt, sizeof old_cmt - 1) || (c > buf && c[-1] != '\n')) return;
+    char tmp[1200];
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *o = fopen(tmp, "wb");
+    if (!o) return;
+    bool ok = fwrite(buf, 1, (size_t)(c - buf), o) == (size_t)(c - buf);
+    ok = ok && fputs("; Default: On (Off on Android)", o) >= 0 && fwrite(e, 1, (size_t)(v - e), o) == (size_t)(v - e);
+    ok = ok && fputs("UnclampedScene = Off", o) >= 0 && fputs(after, o) >= 0;
+    if (fclose(o) || !ok || rename(tmp, path)) { remove(tmp); return; }
+    LOG("[config] UnclampedScene: now Off by default on Android (it costs GPU time), %s updated\n", path);
+}
+#endif
+
 // The settings menu's language for a new player (no mhgurecomp.ini yet): the first of the system's preferred languages
 // the menu has (Chinese for every zh locale: the translation is Simplified Chinese, closer to Traditional than English
 // is), else English. A saved Language always stays. MHGU_LOCALE=<language[-country]> (debug) stands for the system's.
@@ -1392,6 +1433,9 @@ static int system_language(void) {
 void config_load(void) {
     char path[1100];
     config_path(path, sizeof path);
+#ifdef __ANDROID__
+    migrate_hdr_scene(path);
+#endif
     FILE *f = fopen(path, "r");
     if (!f) {
         // (DEFAULT_INI, with the system's language in place of English when the menu has it)

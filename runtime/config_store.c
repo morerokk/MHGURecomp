@@ -36,7 +36,11 @@ static SDL_AtomicInt live_kerning;
 static SDL_AtomicInt live_bold;
 // [HDR]
 static SDL_AtomicInt live_hdr, live_hdr_format, live_hdr_gamma = {HDR_GAMMA_22}, live_hdr_tonemap = {HDR_TONEMAP_RENODRT};
+#ifdef __ANDROID__
+static SDL_AtomicInt live_hdr_scene = {0}, live_hdr_analysis;  // (config.c HDR_SCENE_DEFAULT)
+#else
 static SDL_AtomicInt live_hdr_scene = {1}, live_hdr_analysis;
+#endif
 static SDL_AtomicInt live_hdr_peak = {0x447a0000}, live_hdr_game = {0x434b0000}, live_hdr_ui = {0x434b0000};  // 1000, 203
 static SDL_AtomicInt live_hdr_exposure = {0x3f266666}, live_hdr_flare = {0}, live_hdr_bloom = {0x42c80000};  // 0.65, 0, 100
 static SDL_AtomicInt live_hdr_highlights = {0x42700000}, live_hdr_shadows = {0x42480000}, live_hdr_contrast = {0x42480000};  // 60, 50, 50

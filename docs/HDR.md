@@ -16,7 +16,7 @@ The game renders into RGBA8 targets: everything above SDR white clips at each st
 
 1. **16-bit float targets** (`textures.c vk_rt_widen`, `WIDE_FLOAT16`): the post chain from the colour grading on -
    B (the grading's target), H (the full-screen image FXAA, the bloom add and the HUD are drawn into) and P (the window
-   texture the brightness pass writes) - are rendered as RGBA16F. With `UnclampedScene = On` (default) every other RGBA8
+   texture the brightness pass writes) - are rendered as RGBA16F. With `UnclampedScene = On` (default; Off on Android) every other RGBA8
    target the game renders into is too (the scene, depth of field, the bloom chain at half size and below), so the scene's own lighting above white (sun, fire, sparks, specular) reaches the grading.
    Copies between these targets and guest memory convert (exec.c).
 2. **The game's colour grading and bloom add as HDR variants** (`ShaderKey.hdr`, `hdr.c vk_hdr_wrap_fs`): the game's
@@ -66,7 +66,7 @@ ToneMapper, Flare, Bloom and UnclampedScene are ini only (not in the settings me
 | `Highlights`, `Shadows`, `Contrast`, `Saturation`, `HighlightSaturation` | 0 - 100 | 60, 50, 50, 50, 82 | 50 = the game's |
 | `Flare` | 0 - 100 | 0 | |
 | `Bloom` | 0 - 100 % | 100 | the game's bloom |
-| `UnclampedScene` | Off / On | On | everything the game renders in 16-bit float (scene, depth of field, bloom) |
+| `UnclampedScene` | Off / On | On (Off on Android: it doubles the frame's colour bandwidth) | everything the game renders in 16-bit float (scene, depth of field, bloom) |
 | `HDRFormat` (ini only) | Auto / HDR10 / scRGB | Auto | |
 
 `MHGU_HDR=0|1` overrides `HDR`.
