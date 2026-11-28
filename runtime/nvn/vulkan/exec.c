@@ -4339,6 +4339,50 @@ static uint32_t max_index16(const uint16_t *s, uint32_t n, uint16_t skip) {
     return max_index16_plain(s, n, skip);
 }
 
+// Full-screen post-effect draws (no depth test, one quad over the whole viewport) read the same textures every frame:
+// the post chain's render targets, whose shape (size, format, levels) only changes when the targets are made again.
+// The rare "a scene texture over the whole screen until the next area" bug is one of them reading another texture
+// (its slot given away: runtime/hle/texslots.c): logged here with the texture pool slot, so a player's log names the
+// draw (and objects.c's [texreg] line the slot).
+static void ghost_check(Prog *pr, uint32_t count, const float *vp, bool blend) {
+    if (count < 3 || count > 6 || !st.program || !st.tpool) return;
+    static struct { uint64_t fs; uint32_t vpw, vph, w, h, fmt, levels, tic; uint8_t bind; bool blend, rt, used; } seen[96];
+    static int nlogged;
+    uint64_t fs = st.program->stages[1].code_addr;
+    uint32_t vpw = (uint32_t)vp[2], vph = (uint32_t)fabsf(vp[3]);
+    for (int i = 0; i < pr->fi->ntex && i < 8; i++) {
+        ShaderTexture *stx = &pr->fi->tex[i];
+        int slot = ((int)stx->handle_offset - 0x20) / 8;
+        uint32_t tic = (slot >= 0 && slot < 32) ? (uint32_t)(st.tex[1][slot] & 0xFFFFF) : 0;
+        NvnTexture *t = shader_texture_object(1, stx);
+        uint32_t w = t ? t->width : 0, h = t ? t->height : 0, fmt = t ? t->format : 0, lv = t ? t->levels : 0;
+        bool rt = t && t->backend && ((TexBackend *)t->backend)->gpu_owned;  // (drawn into: a render target)
+        int k = -1, freek = -1;
+        for (int j = 0; j < 96; j++) {
+            if (!seen[j].used) { if (freek < 0) freek = j; continue; }
+            if (seen[j].fs == fs && seen[j].bind == i && seen[j].blend == blend && seen[j].vpw == vpw && seen[j].vph == vph) { k = j; break; }
+        }
+        if (k < 0) {
+            // (only draws that read a render target: 2D sprites have the whole screen as their viewport too, change
+            // pictures all the time and would fill the table)
+            if (!rt) continue;
+            if (freek < 0) return;
+            seen[freek].fs = fs, seen[freek].bind = (uint8_t)i, seen[freek].vpw = vpw, seen[freek].vph = vph, seen[freek].blend = blend, seen[freek].used = true;
+            seen[freek].w = w, seen[freek].h = h, seen[freek].fmt = fmt, seen[freek].levels = lv, seen[freek].tic = tic, seen[freek].rt = rt;
+            continue;
+        }
+        if (seen[k].w == w && seen[k].h == h && seen[k].fmt == fmt && seen[k].levels == lv) { seen[k].tic = tic, seen[k].rt = rt; continue; }
+        if (seen[k].rt && nlogged < 24) {
+            nlogged++;
+            LOG("[ghost] full-screen draw fs %llx (vp %ux%u, blend %d) texture %d: was %ux%u f%#x lv%u%s (slot %u), now %ux%u f%#x lv%u%s "
+                "(slot %u) at frame %llu%s\n", (unsigned long long)fs, vpw, vph, blend, i, seen[k].w, seen[k].h, seen[k].fmt,
+                seen[k].levels, seen[k].rt ? " rt" : "", seen[k].tic, w, h, fmt, lv, rt ? " rt" : "", tic, (unsigned long long)g_present_count,
+                nlogged == 24 ? " (no more of these logged)" : "");
+        }
+        seen[k].w = w, seen[k].h = h, seen[k].fmt = fmt, seen[k].levels = lv, seen[k].tic = tic, seen[k].rt = rt;
+    }
+}
+
 static void draw(CmdRec *r, bool indexed) {
     if (!st.program) { stat_skipped++; return; }
     ShaderKey vkey = {0}, fkey = {0};
@@ -4655,6 +4699,7 @@ static void draw(CmdRec *r, bool indexed) {
         vkCmdBindVertexBuffers(cb, (uint32_t)s, 1, &sp.buf, &off);
     }
 
+    if (!k.depth_test && vp[0] == 0 && vp[1] == 0) ghost_check(pr, count, vp, k.blend_on != 0);
     if (g_dump_active) {
         int n = snprintf(dump_draw_info, sizeof dump_draw_info, "vs %llx fs %llx vp %.0f,%.0f %.0fx%.0f tex:",
                          (unsigned long long)st.program->stages[0].code_addr, (unsigned long long)st.program->stages[1].code_addr,
@@ -4711,9 +4756,10 @@ static void draw(CmdRec *r, bool indexed) {
         }
     }
     if (g_dump_active && getenv("MHGU_DUMP_DRAWS"))  // (debug) every draw's program and depth / stencil use
-        LOG("[dump]   cdraw vs %llx fs %llx (code hash %016llx) count %u inst %u mode %u | z test %d write %d op %d stencil %d\n",
+        LOG("[dump]   cdraw vs %llx fs %llx (code hash %016llx) count %u inst %u mode %u | z test %d write %d op %d stencil %d blend %x | %.700s\n",
             (unsigned long long)st.program->stages[0].code_addr, (unsigned long long)st.program->stages[1].code_addr,
-            (unsigned long long)prog_fs_hash(pr), count, inst, mode, k.depth_test, k.depth_write, k.depth_op, k.stencil_test);
+            (unsigned long long)prog_fs_hash(pr), count, inst, mode, k.depth_test, k.depth_write, k.depth_op, k.stencil_test,
+            k.blend_on, dump_draw_info);
     if (g_dump_active && !st.rt.ncolor && getenv("MHGU_DUMP_VERBOSE")) {  // (debug) depth-only passes: every draw
         Range v0 = st.vbuf[k.attr_bind[0] < 16 ? k.attr_bind[0] : 0];
         LOG("[dump]   draw vs %llx vp %.0f,%.0f %.0fx%.0f sc %d,%d %dx%d count %u inst %u vb %llx clamp %d\n",

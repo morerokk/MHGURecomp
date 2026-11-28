@@ -89,6 +89,7 @@ static void boot(const char *root) {
     fastload_init();  // (shorter transitions when not in a network session: runtime/hle/fastload.c)
     movelog_init();  // (debug, MHGU_LOG_MOVES: runtime/hle/movelog.c)
     quickhunt_init();  // (debug, MHGU_QUICKHUNT: runtime/hle/quickhunt.c)
+    { void texslots_init(void); texslots_init(); }  // (texture / sampler descriptor slots under one lock: runtime/hle/texslots.c)
     camjit_init();  // (FSR: the main camera and its jitter: runtime/hle/camera_jitter.c)
     { void fs_commit_guard_init(void); fs_commit_guard_init(); }  // (save commits wait for other threads' writes: runtime/services/fs.c)
     mousecam_init();  // (mouse look on the hunt camera's angles: runtime/hle/mousecam.c)

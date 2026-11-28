@@ -550,17 +550,44 @@ NVN(nvnTexturePoolSetDebugLabel) { (void)c; }
 NVN(nvnTexturePoolGetMemoryPool) { RET(G(uint64_t, A(0), 8)); }
 NVN(nvnTexturePoolGetMemoryOffset) { RET(G(uint64_t, A(0), 16)); }
 NVN(nvnTexturePoolGetSize) { RET(G(uint32_t, A(0), 24)); }
-static void register_texture(NvnArgs *na_) {
+static void register_texture(Cpu *c, NvnArgs *na_) {
     NvnDescPool *d = HOST(NvnDescPool, A(0));
     int id = (int)A(1);
     if (id < 0 || id >= d->count) return;
     NvnTexEntry *e = &((NvnTexEntry *)d->entries)[id];
-    e->tex = HOST(NvnTexture, A(2));
+    NvnTexture *nt = HOST(NvnTexture, A(2));
+    {
+        // A slot given to a new texture while its old one is still alive (a finalized texture's slots are emptied,
+        // textures.c backend_texture_destroyed): the game never does this in normal play (0 of ~9000 registrations
+        // through boot, towns, Hub and quests), so it is the mark of its slot bitmap losing a bit (runtime/hle/
+        // texslots.c): whatever drew the old texture now draws the new one. Always logged (a few lines).
+        // (debug) MHGU_TEXREG_TRACE=2: every registration.
+        static int trace = -1;
+        static unsigned nreg, nlive;
+        if (trace < 0) trace = getenv("MHGU_TEXREG_TRACE") ? atoi(getenv("MHGU_TEXREG_TRACE")) : 0;
+        nreg++;
+        if (trace == 2)
+            LOG("[texreg] slot %d (pool %p) = %ux%u f%#x lv%u @%llx lr %08x\n", id, (void *)d, nt ? nt->width : 0,
+                nt ? nt->height : 0, nt ? nt->format : 0, nt ? nt->levels : 0, nt ? (unsigned long long)nt->addr : 0, c->r[14]);
+        NvnTexture *o = e->tex;
+        if (o && o != nt && ++nlive <= (trace ? 400u : 8u))
+            LOG("[texreg] slot %d given to a %ux%u f%#x lv%u texture while its %ux%u f%#x lv%u texture is still in use "
+                "(%u of %u registrations)\n", id, nt ? nt->width : 0, nt ? nt->height : 0, nt ? nt->format : 0,
+                nt ? nt->levels : 0, o->width, o->height, o->format, o->levels, nlive, nreg);
+    }
+    e->tex = nt;
     e->has_view = A(3) != 0;
     if (e->has_view) memcpy(&e->view, AP(3), sizeof e->view);
 }
-NVN(nvnTexturePoolRegisterTexture) { (void)c; register_texture(na_); }
-NVN(nvnTexturePoolRegisterImage) { (void)c; register_texture(na_); }
+// The texture registered at slot id of the guest texture pool, while it lives (finalized textures leave their slots
+// empty): NULL for none. (runtime/hle/texslots.c: slots the game's bitmap shows free while their texture lives)
+NvnTexture *nvn_texture_slot(uint32_t guest_pool, int id) {
+    NvnDescPool *d = HOST(NvnDescPool, guest_pool);
+    if (!d || id < 0 || id >= d->count) return NULL;
+    return ((NvnTexEntry *)d->entries)[id].tex;
+}
+NVN(nvnTexturePoolRegisterTexture) { register_texture(c, na_); }
+NVN(nvnTexturePoolRegisterImage) { register_texture(c, na_); }
 
 NVN(nvnSamplerPoolInitialize) {
     desc_pool_init(A(0), A(1), A(2), (int)A(3), sizeof(NvnSamplerDesc), g_sampler_pools);

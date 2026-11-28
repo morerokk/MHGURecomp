@@ -583,6 +583,37 @@ alone are more than 848 MB): a 3D resolution above 1920x1080 + 640 MB / 64 is lo
 demo at 4320x2430 crashed at 30 and 120 fps and played at 1280x720 at 30 and 120 fps; with the fix it plays at
 4320x2430. Not tested: multiplayer at a large render size (four hunters, more of the heap in use), FSR with a large output.
 
+## A scene texture over the whole screen until the next area (2026-11-28)
+
+Reports (issue #446, 0.18.3 Linux; the user twice, at quest start; also Windows): after a quest start, or on the way
+back to the Hunters' Pub, a texture of the scene lies half-transparent over the picture (HUD intact) until the next
+area load. Hours of play, never in short test runs. The same bug is known on the Switch in MHXX, on the same engine (JP MH
+wiki "ゲーム用語/バグ": at quest start, a sheet of eye textures over the screen, or the screen white).
+How the game hands out texture slots: the slot object (device +0x188 +0x34100) has +4 the first slot, +0xc a bitmap of
+256 words (set = taken), +0x50c the word the last search ended in; 0xa6c41c (from 0xd08ba8 / 0xd08c44, texture setup)
+searches from the word after that one, takes the lowest free bit and registers the texture there (its NVNtexturePool at
++0x540); 0xa6c3ac frees a slot (clears its bit); 0xa6c4fc / 0xa6c3e4 the same for samplers (+0x40c, +0x510). No lock in
+any of them, and two threads use them (the main thread 0x101 and the loading thread 0x10f). The slots are handed out
+round-robin, a word further each time, so a freed slot comes back ~256 textures later.
+What it takes: one lost bit under a texture that lives for the whole session (the post chain's render targets). The
+next sweep of the cursor gives that slot to a new texture (a quest load makes hundreds), whose descriptor replaces the
+target's, and the post effect that drew the target blends the new texture over the screen. Shown with
+MHGU_TEXSLOT_DROP=<slot>@<n> (the bit cleared on purpose at the n-th texture made; scratch-ghost qloop.sh, quickhunt
+101): slot 896 (the 640x400 target a blended full-screen copy draws over the picture, fs 7af72800) went to a 256x256
+target at the quest load: the screen white behind the HUD, as in MHXX's white cases; slot 1152 (320x200 bloom) went to
+a 320x180 target (not visible). Before this change the game never registered a slot whose texture still lived (0 in
+~9000 registrations: boot, towns, Hub, quests) and always freed a slot after its texture was finalized (0 of 400).
+Fix (runtime/hle/texslots.c): the four functions run under one host mutex (two threads meeting there are logged:
+"[texslots] two threads ... at once"), and before each texture search the slot it is about to take is checked: if a
+living texture is still registered there (textures.c empties a finalized texture's slots), the bit is set back and the
+search goes on ("[texslots] slot N shows free but ... kept it"). That covers a lost bit from any cause (two threads, a
+slot freed twice). MHGU_TEXSLOT_LOCK=0 / MHGU_TEXSLOT_KEEP=0 turn them off. Logs for a report: "[texreg] slot N given
+to a ... texture while its ... texture is still in use" (objects.c, always) and "[ghost] full-screen draw ... was ... rt,
+now ..." (exec.c ghost_check: a full-viewport draw that read a render target now reads something else, 24 lines at
+most). MHGU_TEXREG_TRACE=2 logs every registration; MHGU_DUMP_DRAWS now lists each draw's textures. Not known: which
+cause loses the bit in real play (no "two threads at once" line in short runs); the fix is untested over hours of play.
+Emulators and the Switch keep the bug (it is the game's).
+
 ## Save data safety (2026-10-22)
 
 Reported: saves in a folder symlinked to a NAS (Linux, Proton) were lost. The game saves by DeleteFile(system),
