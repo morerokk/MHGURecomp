@@ -673,6 +673,9 @@ static void control_poll(void) {
             } else if (!strcmp(cmd, "fps")) {
                 config_set_live_fps(strtof(arg, NULL));
                 LOG("[control] frame rate target %.0f\n", (double)config_live_fps());
+            } else if (!strcmp(cmd, "hdr")) {  // hdr <0|1>: [HDR] HDR for now (not saved)
+                config_set_live_hdr(atoi(arg));
+                LOG("[control] HDR %s\n", atoi(arg) ? "on" : "off");
             } else if (!strcmp(cmd, "af")) {  // af <0|1|2|4|8|16>: [Graphics] AnisotropicFiltering for now (not saved;
                                               // 0: none, not even the game's own)
                 config_set_live_aniso(atoi(arg));

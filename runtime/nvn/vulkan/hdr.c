@@ -130,8 +130,13 @@ void vk_hdr_present(NvnTexture *t) {
 // of the sun and fire included). Without it only the post chain from the colour grading on.
 bool vk_hdr_rt_float(NvnTexture *t) {
     if (!vk_hdr_tracking() || !t) return false;
-    if (t == g_b || t == g_h || (t->backend && ((TexBackend *)t->backend)->presented)) return true;
+    if (vk_hdr_post_target(t)) return true;
     return config_live_hdr_scene();
+}
+
+// t is in the post chain (RGBA16F with HDR on whatever UnclampedScene says): B, H or the presented texture
+bool vk_hdr_post_target(NvnTexture *t) {
+    return t && (t == g_b || t == g_h || (t->backend && ((TexBackend *)t->backend)->presented));
 }
 
 // (log) the passes' HDR variants: drawn through them or not, when that changes

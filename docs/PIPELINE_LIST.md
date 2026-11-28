@@ -18,6 +18,11 @@ render state, nothing of the game itself.
   and monsters add their own entries; the more areas, the fewer first-visit black surfaces.
 - FSR may change some entries (not checked): if players use it, record a hunt or two with it on. Resolution, frame
   rate and draw distance don't change pipelines.
+- HDR draws its post-processing and HUD with pipelines of its own (RGBA16F targets, HDR variants of the colour
+  grading, bloom and HUD). Record the town and a hunt or two with HDR on and `UnclampedScene = Off`: those entries
+  are marked as HDR's, so the game builds them only while the window is HDR. With `UnclampedScene = On` the game
+  makes the RGBA16F twin of every other entry by itself, so that setting needs no recording of its own (entries
+  recorded with it are marked too and only built with it).
 
 ## Steps (Windows)
 

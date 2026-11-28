@@ -219,6 +219,7 @@ void config_runtime_init(const Config *effective) {
     }
 }
 float config_live_fps(void) { return get_float(&live_fps); }
+void config_set_live_hdr(int on) { SDL_SetAtomicInt(&live_hdr, on != 0); }  // (debug: the control file's "hdr")
 void config_set_live_fps(float f) { set_float(&live_fps, f < 30 ? 30 : f > 240 ? 240 : f); }  // (debug: the control file's "fps")
 float config_live_fov(void) { return get_float(&live_fov); }
 float config_live_mouse_sensitivity(void) { return get_float(&live_mouse); }

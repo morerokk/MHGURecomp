@@ -936,6 +936,12 @@ void vk_framebuffers_forget_view(VkImageView v) {
 
 // ================================================================== passes
 static VkFormat pass_color[8], pass_depth;
+// PipeRec / ListRec .pad: a pipeline only HDR draws (hdr.c), recorded so a pipeline list can leave it out without HDR:
+// PL_HDR: a target HDR made RGBA16F, or a pass's HDR variant; PL_SCENE: one such target is a scene target (RGBA16F
+// only with [HDR] UnclampedScene)
+#define PL_HDR 1u
+#define PL_SCENE 2u
+static uint32_t pass_hdr;  // (begin_pass) PL_* of the pass's targets
 static bool pass_d24_as_float;  // the depth attachment is a DEPTH24_STENCIL8 made as D32S8 (polygon offsets in D24 steps)
 static uint32_t pass_ncolor, pass_samples = 1, pass_w, pass_h;
 static bool ui_relax_scissor;  // the draw being set up moved a HUD piece out from under the game's scissor
@@ -1859,12 +1865,15 @@ static void begin_pass(void) {
     pass_samples = 1;
     pass_sx = pass_sy = 1.0f;
     bool fsr_standin = false;
+    pass_hdr = 0;
     for (int i = 0; i < st.rt.ncolor; i++) {
         NvnTexture *t = st.rt.color[i];
         pass_color[i] = VK_FORMAT_UNDEFINED;
         if (!t) continue;
         // (the game's own target: FSR 3 / 4 take no RGBA16 UNORM. HDR: the post chain and the scene as RGBA16F, hdr.c)
         vk_rt_widen(t, vk_fsr_input(t) ? WIDE_NONE : vk_hdr_rt_float(t) ? WIDE_FLOAT16 : vk_wide_rt_on() ? WIDE_UNORM16 : WIDE_NONE);
+        if (t->backend && ((TexBackend *)t->backend)->wide == WIDE_FLOAT16)
+            pass_hdr |= vk_hdr_post_target(t) ? PL_HDR : PL_HDR | PL_SCENE;
         if (g_fsr_on) {  // FSR: from the start of the HUD on, an output-size stand-in (fsr.c)
             NvnTexture *s = vk_fsr_map(t, false);
             if (s != t) pass_sx = (float)s->width / (float)t->width, pass_sy = (float)s->height / (float)t->height, t = s, fsr_standin = true;
@@ -3112,6 +3121,7 @@ static void pipecache_store(const Pipe *pp) {
     PipeRec r;
     memset(&r, 0, sizeof r);
     r.magic = PIPEREC_MAGIC;
+    r.pad = pass_hdr | (pp->k.prog->fkey.hdr ? PL_HDR : 0);
     r.ck = pp->k.prog->ck;
     memcpy(r.color, pass_color, sizeof r.color);
     r.depth = pass_depth;
@@ -3173,15 +3183,15 @@ static void plist_seen(const uint64_t code[2], const uint64_t cmax[2], const uin
     }
 }
 
-// (render thread) r's pipeline for program p, built once p is (as pipelines.bin's)
-static int plist_attach(Prog *p, const ListRec *r) {
+// (render thread) r's pipeline for program p with these colour formats, built once p is (as pipelines.bin's)
+static int plist_attach_as(Prog *p, const ListRec *r, const VkFormat color[8]) {
     PipeKey k = r->k;
     k.prog = p;
     for (int i = 0; i < 32; i++)
         if (k.attr_mask & (1u << i)) k.attr_fmt[i] = vertex_format_supported(k.attr_fmt[i]);
     VkFormat depth = r->depth;
     if (depth == VK_FORMAT_D24_UNORM_S8_UINT || depth == VK_FORMAT_D32_SFLOAT_S8_UINT) depth = vk_depth24_stencil8();
-    k.rp = vk_render_pass(r->color, k.ncolor, depth, k.samples);
+    k.rp = vk_render_pass(color, k.ncolor, depth, k.samples);
     bool created;
     Pipe *pp = pipe_slot(&k, &created);
     if (!pp || !created) return 0;
@@ -3192,6 +3202,29 @@ static int plist_attach(Prog *p, const ListRec *r) {
     if (s == 1) run_job(build_pipeline, pp);
     else if (s == 2) set_state(&pp->state, 2, 0);
     return 1;
+}
+
+// HDR (hdr.c): the pipelines it draws instead of the game's own. A record marked PL_HDR is one of them (a post-chain
+// target made RGBA16F, an HDR variant of the colour grading / bloom add / HUD), attached only while the window is
+// HDR (and with UnclampedScene when it needs it). With UnclampedScene every RGBA8 target is RGBA16F, so each SDR
+// record also gets that twin. Without these an HDR session built them all while playing: arriving in town on a first
+// run built ~130 pipelines on demand (and skipped ~50 draws) where SDR built 6, which a phone feels for seconds.
+static int plist_hdr_state;  // (render thread) what was attached for: 0 SDR, 1 HDR, 3 HDR with UnclampedScene
+static int plist_attach_hdr(Prog *p, const ListRec *r) {
+    if (!plist_hdr_state) return 0;
+    if (r->pad & PL_HDR) return !(r->pad & PL_SCENE) || plist_hdr_state == 3 ? plist_attach_as(p, r, r->color) : 0;
+    if (plist_hdr_state != 3) return 0;
+    VkFormat c[8];
+    bool any = false;
+    for (int i = 0; i < 8; i++) {
+        c[i] = r->color[i];
+        if (i < (int)r->k.ncolor && c[i] == VK_FORMAT_R8G8B8A8_UNORM) c[i] = VK_FORMAT_R16G16B16A16_SFLOAT, any = true;
+    }
+    return any ? plist_attach_as(p, r, c) : 0;
+}
+
+static int plist_attach(Prog *p, const ListRec *r) {
+    return ((r->pad & PL_HDR) ? 0 : plist_attach_as(p, r, r->color)) + plist_attach_hdr(p, r);
 }
 
 static void plist_load(void) {
@@ -3242,7 +3275,58 @@ static void plist_load(void) {
 }
 
 // (render thread) the programs of the records whose shader code the prewarm met, then their pipelines
+// (render thread) The window turned HDR (or UnclampedScene changed under it): the HDR pipelines of the records met so
+// far (plist_attach_hdr); later ones get theirs as the prewarm meets them. An HDR variant whose program isn't made yet
+// is made from its game program's (the same shader code, translated wrapped: hdr.c vk_hdr_wrap_fs).
+static void plist_hdr_check(void) {
+    int want = vk_hdr_tracking() ? (config_live_hdr_scene() ? 3 : 1) : 0;
+    if (want == plist_hdr_state) return;
+    plist_hdr_state = want;
+    if (!want || !plist_n) return;
+    int pipes = 0, made = 0;
+    for (int i = 0; i < plist_n; i++) {
+        ListRec *r = &plist[i];
+        if (!plist_done[i] || r->magic != LISTREC_MAGIC || r->k.ncolor > 8) continue;
+        if (!(r->pad & PL_HDR) && want != 3) continue;  // (nothing of HDR's in it)
+        uint64_t ck = prog_content_key(r->chash, &r->vkey, &r->fkey);
+        ShaderKey base = r->fkey;
+        base.hdr = 0;
+        Prog *p = NULL, *np = NULL;
+        pthread_mutex_lock(&progcache_lock);
+        Prog **c = progcache_slot(ck, false);
+        if (c && *c) {
+            p = *c;
+        } else if (r->fkey.hdr) {
+            Prog **b = progcache_slot(prog_content_key(r->chash, &r->vkey, &base), false);
+            Prog *bp = b ? *b : NULL;
+            if (bp && (c = progcache_slot(ck, true)) && !*c && (np = calloc(1, sizeof *np))) {
+                *c = np;
+                memcpy(np->code, bp->code, sizeof np->code);
+                memcpy(np->cmax, bp->cmax, sizeof np->cmax);
+            }
+        }
+        pthread_mutex_unlock(&progcache_lock);
+        if (np) {
+            memcpy(np->chash, r->chash, sizeof np->chash);
+            np->ck = ck;
+            np->vkey = r->vkey;
+            np->fkey = r->fkey;
+            np->wanted = true;
+            pipes += plist_attach_hdr(np, r);
+            run_translate(translate_program, np);
+            made++;
+        } else if (p) {
+            int k = plist_attach_hdr(p, r);
+            if (k) prog_want(p);  // (a dormant one is loaded)
+            pipes += k;
+        }
+    }
+    LOG("[vk] pipeline list: HDR%s on: %d pipelines to build (%d HDR variant programs)\n",
+        want == 3 ? " with UnclampedScene" : "", pipes, made);
+}
+
 static void plist_drain(void) {
+    plist_hdr_check();
     if (!atomic_load(&plist_qpending)) return;
     pthread_mutex_lock(&plist_lock);
     int n = plist_qn;
@@ -3257,6 +3341,7 @@ static void plist_drain(void) {
             if (plist_done[i] || r->chash[0] != q[j].chash[0] || r->chash[1] != q[j].chash[1]) continue;
             plist_done[i] = 1;
             plist_left--;
+            if ((r->pad & PL_HDR) && !plist_hdr_state) continue;  // (HDR's: plist_hdr_check if the window turns HDR)
             uint64_t ck = prog_content_key(r->chash, &r->vkey, &r->fkey);
             Prog *p = NULL, *have = NULL;
             pthread_mutex_lock(&progcache_lock);
@@ -3308,6 +3393,7 @@ static void plist_export_add(const Prog *p, const PipeRec *pr) {
     ListRec r;
     memset(&r, 0, sizeof r);
     r.magic = LISTREC_MAGIC;
+    r.pad = pr->pad;  // (PL_*)
     memcpy(r.chash, p->chash, sizeof r.chash);
     r.vkey = p->vkey;
     r.fkey = p->fkey;

@@ -252,6 +252,7 @@ bool config_validate(const Config *config, char *error, size_t error_size);
 void config_runtime_init(const Config *effective); // After environment/Auto resolution at startup.
 float config_live_fps(void);
 void config_set_live_fps(float fps);
+void config_set_live_hdr(int on);  // (debug: the control file's "hdr 0|1"; not saved)
 float config_live_fov(void);
 float config_live_mouse_sensitivity(void);
 float config_live_mouse_sensitivity_y(void);

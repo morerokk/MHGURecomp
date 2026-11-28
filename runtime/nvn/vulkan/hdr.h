@@ -15,6 +15,7 @@ static inline bool vk_hdr_tracking(void) { return g_hdr_out != HDR_OUT_NONE; }
 // variant of its program), else 0. fs_hash: its fragment program's code hash.
 int vk_hdr_draw(const FsrDraw *d, uint64_t fs_hash);
 bool vk_hdr_rt_float(NvnTexture *t);              // exec.c begin_pass: render t as RGBA16F (the post chain, the scene)
+bool vk_hdr_post_target(NvnTexture *t);           // t is in the post chain: RGBA16F with HDR on, UnclampedScene or not
 char *vk_hdr_wrap_fs(const char *src, int pass);  // exec.c compile_program: the HDR variant's source (malloc'd)
 char *vk_hdr_guard_fs(const char *src);           // exec.c compile_program: other passes, outputs as RGBA8 bounds them (no NaN)
 #define HDR_NPARAMS 24
