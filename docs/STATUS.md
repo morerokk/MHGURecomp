@@ -903,13 +903,44 @@ MHGU_LOG_ATKSTEP=1/2 logs. The hunter's own attacks (same update, +0x31 = 7: by 
 alone: every one measured (Great Sword testsave/save_0, Charge Blade testsave/ninja/save_guild, rig C:\MHGURecompile\
 scratch-melee, run.sh with SAVES / SEQ) has delay and window in whole 2-frame steps (4-60, 8-22) at speed 1, so the last
 test is at the window's end at 30 and 60 fps alike (MHGU_PLCOLL=2 at 30 / 60: last tests at -0.02 / -0.01); hitstop
-(speed 0.1 for ~10 frames) can put a window up to ~0.4 frames off that grid at 30 fps, after the swing has hit. Not
-covered: the start of a window (high rates open it up to a step before the Switch's first test: more tests, not fewer).
+(speed 0.1 for ~10 frames) can put a window up to ~0.4 frames off that grid at 30 fps, after the swing has hit. The start
+of a window (high rates opened it up to a step before the Switch's first test) is covered since 2026-11-28 (below).
 Debug aids (dummy.c / emtrace.c): MHGU_COLLTRACE=1/2 (MHGU_COLLTRACE_PL=1: our hunter's attacks against hunters' targets
 instead), MHGU_PLCOLL=1/2 (our hunter's attacks against monsters, 0x36c0c0, hits via 0x370968; =2 drops the hits),
 MHGU_HB_BLACK=1 / MHGU_HB_RAGE=1 (before each emact), MHGU_SUMMON_NOPIN=1,
 MHGU_SUMMON_WALK=<units/s>; Hellblade's group 7 actions 200-252 (seen: 200, 227, 228, 234, 240, 245-248, 252).
 Explosions: the spawned blast objects (vtable 0x19f3104, window 9990) live ~300 ms at 30 fps and ~325 at 240, untouched.
+
+Critical Juncture against Hellblade Glavenus (2026-11-28, runtime/hle/atkstep.c, same reporter, issue #23): "at 30 fps
+Critical Juncture hits the head easily, at 60 it is very inconsistent", in damage and in whether the monster flinches.
+Two GIFs: Hellblade's sharpen-and-spin (7:251: hops back, turns to the hunter, sharpens ~2 s, a spinning lunge at
+~3.7 s; the game follows it with 7:233) countered at 30 fps slashes the head and Glavenus stops, at 60 the slash catches
+the body or tail as it spins past and it carries on. The counter: the stance is player action 0010:060 (the Long Sword
+Art in slot 1 of scratch-glav's save), a monster hit in it starts 0010:061, whose slash (an attack with no delay, window
+15, +0x38 000100b4) is made in the hunter's update after the hit and tests in that same update, after one countdown: 2
+frames after the hit at 30 fps (open 13), 1 at 60 (open 14). The monster hits the hunter with 7:251's lunge (attack
++0x38 00030064, delay 237 at speed 1.05) at the same moment at both rates (2.1 is twice 1.05), so the slash came a
+frame sooner at 60, with Glavenus ~54 units less far along its lunge: the same start and heading gave x 509 at 30 fps
+and 455 at 60, and the part in front of the blade changed (counters on part 1: 5 of 12 at 30 fps, 0 of 10 at 60, one
+Glavenus with the rate switched live). Fix: atkstep.c now also moves a window's start, for hunter weapon attacks
+(+0x6d 1, +0x10 0: not shells, kinsects, phials) and monster attacks: when a window starts its delay goes to where
+the 30 fps game first tests (the first whole number of 2-frame steps x speed at or past the delay, at least one;
+half an update short of it, so float error can't make it an update late), the window shortened by as much so its
+end stays (monster windows still stretched at the end as before). Checked (scratch-glav, 30 / 60 / 120 fps live in
+one run): the slash's first test at open 13 at all three (the hunter's counter motion at frame 2.000 in each), the
+monster at the same place at the hit for the same start (300_45: 513, 2836 at all three). Which part a slash over two
+parts takes varies on its own (same rate, same place: part 6 one time, part 2 the next), so per-part counts stay
+noisy. Glavenus' long spin window (delay 227 at 1.05) now opens on the Switch's update too (it opened one 60 fps
+update sooner); 237 already did. What stays different: a monster attack is tested every update, so at high rates it
+can connect between two of the 30 fps game's tests (seen: the counter set off by the earlier spin window at 60 / 120
+fps where at 30 the later one did). Things ruled out on the way: Glavenus' position and pose (its attack shapes in its
+own frame and its position are the same at the same moment at 30 and 60 fps; its motion layer's frame counter, +0x4fc,
+runs one update ahead after a blend-in, +0x500 / the pose don't), and the "shorter hop at 60 fps" first seen, which was
+the quest's random size (compare 30 and 60 only within one run, with "fps"). Rig: scratch-glav seq_cjf.sh (STARTS,
+REPS, F2 "60 120", KD = when the Art is asked for), cjtrig.py (per attempt: the open value at the trigger, the part,
+the monster's reaction and place), cjev.py, cjshape.py; debug aids MHGU_ART_FULL=1, control "art <n>", MHGU_CJTRACE=1,
+MHGU_MOTRACE=1 (emtrace.c, need MHGU_EMTRACE), MHGU_PLCOLL's hit lines now with the parts' damage (+0x488) and the
+hunter's motion frame.
 
 Start in an area (2026-11-18, debug, runtime/hle/quickhunt.c): MHGU_START_AREA=<n> starts every hunt in area n of its map, by replacing the area the random start picked (town +0xc9, copied to sGameControl +0x49 by the town's move 0x8bdfd0 when departing) for low rank's camp too. With MHGU_QUICKHUNT=<quest>, straight from start-up into that area, e.g. MHGU_QUICKHUNT=204 MHGU_START_AREA=8 (Harvest Tour: Arctic Ridge). Checked on that: the game's pick was area 0, the hunter arrived on the snowfield of area 8 ("hunter in area 8" in the camera trace). An area number the map doesn't have is not checked. Not a teleport: it only acts when departing.
 

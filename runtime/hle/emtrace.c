@@ -6,6 +6,11 @@
 // and velocity every update ("[emz]") and the zone's enemy list every 2 s. MHGU_EMACT_SPECIES=<hex> (monster +0xb5f0:
 // 0x1000 + the ems number for small monsters) points emact / emsweep at the first monster of that species instead.
 // Hooked: the engine's frame function (0xda5824: the limiter, which also measures the frame step), after it runs.
+// Hunter Arts (for testing them, e.g. Critical Juncture; these need MHGU_EMTRACE set too): MHGU_ART_FULL=1 keeps our hunter's three Art gauges full
+// (player +0x2758 + 2n, maximum +0x275e + 2n); the control file's "art <n>" asks for Art n. MHGU_CJTRACE=1 logs every
+// update our hunter's action and motion speed (+0x50c) and the large monster's ("[cj]"). MHGU_MOTRACE=1 logs a large
+// monster's motion update (0x271a40: position before and after, root motion; the first motion layer's fields that
+// changed: +0x4fc its frame, +0x500 / +0x514 the frame before, +0x4f4 a blend-in's frames left) ("[mot]").
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +35,10 @@ static volatile int g_sweep;
 static uint32_t g_sweep_group, g_sweep_next, g_sweep_last, g_sweep_act;
 static uint64_t g_sweep_wait_ns, g_sweep_end_ns;
 static uint32_t g_forced = ~0u;  // the last action started from the control file (group | index << 8)
+
+// "art <n>": our hunter asks for Hunter Art n (0..2) at the next frame, as its buttons would (player +0x143c bit n)
+static volatile int g_art_req = -1;
+void emtrace_art(int n) { g_art_req = n; }
 
 void emtrace_request(uint32_t group, uint32_t index, uint32_t mode) {
     g_req_group = group, g_req_index = index, g_req_mode = mode;
@@ -149,6 +158,29 @@ static void frame(Cpu *c) {
     uint64_t now = plat_now_ns();
     if (g_zako) zako_log(sen, now);
     float step = sys ? LDF(sys + 0x68) : 0;
+    {  // Hunter Arts: MHGU_ART_FULL, "art <n>", MHGU_CJTRACE (see the top)
+        static int art = -1, cj = -1;
+        if (art < 0) art = getenv("MHGU_ART_FULL") != NULL, cj = getenv("MHGU_CJTRACE") != NULL;
+        uint32_t gc = LD32(0x1a8ca48u), sp = LD32(0x1a85b58u), slot = gc ? LD32(gc + 0x30) : 4;
+        uint32_t pl = sp && slot < 4 ? LD32(sp + 0x1c + 4 * slot) : 0;
+        if (pl && art)
+            for (uint32_t n = 0; n < 3; n++) ST16(pl + 0x2758 + 2 * n, LD16(pl + 0x275e + 2 * n));
+        if (pl && g_art_req >= 0 && g_art_req < 3) {
+            ST32(pl + 0x143c, LD32(pl + 0x143c) | 1u << g_art_req);
+            LOG("[cj] art %d asked for (gauge %u/%u)\n", g_art_req, LD16(pl + 0x2758 + 2 * g_art_req), LD16(pl + 0x275e + 2 * g_art_req));
+            g_art_req = -1;
+        }
+        if (pl && cj) {
+            uint32_t en = 0;
+            for (int k = 0; k < MAX_EN && !en; k++) {
+                uint32_t e = LD32(sen + 0x1c + 4u * (uint32_t)k);
+                if (e && large(e)) en = e;
+            }
+            LOG("[cj] %llu step %.3f pl %08x act %04x:%u spd %.3f | em act %08x spd %.3f\n", (unsigned long long)(now / 1000000),
+                (double)step, pl, LD16(pl + 0x2506), LD16(pl + 0x250a), (double)LDF(pl + 0x50c), en ? LD32(en + EN_ACTION) : 0,
+                en ? (double)LDF(en + 0x50c) : 0.0);
+        }
+    }
     static uint64_t list_last;
     if (g_zako >= 2 && now - list_last > 2000000000ull) {
         list_last = now;
@@ -311,6 +343,27 @@ static void frame(Cpu *c) {
     }
 }
 
+// MHGU_MOTRACE=1: a large monster's motion update 0x271a40, position and the first motion layer before / after
+static void motion(Cpu *c) {
+    uint32_t en = c->r[0];
+    if (!large(en)) { fnhook_call_original(c, 0x271a40u); return; }
+    float b[3] = {LDF(en + 0x40), LDF(en + 0x44), LDF(en + 0x48)}, s0 = LDF(en + 0x1370), s2 = LDF(en + 0x1378);
+    uint32_t L0[12];
+    for (int i = 0; i < 12; i++) L0[i] = LD32(en + 0x4e8 + 4u * (uint32_t)i);
+    fnhook_call_original(c, 0x271a40u);
+    char buf[400];
+    int n = 0;
+    for (int i = 0; i < 12; i++) {
+        uint32_t w = LD32(en + 0x4e8 + 4u * (uint32_t)i);
+        float f, g;
+        memcpy(&f, &L0[i], 4), memcpy(&g, &w, 4);
+        if (w != L0[i]) n += snprintf(buf + n, sizeof buf - (size_t)n, " +%x %.3f>%.3f", 0x4e8 + 4 * i, (double)f, (double)g);
+    }
+    LOG("[mot] %llu act %08x pos %.1f %.1f (%.1f %.1f) -> %.1f %.1f +1c %.2f +50c %.3f |%s\n", (unsigned long long)(plat_now_ns() / 100000ull),
+        LD32(en + EN_ACTION), (double)b[0], (double)b[2], (double)s0, (double)s2, (double)LDF(en + 0x40), (double)LDF(en + 0x48),
+        (double)LDF(en + 0x1c), (double)LDF(en + 0x50c), buf);
+}
+
 static void set_action(Cpu *c) {
     if (large(c->r[0]))
         LOG("[em] %08x set action %u:%u mode %u (was %08x) lr %08x\n", c->r[0], c->r[1] & 0xff, c->r[2] & 0xff, c->r[3],
@@ -328,6 +381,7 @@ void emtrace_init(void) {
     if ((!e || !*e || !(g_level = atoi(e))) && !g_zako) return;
     fnhook_set(FN_FRAME, hle_register("emtrace:frame", frame));
     fnhook_set(FN_SET_ACTION, hle_register("emtrace:set_action", set_action));
+    if (getenv("MHGU_MOTRACE")) fnhook_set(0x271a40u, hle_register("emtrace:motion", motion));
     if (g_zako) fnhook_set(FN_HATE_RATE, hle_register("emtrace:hate_rate", hate_rate));
     LOG("[em] tracing large monster actions (level %d)\n", g_level);
 }

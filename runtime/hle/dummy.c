@@ -328,14 +328,16 @@ static void shape_capsule(Cpu *c) { shape_log(c, 0x367b5cu, "capsule"); }
 static void shape_three(Cpu *c) { shape_log(c, 0x3683dcu, "three"); }
 
 // (debug) MHGU_PLCOLL=1: our hunter's attacks against monsters (0x36c0c0: collision system, attack, target; its hits go
-// through 0x370968): each test with the attack's countdowns, and each hit it makes
+// through 0x370968): each test with the attack's countdowns, and each hit it makes, with the damage it did to each of
+// the 8 parts and where the monster was
 static uint32_t g_plcoll_at;
 static void plcoll_test(Cpu *c) {
     uint32_t at = c->r[1], owner = LD32(at + 0xc), sys = LD32(0x2326764u);
     bool ours = owner && owner == local_player();
     if (ours)
-        LOG("[plcoll] %.1f ms step %.2f attack %08x delay %.2f open %.2f +38 %08x\n", (double)(plat_now_ns() / 100000ull) / 10.0,
-            sys ? (double)LDF(sys + 0x68) : 0.0, at, (double)LDF(at + 0x5c), (double)LDF(at + 0x60), LD32(at + 0x38));
+        LOG("[plcoll] %.1f ms step %.2f attack %08x delay %.2f open %.2f +38 %08x frame %.3f (was %.3f)\n",
+            (double)(plat_now_ns() / 100000ull) / 10.0, sys ? (double)LDF(sys + 0x68) : 0.0, at, (double)LDF(at + 0x5c),
+            (double)LDF(at + 0x60), LD32(at + 0x38), (double)LDF(owner + 0x4fc), (double)LDF(owner + 0x500));
     g_plcoll_at = ours ? at : 0;
     fnhook_call_original(c, 0x36c0c0u);
     g_plcoll_at = 0;
@@ -345,7 +347,17 @@ static void plcoll_hit(Cpu *c) {
     static int drop = -1;  // (=2: the hit is dropped, so the attack goes on testing that target while it overlaps)
     if (drop < 0) drop = atoi(getenv("MHGU_PLCOLL")) == 2;
     if (g_plcoll_at && drop) { c->r[0] = 0; return; }
+    uint32_t at = g_plcoll_at, tgt = c->r[2], info = at ? LD32(tgt + 0x1428u) : 0;
     fnhook_call_next(c, 0x370968u);
+    if (at && info) {  // (the parts' damage this update, status +0x488, and where the monster is and faces)
+        char buf[160];
+        int n = 0;
+        for (int k = 0; k < 8; k++) n += snprintf(buf + n, sizeof buf - (size_t)n, " %d", (int16_t)LD16(info + 0x488 + 2 * k));
+        uint32_t pl = local_player();
+        LOG("[plcoll] after: +38 %08x parts%s react %u yaw %d em %.0f %.0f pl %.0f %.0f\n", LD32(at + 0x38), buf, LD8(info + 0x484),
+            (int)(LD32(info + 0x54) & 0xffff), (double)LDF(info + 0x40), (double)LDF(info + 0x48), pl ? (double)LDF(pl + 0x40) : 0.0,
+            pl ? (double)LDF(pl + 0x48) : 0.0);
+    }
 }
 
 void dummy_init(void) {

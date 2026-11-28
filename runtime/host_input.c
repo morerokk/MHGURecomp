@@ -409,6 +409,11 @@ static void control_poll(void) {
                 emtrace_request((uint32_t)atoi(arg), (uint32_t)atoi(arg2), (uint32_t)atoi(arg3));
                 continue;
             }
+            if (!strcmp(cmd, "art")) {  // art <0..2>: our hunter asks for that Hunter Art, as its buttons would (emtrace.c)
+                void emtrace_art(int);
+                emtrace_art(atoi(arg));
+                continue;
+            }
             if (!strcmp(cmd, "emsweep")) {  // emsweep <group> <first> <last>: each monster action in turn (emtrace.c)
                 void emtrace_sweep(uint32_t, uint32_t, uint32_t);
                 char arg3[16] = "";
