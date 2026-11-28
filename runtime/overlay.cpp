@@ -1388,6 +1388,17 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t) {
 #endif
 }
 
+bool overlay_busy(void) {
+#ifndef MHGU_NULL_BACKEND
+    if (!g_enabled) return false;
+    if (g_present_count < 60) return true;  // (overlay_draw's loading indicator)
+    std::lock_guard<std::mutex> l(g_snap_lock);
+    return g_snap.Valid && g_snap.CmdListsCount && g_snap.TotalVtxCount;
+#else
+    return false;
+#endif
+}
+
 // (the loading screen's thread, holding the Vulkan lock) If the game's thread is building its overlay frame, nothing:
 // its frames have begun, the game's first is near. (Only tried, never waited for: the game's thread takes the Vulkan
 // lock inside its frame, for texture uploads.)

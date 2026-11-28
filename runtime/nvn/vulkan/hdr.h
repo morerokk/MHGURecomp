@@ -26,6 +26,9 @@ void vk_hdr_variant_used(int pass, bool ready, int state);  // (exec.c draw: log
 // device.c, inside the HDR render pass on the window image: the composition (the game's picture in the intermediate
 // encoding + the overlay) -> HDR10 / scRGB.
 void vk_hdr_encode(VkCommandBuffer cb, VkRenderPass rp, TexBackend *compose);
+// exec.c vk_present_draw_hdr (a frame with no overlay: the game's picture straight into the window image, the
+// composition image skipped): h = gamma, tone mapper, BT.2020 picture; lum = game white, UI white, peak, output
+void vk_hdr_out_params(float h[4], float lum[4]);
 void vk_hdr_metadata_values(float *peak_nits, float *frame_avg_nits);
 // device.c backend_present, outside a render pass: the HDR analysis of the presented picture ([HDR] Analysis: hdr_stats.h)
 void vk_hdr_analyze(VkCommandBuffer cb, TexBackend *presented);  // VK_EXT_hdr_metadata, from the settings now

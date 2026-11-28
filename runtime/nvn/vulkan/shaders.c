@@ -325,6 +325,46 @@ static const char *builtin_src(const char *name, int *stage) {
                "  o = vec4(enc(c), 1.0);\n"
                "}\n";
     }
+    // (exec.c vk_present_draw_hdr: the game's picture straight into the HDR10 / scRGB window image, as the composition
+    // image + hdr.c's encode_frag would make it; h: x gamma (0 sRGB), y tone mapper (0 vanilla), z the picture is
+    // BT.2020; lum: x game white, y UI white, z peak (nits), w output (1 PQ, 2 scRGB))
+    if (!strcmp(name, "present.frag.out")) {
+        *stage = STAGE_FRAGMENT;
+        return "#version 450\n"
+               "layout(set = 0, binding = 0) uniform sampler2D t;\n"
+               "layout(push_constant) uniform P { vec4 a; vec4 crop; vec4 h; vec4 lum; } pc;\n"
+               "layout(location = 0) in vec2 uv;\n"
+               "layout(location = 0) out vec4 o;\n"
+               "vec3 spow(vec3 c, float e) { return sign(c) * pow(abs(c), vec3(e)); }\n"
+               "vec3 srgb_dec(vec3 c) {\n"
+               "  vec3 a = abs(c);\n"
+               "  return sign(c) * mix(a / 12.92, pow((a + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), a));\n"
+               "}\n"
+               "vec3 to_bt2020(vec3 c) {\n"
+               "  return vec3(dot(vec3(0.6274040, 0.3292820, 0.0433136), c), dot(vec3(0.0690970, 0.9195400, 0.0113612), c),\n"
+               "              dot(vec3(0.0163916, 0.0880132, 0.8955950), c));\n"
+               "}\n"
+               "vec3 from_bt2020(vec3 c) {\n"
+               "  return vec3(dot(vec3(1.6604910, -0.5876411, -0.0728499), c), dot(vec3(-0.1245505, 1.1328999, -0.0083494), c),\n"
+               "              dot(vec3(-0.0181508, -0.1005789, 1.1187297), c));\n"
+               "}\n"
+               "vec3 pq(vec3 nits) {\n"
+               "  vec3 y = pow(clamp(nits / 10000.0, 0.0, 1.0), vec3(0.1593017578125));\n"
+               "  return pow((0.8359375 + 18.8515625 * y) / (1.0 + 18.6875 * y), vec3(78.84375));\n"
+               "}\n"
+               "void main() {\n"
+               "  vec3 c = texture(t, uv).rgb;\n"
+               "  c = vec3(isnan(c.x) ? 0.0 : c.x, isnan(c.y) ? 0.0 : c.y, isnan(c.z) ? 0.0 : c.z);\n"
+               "  bool vanilla = pc.h.y < 0.5;\n"
+               "  vec3 lin = pc.h.x > 0.0 ? spow(c, pc.h.x) : srgb_dec(c);\n"
+               "  float s = vanilla ? pc.lum.x : pc.lum.y;\n"
+               "  vec3 nits;\n"
+               "  if (pc.h.z > 0.5) nits = (vanilla ? to_bt2020(clamp(from_bt2020(lin), 0.0, 1.0)) : lin) * s;\n"
+               "  else nits = to_bt2020((vanilla ? clamp(lin, 0.0, 1.0) : lin) * s);\n"
+               "  nits = clamp(nits, 0.0, pc.lum.z);\n"
+               "  o = vec4(pc.lum.w > 1.5 ? from_bt2020(nits) / 80.0 : pq(nits), 1.0);\n"
+               "}\n";
+    }
     if (!strcmp(name, "clear.vert")) {
         *stage = STAGE_VERTEX;
         return "#version 450\n"

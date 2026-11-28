@@ -54,6 +54,9 @@ void overlay_draw(VkCommandBuffer cb, const OverlayTarget *t);
 // Before the game's first frame (device.c's loading screen thread, under the Vulkan lock, inside the window image's
 // render pass): the loading indicator alone, on the black window.
 void overlay_loading(VkCommandBuffer cb, const OverlayTarget *t);
+// (render thread, before the window image's frame begins) false: overlay_draw would draw nothing this frame - no
+// overlay window, notice or loading indicator (HDR then draws the game straight into the window image: device.c)
+bool overlay_busy(void);
 
 // Forge 2.0.0's forge_graphics_registerTexture / unregisterTexture (any thread): a plugin's NVNtexture (guest address)
 // with its NVNtextureView's 0x28 bytes (NULL: none) for ImGui::Image; the ImTextureID the plugin draws it with, 0 when

@@ -480,6 +480,7 @@ static TexBackend compose;
 static VkImageView compose_view;  // (its own: a cached view can be evicted while the framebuffer still uses it)
 static VkFramebuffer compose_fb;
 static VkRenderPass hdr_pass;
+static VkRenderPass hdr_clear_pass;  // (hdr_pass cleared first: a frame drawn straight into the window image, frame_begin)
 static VkFramebuffer hdr_fb[SC_MAX];
 
 static bool hdr_broken;  // the composition image could not be made: SDR
@@ -681,7 +682,10 @@ static void create_swapchain(void) {
     VkRenderPass pass = window_pass(wfmt, true, out ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     if (pass != sc_pass || !out) compose_free();  // (its framebuffer was made for the old pass)
     sc_pass = pass;
-    if (out) hdr_pass = window_pass(sf.format, false, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    if (out) {
+        hdr_pass = window_pass(sf.format, false, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        hdr_clear_pass = window_pass(sf.format, true, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);  // (compatible: hdr_fb serves both)
+    }
     g_vk.sc_format = sf.format;
     g_vk.sc_extent = ext;
     if (out && !compose_make(ext)) {  // (no memory for it: SDR from now on, the swapchain made again)
@@ -782,7 +786,7 @@ static bool surface_ready(void) {
 }
 #endif
 
-typedef struct { uint32_t image; VkSemaphore acquired; bool ok; } Frame;
+typedef struct { uint32_t image; VkSemaphore acquired; bool ok, direct; } Frame;  // (direct: HDR, no composition image)
 static Frame cur_frame;
 
 // A stuck present, logged: the window calls that can block with no timeout of their own (vk_wait_seq logs after 10 s by
@@ -810,8 +814,10 @@ static void step_end(void) {
 }
 
 // Acquire the next window image and begin its render pass (cleared to black). false: nothing to draw into.
-static bool frame_begin(void) {
-    cur_frame.ok = false;
+// direct (HDR): the HDR window image's own pass instead of the composition image's, for a frame nothing is drawn over
+// (cur_frame.direct says whether it is: not once HDR turned off here).
+static bool frame_begin(bool direct) {
+    cur_frame.ok = cur_frame.direct = false;
     int w, h;
     SDL_GetWindowSizeInPixels(ui_window(), &w, &h);
     if (!w || !h || ui_window_away()) return false;  // minimised (or the window going away: ui.c)
@@ -853,9 +859,10 @@ static bool frame_begin(void) {
     VkCommandBuffer cb = vk_cmd();
     vk_full_barrier(cb);  // (the game's image is complete before it is sampled)
     VkClearValue black = {.color.float32 = {0, 0, 0, 1}};
-    VkRenderPassBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, .renderPass = sc_pass,
-                                .framebuffer = g_hdr_out ? compose_fb : sc_fb[cur_frame.image], .renderArea = {{0, 0}, g_vk.sc_extent},
-                                .clearValueCount = 1, .pClearValues = &black};
+    cur_frame.direct = direct && g_hdr_out;
+    VkRenderPassBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, .renderPass = cur_frame.direct ? hdr_clear_pass : sc_pass,
+                                .framebuffer = cur_frame.direct ? hdr_fb[cur_frame.image] : g_hdr_out ? compose_fb : sc_fb[cur_frame.image],
+                                .renderArea = {{0, 0}, g_vk.sc_extent}, .clearValueCount = 1, .pClearValues = &black};
     vkCmdBeginRenderPass(cb, &bi, VK_SUBPASS_CONTENTS_INLINE);
     VkViewport vp = {0, 0, (float)g_vk.sc_extent.width, (float)g_vk.sc_extent.height, 0, 1};
     VkRect2D sc = {{0, 0}, g_vk.sc_extent};
@@ -912,7 +919,9 @@ static void frame_end(const char *shot_path) {
         VkBufferImageCopy rg = {.bufferOffset = shot.off, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {w, h, 1}};
         vkCmdCopyImageToBuffer(cb, compose.image, VK_IMAGE_LAYOUT_GENERAL, shot.buf, 1, &rg);
     }
-    if (hdr) {  // (HDR) the composition -> the window image (hdr.c)
+    if (hdr && cur_frame.direct) {
+        hdr_send_metadata(false);
+    } else if (hdr) {  // (HDR) the composition -> the window image (hdr.c)
         vk_full_barrier(cb);
         VkRenderPassBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, .renderPass = hdr_pass,
                                     .framebuffer = hdr_fb[img], .renderArea = {{0, 0}, g_vk.sc_extent}};
@@ -993,6 +1002,7 @@ void vk_save_png(const char *path, const uint8_t *rgba, uint32_t w, uint32_t h) 
 
 // ================================================================== presentation (nvnQueuePresentTexture)
 void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, float vw, float vh);  // (exec.c)
+void vk_present_draw_hdr(VkCommandBuffer cb, VkRenderPass rp, TexBackend *b, float vx, float vy, float vw, float vh);
 
 static uint64_t g_frames;
 uint64_t vk_frame_counter(void) { return g_frames; }
@@ -1030,18 +1040,35 @@ void backend_present(NvnTexture *t) {
     vk_ms_resolve(b);
     overlay_user_textures_prepare(user_tex_view);  // (Forge plugins' textures for ImGui, drawn by overlay_draw)
     if (g_hdr_out) vk_hdr_analyze(vk_cmd(), b);  // ([HDR] Analysis: measured before it is drawn, hdr.c)
-    if (frame_begin()) {
+    extern char g_shot_request[256];  // (runtime/host_input.c: MHGU_CONTROL "shot <name>")
+    extern char g_burst_name[200];
+    extern int g_burst_left, g_burst_index;
+    // HDR: a frame nothing is drawn over (no overlay, no screenshot, which reads the composition image) goes straight
+    // into the window image (hdr.c vk_hdr_out_params). MHGU_HDR_COMPOSE=1: always through the composition image.
+    static int force_compose = -1;
+    if (force_compose < 0) force_compose = getenv("MHGU_HDR_COMPOSE") && atoi(getenv("MHGU_HDR_COMPOSE"));
+    bool direct = g_hdr_out && !force_compose && !overlay_busy() && !g_shot_request[0] && g_burst_left <= 0 &&
+                  !shot_frame(g_frames + 1);
+    if (frame_begin(direct)) {
+        static int last_direct = -1, nlog;
+        if (g_hdr_out && last_direct != (int)cur_frame.direct && nlog < 20) {
+            nlog++;
+            LOG("[hdr] window image: %s\n", cur_frame.direct ? "the game drawn straight into it"
+                                                             : "through the composition image (overlay or screenshot)");
+        }
+        last_direct = g_hdr_out ? cur_frame.direct : -1;
         // the game's image, as large as fits with its aspect ratio, centred
         double ww = g_vk.sc_extent.width, wh = g_vk.sc_extent.height, s = fmin(ww / t->width, wh / t->height);
         double vw = t->width * s, vh = t->height * s;
-        vk_present_draw(vk_cmd(), b, (float)((ww - vw) / 2), (float)((wh - vh) / 2), (float)vw, (float)vh);
-        OverlayTarget ot = {g_vk.inst, g_vk.phys, g_vk.dev, g_vk.qfam, g_vk.queue, g_vk.pcache, sc_pass,
-                            g_vk.sc_extent.width, g_vk.sc_extent.height};
-        overlay_draw(vk_cmd(), &ot);  // (Forge plugins' ImGui overlay, over the game: runtime/overlay.cpp)
+        if (cur_frame.direct) {
+            vk_present_draw_hdr(vk_cmd(), hdr_clear_pass, b, (float)((ww - vw) / 2), (float)((wh - vh) / 2), (float)vw, (float)vh);
+        } else {
+            vk_present_draw(vk_cmd(), b, (float)((ww - vw) / 2), (float)((wh - vh) / 2), (float)vw, (float)vh);
+            OverlayTarget ot = {g_vk.inst, g_vk.phys, g_vk.dev, g_vk.qfam, g_vk.queue, g_vk.pcache, sc_pass,
+                                g_vk.sc_extent.width, g_vk.sc_extent.height};
+            overlay_draw(vk_cmd(), &ot);  // (Forge plugins' ImGui overlay, over the game: runtime/overlay.cpp)
+        }
         char path[300];
-        extern char g_shot_request[256];  // (runtime/host_input.c: MHGU_CONTROL "shot <name>")
-        extern char g_burst_name[200];
-        extern int g_burst_left, g_burst_index;
         if (!g_shot_request[0] && g_burst_left > 0) {
             g_burst_left--;
             snprintf(g_shot_request, sizeof g_shot_request, "shots/%s_%d.png", g_burst_name, g_burst_index++);
@@ -1200,7 +1227,7 @@ static void *loading_thread(void *arg) {
     for (;;) {
         vk_lock();
         bool game = g_frames != 0;
-        if (!game && frame_begin()) {
+        if (!game && frame_begin(false)) {
             OverlayTarget ot = {g_vk.inst, g_vk.phys, g_vk.dev, g_vk.qfam, g_vk.queue, g_vk.pcache, sc_pass,
                                 g_vk.sc_extent.width, g_vk.sc_extent.height};
             overlay_loading(vk_cmd(), &ot);

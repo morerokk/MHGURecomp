@@ -478,6 +478,15 @@ void vk_hdr_encode(VkCommandBuffer cb, VkRenderPass rp, TexBackend *compose) {
     vkCmdDraw(cb, 3, 1, 0, 0);
 }
 
+// A frame nothing is drawn over (no overlay, no screenshot: device.c backend_present): the game's picture goes straight
+// into the window image through shaders.c's present.frag.out, encode_frag's maths on the picture as the present draw
+// samples it. The composition image's round trip is skipped: a window-size RGBA16F image written and read back again
+// each frame (about 40 MB at a phone's 2400x1080), a full barrier and a render pass, which mobile GPUs feel most.
+void vk_hdr_out_params(float h[4], float lum[4]) {
+    h[0] = gamma_value(), h[1] = (float)config_live_hdr_tonemap(), h[2] = present_2020 ? 1.0f : 0.0f, h[3] = 0;
+    lum[0] = config_live_hdr_game(), lum[1] = config_live_hdr_ui(), lum[2] = config_live_hdr_peak(), lum[3] = (float)g_hdr_out;
+}
+
 // ---- the HDR analysis ([HDR] Analysis, hdr_stats.h): the presented picture measured by a compute pass before it is
 // drawn into the window (device.c backend_present), every other pixel in each direction, with the window image's own
 // maths (vk_hdr_encode); read back a frame or two later, without waiting. Its buffer (uints): [0] max Y, [1] min Y,
