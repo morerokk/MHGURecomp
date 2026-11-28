@@ -10,6 +10,13 @@
 
 #include "../platform.h"
 
+// ---- dedicated GPU on hybrid laptops
+// NVIDIA Optimus and AMD switchable-graphics drivers read these from the exe at start: without them an unknown exe is
+// put on the integrated GPU, and Optimus can leave the NVIDIA GPU out of the Vulkan device list entirely, so neither
+// pick_device's discrete-first rule nor Windows' Graphics settings get to choose it. (MHGU_GPU still picks any listed one.)
+__declspec(dllexport) DWORD NvOptimusEnablement = 1;
+__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+
 // ---- guest address space
 // The 4 GB window is reserved up front; pages are committed on their first touch by the exception handler below
 // (64 KB at a time), so only memory the game uses is backed.
