@@ -103,6 +103,22 @@ Tested with a virtual controller (control file `vpad`) on an HBG: default, `Spli
 (tap: scope, again: out, hold: quick aim; R then aims no more). `hle/combowin.c` (Lenient window) still treats only the
 real R / ZR as the modifier: with WeaponR on its own input, R+X+A rolled at high fps gets none of its help (not tested).
 
+**Sprinting sheathes the weapon** (`[Actions] SprintSheathes=1`, off by default; in the settings: Controls > Game
+actions, Show: a hunt, *Sprint sheathes the weapon*, Advanced layout, below *Split Dash from weapon R-action*), as in the
+later games. A new press of `Dash` while the hunter has the
+weapon out (the gameplay view `ACT_VIEW_MB1`, the item bar closed) and `WeaponR` is not active gives the gameplay word Y
+for `ACT_SPRINT_SHEATHE_TAP` (3) updates: the game's own sheathe, the walking one when the hunter moves, and the held
+Dash runs once the weapon is away. `act_sprint_sheathe` (actions.c, host-tested) is ORed in after `act_view` in the
+gameplay translator (`hle/input_view.c` `tr_view`, slot 0). Rules:
+* Only where Dash is another input than the weapon R-action, decided per press from the active set: without the split,
+  or with `WeaponR` following Dash or bound to Dash's input too, both are active on every Dash press and nothing is added
+  (R stays the guard, the charge, the aim). With the guard held on its own input while Dash is pressed, nothing either.
+* A tap, not a hold: a held Y with the weapon out is Valor's sheathe stance.
+* The tap stops early when the weapon is put away (with it away Y uses an item), the bar opens, or `WeaponR` becomes
+  active (the Sword and Shield uses an item on guard + Y). The Prowler and "no hunter" (`ACT_VIEW_HUNT_ANY`) get nothing.
+* Not checked in the game yet: Dash pressed during an attack (the game may keep the Y and sheathe after the attack, as it
+  does with Y) and each class's sheathe from a run.
+
 Weapon classes for per-class overrides: GreatSword SnS Hammer Lance HBG LBG LongSword SwitchAxe Gunlance Bow DualBlades Horn
 InsectGlaive ChargeBlade Prowler.
 
@@ -269,6 +285,7 @@ low; (6) mash / struggle and the raw-word readers, not worth it.
 Enable=1                  ; 1 is the default (no section at all too); 0: nothing hooked, bit-for-bit the game's own input
 ManageMenus=1             ; the menu view too
 SheathedAttackA=0         ; 1: AttackA presses A with the weapon away too (only matters once Interact is bound)
+SprintSheathes=0          ; 1: Dash with the weapon out sheathes it (only where Dash is another input than WeaponR)
 ConfirmTargets=5,8,9,13,17 ; OpenTalk's targets (the interactable's category, see above), only with OpenTalk bound; empty: off
 Pointer=0                 ; feed the engine's (dormant) pointer block: experiment, see P1 below
 Log=0                     ; one line per frame (env MHGU_ACTION_LOG=1); env MHGU_ACTIONS=0|1 overrides Enable
