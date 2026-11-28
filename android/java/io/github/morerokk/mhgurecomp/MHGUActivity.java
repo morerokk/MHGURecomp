@@ -13,6 +13,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.Window;
@@ -132,7 +133,18 @@ public class MHGUActivity extends SDLActivity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) { hideBars(); hideBarsSoon(); }  // (back from a picker, the notification shade, the keyboard...)
+        if (hasFocus) { hideBars(); hideBarsSoon(); unbufferedSticks(); }  // (back from a picker, the notification shade, the keyboard...)
+    }
+
+    // Android holds a controller's stick, trigger and (on many pads) d-pad movement back until the screen's next frame
+    // and hands it over then, batched: up to a refresh (16.7 ms at 60 Hz) of input lag that a PC doesn't have. Buttons
+    // aren't held. Asked on the window's root view, which the window reads it from (0 first: asking for the same
+    // source again isn't passed on, and the window may not have been there to hear the first time).
+    private void unbufferedSticks() {
+        if (Build.VERSION.SDK_INT < 30 || getWindow() == null) return;
+        View v = getWindow().getDecorView();
+        v.requestUnbufferedDispatch(InputDevice.SOURCE_CLASS_NONE);
+        v.requestUnbufferedDispatch(InputDevice.SOURCE_CLASS_JOYSTICK);
     }
 
     @Override
