@@ -18,8 +18,11 @@ upscaling is on, as before.
 
 Everything else is shared with FSR 3.1: the jittered camera, the scene-frame detection, the output-size stand-ins for
 the HUD, the texture LOD bias, object motion capture, animated-surface detection and history resets. `docs/FSR-PORT.md`
-describes that preparation; only the final dispatch differs. SGSR 2 uses no reactive mask and no sharpening
-(`Sharpness` and `Reactive` have no effect with it).
+describes that preparation; only the final dispatch differs. SGSR 2 uses no reactive mask (`Reactive` has no effect
+with it). It has no sharpening of its own, so its final copy into H' runs AMD's RCAS (the filter FSR 3.1 runs after
+its upscale), with `Sharpness` mapped as FSR maps it and read each frame; the history stays unsharpened. In town at
+Performance, 0.8 took the mean neighbour difference (a sharpness measure) from 6.4 to 7.6, against 8.9 native and 9.4
+for FSR 3.1 at 0.8.
 
 ## What was added
 

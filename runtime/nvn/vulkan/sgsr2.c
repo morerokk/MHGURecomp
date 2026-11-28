@@ -20,6 +20,7 @@
 #include "sgsr2_math.h"
 #include "shaders.h"
 #include "sgsr2_glsl.h"
+#include "../../config.h"
 
 static uint32_t rw, rh, ow, oh;
 
@@ -60,12 +61,33 @@ static const char QUAD_VS[] =
     "}\n";
 
 // Qualcomm's sample keeps both history images RGBA16F. The port's H' is RGBA8 (the game's LDR picture), so a small
-// final pass writes the RGBA16F upscale into it instead of copying between different formats.
+// final pass writes the RGBA16F upscale into it instead of copying between different formats. SGSR 2 has no
+// sharpening of its own: this pass is also AMD's RCAS (FidelityFX FSR 1, MIT, as FSR 3.1 runs it after its upscale),
+// with [Upscaler] Sharpness read each frame like FSR's. The history stays unsharpened (it is only read back here).
+// pc.con: RCAS's sharpness, exp2(-stops) (0: a plain copy); 5 taps, the noise-limited lobe (FSR_RCAS_DENOISE).
 static const char COPY_FS[] =
     "#version 450\n"
     "layout(set = 0, binding = 0) uniform sampler2D src;\n"
+    "layout(push_constant) uniform Push { float con; } pc;\n"
     "layout(location = 0) out vec4 o;\n"
-    "void main() { o = vec4(clamp(texelFetch(src, ivec2(gl_FragCoord.xy), 0).rgb, 0.0, 1.0), 1.0); }\n";
+    "vec3 at(ivec2 p) { return clamp(texelFetch(src, clamp(p, ivec2(0), textureSize(src, 0) - 1), 0).rgb, 0.0, 1.0); }\n"
+    "float luma(vec3 c) { return c.b * 0.5 + (c.r * 0.5 + c.g); }\n"
+    "void main() {\n"
+    "    ivec2 p = ivec2(gl_FragCoord.xy);\n"
+    "    vec3 e = at(p);\n"
+    "    if (pc.con <= 0.0) { o = vec4(e, 1.0); return; }\n"
+    "    vec3 b = at(p + ivec2(0, -1)), d = at(p + ivec2(-1, 0)), f = at(p + ivec2(1, 0)), h = at(p + ivec2(0, 1));\n"
+    "    float bL = luma(b), dL = luma(d), eL = luma(e), fL = luma(f), hL = luma(h);\n"
+    "    float range = max(max(max(bL, dL), max(eL, fL)), hL) - min(min(min(bL, dL), min(eL, fL)), hL);\n"
+    "    float nz = clamp(abs(0.25 * (bL + dL + fL + hL) - eL) / max(range, 1e-6), 0.0, 1.0);\n"
+    "    nz = -0.5 * nz + 1.0;\n"
+    "    vec3 mn4 = min(min(b, d), min(f, h)), mx4 = max(max(b, d), max(f, h));\n"
+    "    vec3 hitMin = mn4 / max(4.0 * mx4, vec3(1e-6));\n"
+    "    vec3 hitMax = (1.0 - mx4) / min(4.0 * mn4 - 4.0, vec3(-1e-6));\n"
+    "    vec3 lobe3 = max(-hitMin, hitMax);\n"
+    "    float lobe = max(-(0.25 - 1.0 / 16.0), min(max(max(lobe3.r, lobe3.g), lobe3.b), 0.0)) * pc.con * nz;\n"
+    "    o = vec4(clamp((lobe * (b + d + f + h) + e) / (4.0 * lobe + 1.0), 0.0, 1.0), 1.0);\n"
+    "}\n";
 
 static const char *const NDC_Y_UP[] = {"REQUEST_NDC_Y_UP=1"};
 
@@ -145,7 +167,9 @@ static bool make_layouts(void) {
     if (vkCreatePipelineLayout(g_vk.dev, &gli, NULL, &convert_layout) != VK_SUCCESS) return false;
     gli.pSetLayouts = &upscale_set;
     if (vkCreatePipelineLayout(g_vk.dev, &gli, NULL, &upscale_layout) != VK_SUCCESS) return false;
-    gli.pSetLayouts = &copy_set;
+    gli.pSetLayouts = &copy_set;  // (+ RCAS's sharpness as a push constant)
+    VkPushConstantRange cr = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .size = 4};
+    gli.pushConstantRangeCount = 1, gli.pPushConstantRanges = &cr;
     return vkCreatePipelineLayout(g_vk.dev, &gli, NULL, &copy_layout) == VK_SUCCESS;
 }
 
@@ -367,7 +391,10 @@ bool vk_sgsr2_dispatch(VkCommandBuffer cb, TexBackend *color, TexBackend *depth,
         VkRenderPassBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, .renderPass = rp_copy,
                                     .framebuffer = vk_framebuffer(rp_copy, &view, 1, ow, oh),
                                     .renderArea = {{0, 0}, {ow, oh}}};
+        // [Upscaler] Sharpness 0..1 as FSR 3.1 maps it (stops = 2 - 2 x sharpness; 0 = no sharpening)
+        float s = config_live_fsr_sharpness(), con = s > 0.0f ? exp2f(-(2.0f - 2.0f * fminf(s, 1.0f))) : 0.0f;
         vkCmdBeginRenderPass(cb, &bi, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdPushConstants(cb, copy_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof con, &con);
         bind_quad(cb, copy_pipe, copy_layout, set, ow, oh);
         vkCmdEndRenderPass(cb);
     }
