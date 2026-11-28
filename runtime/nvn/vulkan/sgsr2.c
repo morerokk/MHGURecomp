@@ -27,11 +27,14 @@ static uint32_t rw, rh, ow, oh;
 // texture's vector and reprojecting depth, so STATIC pixels must be literal zero, not an encoded zero motion (0.5).
 // The port's object vectors are render pixels, +y down; SGSR decodes (ev - 0.5) / 0.2495 into clip-space motion with
 // +y up in NDC (REQUEST_NDC_Y_UP).
+// The encoded image is RGBA32F. Qualcomm's decode (32767 / 65535) assumes 16-bit UNORM; RGBA16F has steps of 2^-11
+// around 0.5, ~1 render pixel of motion at 960 wide, so static objects got +-1 px vectors every frame and the history
+// was pulled around (the picture waved). RGBA32F is a mandatory storage format, unlike RGBA16 UNORM.
 static const char VEL_GLSL[] =
     "#version 450\n"
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(set = 0, binding = 0) uniform sampler2D obj_vel;\n"  // RGBA16F: object pixels, b > 0.5 = valid
-    "layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D out_vel;\n"
+    "layout(set = 0, binding = 1, rgba32f) uniform writeonly image2D out_vel;\n"
     "layout(push_constant) uniform Push { vec2 size; uint flags; uint reset; } pc;\n"
     "void main() {\n"
     "    ivec2 p = ivec2(gl_GlobalInvocationID.xy);\n"
@@ -204,7 +207,7 @@ bool vk_sgsr2_init(uint32_t w, uint32_t h, uint32_t wo, uint32_t ho) {
         return false;
     }
     VkImageUsageFlags img_use = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    bool ok = own_image(&img_vel_enc, VK_FORMAT_R16G16B16A16_SFLOAT, rw, rh, img_use) &&
+    bool ok = own_image(&img_vel_enc, VK_FORMAT_R32G32B32A32_SFLOAT, rw, rh, img_use) &&
               own_image(&img_mda, VK_FORMAT_R16G16B16A16_SFLOAT, rw, rh,
                         img_use | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) &&
               own_image(&img_hist[0], VK_FORMAT_R16G16B16A16_SFLOAT, ow, oh,

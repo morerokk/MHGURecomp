@@ -30,7 +30,9 @@ describes that preparation; only the final dispatch differs. SGSR 2 uses no reac
   1. a compute pass encodes the port's motion vectors into SGSR 2's format. The port's vectors are render pixels
      (previous - current, +y down); SGSR 2 decodes `(ev - 0.5) / 0.2495` into clip-space motion (current - previous,
      +y up). Only moving objects get a vector; static pixels get zero so SGSR 2 reprojects them from depth with
-     `clipToPrevClip`. This avoids the camera vectors that FSR needs everywhere.
+     `clipToPrevClip`. This avoids the camera vectors that FSR needs everywhere. The encoded image is RGBA32F: the
+     decode assumes 16-bit UNORM precision, and RGBA16F's steps near 0.5 (~1 render pixel of motion) made static
+     objects waver.
   2. Qualcomm's Convert pass at render size: colour + D24S8 depth + encoded velocity -> RGBA16F motion/depth/clip.
   3. Qualcomm's Upscale pass at output size, into one of two ping-ponged RGBA16F history images, then a small copy to
      the game's RGBA8 H'. The UBO is the std140 `Params` block from the two shaders (128 bytes), filled from the
