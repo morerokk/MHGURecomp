@@ -281,6 +281,10 @@ static void tr_view(Cpu *c, int view, int slot, uint32_t fn) {
         }
     }
     uint32_t out = act_view(view, in, active, g_dash_zr);  // (the Hunter Arts' keys press nothing: pl_no_input)
+    if (slot == 0) {  // (the gameplay word: SprintSheathes' tap of Y, actions.h)
+        static ActSprintSheathe sheathe;
+        out |= act_sprint_sheathe(&sheathe, view, active, g_frame);
+    }
     g_in[slot] = in, g_out[slot] = out;
     c->r[1] = out;
     fnhook_call_next(c, fn);

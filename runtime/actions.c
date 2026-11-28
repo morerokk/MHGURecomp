@@ -454,6 +454,7 @@ void act_parse(const char *text, ActProfile *p) {
             else if (same_name(key, "SplitDashWeaponR")) p->split = parse_bool(val);
             else if (same_name(key, "SheathedAttackA")) p->sheathed_attack = parse_bool(val);
             else if (same_name(key, "HunterArtKeys")) p->art_keys = parse_bool(val);
+            else if (same_name(key, "SprintSheathes")) p->sprint_sheathe = parse_bool(val);
             else if (same_name(key, "ConfirmTargets")) p->confirm_mask = parse_categories(val);
             else if (same_name(key, "OpenTalkAlsoInteract")) p->open_talk_union = parse_bool(val);
             else if (same_name(key, "TargetLog")) p->target_log = parse_bool(val);
@@ -508,6 +509,7 @@ size_t act_format(const ActProfile *p, char *buf, size_t size) {
     if (p->split) PUT("SplitDashWeaponR=1\n");
     if (p->sheathed_attack) PUT("SheathedAttackA=1\n");
     if (p->art_keys) PUT("HunterArtKeys=1\n");
+    if (p->sprint_sheathe) PUT("SprintSheathes=1\n");
     if (p->open_talk_union) PUT("OpenTalkAlsoInteract=1\n");
     if (p->target_log) PUT("TargetLog=1\n");
     // (a comment, not a setting: the default categories are built in, so an ini that changes nothing stays short; the
@@ -785,6 +787,22 @@ uint32_t act_virtual_bits(uint64_t active) {
     return act_split() && (active >> ACT_WEAPON_R & 1) ? ACT_VBIT_WEAPON_R : 0;
 }
 bool act_art_keys(void) { return prof_on && prof.art_keys; }
+
+uint32_t act_sprint_sheathe(ActSprintSheathe *s, int view, uint64_t active, uint64_t frame) {
+    if (!prof_on || !prof.sprint_sheathe) {
+        s->until = 0, s->dash = false;
+        return 0;
+    }
+    bool dash = active >> ACT_DASH & 1, weapon_r = active >> ACT_WEAPON_R & 1;
+    bool out = view == ACT_VIEW_MB1;  // (weapon out, the bar closed: not ACT_VIEW_BAR, the Prowler or no hunter)
+    if (frame != s->frame) {  // (a new update: a new press of Dash, with the weapon out and not the weapon R-action)
+        s->frame = frame;
+        if (dash && !s->dash && out && !weapon_r) s->until = frame + ACT_SPRINT_SHEATHE_TAP;
+        s->dash = dash;
+    }
+    if (!out || weapon_r) s->until = 0;  // (the weapon away, the bar open, the guard raised: no Y)
+    return frame < s->until ? ew_of_btn[S_Y] : 0;
+}
 bool act_target_log(void) { return prof_on && prof.target_log; }
 void act_format_targets(uint64_t mask, char *buf, size_t size) {
     if (!size) return;

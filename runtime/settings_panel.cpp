@@ -1634,6 +1634,8 @@ void action_rows(std::vector<Row> &r) {
                    "Only matters once Interact has a binding of its own. Off: with the weapon away only Interact presses the game's A (gather, carve, talk), with it out only Attack A does. On: Attack A presses it in both cases.");
             toggle("act.split", "Split Dash from weapon R-action", &p.split,
                    "On: Dash and the weapon's R-action (guard, charge, aim) are two actions you can put on two buttons. Binding Weapon R-action turns it on by itself. Off: they are one button, as in the game.");
+            toggle("act.sprintsheathe", "Sprint sheathes the weapon", &p.sprint_sheathe,
+                   "On: pressing Sprint with the weapon out puts it away, as in the later games; keep holding it to run. Only where Sprint is not also the weapon action (guard, charge, aim): give that one an input of its own first. Off: Sprint does nothing with the weapon out, as in the game.");
         }
         advanced_rows(r);
     } else

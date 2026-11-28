@@ -999,6 +999,86 @@ static void test_hunter_arts(void) {
     act_set_log(quiet);
 }
 
+// SprintSheathes: a new press of Dash with the weapon out taps Y (the sheathe), only where Dash is another input than
+// the weapon R-action, and never with the weapon away, the bar open, the Prowler or the guard raised
+static void test_sprint_sheathe(void) {
+    const uint64_t D = 1ull << ACT_DASH, R = 1ull << ACT_WEAPON_R;
+    const int OUT = ACT_VIEW_MB1;
+    ActSprintSheathe s;
+    // off (the default): nothing, and the ini says nothing
+    ActProfile p = parse("[Actions]\nEnable=1\n");
+    act_use_profile(&p);
+    memset(&s, 0, sizeof s);
+    CHECK(!p.sprint_sheathe && act_sprint_sheathe(&s, OUT, D, 1) == 0, "off unless asked for");
+    char buf[4096];
+    act_format(&p, buf, sizeof buf);
+    CHECK(!strstr(buf, "SprintSheathes"), "not written while off");
+    p = parse("[Actions]\nEnable=1\nSprintSheathes=1\n");
+    act_use_profile(&p);
+    act_format(&p, buf, sizeof buf);
+    CHECK(p.sprint_sheathe && strstr(buf, "SprintSheathes=1"), "SprintSheathes=1, written back: %s", buf);
+    // a press of Dash alone: Y for the tap's updates, asked again in one update the same, then nothing while held
+    memset(&s, 0, sizeof s);
+    CHECK(act_sprint_sheathe(&s, OUT, 0, 10) == 0, "nothing held");
+    for (uint64_t f = 11; f < 11 + ACT_SPRINT_SHEATHE_TAP; f++) {
+        CHECK(act_sprint_sheathe(&s, OUT, D, f) == 0x8000, "update %llu: Y", (unsigned long long)f);
+        CHECK(act_sprint_sheathe(&s, OUT, D, f) == 0x8000, "update %llu again: Y", (unsigned long long)f);
+    }
+    CHECK(act_sprint_sheathe(&s, OUT, D, 11 + ACT_SPRINT_SHEATHE_TAP) == 0, "held on: the tap is over (no Valor stance)");
+    CHECK(act_sprint_sheathe(&s, OUT, D, 20) == 0, "still held: no new press");
+    CHECK(act_sprint_sheathe(&s, OUT, 0, 21) == 0 && act_sprint_sheathe(&s, OUT, D, 22) == 0x8000, "released and pressed: again");
+    // Dash and the weapon R-action active together (one input): never
+    memset(&s, 0, sizeof s);
+    CHECK(act_sprint_sheathe(&s, OUT, D | R, 30) == 0 && act_sprint_sheathe(&s, OUT, D | R, 31) == 0, "one input with the guard: no Y");
+    CHECK(act_sprint_sheathe(&s, OUT, D, 32) == 0, "the guard let go, Dash still held: not a new press");
+    // the guard raised during the tap stops it (the Sword and Shield's guard + Y uses an item)
+    memset(&s, 0, sizeof s);
+    CHECK(act_sprint_sheathe(&s, OUT, D, 40) == 0x8000 && act_sprint_sheathe(&s, OUT, D | R, 41) == 0, "guard mid-tap: stops");
+    // other states: never, and the tap stops when the weapon is away (Y would use an item) or the bar opens
+    int views[] = {ACT_VIEW_SHEATHED, ACT_VIEW_HUNT_ANY, ACT_VIEW_MB1 | ACT_VIEW_BAR, ACT_VIEW_TOWN, ACT_VIEW_MB2};
+    for (int i = 0; i < 5; i++) {
+        memset(&s, 0, sizeof s);
+        CHECK(act_sprint_sheathe(&s, views[i], D, 50) == 0, "view %x: no Y", views[i]);
+        memset(&s, 0, sizeof s);
+        CHECK(act_sprint_sheathe(&s, OUT, D, 60) == 0x8000 && act_sprint_sheathe(&s, views[i], D, 61) == 0 &&
+              act_sprint_sheathe(&s, OUT, D, 62) == 0, "view %x mid-tap: stops for good", views[i]);
+    }
+    // what the sampler makes of the bindings: Dash and WeaponR on two keys sheathe, one key (any way) does not
+    ActSnap sn;
+    ActHost h = (ActHost){NULL, fake_held, map_sources, 0, 0, false, false, 800};
+    #define SAMPLE(code) do { release_all(); press(code); h.sw_word = map_word(); act_sample(&h, &sn); } while (0)
+    #define TAP(view, f) (memset(&s, 0, sizeof s), act_sprint_sheathe(&s, (view), sn.hold[0] | sn.pulse[0], (f)))
+    p = parse("[Actions]\nEnable=1\nSprintSheathes=1\n[Actions.Kbm]\nDash = key:f\nWeaponR = key:g\n");
+    act_use_profile(&p);
+    SAMPLE(SDL_SCANCODE_F);
+    CHECK(TAP(OUT, 70) == 0x8000, "Dash on F, WeaponR on G: F sheathes");
+    SAMPLE(SDL_SCANCODE_G);
+    CHECK(TAP(OUT, 71) == 0, "G (the guard) does not");
+    SAMPLE(40 + 7);  // (Tier 0's R key: both actions are on keys of their own now, so it presses neither)
+    CHECK(TAP(OUT, 72) == 0, "Tier 0's R key: neither");
+    p = parse("[Actions]\nEnable=1\nSprintSheathes=1\n");  // no split: R is the dash and the guard
+    act_use_profile(&p);
+    SAMPLE(40 + 7);
+    CHECK(TAP(OUT, 73) == 0, "no split: R does not sheathe");
+    p = parse("[Actions]\nEnable=1\nSprintSheathes=1\nSplitDashWeaponR=1\n[Actions.Kbm]\nDash = key:f\n");  // WeaponR follows Dash
+    act_use_profile(&p);
+    SAMPLE(SDL_SCANCODE_F);
+    CHECK(TAP(OUT, 74) == 0, "split, WeaponR following Dash's input: no");
+    p = parse("[Actions]\nEnable=1\nSprintSheathes=1\n[Actions.Kbm]\nDash = key:f\nWeaponR = key:g | key:f\n");
+    act_use_profile(&p);
+    SAMPLE(SDL_SCANCODE_F);
+    CHECK(TAP(OUT, 75) == 0, "WeaponR also on Dash's input: no");
+    p = parse("[Actions]\nEnable=1\nSprintSheathes=1\n[Actions.Pad]\nWeaponR = pad:rtrigger\n");  // the controller: R is Dash only
+    act_use_profile(&p);
+    SAMPLE(ACT_PAD + 30 + 7);  // (map_sources: Tier 0's R on the controller)
+    CHECK(TAP(OUT, 76) == 0x8000, "controller: R sheathes once the guard is on another button");
+    CHECK(act_view(OUT, 0, sn.hold[0], false) == 0x200, "and R still reaches the game as the dash");
+    p = parse("[Actions]\nEnable=1\n");
+    act_use_profile(&p);
+    #undef SAMPLE
+    #undef TAP
+}
+
 // The confirm key (ConfirmTargets): A is the roll unless the hunter stands by an interactable whose category is listed,
 // and there A confirms while the roll gives the bit up. Interact (the function key) works everywhere, and with the
 // weapon out nothing changes.
@@ -1133,6 +1213,7 @@ int main(void) {
     test_crouch_not_moving();
     test_crouch_attack_a();
     test_hunter_arts();
+    test_sprint_sheathe();
     test_confirm_target();
     test_rows();
     test_claim();

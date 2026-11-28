@@ -142,6 +142,9 @@ typedef struct ActProfile {
     bool split;     // SplitDashWeaponR: Dash and the weapon R-action are two inputs (also when WeaponR has a binding)
     bool sheathed_attack;  // SheathedAttackA: AttackA presses A with the weapon put away too (default: only Interact does)
     bool art_keys;  // HunterArtKeys: HunterArt1-3 are read (keyboard default 1, 2, 3) and the HUD shows their inputs
+    // SprintSheathes: pressing Dash with the weapon out sheathes it (a short Y), as in the later games; only where Dash is
+    // another input than the weapon R-action (act_sprint_sheathe)
+    bool sprint_sheathe;
     // ConfirmTargets: the interactable categories (1..63) OpenTalk is for. 0 (no target) is never one of them, and
     // an empty mask turns OpenTalk off: Interact then presses A everywhere it did before.
     uint64_t confirm_mask;
@@ -256,6 +259,19 @@ int act_shared_frames(void);
 // `active` is the actions held (hold | pulse); share: act_interact_share; changed: the hunter's action differs from the
 // one when the press began (the caller tracks it while gate->phase is 0); frame: the game's update count
 uint64_t act_gate(ActGate *gate, uint64_t active, uint64_t share, bool changed, uint64_t frame, int delay);
+
+// ---- sprinting sheathes the weapon (SprintSheathes, the game thread)
+// A new press of Dash while the hunter has the weapon out (ACT_VIEW_MB1, the item bar closed) and the weapon R-action is
+// not active gives the gameplay word Y for ACT_SPRINT_SHEATHE_TAP updates: the game's own sheathe (on the move: the
+// walking sheathe), and the held Dash runs once the weapon is away. Where Dash and WeaponR are one input (no split, or
+// WeaponR on Dash's input) both are active on every press, so nothing is added: R stays the guard, the charge or the aim.
+// A tap, not a hold: a held Y is Valor's sheathe stance. It stops early if the weapon is put away, the bar opens or the
+// weapon R-action starts (with the weapon away Y would use an item; guarding, the Sword and Shield's Y uses one).
+#define ACT_SPRINT_SHEATHE_TAP 3
+typedef struct { uint64_t frame, until; bool dash; } ActSprintSheathe;
+// The bits to OR into the gameplay word after act_view (0 or the Y bit); view as act_view's, frame the game's update count
+// (called again in the same update it answers the same and sees no new press)
+uint32_t act_sprint_sheathe(ActSprintSheathe *s, int view, uint64_t active, uint64_t frame);
 
 // ---- the view (game thread)
 // The word the translator gets in a context after the actions: the buttons the context's actions own are replaced by
